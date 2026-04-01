@@ -1,0 +1,12 @@
+/target
+*.swp
+*.swo
+.idea/
+.vscode/
+*.baseline.json
+coverage.lcov
+CLAUDE.md
+bugs/
+bugs.txt
+docs/
+prd-*.md

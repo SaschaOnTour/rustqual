@@ -1,0 +1,114 @@
+# rustqual.toml — Configuration for the rustqual code quality analyzer
+#
+# Place this file in your project root.
+
+# External crate/function prefixes that are allowed inside operations.
+# Calls matching these prefixes are NOT counted as "own function calls".
+external_prefixes = [
+    "std",
+    "core",
+    "alloc",
+    "log",
+    "tracing",
+    "anyhow",
+    "thiserror",
+    "serde",
+    "tokio",
+    "println",
+    "eprintln",
+    "format",
+    "vec",
+    "dbg",
+    "todo",
+    "unimplemented",
+    "panic",
+    "assert",
+    "assert_eq",
+    "assert_ne",
+    "debug_assert",
+]
+
+# Function names (or patterns with trailing *) to exclude from analysis.
+ignore_functions = [
+    "main",
+    "run",
+    "test_*",
+    "visit_*",
+]
+
+# Glob patterns for files to exclude.
+exclude_files = []
+
+# If true, closures count as "logic" even when passed to iterator adaptors.
+# Default: false (lenient — closures inside .map()/.filter() are ignored).
+strict_closures = false
+
+# If true, iterator chains (.map, .filter, .fold, ...) count as logic.
+# Default: false.
+strict_iterator_chains = false
+
+# If true, recursive calls (function calling itself) are allowed and don't
+# count as IOSP violations. Default: false.
+allow_recursion = false
+
+# If true, the ? operator counts as logic (implicit control flow).
+# Default: false.
+strict_error_propagation = false
+
+# Maximum ratio of all allow suppressions (qual:allow + #[allow]) before a warning is emitted.
+max_suppression_ratio = 0.10
+
+# ── Complexity Analysis ──────────────────────────────────────────────────
+
+[complexity]
+enabled = true
+# max_cognitive = 15
+# max_cyclomatic = 10
+# max_nesting_depth = 4
+# max_function_lines = 60
+# detect_unsafe = true
+# detect_error_handling = true
+allow_expect = true
+
+# ── DRY / Duplicate Detection ───────────────────────────────────────────
+
+[duplicates]
+enabled = true
+
+# ── Boilerplate Detection ───────────────────────────────────────────────
+
+[boilerplate]
+enabled = true
+
+# ── SRP (Single Responsibility) ─────────────────────────────────────────
+
+[srp]
+enabled = true
+
+# ── Coupling Analysis ───────────────────────────────────────────────────
+
+[coupling]
+enabled = true
+
+# ── Structural Binary Checks ───────────────────────────────────────────
+
+[structural]
+enabled = true
+
+# ── Test Quality Analysis ──────────────────────────────────────────────
+
+[test]
+enabled = true
+# Extra macro names (beyond assert*/debug_assert*) to recognize as assertions in TQ-001.
+# Example: extra_assertion_macros = ["verify", "check", "expect_that"]
+# extra_assertion_macros = []
+
+# ── Quality Score Weights ──────────────────────────────────────────────
+
+[weights]
+iosp = 0.25
+complexity = 0.20
+dry = 0.15
+srp = 0.20
+coupling = 0.10
+test = 0.10

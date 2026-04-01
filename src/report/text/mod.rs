@@ -1,0 +1,313 @@
+mod coupling;
+mod dry;
+mod srp;
+pub(crate) mod structural;
+mod summary;
+pub(crate) mod tq;
+
+pub use coupling::print_coupling_section;
+pub use dry::print_dry_section;
+pub use srp::print_srp_section;
+pub(crate) use structural::print_structural_section;
+pub(crate) use tq::print_tq_section;
+
+use colored::Colorize;
+
+use crate::analyzer::{Classification, FunctionAnalysis, Severity};
+
+use super::Summary;
+
+/// Print a full report to stdout.
+/// Integration: orchestrates file section and summary section.
+pub fn print_report(
+    results: &[FunctionAnalysis],
+    summary: &Summary,
+    verbose: bool,
+    findings: &[crate::report::findings_list::FindingEntry],
+) {
+    print_files_section(results, verbose);
+    summary::print_summary_section(summary, findings);
+}
+
+/// Print per-file function listings.
+/// Operation: file grouping and iteration logic; delegates per-function
+/// printing via `.for_each` closure (no own calls in lenient mode).
+fn print_files_section(results: &[FunctionAnalysis], verbose: bool) {
+    if results.is_empty() {
+        println!("{}", "No functions found to analyze.".yellow());
+        return;
+    }
+
+    let mut by_file: std::collections::BTreeMap<&str, Vec<&FunctionAnalysis>> =
+        std::collections::BTreeMap::new();
+    for r in results {
+        by_file.entry(&r.file).or_default().push(r);
+    }
+
+    for (file, functions) in &by_file {
+        let has_violations = functions
+            .iter()
+            .any(|f| !f.suppressed && matches!(f.classification, Classification::Violation { .. }));
+        let has_suppressed = functions.iter().any(|f| f.suppressed);
+
+        if !verbose && !has_violations && !has_suppressed {
+            continue;
+        }
+
+        println!("\n{}", format!("── {} ", file).bold());
+        functions
+            .iter()
+            .for_each(|func| print_function_entry(func, verbose));
+    }
+}
+
+/// Print a single function entry based on its classification.
+/// Operation: classification dispatch logic; helper calls hidden in closures.
+fn print_function_entry(func: &FunctionAnalysis, verbose: bool) {
+    let (show_violation, show_complexity) = (
+        |f: &FunctionAnalysis| print_violation_detail(f),
+        |f: &FunctionAnalysis| print_complexity_details(f),
+    );
+    let print_entry = |tag: &dyn std::fmt::Display, name: &dyn std::fmt::Display| {
+        println!("  {} {} (line {})", tag, name, func.line);
+    };
+
+    if func.suppressed {
+        if verbose {
+            print_entry(&"~ SUPPRESSED ".yellow(), &func.qualified_name.dimmed());
+        }
+        return;
+    }
+
+    match &func.classification {
+        Classification::Integration if verbose => {
+            print_entry(&"✓ INTEGRATION".green(), &func.qualified_name.bold());
+            show_complexity(func);
+        }
+        Classification::Operation if verbose => {
+            print_entry(&"✓ OPERATION  ".blue(), &func.qualified_name.bold());
+            show_complexity(func);
+        }
+        Classification::Trivial if verbose => {
+            print_entry(&"· TRIVIAL    ".dimmed(), &func.qualified_name.dimmed());
+            show_complexity(func);
+        }
+        Classification::Violation { .. } => {
+            show_violation(func);
+            show_complexity(func);
+        }
+        _ => {}
+    }
+}
+
+/// Print violation details: severity tag, logic locations, call locations.
+/// Operation: formatting logic, no own calls.
+fn print_violation_detail(func: &FunctionAnalysis) {
+    let Classification::Violation {
+        logic_locations,
+        call_locations,
+        ..
+    } = &func.classification
+    else {
+        return;
+    };
+
+    let severity_tag = match &func.severity {
+        Some(Severity::High) => " [HIGH]".red().bold().to_string(),
+        Some(Severity::Medium) => " [MEDIUM]".yellow().to_string(),
+        Some(Severity::Low) => " [LOW]".dimmed().to_string(),
+        None => String::new(),
+    };
+    println!(
+        "  {} {} (line {}){}",
+        "✗ VIOLATION  ".red().bold(),
+        func.qualified_name.bold(),
+        func.line,
+        severity_tag,
+    );
+    if !logic_locations.is_empty() {
+        let logic_summary: Vec<String> = logic_locations.iter().map(|l| l.to_string()).collect();
+        println!("    {} {}", "Logic:".yellow(), logic_summary.join(", "));
+    }
+    if !call_locations.is_empty() {
+        let call_summary: Vec<String> = call_locations.iter().map(|c| c.to_string()).collect();
+        println!("    {} {}", "Calls:".yellow(), call_summary.join(", "));
+    }
+    if let Some(effort) = func.effort_score {
+        println!("    {} {:.1}", "Effort:".yellow(), effort);
+    }
+}
+
+/// Print complexity metrics for a function.
+/// Operation: data-driven formatting logic, no own calls.
+fn print_complexity_details(func: &FunctionAnalysis) {
+    let Some(ref m) = func.complexity else { return };
+    let warn = "⚠".yellow();
+
+    if m.logic_count > 0 || m.call_count > 0 || m.max_nesting > 0 {
+        println!(
+            "    {} logic={}, calls={}, nesting={}, cognitive={}, cyclomatic={}",
+            "Complexity:".dimmed(),
+            m.logic_count, m.call_count, m.max_nesting,
+            m.cognitive_complexity, m.cyclomatic_complexity,
+        );
+    }
+    let magic_msg = (!m.magic_numbers.is_empty()).then(|| {
+        let nums: Vec<String> = m.magic_numbers.iter().map(|n| n.to_string()).collect();
+        format!("magic numbers: {}", nums.join(", "))
+    });
+    let unsafe_msg = func.unsafe_warning.then(|| {
+        let s = if m.unsafe_blocks == 1 { "" } else { "s" };
+        format!("{} unsafe block{s}", m.unsafe_blocks)
+    });
+    let err_msg = func.error_handling_warning.then(|| {
+        let parts: Vec<String> = [
+            (m.unwrap_count, "unwrap"), (m.expect_count, "expect"),
+            (m.panic_count, "panic/unreachable"), (m.todo_count, "todo"),
+        ].iter().filter(|(c, _)| *c > 0).map(|(c, l)| format!("{c} {l}")).collect();
+        format!("error handling: {}", parts.join(", "))
+    });
+    [
+        func.cognitive_warning.then(|| format!("cognitive complexity {} exceeds threshold", m.cognitive_complexity)),
+        func.cyclomatic_warning.then(|| format!("cyclomatic complexity {} exceeds threshold", m.cyclomatic_complexity)),
+        magic_msg,
+        func.nesting_depth_warning.then(|| format!("nesting depth {} exceeds threshold", m.max_nesting)),
+        func.function_length_warning.then(|| format!("function length {} lines exceeds threshold", m.function_lines)),
+        unsafe_msg, err_msg,
+    ].iter().flatten().for_each(|w| println!("    {warn} {w}"));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analyzer::{
+        compute_severity, CallOccurrence, Classification, ComplexityMetrics, FunctionAnalysis,
+        LogicOccurrence,
+    };
+    use crate::report::Summary;
+
+    fn make_result(name: &str, classification: Classification) -> FunctionAnalysis {
+        let severity = compute_severity(&classification);
+        FunctionAnalysis {
+            name: name.to_string(),
+            file: "test.rs".to_string(),
+            line: 1,
+            classification,
+            parent_type: None,
+            suppressed: false,
+            complexity: None,
+            qualified_name: name.to_string(),
+            severity,
+            cognitive_warning: false,
+            cyclomatic_warning: false,
+            nesting_depth_warning: false,
+            function_length_warning: false,
+            unsafe_warning: false,
+            error_handling_warning: false,
+            complexity_suppressed: false,
+            own_calls: vec![],
+            parameter_count: 0,
+            is_trait_impl: false,
+            is_test: false,
+            effort_score: None,
+        }
+    }
+
+    #[test]
+    fn test_print_report_empty_no_panic() {
+        let results: Vec<FunctionAnalysis> = vec![];
+        let summary = Summary::from_results(&results);
+        print_report(&results, &summary, false, &[]);
+    }
+
+    #[test]
+    fn test_print_report_no_violations_no_panic() {
+        let results = vec![make_result("good_fn", Classification::Integration)];
+        let summary = Summary::from_results(&results);
+        print_report(&results, &summary, false, &[]);
+    }
+
+    #[test]
+    fn test_print_report_with_violation_no_panic() {
+        let results = vec![make_result(
+            "bad_fn",
+            Classification::Violation {
+                has_logic: true,
+                has_own_calls: true,
+                logic_locations: vec![LogicOccurrence {
+                    kind: "if".into(),
+                    line: 5,
+                }],
+                call_locations: vec![CallOccurrence {
+                    name: "helper".into(),
+                    line: 6,
+                }],
+            },
+        )];
+        let summary = Summary::from_results(&results);
+        print_report(&results, &summary, false, &[]);
+    }
+
+    #[test]
+    fn test_print_report_verbose_no_panic() {
+        let results = vec![
+            make_result("integrate_fn", Classification::Integration),
+            make_result("operate_fn", Classification::Operation),
+            make_result("trivial_fn", Classification::Trivial),
+            make_result(
+                "violate_fn",
+                Classification::Violation {
+                    has_logic: true,
+                    has_own_calls: true,
+                    logic_locations: vec![LogicOccurrence {
+                        kind: "for".into(),
+                        line: 1,
+                    }],
+                    call_locations: vec![CallOccurrence {
+                        name: "foo".into(),
+                        line: 2,
+                    }],
+                },
+            ),
+        ];
+        let summary = Summary::from_results(&results);
+        print_report(&results, &summary, true, &[]);
+    }
+
+    #[test]
+    fn test_print_report_with_complexity_no_panic() {
+        let mut func = make_result("complex_fn", Classification::Operation);
+        func.complexity = Some(ComplexityMetrics {
+            logic_count: 5,
+            call_count: 0,
+            max_nesting: 3,
+            ..Default::default()
+        });
+        let results = vec![func];
+        let summary = Summary::from_results(&results);
+        print_report(&results, &summary, true, &[]);
+    }
+
+    #[test]
+    fn test_print_report_suppressed_verbose_no_panic() {
+        let mut func = make_result(
+            "suppressed_fn",
+            Classification::Violation {
+                has_logic: true,
+                has_own_calls: true,
+                logic_locations: vec![LogicOccurrence {
+                    kind: "if".into(),
+                    line: 1,
+                }],
+                call_locations: vec![CallOccurrence {
+                    name: "f".into(),
+                    line: 2,
+                }],
+            },
+        );
+        func.suppressed = true;
+        let results = vec![func];
+        let summary = Summary::from_results(&results);
+        print_report(&results, &summary, true, &[]);
+    }
+}
