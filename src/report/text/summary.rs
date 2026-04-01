@@ -10,16 +10,16 @@ const INLINE_LOCATION_THRESHOLD: usize = 10;
 /// Print summary statistics and final status message.
 /// Integration: orchestrates per-section summary printers.
 pub(super) fn print_summary_section(summary: &Summary, findings: &[FindingEntry]) {
-    print_summary_scores(summary, findings);
+    print_summary_header(summary);
+    print_dimension_scores(summary, findings);
     print_summary_suppression(summary);
     print_summary_footer(summary);
 }
 
-/// Print header with function count, quality score, and per-dimension score lines.
-/// Operation: formatting logic with closures, no own calls.
-fn print_summary_scores(summary: &Summary, findings: &[FindingEntry]) {
+/// Print the summary header: function count, quality score, IOSP detail.
+/// Operation: formatting logic, no own calls.
+fn print_summary_header(summary: &Summary) {
     let pct = |v: f64| v * PERCENTAGE_MULTIPLIER;
-
     println!();
     println!("{}", "═══ Summary ═══".bold());
     println!(
@@ -28,7 +28,6 @@ fn print_summary_scores(summary: &Summary, findings: &[FindingEntry]) {
         pct(summary.quality_score)
     );
     println!();
-
     let s = summary;
     let iosp_detail = if s.violations > 0 {
         let pl = if s.violations == 1 { "" } else { "s" };
@@ -39,13 +38,25 @@ fn print_summary_scores(summary: &Summary, findings: &[FindingEntry]) {
     } else {
         format!("{}I, {}O, {}T", s.integrations, s.operations, s.trivial)
     };
-    let [iosp_s, cx_s, dry_s, srp_s, cp_s, tq_s] = s.dimension_scores;
-    println!("  {:<13}{:>5.1}%  ({})", "IOSP:", pct(iosp_s), iosp_detail);
+    println!(
+        "  {:<13}{:>5.1}%  ({})",
+        "IOSP:",
+        pct(s.dimension_scores[0]),
+        iosp_detail
+    );
+}
 
-    let dimensions = [
+/// A dimension entry: (display name, score, list of (count, label) finding categories).
+type DimensionEntry = (&'static str, f64, Vec<(usize, &'static str)>);
+
+/// Build the dimension data array for score printing.
+/// Operation: array construction logic.
+fn build_dimensions(s: &Summary) -> Vec<DimensionEntry> {
+    let [_, cx, dry, srp, cp, tq] = s.dimension_scores;
+    vec![
         (
             "Complexity",
-            cx_s,
+            cx,
             vec![
                 (s.complexity_warnings, "complexity"),
                 (s.magic_number_warnings, "magic numbers"),
@@ -57,7 +68,7 @@ fn print_summary_scores(summary: &Summary, findings: &[FindingEntry]) {
         ),
         (
             "DRY",
-            dry_s,
+            dry,
             vec![
                 (s.duplicate_groups, "duplicates"),
                 (s.fragment_groups, "fragments"),
@@ -68,7 +79,7 @@ fn print_summary_scores(summary: &Summary, findings: &[FindingEntry]) {
         ),
         (
             "SRP",
-            srp_s,
+            srp,
             vec![
                 (s.srp_struct_warnings, "struct"),
                 (s.srp_module_warnings, "module"),
@@ -77,7 +88,7 @@ fn print_summary_scores(summary: &Summary, findings: &[FindingEntry]) {
         ),
         (
             "Coupling",
-            cp_s,
+            cp,
             vec![
                 (s.coupling_warnings, "instability"),
                 (s.coupling_cycles, "cycles"),
@@ -86,7 +97,7 @@ fn print_summary_scores(summary: &Summary, findings: &[FindingEntry]) {
         ),
         (
             "Test Quality",
-            tq_s,
+            tq,
             vec![
                 (s.tq_no_assertion_warnings, "no assertion"),
                 (s.tq_no_sut_warnings, "no SUT"),
@@ -95,11 +106,20 @@ fn print_summary_scores(summary: &Summary, findings: &[FindingEntry]) {
                 (s.tq_untested_logic_warnings, "untested logic"),
             ],
         ),
-    ];
-    let show_locations = |s: &Summary| s.total_findings() <= INLINE_LOCATION_THRESHOLD;
-    let should_show = show_locations(summary) && !findings.is_empty();
+    ]
+}
 
-    dimensions.iter().for_each(|(name, score, dim_findings)| {
+/// Print per-dimension score lines with optional inline finding locations.
+/// Operation: iteration + formatting logic, no own calls.
+fn print_dimension_scores(summary: &Summary, findings: &[FindingEntry]) {
+    let pct = |v: f64| v * PERCENTAGE_MULTIPLIER;
+    let show_locs =
+        |s: &Summary| s.total_findings() <= INLINE_LOCATION_THRESHOLD && !findings.is_empty();
+    let should_show = show_locs(summary);
+    let get_dims = |s: &Summary| build_dimensions(s);
+    let dims = get_dims(summary);
+
+    dims.iter().for_each(|(name, score, dim_findings)| {
         let d: Vec<String> = dim_findings
             .iter()
             .filter(|(c, _)| *c > 0)
@@ -111,21 +131,27 @@ fn print_summary_scores(summary: &Summary, findings: &[FindingEntry]) {
         } else {
             println!("  {:<13}{:>5.1}%  ({})", label, pct(*score), d.join(", "));
             if should_show {
-                let dim_cats = dimension_categories(name);
-                findings
-                    .iter()
-                    .filter(|f| dim_cats.contains(&f.category))
-                    .for_each(|f| {
-                        let loc = if f.detail.is_empty() {
-                            f.function_name.clone()
-                        } else {
-                            format!("{} — {}", f.function_name, f.detail)
-                        };
-                        println!("    {} {}:{} ({})", "→".dimmed(), f.file, f.line, loc);
-                    });
+                print_inline_locations(name, findings);
             }
         }
     });
+}
+
+/// Print `→ file:line (detail)` sub-lines for findings in a given dimension.
+/// Operation: iteration + formatting logic, no own calls.
+fn print_inline_locations(dim_name: &str, findings: &[FindingEntry]) {
+    let dim_cats = dimension_categories(dim_name);
+    findings
+        .iter()
+        .filter(|f| dim_cats.contains(&f.category))
+        .for_each(|f| {
+            let loc = if f.detail.is_empty() {
+                f.function_name.clone()
+            } else {
+                format!("{} — {}", f.function_name, f.detail)
+            };
+            println!("    {} {}:{} ({})", "→".dimmed(), f.file, f.line, loc);
+        });
 }
 
 /// Map dimension display name to finding categories.

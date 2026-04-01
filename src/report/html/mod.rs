@@ -1,4 +1,5 @@
 mod sections;
+mod srp_tables;
 mod structural_table;
 mod tables;
 mod tq_table;

@@ -169,13 +169,35 @@ pub(super) fn html_complexity_section(results: &[FunctionAnalysis]) -> String {
     html
 }
 
+/// Format a single module metrics row.
+/// Operation: conditional formatting logic, no own calls.
+fn html_module_metric_row(
+    m: &crate::coupling::CouplingMetrics,
+    esc: &dyn Fn(&str) -> String,
+) -> String {
+    let st = if m.suppressed {
+        "<span class=\"tag tag-ok\">suppressed</span>"
+    } else {
+        ""
+    };
+    format!(
+        "<tr><td>{}</td><td>{}</td><td>{}</td><td>{:.2}</td><td>{}</td></tr>\n",
+        esc(&m.module_name),
+        m.afferent,
+        m.efferent,
+        m.instability,
+        st,
+    )
+}
+
 /// Build coupling sub-sections: cycles, SDP violations, and metrics table.
-/// Operation: conditional iteration and HTML formatting logic, no own calls.
+/// Operation: conditional iteration and HTML formatting logic; helper call in closure.
 fn html_coupling_subsections(
     coupling: Option<&crate::coupling::CouplingAnalysis>,
     cc: usize,
     esc: &dyn Fn(&str) -> String,
 ) -> String {
+    let metric_row = |m: &crate::coupling::CouplingMetrics| html_module_metric_row(m, esc);
     let mut html = String::new();
     if cc > 0 {
         html.push_str("<h3>Circular Dependencies</h3>\n<ul>\n");
@@ -191,29 +213,26 @@ fn html_coupling_subsections(
             });
         html.push_str("</ul>\n");
     }
-    let sdp_count = coupling
-        .map(|c| c.sdp_violations.iter().filter(|v| !v.suppressed).count())
-        .unwrap_or(0);
-    if sdp_count > 0 {
+    let sdp: Vec<_> = coupling
+        .iter()
+        .flat_map(|c| c.sdp_violations.iter().filter(|v| !v.suppressed))
+        .collect();
+    if !sdp.is_empty() {
         html.push_str(
             "<h3>SDP Violations</h3>\n<table>\n<thead><tr>\
              <th>From (stable)</th><th>Instability</th>\
              <th>To (unstable)</th><th>Instability</th>\
              </tr></thead>\n<tbody>\n",
         );
-        coupling
-            .iter()
-            .flat_map(|c| c.sdp_violations.iter())
-            .filter(|v| !v.suppressed)
-            .for_each(|v| {
-                html.push_str(&format!(
-                    "<tr><td>{}</td><td>{:.2}</td><td>{}</td><td>{:.2}</td></tr>\n",
-                    esc(&v.from_module),
-                    v.from_instability,
-                    esc(&v.to_module),
-                    v.to_instability,
-                ));
-            });
+        sdp.iter().for_each(|v| {
+            html.push_str(&format!(
+                "<tr><td>{}</td><td>{:.2}</td><td>{}</td><td>{:.2}</td></tr>\n",
+                esc(&v.from_module),
+                v.from_instability,
+                esc(&v.to_module),
+                v.to_instability,
+            ));
+        });
         html.push_str("</tbody></table>\n");
     }
     html.push_str(
@@ -224,21 +243,7 @@ fn html_coupling_subsections(
     coupling
         .iter()
         .flat_map(|c| c.metrics.iter())
-        .for_each(|m| {
-            let st = if m.suppressed {
-                "<span class=\"tag tag-ok\">suppressed</span>"
-            } else {
-                ""
-            };
-            html.push_str(&format!(
-                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{:.2}</td><td>{}</td></tr>\n",
-                esc(&m.module_name),
-                m.afferent,
-                m.efferent,
-                m.instability,
-                st,
-            ));
-        });
+        .for_each(|m| html.push_str(&metric_row(m)));
     html.push_str("</tbody></table>\n");
     html
 }

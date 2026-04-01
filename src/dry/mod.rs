@@ -1,4 +1,5 @@
 pub mod boilerplate;
+pub(crate) mod call_targets;
 pub mod dead_code;
 pub mod fragments;
 pub mod functions;

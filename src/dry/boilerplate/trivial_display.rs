@@ -3,6 +3,21 @@ use syn::spanned::Spanned;
 use super::{self_type_of, single_return_expr, trait_name_of, BoilerplateFind};
 use crate::config::sections::BoilerplateConfig;
 
+/// Check whether an expression is a `write!` or `writeln!` macro call.
+/// Operation: AST pattern matching logic, no own calls.
+fn is_write_macro(expr: &syn::Expr) -> bool {
+    if let syn::Expr::Macro(m) = expr {
+        m.mac
+            .path
+            .segments
+            .last()
+            .map(|s| s.ident == "write" || s.ident == "writeln")
+            .unwrap_or(false)
+    } else {
+        false
+    }
+}
+
 /// Detect trivial `impl Display` with a single write!/writeln! call.
 /// Operation: AST pattern matching logic; helper calls in closures.
 pub(super) fn check_trivial_display(
@@ -15,6 +30,7 @@ pub(super) fn check_trivial_display(
     } else {
         "Consider using a derive macro for simple Display implementations"
     };
+    let is_write = |e: &syn::Expr| is_write_macro(e);
     parsed
         .iter()
         .flat_map(|(file, _, syntax)| {
@@ -43,17 +59,7 @@ pub(super) fn check_trivial_display(
                         return None;
                     }
                     let expr = single_return_expr(&methods[0].block)?;
-                    let is_write = if let syn::Expr::Macro(m) = expr {
-                        m.mac
-                            .path
-                            .segments
-                            .last()
-                            .map(|s| s.ident == "write" || s.ident == "writeln")
-                            .unwrap_or(false)
-                    } else {
-                        false
-                    };
-                    if !is_write {
+                    if !is_write(expr) {
                         return None;
                     }
                     Some(BoilerplateFind {

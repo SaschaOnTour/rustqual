@@ -44,7 +44,8 @@
       "Bash(sed -i 's/detect\\(&mut warnings, &parsed, &config\\)/detect_slm\\(\\\\&mut warnings, \\\\&parsed, \\\\&config\\)/g' src/structural/slm.rs)",
       "Bash(sed -i 's/detect\\(&mut warnings, &parsed, &config\\)/detect_nms\\(\\\\&mut warnings, \\\\&parsed, \\\\&config\\)/g' src/structural/nms.rs)",
       "Bash(sed -i 's/detect\\(&mut warnings, &parsed, &config\\)/detect_deh\\(\\\\&mut warnings, \\\\&parsed, \\\\&config\\)/g' src/structural/deh.rs)",
-      "Bash(sed -i 's/detect\\(&mut warnings, &parsed, &config\\)/detect_iet\\(\\\\&mut warnings, \\\\&parsed, \\\\&config\\)/g' src/structural/iet.rs)"
+      "Bash(sed -i 's/detect\\(&mut warnings, &parsed, &config\\)/detect_iet\\(\\\\&mut warnings, \\\\&parsed, \\\\&config\\)/g' src/structural/iet.rs)",
+      "Bash(git -C /mnt/d/KI/iosp-analyzer stash)"
     ]
   }
 }
