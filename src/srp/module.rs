@@ -87,7 +87,12 @@ fn count_independent_clusters(
     let component_members = components(&mut uf);
     let mut cluster_names: Vec<Vec<String>> = component_members
         .values()
-        .map(|indices| indices.iter().map(|&i| substantive[i].name.clone()).collect())
+        .map(|indices| {
+            indices
+                .iter()
+                .map(|&i| substantive[i].name.clone())
+                .collect()
+        })
         .collect();
     cluster_names.iter_mut().for_each(|c| c.sort());
     cluster_names.sort();

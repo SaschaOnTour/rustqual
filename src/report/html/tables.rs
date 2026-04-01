@@ -20,7 +20,11 @@ pub(super) fn html_dry_section(analysis: &crate::report::AnalysisResult) -> Stri
 /// Build DRY section header with finding count and empty state.
 /// Operation: formatting logic, no own calls.
 fn html_dry_header(analysis: &crate::report::AnalysisResult) -> String {
-    let wildcards = analysis.wildcard_warnings.iter().filter(|w| !w.suppressed).count();
+    let wildcards = analysis
+        .wildcard_warnings
+        .iter()
+        .filter(|w| !w.suppressed)
+        .count();
     let total = analysis.duplicates.len()
         + analysis.fragments.len()
         + analysis.dead_code.len()
@@ -235,8 +239,14 @@ pub(super) fn html_srp_section(srp: Option<&crate::srp::SrpAnalysis>) -> String 
             format!(
                 "<tr><td>{}</td><td>{}</td><td>{}</td>\
                  <td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{:.2}</td></tr>\n",
-                esc(&w.struct_name), esc(&w.file), w.line,
-                w.lcom4, w.field_count, w.method_count, w.fan_out, w.composite_score,
+                esc(&w.struct_name),
+                esc(&w.file),
+                w.line,
+                w.lcom4,
+                w.field_count,
+                w.method_count,
+                w.fan_out,
+                w.composite_score,
             )
         },
     ));
@@ -263,7 +273,10 @@ pub(super) fn html_srp_section(srp: Option<&crate::srp::SrpAnalysis>) -> String 
         |w: &crate::srp::ParamSrpWarning| {
             format!(
                 "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n",
-                esc(&w.function_name), esc(&w.file), w.line, w.parameter_count,
+                esc(&w.function_name),
+                esc(&w.file),
+                w.line,
+                w.parameter_count,
             )
         },
     ));
@@ -321,4 +334,3 @@ fn html_srp_table<T>(
     html.push_str("</tbody></table>\n");
     html
 }
-

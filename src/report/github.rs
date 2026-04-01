@@ -56,26 +56,53 @@ fn build_annotation_pairs(
     });
     [
         func.cognitive_warning.then(|| {
-            ("notice", format!("Cognitive complexity {} in {q} exceeds threshold", m.cognitive_complexity))
+            (
+                "notice",
+                format!(
+                    "Cognitive complexity {} in {q} exceeds threshold",
+                    m.cognitive_complexity
+                ),
+            )
         }),
         func.cyclomatic_warning.then(|| {
-            ("notice", format!("Cyclomatic complexity {} in {q} exceeds threshold", m.cyclomatic_complexity))
+            (
+                "notice",
+                format!(
+                    "Cyclomatic complexity {} in {q} exceeds threshold",
+                    m.cyclomatic_complexity
+                ),
+            )
         }),
         magic_msg.map(|msg| ("warning", msg)),
         func.nesting_depth_warning.then(|| {
-            ("notice", format!("Nesting depth {} in {q} exceeds threshold", m.max_nesting))
+            (
+                "notice",
+                format!("Nesting depth {} in {q} exceeds threshold", m.max_nesting),
+            )
         }),
         func.function_length_warning.then(|| {
-            ("notice", format!("Function {q} has {} lines (exceeds threshold)", m.function_lines))
+            (
+                "notice",
+                format!(
+                    "Function {q} has {} lines (exceeds threshold)",
+                    m.function_lines
+                ),
+            )
         }),
         func.unsafe_warning.then(|| {
-            ("warning", format!("{} unsafe block(s) in {q}", m.unsafe_blocks))
+            (
+                "warning",
+                format!("{} unsafe block(s) in {q}", m.unsafe_blocks),
+            )
         }),
         func.error_handling_warning.then(|| {
-            ("warning", format!(
-                "Error handling in {q}: unwrap={}, expect={}, panic={}, todo={}",
-                m.unwrap_count, m.expect_count, m.panic_count, m.todo_count,
-            ))
+            (
+                "warning",
+                format!(
+                    "Error handling in {q}: unwrap={}, expect={}, panic={}, todo={}",
+                    m.unwrap_count, m.expect_count, m.panic_count, m.todo_count,
+                ),
+            )
         }),
     ]
     .into_iter()
@@ -173,11 +200,7 @@ pub fn print_dry_annotations(analysis: &super::AnalysisResult) {
         );
     }
     for g in &analysis.repeated_matches {
-        let fns: Vec<&str> = g
-            .entries
-            .iter()
-            .map(|e| e.function_name.as_str())
-            .collect();
+        let fns: Vec<&str> = g.entries.iter().map(|e| e.function_name.as_str()).collect();
         println!(
             "::notice::DRY-005: Repeated match on '{}' in: {}",
             g.enum_name,
@@ -240,8 +263,10 @@ pub fn print_tq_annotations(tq: &crate::tq::TqAnalysis) {
                 "TQ-004: production function has no coverage".to_string()
             }
             crate::tq::TqWarningKind::UntestedLogic { uncovered_lines } => {
-                let lines: Vec<String> =
-                    uncovered_lines.iter().map(|(f, l)| format!("{f}:{l}")).collect();
+                let lines: Vec<String> = uncovered_lines
+                    .iter()
+                    .map(|(f, l)| format!("{f}:{l}"))
+                    .collect();
                 format!("TQ-005: untested logic at {}", lines.join(", "))
             }
         };

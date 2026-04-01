@@ -121,22 +121,52 @@ fn build_extended_entries(
     };
     let err_msg = func.error_handling_warning.then(|| {
         let parts: Vec<String> = [
-            (m.unwrap_count, "unwrap"), (m.expect_count, "expect"),
-            (m.panic_count, "panic"), (m.todo_count, "todo"),
+            (m.unwrap_count, "unwrap"),
+            (m.expect_count, "expect"),
+            (m.panic_count, "panic"),
+            (m.todo_count, "todo"),
         ]
         .iter()
         .filter(|(c, _)| *c > 0)
         .map(|(c, l)| format!("{c} {l}"))
         .collect();
-        format!("Error handling in {}: {}", func.qualified_name, parts.join(", "))
+        format!(
+            "Error handling in {}: {}",
+            func.qualified_name,
+            parts.join(", ")
+        )
     });
     [
-        func.function_length_warning.then(|| ("CX-004", "warning",
-            format!("Function {} has {} lines (exceeds threshold)", func.qualified_name, m.function_lines))),
-        func.nesting_depth_warning.then(|| ("CX-005", "warning",
-            format!("Nesting depth {} in {} exceeds threshold", m.max_nesting, func.qualified_name))),
-        func.unsafe_warning.then(|| ("CX-006", "warning",
-            format!("{} unsafe block(s) in {}", m.unsafe_blocks, func.qualified_name))),
+        func.function_length_warning.then(|| {
+            (
+                "CX-004",
+                "warning",
+                format!(
+                    "Function {} has {} lines (exceeds threshold)",
+                    func.qualified_name, m.function_lines
+                ),
+            )
+        }),
+        func.nesting_depth_warning.then(|| {
+            (
+                "CX-005",
+                "warning",
+                format!(
+                    "Nesting depth {} in {} exceeds threshold",
+                    m.max_nesting, func.qualified_name
+                ),
+            )
+        }),
+        func.unsafe_warning.then(|| {
+            (
+                "CX-006",
+                "warning",
+                format!(
+                    "{} unsafe block(s) in {}",
+                    m.unsafe_blocks, func.qualified_name
+                ),
+            )
+        }),
         err_msg.map(|msg| ("A20", "warning", msg)),
     ]
     .into_iter()
@@ -150,7 +180,8 @@ fn build_extended_entries(
 fn collect_extended_complexity_findings(
     results: &[crate::analyzer::FunctionAnalysis],
 ) -> Vec<serde_json::Value> {
-    let build = |func: &crate::analyzer::FunctionAnalysis, m: &crate::analyzer::ComplexityMetrics| {
+    let build = |func: &crate::analyzer::FunctionAnalysis,
+                 m: &crate::analyzer::ComplexityMetrics| {
         build_extended_entries(func, m)
     };
     let mut findings = Vec::new();

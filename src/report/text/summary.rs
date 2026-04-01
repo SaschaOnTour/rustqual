@@ -32,7 +32,10 @@ fn print_summary_scores(summary: &Summary, findings: &[FindingEntry]) {
     let s = summary;
     let iosp_detail = if s.violations > 0 {
         let pl = if s.violations == 1 { "" } else { "s" };
-        format!("{}I, {}O, {}T, {} violation{pl}", s.integrations, s.operations, s.trivial, s.violations)
+        format!(
+            "{}I, {}O, {}T, {} violation{pl}",
+            s.integrations, s.operations, s.trivial, s.violations
+        )
     } else {
         format!("{}I, {}O, {}T", s.integrations, s.operations, s.trivial)
     };
@@ -40,17 +43,65 @@ fn print_summary_scores(summary: &Summary, findings: &[FindingEntry]) {
     println!("  {:<13}{:>5.1}%  ({})", "IOSP:", pct(iosp_s), iosp_detail);
 
     let dimensions = [
-        ("Complexity", cx_s, vec![(s.complexity_warnings, "complexity"), (s.magic_number_warnings, "magic numbers"), (s.nesting_depth_warnings, "nesting"), (s.function_length_warnings, "long fn"), (s.unsafe_warnings, "unsafe"), (s.error_handling_warnings, "error handling")]),
-        ("DRY", dry_s, vec![(s.duplicate_groups, "duplicates"), (s.fragment_groups, "fragments"), (s.dead_code_warnings, "dead code"), (s.boilerplate_warnings, "boilerplate"), (s.wildcard_import_warnings, "wildcards")]),
-        ("SRP", srp_s, vec![(s.srp_struct_warnings, "struct"), (s.srp_module_warnings, "module"), (s.srp_param_warnings, "params")]),
-        ("Coupling", cp_s, vec![(s.coupling_warnings, "instability"), (s.coupling_cycles, "cycles"), (s.sdp_violations, "SDP")]),
-        ("Test Quality", tq_s, vec![(s.tq_no_assertion_warnings, "no assertion"), (s.tq_no_sut_warnings, "no SUT"), (s.tq_untested_warnings, "untested"), (s.tq_uncovered_warnings, "uncovered"), (s.tq_untested_logic_warnings, "untested logic")]),
+        (
+            "Complexity",
+            cx_s,
+            vec![
+                (s.complexity_warnings, "complexity"),
+                (s.magic_number_warnings, "magic numbers"),
+                (s.nesting_depth_warnings, "nesting"),
+                (s.function_length_warnings, "long fn"),
+                (s.unsafe_warnings, "unsafe"),
+                (s.error_handling_warnings, "error handling"),
+            ],
+        ),
+        (
+            "DRY",
+            dry_s,
+            vec![
+                (s.duplicate_groups, "duplicates"),
+                (s.fragment_groups, "fragments"),
+                (s.dead_code_warnings, "dead code"),
+                (s.boilerplate_warnings, "boilerplate"),
+                (s.wildcard_import_warnings, "wildcards"),
+            ],
+        ),
+        (
+            "SRP",
+            srp_s,
+            vec![
+                (s.srp_struct_warnings, "struct"),
+                (s.srp_module_warnings, "module"),
+                (s.srp_param_warnings, "params"),
+            ],
+        ),
+        (
+            "Coupling",
+            cp_s,
+            vec![
+                (s.coupling_warnings, "instability"),
+                (s.coupling_cycles, "cycles"),
+                (s.sdp_violations, "SDP"),
+            ],
+        ),
+        (
+            "Test Quality",
+            tq_s,
+            vec![
+                (s.tq_no_assertion_warnings, "no assertion"),
+                (s.tq_no_sut_warnings, "no SUT"),
+                (s.tq_untested_warnings, "untested"),
+                (s.tq_uncovered_warnings, "uncovered"),
+                (s.tq_untested_logic_warnings, "untested logic"),
+            ],
+        ),
     ];
     let show_locations = |s: &Summary| s.total_findings() <= INLINE_LOCATION_THRESHOLD;
     let should_show = show_locations(summary) && !findings.is_empty();
 
     dimensions.iter().for_each(|(name, score, dim_findings)| {
-        let d: Vec<String> = dim_findings.iter()
+        let d: Vec<String> = dim_findings
+            .iter()
             .filter(|(c, _)| *c > 0)
             .map(|(c, l)| format!("{c} {l}"))
             .collect();
@@ -61,7 +112,8 @@ fn print_summary_scores(summary: &Summary, findings: &[FindingEntry]) {
             println!("  {:<13}{:>5.1}%  ({})", label, pct(*score), d.join(", "));
             if should_show {
                 let dim_cats = dimension_categories(name);
-                findings.iter()
+                findings
+                    .iter()
                     .filter(|f| dim_cats.contains(&f.category))
                     .for_each(|f| {
                         let loc = if f.detail.is_empty() {
@@ -80,11 +132,32 @@ fn print_summary_scores(summary: &Summary, findings: &[FindingEntry]) {
 /// Operation: static mapping logic, no own calls.
 fn dimension_categories(dim_name: &str) -> &[&str] {
     match dim_name {
-        "Complexity" => &["COGNITIVE", "CYCLOMATIC", "MAGIC_NUMBER", "NESTING", "LONG_FN", "UNSAFE", "ERROR_HANDLING"],
-        "DRY" => &["DUPLICATE", "DEAD_CODE", "FRAGMENT", "BOILERPLATE", "WILDCARD", "REPEATED_MATCH"],
+        "Complexity" => &[
+            "COGNITIVE",
+            "CYCLOMATIC",
+            "MAGIC_NUMBER",
+            "NESTING",
+            "LONG_FN",
+            "UNSAFE",
+            "ERROR_HANDLING",
+        ],
+        "DRY" => &[
+            "DUPLICATE",
+            "DEAD_CODE",
+            "FRAGMENT",
+            "BOILERPLATE",
+            "WILDCARD",
+            "REPEATED_MATCH",
+        ],
         "SRP" => &["SRP_STRUCT", "SRP_MODULE", "SRP_PARAMS", "STRUCTURAL"],
         "Coupling" => &["COUPLING", "SDP"],
-        "Test Quality" => &["TQ_NO_ASSERT", "TQ_NO_SUT", "TQ_UNTESTED", "TQ_UNCOVERED", "TQ_UNTESTED_LOGIC"],
+        "Test Quality" => &[
+            "TQ_NO_ASSERT",
+            "TQ_NO_SUT",
+            "TQ_UNTESTED",
+            "TQ_UNCOVERED",
+            "TQ_UNTESTED_LOGIC",
+        ],
         _ => &[],
     }
 }

@@ -138,7 +138,9 @@ pub fn print_comparison(
         let finding_delta = findings(summary) as i64 - old_findings as i64;
         println!(
             "  Findings:   {} \u{2192} {} ({:+})",
-            old_findings, findings(summary), finding_delta
+            old_findings,
+            findings(summary),
+            finding_delta
         );
     }
     show_delta(
@@ -147,10 +149,25 @@ pub fn print_comparison(
         summary.iosp_score * PERCENTAGE_MULTIPLIER,
     );
     if is_v2 {
-        let tq_keys = ["tq_no_assertion_warnings", "tq_no_sut_warnings", "tq_untested_warnings", "tq_uncovered_warnings", "tq_untested_logic_warnings"];
+        let tq_keys = [
+            "tq_no_assertion_warnings",
+            "tq_no_sut_warnings",
+            "tq_untested_warnings",
+            "tq_uncovered_warnings",
+            "tq_untested_logic_warnings",
+        ];
         let old_tq: u64 = tq_keys.iter().map(|k| raw[*k].as_u64().unwrap_or(0)).sum();
-        let new_tq = summary.tq_no_assertion_warnings + summary.tq_no_sut_warnings + summary.tq_untested_warnings + summary.tq_uncovered_warnings + summary.tq_untested_logic_warnings;
-        println!("  TQ warnings: {} \u{2192} {} ({:+})", old_tq, new_tq, new_tq as i64 - old_tq as i64);
+        let new_tq = summary.tq_no_assertion_warnings
+            + summary.tq_no_sut_warnings
+            + summary.tq_untested_warnings
+            + summary.tq_uncovered_warnings
+            + summary.tq_untested_logic_warnings;
+        println!(
+            "  TQ warnings: {} \u{2192} {} ({:+})",
+            old_tq,
+            new_tq,
+            new_tq as i64 - old_tq as i64
+        );
         let old_quality = raw["quality_score"].as_f64().unwrap_or(0.0);
         show_delta(
             "Quality",

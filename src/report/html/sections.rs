@@ -74,7 +74,11 @@ pub(super) fn html_iosp_section(results: &[FunctionAnalysis], summary: &Summary)
 
 /// Build an HTML table row for a single complexity warning.
 /// Operation: formatting logic, no own calls (html_escape via closure parameter).
-fn html_complexity_row(f: &FunctionAnalysis, m: &crate::analyzer::ComplexityMetrics, esc: &dyn Fn(&str) -> String) -> String {
+fn html_complexity_row(
+    f: &FunctionAnalysis,
+    m: &crate::analyzer::ComplexityMetrics,
+    esc: &dyn Fn(&str) -> String,
+) -> String {
     let magic_issue = (!m.magic_numbers.is_empty()).then(|| {
         let mn: Vec<String> = m.magic_numbers.iter().map(|n| n.to_string()).collect();
         format!("magic: {}", esc(&mn.join(", ")))
@@ -118,7 +122,9 @@ fn html_complexity_row(f: &FunctionAnalysis, m: &crate::analyzer::ComplexityMetr
 /// Operation: iteration, filtering, and HTML formatting logic.
 pub(super) fn html_complexity_section(results: &[FunctionAnalysis]) -> String {
     let esc = |s: &str| html_escape(s);
-    let row = |f: &FunctionAnalysis, m: &crate::analyzer::ComplexityMetrics| html_complexity_row(f, m, &esc);
+    let row = |f: &FunctionAnalysis, m: &crate::analyzer::ComplexityMetrics| {
+        html_complexity_row(f, m, &esc)
+    };
     let has_warn = |f: &FunctionAnalysis| {
         [
             f.cognitive_warning,
@@ -173,13 +179,16 @@ fn html_coupling_subsections(
     let mut html = String::new();
     if cc > 0 {
         html.push_str("<h3>Circular Dependencies</h3>\n<ul>\n");
-        coupling.iter().flat_map(|c| c.cycles.iter()).for_each(|cycle| {
-            let path: Vec<String> = cycle.modules.iter().map(|m| esc(m)).collect();
-            html.push_str(&format!(
-                "  <li class=\"severity-high\">{}</li>\n",
-                path.join(" \u{2192} ")
-            ));
-        });
+        coupling
+            .iter()
+            .flat_map(|c| c.cycles.iter())
+            .for_each(|cycle| {
+                let path: Vec<String> = cycle.modules.iter().map(|m| esc(m)).collect();
+                html.push_str(&format!(
+                    "  <li class=\"severity-high\">{}</li>\n",
+                    path.join(" \u{2192} ")
+                ));
+            });
         html.push_str("</ul>\n");
     }
     let sdp_count = coupling
@@ -199,7 +208,10 @@ fn html_coupling_subsections(
             .for_each(|v| {
                 html.push_str(&format!(
                     "<tr><td>{}</td><td>{:.2}</td><td>{}</td><td>{:.2}</td></tr>\n",
-                    esc(&v.from_module), v.from_instability, esc(&v.to_module), v.to_instability,
+                    esc(&v.from_module),
+                    v.from_instability,
+                    esc(&v.to_module),
+                    v.to_instability,
                 ));
             });
         html.push_str("</tbody></table>\n");
@@ -209,13 +221,24 @@ fn html_coupling_subsections(
          <th>Fan-in</th><th>Fan-out</th><th>Instability</th><th>Status</th>\
          </tr></thead>\n<tbody>\n",
     );
-    coupling.iter().flat_map(|c| c.metrics.iter()).for_each(|m| {
-        let st = if m.suppressed { "<span class=\"tag tag-ok\">suppressed</span>" } else { "" };
-        html.push_str(&format!(
-            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{:.2}</td><td>{}</td></tr>\n",
-            esc(&m.module_name), m.afferent, m.efferent, m.instability, st,
-        ));
-    });
+    coupling
+        .iter()
+        .flat_map(|c| c.metrics.iter())
+        .for_each(|m| {
+            let st = if m.suppressed {
+                "<span class=\"tag tag-ok\">suppressed</span>"
+            } else {
+                ""
+            };
+            html.push_str(&format!(
+                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{:.2}</td><td>{}</td></tr>\n",
+                esc(&m.module_name),
+                m.afferent,
+                m.efferent,
+                m.instability,
+                st,
+            ));
+        });
     html.push_str("</tbody></table>\n");
     html
 }
@@ -234,7 +257,10 @@ pub(super) fn html_coupling_section(
     html.push_str(&format!(
         "<details>\n<summary>Coupling \u{2014} {} Module{}, {} Cycle{}</summary>\n\
          <div class=\"detail-content\">\n",
-        mc, if mc == 1 { "" } else { "s" }, cc, if cc == 1 { "" } else { "s" },
+        mc,
+        if mc == 1 { "" } else { "s" },
+        cc,
+        if cc == 1 { "" } else { "s" },
     ));
     if mc == 0 {
         html.push_str("<p class=\"empty-state\">No coupling data.</p>\n");

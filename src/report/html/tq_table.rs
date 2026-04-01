@@ -6,12 +6,9 @@ pub(super) fn html_tq_section(tq: Option<&crate::tq::TqAnalysis>) -> String {
     let count = tq
         .map(|t| t.warnings.iter().filter(|w| !w.suppressed).count())
         .unwrap_or(0);
-    super::html_section_wrapper(
-        "Test Quality",
-        count,
-        "No test quality warnings.",
-        || html_tq_table(tq),
-    )
+    super::html_section_wrapper("Test Quality", count, "No test quality warnings.", || {
+        html_tq_table(tq)
+    })
 }
 
 /// Build HTML table rows for TQ warnings.

@@ -24,9 +24,7 @@ pub(crate) fn detect_iet(
                 file: path.clone(),
                 line: 1,
                 name: path.clone(),
-                kind: StructuralWarningKind::InconsistentErrorTypes {
-                    error_types: types,
-                },
+                kind: StructuralWarningKind::InconsistentErrorTypes { error_types: types },
                 dimension: Dimension::Coupling,
                 suppressed: false,
             });
@@ -59,7 +57,9 @@ fn collect_item_errors(item: &syn::Item, error_types: &mut HashSet<String>) {
         syn::Item::Mod(m) => {
             if !super::has_cfg_test_attr(&m.attrs) {
                 m.content.iter().for_each(|(_, items)| {
-                    items.iter().for_each(|i| collect_item_errors(i, error_types));
+                    items
+                        .iter()
+                        .for_each(|i| collect_item_errors(i, error_types));
                 });
             }
         }
@@ -121,7 +121,10 @@ mod tests {
     fn test_inconsistent_error_types_flagged() {
         let w = detect_in("pub fn a() -> Result<(), String> { Ok(()) } pub fn b() -> Result<i32, std::io::Error> { Ok(1) }");
         assert_eq!(w.len(), 1);
-        assert!(matches!(w[0].kind, StructuralWarningKind::InconsistentErrorTypes { .. }));
+        assert!(matches!(
+            w[0].kind,
+            StructuralWarningKind::InconsistentErrorTypes { .. }
+        ));
     }
 
     #[test]
@@ -146,14 +149,20 @@ mod tests {
     fn test_normalized_paths() {
         // std::io::Error and io::Error should be the same
         let w = detect_in("pub fn a() -> Result<(), io::Error> { todo!() } pub fn b() -> Result<(), std::io::Error> { todo!() }");
-        assert!(w.is_empty(), "std:: prefix should be stripped for comparison");
+        assert!(
+            w.is_empty(),
+            "std:: prefix should be stripped for comparison"
+        );
     }
 
     #[test]
     fn test_disabled_check() {
         let syntax = syn::parse_file("pub fn a() -> Result<(), String> { Ok(()) } pub fn b() -> Result<i32, std::io::Error> { Ok(1) }").expect("test source");
         let parsed = vec![("lib.rs".to_string(), String::new(), syntax)];
-        let config = StructuralConfig { check_iet: false, ..StructuralConfig::default() };
+        let config = StructuralConfig {
+            check_iet: false,
+            ..StructuralConfig::default()
+        };
         let mut warnings = Vec::new();
         detect_iet(&mut warnings, &parsed, &config);
         assert!(warnings.is_empty());

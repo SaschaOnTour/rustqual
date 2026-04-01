@@ -218,9 +218,7 @@ pub(super) fn mark_wildcard_suppressions(
 
 /// Mark SDP violations as suppressed when either involved module has a coupling suppression.
 /// Operation: iteration + lookup logic, no own calls.
-pub(super) fn mark_sdp_suppressions(
-    coupling: Option<&mut crate::coupling::CouplingAnalysis>,
-) {
+pub(super) fn mark_sdp_suppressions(coupling: Option<&mut crate::coupling::CouplingAnalysis>) {
     let Some(coupling) = coupling else { return };
     let suppressed_modules: std::collections::HashSet<&str> = coupling
         .metrics
@@ -450,34 +448,52 @@ mod tests {
     #[test]
     fn test_mark_sdp_suppressions_from_module_suppressed() {
         let mut analysis = crate::coupling::CouplingAnalysis {
-            metrics: vec![make_coupling_metric("a", true), make_coupling_metric("b", false)],
+            metrics: vec![
+                make_coupling_metric("a", true),
+                make_coupling_metric("b", false),
+            ],
             cycles: vec![],
             sdp_violations: vec![make_sdp_violation("a", "b")],
         };
         mark_sdp_suppressions(Some(&mut analysis));
-        assert!(analysis.sdp_violations[0].suppressed, "from_module suppressed → violation suppressed");
+        assert!(
+            analysis.sdp_violations[0].suppressed,
+            "from_module suppressed → violation suppressed"
+        );
     }
 
     #[test]
     fn test_mark_sdp_suppressions_to_module_suppressed() {
         let mut analysis = crate::coupling::CouplingAnalysis {
-            metrics: vec![make_coupling_metric("a", false), make_coupling_metric("b", true)],
+            metrics: vec![
+                make_coupling_metric("a", false),
+                make_coupling_metric("b", true),
+            ],
             cycles: vec![],
             sdp_violations: vec![make_sdp_violation("a", "b")],
         };
         mark_sdp_suppressions(Some(&mut analysis));
-        assert!(analysis.sdp_violations[0].suppressed, "to_module suppressed → violation suppressed");
+        assert!(
+            analysis.sdp_violations[0].suppressed,
+            "to_module suppressed → violation suppressed"
+        );
     }
 
     #[test]
     fn test_mark_sdp_suppressions_neither_suppressed() {
         let mut analysis = crate::coupling::CouplingAnalysis {
-            metrics: vec![make_coupling_metric("a", false), make_coupling_metric("b", false)],
+            metrics: vec![
+                make_coupling_metric("a", false),
+                make_coupling_metric("b", false),
+            ],
             cycles: vec![],
             sdp_violations: vec![make_sdp_violation("a", "b")],
         };
         mark_sdp_suppressions(Some(&mut analysis));
-        assert!(!analysis.sdp_violations[0].suppressed, "neither suppressed → violation not suppressed");
+        assert!(
+            !analysis.sdp_violations[0].suppressed,
+            "neither suppressed → violation not suppressed"
+        );
     }
 
     #[test]
@@ -511,6 +527,9 @@ mod tests {
         let config = crate::config::sections::CouplingConfig::default();
         let mut summary = Summary::from_results(&[]);
         count_sdp_violations(Some(&analysis), &config, &mut summary);
-        assert_eq!(summary.sdp_violations, 1, "Only unsuppressed violations counted");
+        assert_eq!(
+            summary.sdp_violations, 1,
+            "Only unsuppressed violations counted"
+        );
     }
 }

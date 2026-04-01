@@ -86,8 +86,7 @@ mod tests {
         let tested = HashSet::new();
         let config = Config::default();
 
-        let warnings =
-            detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
+        let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].kind, TqWarningKind::Untested);
         assert_eq!(warnings[0].function_name, "process");
@@ -100,8 +99,7 @@ mod tests {
         let tested: HashSet<String> = ["process".to_string()].into();
         let config = Config::default();
 
-        let warnings =
-            detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
+        let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
         assert!(warnings.is_empty());
     }
 
@@ -112,9 +110,11 @@ mod tests {
         let tested = HashSet::new();
         let config = Config::default();
 
-        let warnings =
-            detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
-        assert!(warnings.is_empty(), "functions not called from prod are not TQ-003");
+        let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
+        assert!(
+            warnings.is_empty(),
+            "functions not called from prod are not TQ-003"
+        );
     }
 
     #[test]
@@ -124,8 +124,7 @@ mod tests {
         let tested = HashSet::new();
         let config = Config::default();
 
-        let warnings =
-            detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
+        let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
         assert!(warnings.is_empty());
     }
 
@@ -137,8 +136,7 @@ mod tests {
         let tested = HashSet::new();
         let config = Config::default();
 
-        let warnings =
-            detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
+        let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
         assert!(warnings.is_empty());
     }
 
@@ -150,8 +148,7 @@ mod tests {
         let tested = HashSet::new();
         let config = Config::default();
 
-        let warnings =
-            detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
+        let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
         assert!(warnings.is_empty());
     }
 
@@ -170,8 +167,7 @@ mod tests {
         }];
         let config = Config::default();
 
-        let warnings =
-            detect_untested_functions(&declared, &prod_calls, &tested, &dead, &config);
+        let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &dead, &config);
         assert!(warnings.is_empty());
     }
 
@@ -188,8 +184,7 @@ mod tests {
         let tested = build_transitive_tested_set(&test_calls, &call_graph);
         let config = Config::default();
 
-        let warnings =
-            detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
+        let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
         assert!(warnings.is_empty(), "b is transitively tested via a");
     }
 
@@ -201,8 +196,7 @@ mod tests {
             make_declared("b", false),
             make_declared("c", false),
         ];
-        let prod_calls: HashSet<String> =
-            ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
+        let prod_calls: HashSet<String> = ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
         let test_calls: HashSet<String> = ["a".to_string()].into();
         let call_graph: HashMap<String, Vec<String>> = [
             ("a".to_string(), vec!["b".to_string()]),
@@ -212,8 +206,7 @@ mod tests {
         let tested = build_transitive_tested_set(&test_calls, &call_graph);
         let config = Config::default();
 
-        let warnings =
-            detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
+        let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
         assert!(warnings.is_empty(), "c is transitively tested via a→b→c");
     }
 
@@ -231,9 +224,11 @@ mod tests {
         let tested = build_transitive_tested_set(&test_calls, &call_graph);
         let config = Config::default();
 
-        let warnings =
-            detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
-        assert!(warnings.is_empty(), "cycle terminates; both a and b are tested");
+        let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
+        assert!(
+            warnings.is_empty(),
+            "cycle terminates; both a and b are tested"
+        );
     }
 
     #[test]
@@ -244,16 +239,14 @@ mod tests {
             make_declared("b", false),
             make_declared("d", false),
         ];
-        let prod_calls: HashSet<String> =
-            ["a", "b", "d"].iter().map(|s| s.to_string()).collect();
+        let prod_calls: HashSet<String> = ["a", "b", "d"].iter().map(|s| s.to_string()).collect();
         let test_calls: HashSet<String> = ["a".to_string()].into();
         let call_graph: HashMap<String, Vec<String>> =
             [("a".to_string(), vec!["b".to_string()])].into();
         let tested = build_transitive_tested_set(&test_calls, &call_graph);
         let config = Config::default();
 
-        let warnings =
-            detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
+        let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].function_name, "d");
     }
@@ -266,8 +259,7 @@ mod tests {
         let tested: HashSet<String> = ["a".to_string()].into();
         let config = Config::default();
 
-        let warnings =
-            detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
+        let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].function_name, "b");
     }

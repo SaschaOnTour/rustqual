@@ -76,12 +76,7 @@ impl<'ast> Visit<'ast> for TestFunctionCollector {
 
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
         if has_test_attr(&node.attrs) {
-            let line = node
-                .sig
-                .ident
-                .span()
-                .start()
-                .line;
+            let line = node.sig.ident.span().start().line;
             self.test_fns.push(TestFnInfo {
                 name: node.sig.ident.to_string(),
                 line,
@@ -333,7 +328,10 @@ mod tests {
             }
             "#,
         );
-        assert!(warnings.is_empty(), "assert_relative_eq! should be recognized by prefix");
+        assert!(
+            warnings.is_empty(),
+            "assert_relative_eq! should be recognized by prefix"
+        );
     }
 
     #[test]
@@ -351,7 +349,10 @@ mod tests {
             "#,
             &extras,
         );
-        assert!(warnings.is_empty(), "verify! in extra_assertion_macros should be recognized");
+        assert!(
+            warnings.is_empty(),
+            "verify! in extra_assertion_macros should be recognized"
+        );
     }
 
     #[test]

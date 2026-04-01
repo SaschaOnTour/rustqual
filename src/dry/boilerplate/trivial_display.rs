@@ -22,19 +22,40 @@ pub(super) fn check_trivial_display(
                 let file = file.clone();
                 let suggest = suggest.to_string();
                 move |item| {
-                    let syn::Item::Impl(imp) = item else { return None };
-                    if trait_name_of(imp)? != "Display" { return None; }
-                    let methods: Vec<_> = imp.items.iter()
-                        .filter_map(|i| if let syn::ImplItem::Fn(m) = i { Some(m) } else { None })
+                    let syn::Item::Impl(imp) = item else {
+                        return None;
+                    };
+                    if trait_name_of(imp)? != "Display" {
+                        return None;
+                    }
+                    let methods: Vec<_> = imp
+                        .items
+                        .iter()
+                        .filter_map(|i| {
+                            if let syn::ImplItem::Fn(m) = i {
+                                Some(m)
+                            } else {
+                                None
+                            }
+                        })
                         .collect();
-                    if methods.len() != 1 || methods[0].sig.ident != "fmt" { return None; }
+                    if methods.len() != 1 || methods[0].sig.ident != "fmt" {
+                        return None;
+                    }
                     let expr = single_return_expr(&methods[0].block)?;
                     let is_write = if let syn::Expr::Macro(m) = expr {
-                        m.mac.path.segments.last()
+                        m.mac
+                            .path
+                            .segments
+                            .last()
                             .map(|s| s.ident == "write" || s.ident == "writeln")
                             .unwrap_or(false)
-                    } else { false };
-                    if !is_write { return None; }
+                    } else {
+                        false
+                    };
+                    if !is_write {
+                        return None;
+                    }
                     Some(BoilerplateFind {
                         pattern_id: "BP-002".to_string(),
                         file: file.clone(),

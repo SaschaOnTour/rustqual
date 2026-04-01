@@ -148,8 +148,11 @@ fn print_complexity_details(func: &FunctionAnalysis) {
         println!(
             "    {} logic={}, calls={}, nesting={}, cognitive={}, cyclomatic={}",
             "Complexity:".dimmed(),
-            m.logic_count, m.call_count, m.max_nesting,
-            m.cognitive_complexity, m.cyclomatic_complexity,
+            m.logic_count,
+            m.call_count,
+            m.max_nesting,
+            m.cognitive_complexity,
+            m.cyclomatic_complexity,
         );
     }
     let magic_msg = (!m.magic_numbers.is_empty()).then(|| {
@@ -162,19 +165,45 @@ fn print_complexity_details(func: &FunctionAnalysis) {
     });
     let err_msg = func.error_handling_warning.then(|| {
         let parts: Vec<String> = [
-            (m.unwrap_count, "unwrap"), (m.expect_count, "expect"),
-            (m.panic_count, "panic/unreachable"), (m.todo_count, "todo"),
-        ].iter().filter(|(c, _)| *c > 0).map(|(c, l)| format!("{c} {l}")).collect();
+            (m.unwrap_count, "unwrap"),
+            (m.expect_count, "expect"),
+            (m.panic_count, "panic/unreachable"),
+            (m.todo_count, "todo"),
+        ]
+        .iter()
+        .filter(|(c, _)| *c > 0)
+        .map(|(c, l)| format!("{c} {l}"))
+        .collect();
         format!("error handling: {}", parts.join(", "))
     });
     [
-        func.cognitive_warning.then(|| format!("cognitive complexity {} exceeds threshold", m.cognitive_complexity)),
-        func.cyclomatic_warning.then(|| format!("cyclomatic complexity {} exceeds threshold", m.cyclomatic_complexity)),
+        func.cognitive_warning.then(|| {
+            format!(
+                "cognitive complexity {} exceeds threshold",
+                m.cognitive_complexity
+            )
+        }),
+        func.cyclomatic_warning.then(|| {
+            format!(
+                "cyclomatic complexity {} exceeds threshold",
+                m.cyclomatic_complexity
+            )
+        }),
         magic_msg,
-        func.nesting_depth_warning.then(|| format!("nesting depth {} exceeds threshold", m.max_nesting)),
-        func.function_length_warning.then(|| format!("function length {} lines exceeds threshold", m.function_lines)),
-        unsafe_msg, err_msg,
-    ].iter().flatten().for_each(|w| println!("    {warn} {w}"));
+        func.nesting_depth_warning
+            .then(|| format!("nesting depth {} exceeds threshold", m.max_nesting)),
+        func.function_length_warning.then(|| {
+            format!(
+                "function length {} lines exceeds threshold",
+                m.function_lines
+            )
+        }),
+        unsafe_msg,
+        err_msg,
+    ]
+    .iter()
+    .flatten()
+    .for_each(|w| println!("    {warn} {w}"));
 }
 
 #[cfg(test)]

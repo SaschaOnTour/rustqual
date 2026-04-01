@@ -23,7 +23,10 @@ pub(super) fn apply_file_suppressions(fa: &mut FunctionAnalysis, suppressions: &
     let covers_cx = |s: &Suppression| s.covers(crate::findings::Dimension::Complexity);
     let is_adjacent = |s: &Suppression| s.line == fa.line || (fa.line > 1 && s.line == fa.line - 1);
 
-    fa.suppressed = fa.suppressed || suppressions.iter().any(|s| is_adjacent(s) && covers_iosp(s));
+    fa.suppressed = fa.suppressed
+        || suppressions
+            .iter()
+            .any(|s| is_adjacent(s) && covers_iosp(s));
     fa.complexity_suppressed =
         fa.complexity_suppressed || suppressions.iter().any(|s| is_adjacent(s) && covers_cx(s));
 }
@@ -437,7 +440,10 @@ mod tests {
         };
         let mut results = vec![fa];
         exclude_test_violations(&mut results);
-        assert!(matches!(results[0].classification, Classification::Violation { .. }));
+        assert!(matches!(
+            results[0].classification,
+            Classification::Violation { .. }
+        ));
     }
 
     // ── error handling skipped for tests ─────────────────────────

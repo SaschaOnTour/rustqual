@@ -78,28 +78,50 @@ fn merge_warnings(
 /// Scan all parsed files for `#[cfg(test)] mod name;` (external module declarations)
 /// and compute which child file paths are test-only.
 /// Operation: path computation logic, no own calls. Inner helpers hidden in closures.
-pub(crate) fn collect_cfg_test_file_paths(parsed: &[(String, String, syn::File)]) -> HashSet<String> {
+pub(crate) fn collect_cfg_test_file_paths(
+    parsed: &[(String, String, syn::File)],
+) -> HashSet<String> {
     let all_paths: HashSet<&str> = parsed.iter().map(|(p, _, _)| p.as_str()).collect();
     let is_ext_cfg_test = |m: &syn::ItemMod| m.content.is_none() && super::has_cfg_test(&m.attrs);
     let resolve = |parent_path: &str, mod_name: &str| -> Option<String> {
         let parent = Path::new(parent_path);
-        let child_dir = if parent.file_stem().is_some_and(|s| s == "mod" || s == "lib" || s == "main") {
+        let child_dir = if parent
+            .file_stem()
+            .is_some_and(|s| s == "mod" || s == "lib" || s == "main")
+        {
             parent.parent().unwrap_or(Path::new("")).to_path_buf()
         } else {
             parent.with_extension("")
         };
-        let f = child_dir.join(format!("{mod_name}.rs")).to_string_lossy().into_owned();
-        let d = child_dir.join(mod_name).join("mod.rs").to_string_lossy().into_owned();
-        if all_paths.contains(f.as_str()) { Some(f) }
-        else if all_paths.contains(d.as_str()) { Some(d) }
-        else { None }
+        let f = child_dir
+            .join(format!("{mod_name}.rs"))
+            .to_string_lossy()
+            .into_owned();
+        let d = child_dir
+            .join(mod_name)
+            .join("mod.rs")
+            .to_string_lossy()
+            .into_owned();
+        if all_paths.contains(f.as_str()) {
+            Some(f)
+        } else if all_paths.contains(d.as_str()) {
+            Some(d)
+        } else {
+            None
+        }
     };
-    parsed.iter()
+    parsed
+        .iter()
         .flat_map(|(path, _, file)| {
-            file.items.iter().filter_map(|item| match item {
-                syn::Item::Mod(m) if is_ext_cfg_test(m) => Some((path.as_str(), m.ident.to_string())),
-                _ => None,
-            }).collect::<Vec<_>>()
+            file.items
+                .iter()
+                .filter_map(|item| match item {
+                    syn::Item::Mod(m) if is_ext_cfg_test(m) => {
+                        Some((path.as_str(), m.ident.to_string()))
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
         })
         .filter_map(|(parent, name)| resolve(parent, &name))
         .collect()
@@ -150,9 +172,15 @@ struct CallTargetCollector {
 /// Insert the last path segment and qualified `Type::method` form into the target set.
 fn insert_path_segments(target: &mut HashSet<String>, path: &syn::Path) {
     let segments: Vec<_> = path.segments.iter().map(|s| s.ident.to_string()).collect();
-    if let Some(last) = segments.last() { target.insert(last.clone()); }
+    if let Some(last) = segments.last() {
+        target.insert(last.clone());
+    }
     if segments.len() >= 2 {
-        target.insert(format!("{}::{}", segments[segments.len() - 2], segments.last().unwrap()));
+        target.insert(format!(
+            "{}::{}",
+            segments[segments.len() - 2],
+            segments.last().unwrap()
+        ));
     }
 }
 
@@ -162,31 +190,38 @@ impl CallTargetCollector {
     fn extract_serde_fn_refs(attrs: &[syn::Attribute]) -> Vec<String> {
         let mut refs = Vec::new();
         let push_fn_ref = |refs: &mut Vec<String>, s: String| {
-            if let Some(name) = s.rsplit("::").next() { refs.push(name.to_string()); }
-            if s.contains("::") { refs.push(s); }
+            if let Some(name) = s.rsplit("::").next() {
+                refs.push(name.to_string());
+            }
+            if s.contains("::") {
+                refs.push(s);
+            }
         };
-        attrs.iter().filter(|a| a.path().is_ident("serde")).for_each(|attr| {
-            let _ = attr.parse_nested_meta(|meta| {
-                let is_fn_key = meta.path.is_ident("deserialize_with")
-                    || meta.path.is_ident("serialize_with")
-                    || meta.path.is_ident("default");
-                if is_fn_key || meta.path.is_ident("with") {
-                    if let Ok(value) = meta.value() {
-                        if let Ok(lit) = value.parse::<syn::LitStr>() {
-                            let s = lit.value();
-                            if is_fn_key {
-                                push_fn_ref(&mut refs, s);
-                            } else {
-                                refs.push(format!("{s}::serialize"));
-                                refs.push(format!("{s}::deserialize"));
-                                refs.extend(["serialize".into(), "deserialize".into()]);
+        attrs
+            .iter()
+            .filter(|a| a.path().is_ident("serde"))
+            .for_each(|attr| {
+                let _ = attr.parse_nested_meta(|meta| {
+                    let is_fn_key = meta.path.is_ident("deserialize_with")
+                        || meta.path.is_ident("serialize_with")
+                        || meta.path.is_ident("default");
+                    if is_fn_key || meta.path.is_ident("with") {
+                        if let Ok(value) = meta.value() {
+                            if let Ok(lit) = value.parse::<syn::LitStr>() {
+                                let s = lit.value();
+                                if is_fn_key {
+                                    push_fn_ref(&mut refs, s);
+                                } else {
+                                    refs.push(format!("{s}::serialize"));
+                                    refs.push(format!("{s}::deserialize"));
+                                    refs.extend(["serialize".into(), "deserialize".into()]);
+                                }
                             }
                         }
                     }
-                }
-                Ok(())
+                    Ok(())
+                });
             });
-        });
         refs
     }
 
@@ -195,9 +230,15 @@ impl CallTargetCollector {
         &mut self,
         args: &syn::punctuated::Punctuated<syn::Expr, syn::token::Comma>,
     ) {
-        let target = if self.in_test { &mut self.test_calls } else { &mut self.production_calls };
+        let target = if self.in_test {
+            &mut self.test_calls
+        } else {
+            &mut self.production_calls
+        };
         args.iter().for_each(|arg| {
-            if let syn::Expr::Path(p) = arg { insert_path_segments(target, &p.path); }
+            if let syn::Expr::Path(p) = arg {
+                insert_path_segments(target, &p.path);
+            }
         });
     }
 }
@@ -205,7 +246,11 @@ impl CallTargetCollector {
 impl<'ast> Visit<'ast> for CallTargetCollector {
     fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
         if let syn::Expr::Path(p) = &*node.func {
-            let target = if self.in_test { &mut self.test_calls } else { &mut self.production_calls };
+            let target = if self.in_test {
+                &mut self.test_calls
+            } else {
+                &mut self.production_calls
+            };
             insert_path_segments(target, &p.path);
         }
         self.record_path_args(&node.args);
@@ -214,7 +259,11 @@ impl<'ast> Visit<'ast> for CallTargetCollector {
 
     fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
         let name = node.method.to_string();
-        if self.in_test { self.test_calls.insert(name); } else { self.production_calls.insert(name); }
+        if self.in_test {
+            self.test_calls.insert(name);
+        } else {
+            self.production_calls.insert(name);
+        }
         self.record_path_args(&node.args);
         syn::visit::visit_expr_method_call(self, node);
     }
@@ -253,7 +302,11 @@ impl<'ast> Visit<'ast> for CallTargetCollector {
 
     fn visit_field(&mut self, node: &'ast syn::Field) {
         let refs = Self::extract_serde_fn_refs(&node.attrs);
-        if self.in_test { self.test_calls.extend(refs); } else { self.production_calls.extend(refs); }
+        if self.in_test {
+            self.test_calls.extend(refs);
+        } else {
+            self.production_calls.extend(refs);
+        }
         syn::visit::visit_field(self, node);
     }
 
@@ -264,7 +317,11 @@ impl<'ast> Visit<'ast> for CallTargetCollector {
         if matches!(node.vis, syn::Visibility::Inherited) {
             return;
         }
-        let target = if self.in_test { &mut self.test_calls } else { &mut self.production_calls };
+        let target = if self.in_test {
+            &mut self.test_calls
+        } else {
+            &mut self.production_calls
+        };
         // Iterative UseTree walk
         let mut stack: Vec<&syn::UseTree> = vec![&node.tree];
         while let Some(tree) = stack.pop() {
@@ -348,7 +405,12 @@ fn find_test_only(
 /// The `is_ignored_function` call is hidden in a closure (lenient mode).
 fn should_exclude(d: &DeclaredFunction, config: &crate::config::Config) -> bool {
     let is_ignored = |name: &str| config.is_ignored_function(name);
-    d.is_main || d.is_test || d.is_trait_impl || d.has_allow_dead_code || d.is_api || is_ignored(&d.name)
+    d.is_main
+        || d.is_test
+        || d.is_trait_impl
+        || d.has_allow_dead_code
+        || d.is_api
+        || is_ignored(&d.name)
 }
 
 #[cfg(test)]
@@ -706,7 +768,11 @@ mod tests {
         let parent_ast = syn::parse_file(parent_code).expect("parse parent");
         let child_ast = syn::parse_file(child_code).expect("parse child");
         let parsed = vec![
-            ("src/mod.rs".to_string(), parent_code.to_string(), parent_ast),
+            (
+                "src/mod.rs".to_string(),
+                parent_code.to_string(),
+                parent_ast,
+            ),
             (
                 "src/helpers.rs".to_string(),
                 child_code.to_string(),
@@ -739,7 +805,11 @@ mod tests {
         let parent_ast = syn::parse_file(parent_code).expect("parse parent");
         let child_ast = syn::parse_file(child_code).expect("parse child");
         let parsed = vec![
-            ("src/lib.rs".to_string(), parent_code.to_string(), parent_ast),
+            (
+                "src/lib.rs".to_string(),
+                parent_code.to_string(),
+                parent_ast,
+            ),
             (
                 "src/helpers.rs".to_string(),
                 child_code.to_string(),
@@ -844,7 +914,11 @@ mod tests {
         let parent_ast = syn::parse_file(parent_code).unwrap();
         let child_ast = syn::parse_file(child_code).unwrap();
         let parsed = vec![
-            ("src/lib.rs".to_string(), parent_code.to_string(), parent_ast),
+            (
+                "src/lib.rs".to_string(),
+                parent_code.to_string(),
+                parent_ast,
+            ),
             (
                 "src/helpers.rs".to_string(),
                 child_code.to_string(),
@@ -1057,10 +1131,7 @@ mod tests {
         let parsed = parse(code);
         let config = Config::default();
         let warnings = detect_dead_code(&parsed, &config, &std::collections::HashMap::new());
-        let flagged: Vec<&str> = warnings
-            .iter()
-            .map(|w| w.function_name.as_str())
-            .collect();
+        let flagged: Vec<&str> = warnings.iter().map(|w| w.function_name.as_str()).collect();
         assert!(
             !flagged.contains(&"default_true"),
             "default_true should not be flagged, got: {flagged:?}"
@@ -1155,7 +1226,9 @@ mod tests {
         let mut api_lines = std::collections::HashMap::new();
         api_lines.insert(
             "test.rs".to_string(),
-            [2usize].into_iter().collect::<std::collections::HashSet<_>>(),
+            [2usize]
+                .into_iter()
+                .collect::<std::collections::HashSet<_>>(),
         );
         let warnings = detect_dead_code(&parsed, &config, &api_lines);
         let names: Vec<&str> = warnings.iter().map(|w| w.function_name.as_str()).collect();

@@ -182,11 +182,15 @@ impl Summary {
                 + self.repeated_match_groups) as f64
                 / n)
                 .min(1.0),
-            1.0 - ((self.srp_struct_warnings + self.srp_module_warnings + self.srp_param_warnings
+            1.0 - ((self.srp_struct_warnings
+                + self.srp_module_warnings
+                + self.srp_param_warnings
                 + self.structural_srp_warnings) as f64
                 / n)
                 .min(1.0),
-            1.0 - ((self.coupling_warnings + self.coupling_cycles * 2 + self.sdp_violations
+            1.0 - ((self.coupling_warnings
+                + self.coupling_cycles * 2
+                + self.sdp_violations
                 + self.structural_coupling_warnings) as f64
                 / n)
                 .min(1.0),

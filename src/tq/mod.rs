@@ -38,7 +38,9 @@ pub enum TqWarningKind {
     /// TQ-004: Production function has 0 execution count in LCOV data.
     Uncovered,
     /// TQ-005: Logic occurrence at a line that is uncovered in LCOV data.
-    UntestedLogic { uncovered_lines: Vec<(String, usize)> },
+    UntestedLogic {
+        uncovered_lines: Vec<(String, usize)>,
+    },
 }
 
 /// Results of test quality analysis.
@@ -184,12 +186,13 @@ pub(crate) fn analyze_test_quality(ctx: &TqContext<'_>) -> TqAnalysis {
     let full_graph = build_full_call_graph(ctx.parsed);
     let reaches_prod = build_reaches_prod_set(&full_graph, ctx.declared_fns);
 
-    let assertion_free =
-        assertions::detect_assertion_free_tests(ctx.parsed, &ctx.config.test.extra_assertion_macros);
+    let assertion_free = assertions::detect_assertion_free_tests(
+        ctx.parsed,
+        &ctx.config.test.extra_assertion_macros,
+    );
     warnings.extend(assertion_free);
 
-    let no_sut =
-        sut::detect_no_sut_tests(ctx.parsed, ctx.scope, ctx.declared_fns, &reaches_prod);
+    let no_sut = sut::detect_no_sut_tests(ctx.parsed, ctx.scope, ctx.declared_fns, &reaches_prod);
     warnings.extend(no_sut);
 
     // Seed from test_calls + ignored functions (entry points, visitors are implicitly tested)

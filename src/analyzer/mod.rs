@@ -1198,7 +1198,10 @@ fn violator(x: i32) {
         "#;
         let results = parse_and_analyze(code);
         let test_fn = results.iter().find(|f| f.name == "my_test").unwrap();
-        assert!(test_fn.is_test, "Function with #[test] should have is_test=true");
+        assert!(
+            test_fn.is_test,
+            "Function with #[test] should have is_test=true"
+        );
     }
 
     #[test]
@@ -1212,9 +1215,15 @@ fn violator(x: i32) {
         "#;
         let results = parse_and_analyze(code);
         let prod = results.iter().find(|f| f.name == "production_fn").unwrap();
-        assert!(!prod.is_test, "Production function should have is_test=false");
+        assert!(
+            !prod.is_test,
+            "Production function should have is_test=false"
+        );
         let helper = results.iter().find(|f| f.name == "test_helper").unwrap();
-        assert!(helper.is_test, "Function inside #[cfg(test)] mod should have is_test=true");
+        assert!(
+            helper.is_test,
+            "Function inside #[cfg(test)] mod should have is_test=true"
+        );
     }
 
     #[test]
