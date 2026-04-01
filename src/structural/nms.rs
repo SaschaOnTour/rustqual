@@ -113,7 +113,9 @@ impl<'ast> Visit<'ast> for MutationChecker {
 fn is_self_target(expr: &syn::Expr) -> bool {
     match expr {
         syn::Expr::Field(f) => matches!(&*f.base, syn::Expr::Path(p) if p.path.is_ident("self")),
-        syn::Expr::Index(idx) => matches!(&*idx.expr, syn::Expr::Field(f) if matches!(&*f.base, syn::Expr::Path(p) if p.path.is_ident("self"))),
+        syn::Expr::Index(idx) => {
+            matches!(&*idx.expr, syn::Expr::Field(f) if matches!(&*f.base, syn::Expr::Path(p) if p.path.is_ident("self")))
+        }
         _ => false,
     }
 }
@@ -155,7 +157,12 @@ fn is_self_path(expr: &syn::Expr) -> bool {
 /// Operation: pattern matching.
 fn is_self_ref(expr: &syn::Expr) -> bool {
     match expr {
-        syn::Expr::Path(p) => p.path.segments.first().map(|s| s.ident == "self").unwrap_or(false),
+        syn::Expr::Path(p) => p
+            .path
+            .segments
+            .first()
+            .map(|s| s.ident == "self")
+            .unwrap_or(false),
         syn::Expr::Field(f) => matches!(&*f.base, syn::Expr::Path(p) if p.path.is_ident("self")),
         _ => false,
     }
@@ -183,7 +190,8 @@ mod tests {
 
     #[test]
     fn test_assignment_not_flagged() {
-        let w = detect_in("struct S { x: i32 } impl S { fn set(&mut self, v: i32) { self.x = v; } }");
+        let w =
+            detect_in("struct S { x: i32 } impl S { fn set(&mut self, v: i32) { self.x = v; } }");
         assert!(w.is_empty());
     }
 
@@ -195,7 +203,9 @@ mod tests {
 
     #[test]
     fn test_mut_borrow_not_flagged() {
-        let w = detect_in("struct S { x: i32 } impl S { fn borrow(&mut self) -> &mut i32 { &mut self.x } }");
+        let w = detect_in(
+            "struct S { x: i32 } impl S { fn borrow(&mut self) -> &mut i32 { &mut self.x } }",
+        );
         assert!(w.is_empty());
     }
 

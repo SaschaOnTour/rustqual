@@ -19,11 +19,7 @@ pub(super) fn compute_tq(
     let cfg_test_files = crate::dry::dead_code::collect_cfg_test_file_paths(parsed);
     let (prod_calls, test_calls) =
         crate::dry::dead_code::collect_all_calls(parsed, &cfg_test_files);
-    let coverage_path = config
-        .test
-        .coverage_file
-        .as_ref()
-        .map(std::path::Path::new);
+    let coverage_path = config.test.coverage_file.as_ref().map(std::path::Path::new);
     let ctx = crate::tq::TqContext {
         parsed,
         scope,
@@ -60,8 +56,10 @@ pub(super) fn mark_tq_suppressions(
 /// Operation: iteration + conditional counting, no own calls.
 pub(super) fn count_tq_warnings(tq: Option<&crate::tq::TqAnalysis>, summary: &mut Summary) {
     let Some(tq) = tq else { return };
-    tq.warnings.iter().filter(|w| !w.suppressed).for_each(|w| {
-        match &w.kind {
+    tq.warnings
+        .iter()
+        .filter(|w| !w.suppressed)
+        .for_each(|w| match &w.kind {
             crate::tq::TqWarningKind::NoAssertion => summary.tq_no_assertion_warnings += 1,
             crate::tq::TqWarningKind::NoSut => summary.tq_no_sut_warnings += 1,
             crate::tq::TqWarningKind::Untested => summary.tq_untested_warnings += 1,
@@ -69,6 +67,5 @@ pub(super) fn count_tq_warnings(tq: Option<&crate::tq::TqAnalysis>, summary: &mu
             crate::tq::TqWarningKind::UntestedLogic { .. } => {
                 summary.tq_untested_logic_warnings += 1;
             }
-        }
-    });
+        });
 }

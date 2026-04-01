@@ -40,7 +40,9 @@ fn check_method(method: &syn::ImplItemFn, path: &str, warnings: &mut Vec<Structu
         return;
     }
 
-    let mut checker = SelfRefChecker { has_self_ref: false };
+    let mut checker = SelfRefChecker {
+        has_self_ref: false,
+    };
     checker.visit_block(&method.block);
 
     if !checker.has_self_ref {
@@ -89,7 +91,12 @@ impl<'ast> Visit<'ast> for SelfRefChecker {
             return; // early exit
         }
         if let syn::Expr::Path(p) = expr {
-            if p.path.segments.first().map(|s| s.ident == "self").unwrap_or(false) {
+            if p.path
+                .segments
+                .first()
+                .map(|s| s.ident == "self")
+                .unwrap_or(false)
+            {
                 self.has_self_ref = true;
                 return;
             }

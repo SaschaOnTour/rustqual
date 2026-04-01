@@ -1,10 +1,10 @@
-use super::{json_srp, json_structural, json_tq, AnalysisResult};
 use super::json_types::{
     JsonBoilerplateFind, JsonComplexity, JsonCoupling, JsonCouplingModule, JsonDeadCodeWarning,
     JsonDuplicateEntry, JsonDuplicateGroup, JsonFragmentEntry, JsonFragmentGroup, JsonFunction,
     JsonHotspot, JsonMagicNumber, JsonOutput, JsonRepeatedMatchEntry, JsonRepeatedMatchGroup,
     JsonSdpViolation, JsonSummary, JsonWildcardWarning,
 };
+use super::{json_srp, json_structural, json_tq, AnalysisResult};
 use crate::analyzer::Classification;
 
 /// Print results in a machine-readable format (for CI integration).

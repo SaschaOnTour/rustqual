@@ -101,6 +101,41 @@ pub fn create_baseline(results: &[FunctionAnalysis], summary: &Summary) -> Strin
     serde_json::to_string_pretty(&baseline).expect("Baseline serialization failed")
 }
 
+/// Print v2-specific deltas: TQ warnings, findings, and quality score.
+/// Returns true if quality score regressed.
+/// Operation: data extraction, comparison, and display logic; own call hidden in closure.
+fn print_v2_deltas(raw: &serde_json::Value, summary: &Summary) -> bool {
+    let show_delta = |label: &str, old_pct: f64, new_pct: f64| {
+        print_score_delta(label, old_pct, new_pct);
+    };
+    let tq_keys = [
+        "tq_no_assertion_warnings",
+        "tq_no_sut_warnings",
+        "tq_untested_warnings",
+        "tq_uncovered_warnings",
+        "tq_untested_logic_warnings",
+    ];
+    let old_tq: u64 = tq_keys.iter().map(|k| raw[*k].as_u64().unwrap_or(0)).sum();
+    let new_tq = summary.tq_no_assertion_warnings
+        + summary.tq_no_sut_warnings
+        + summary.tq_untested_warnings
+        + summary.tq_uncovered_warnings
+        + summary.tq_untested_logic_warnings;
+    println!(
+        "  TQ warnings: {} \u{2192} {} ({:+})",
+        old_tq,
+        new_tq,
+        new_tq as i64 - old_tq as i64
+    );
+    let old_quality = raw["quality_score"].as_f64().unwrap_or(0.0);
+    show_delta(
+        "Quality",
+        old_quality * PERCENTAGE_MULTIPLIER,
+        summary.quality_score * PERCENTAGE_MULTIPLIER,
+    );
+    summary.quality_score - old_quality < 0.0
+}
+
 /// Compare current results against a baseline and print delta.
 /// Returns true if there was a regression (quality score decreased).
 /// Supports v1 (IOSP-only) and v2 (full quality score) baseline formats.
@@ -113,6 +148,7 @@ pub fn print_comparison(
     let show_delta = |label: &str, old_pct: f64, new_pct: f64| {
         print_score_delta(label, old_pct, new_pct);
     };
+    let v2_deltas = |r: &serde_json::Value, s: &Summary| print_v2_deltas(r, s);
     let findings = |s: &Summary| s.total_findings();
     let raw: serde_json::Value = match serde_json::from_str(baseline_content) {
         Ok(v) => v,
@@ -138,7 +174,9 @@ pub fn print_comparison(
         let finding_delta = findings(summary) as i64 - old_findings as i64;
         println!(
             "  Findings:   {} \u{2192} {} ({:+})",
-            old_findings, findings(summary), finding_delta
+            old_findings,
+            findings(summary),
+            finding_delta
         );
     }
     show_delta(
@@ -147,17 +185,7 @@ pub fn print_comparison(
         summary.iosp_score * PERCENTAGE_MULTIPLIER,
     );
     if is_v2 {
-        let tq_keys = ["tq_no_assertion_warnings", "tq_no_sut_warnings", "tq_untested_warnings", "tq_uncovered_warnings", "tq_untested_logic_warnings"];
-        let old_tq: u64 = tq_keys.iter().map(|k| raw[*k].as_u64().unwrap_or(0)).sum();
-        let new_tq = summary.tq_no_assertion_warnings + summary.tq_no_sut_warnings + summary.tq_untested_warnings + summary.tq_uncovered_warnings + summary.tq_untested_logic_warnings;
-        println!("  TQ warnings: {} \u{2192} {} ({:+})", old_tq, new_tq, new_tq as i64 - old_tq as i64);
-        let old_quality = raw["quality_score"].as_f64().unwrap_or(0.0);
-        show_delta(
-            "Quality",
-            old_quality * PERCENTAGE_MULTIPLIER,
-            summary.quality_score * PERCENTAGE_MULTIPLIER,
-        );
-        summary.quality_score - old_quality < 0.0
+        v2_deltas(&raw, summary)
     } else {
         summary.iosp_score - old_iosp < 0.0
     }

@@ -30,9 +30,9 @@ fn insert_da(data: &str, file_data: &mut LcovFileData) {
     let mut parts = data.splitn(DA_MAX_FIELDS, ',');
     let line = parts.next().and_then(|s| s.parse::<usize>().ok());
     let count = parts.next().and_then(|s| s.parse::<u64>().ok());
-    line.zip(count)
-        .iter()
-        .for_each(|(l, c)| { file_data.line_hits.insert(*l, *c); });
+    line.zip(count).iter().for_each(|(l, c)| {
+        file_data.line_hits.insert(*l, *c);
+    });
 }
 
 /// Parse an LCOV file into per-file coverage data.

@@ -23,14 +23,13 @@ pub(super) fn collect_tq_findings(tq: &crate::tq::TqAnalysis) -> Vec<serde_json:
                 ),
                 crate::tq::TqWarningKind::Uncovered => (
                     "TQ-004",
-                    format!(
-                        "Production function '{}' has no coverage",
-                        w.function_name,
-                    ),
+                    format!("Production function '{}' has no coverage", w.function_name,),
                 ),
                 crate::tq::TqWarningKind::UntestedLogic { uncovered_lines } => {
-                    let lines: Vec<String> =
-                        uncovered_lines.iter().map(|(f, l)| format!("{f}:{l}")).collect();
+                    let lines: Vec<String> = uncovered_lines
+                        .iter()
+                        .map(|(f, l)| format!("{f}:{l}"))
+                        .collect();
                     (
                         "TQ-005",
                         format!(

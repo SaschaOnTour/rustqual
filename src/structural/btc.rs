@@ -67,19 +67,22 @@ fn check_impl(imp: &syn::ItemImpl, path: &str, warnings: &mut Vec<StructuralWarn
     }
 
     // Flag each stub method individually
-    methods.iter().filter(|m| is_stub_body(&m.block)).for_each(|m| {
-        let line = m.sig.ident.span().start().line;
-        warnings.push(StructuralWarning {
-            file: path.to_string(),
-            line,
-            name: m.sig.ident.to_string(),
-            kind: StructuralWarningKind::BrokenTraitContract {
-                trait_name: trait_name.clone(),
-            },
-            dimension: Dimension::Srp,
-            suppressed: false,
+    methods
+        .iter()
+        .filter(|m| is_stub_body(&m.block))
+        .for_each(|m| {
+            let line = m.sig.ident.span().start().line;
+            warnings.push(StructuralWarning {
+                file: path.to_string(),
+                line,
+                name: m.sig.ident.to_string(),
+                kind: StructuralWarningKind::BrokenTraitContract {
+                    trait_name: trait_name.clone(),
+                },
+                dimension: Dimension::Srp,
+                suppressed: false,
+            });
         });
-    });
 }
 
 /// Check if a block body is a single stub expression (todo!, unimplemented!, panic!("not implemented")).
@@ -129,7 +132,10 @@ mod tests {
     fn test_all_stub_methods_flagged() {
         let w = detect_in("trait Foo { fn bar(&self); } impl Foo for MyType { fn bar(&self) { todo!() } } struct MyType;");
         assert_eq!(w.len(), 1);
-        assert!(matches!(w[0].kind, StructuralWarningKind::BrokenTraitContract { .. }));
+        assert!(matches!(
+            w[0].kind,
+            StructuralWarningKind::BrokenTraitContract { .. }
+        ));
     }
 
     #[test]
@@ -171,9 +177,15 @@ mod tests {
 
     #[test]
     fn test_disabled_check() {
-        let syntax = syn::parse_file("trait Foo { fn bar(&self); } impl Foo for M { fn bar(&self) { todo!() } } struct M;").expect("test source");
+        let syntax = syn::parse_file(
+            "trait Foo { fn bar(&self); } impl Foo for M { fn bar(&self) { todo!() } } struct M;",
+        )
+        .expect("test source");
         let parsed = vec![("test.rs".to_string(), String::new(), syntax)];
-        let config = StructuralConfig { check_btc: false, ..StructuralConfig::default() };
+        let config = StructuralConfig {
+            check_btc: false,
+            ..StructuralConfig::default()
+        };
         let mut warnings = Vec::new();
         detect_btc(&mut warnings, &parsed, &config);
         assert!(warnings.is_empty());

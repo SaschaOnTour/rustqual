@@ -45,8 +45,8 @@ pub(crate) fn detect_sit(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::collect_metadata;
+    use super::*;
 
     fn detect_from(source: &str) -> Vec<StructuralWarning> {
         let syntax = syn::parse_file(source).expect("test source");
@@ -64,7 +64,10 @@ mod tests {
             "trait Drawable { fn draw(&self); } struct Circle; impl Drawable for Circle { fn draw(&self) {} }",
         );
         assert_eq!(w.len(), 1);
-        assert!(matches!(w[0].kind, StructuralWarningKind::SingleImplTrait { .. }));
+        assert!(matches!(
+            w[0].kind,
+            StructuralWarningKind::SingleImplTrait { .. }
+        ));
         assert_eq!(w[0].name, "Drawable");
     }
 
@@ -86,9 +89,7 @@ mod tests {
 
     #[test]
     fn test_marker_trait_excluded() {
-        let w = detect_from(
-            "trait Marker {} struct Circle; impl Marker for Circle {}",
-        );
+        let w = detect_from("trait Marker {} struct Circle; impl Marker for Circle {}");
         assert!(w.is_empty());
     }
 
@@ -100,10 +101,15 @@ mod tests {
 
     #[test]
     fn test_disabled_check() {
-        let syntax = syn::parse_file("trait D { fn d(&self); } struct C; impl D for C { fn d(&self) {} }").expect("test source");
+        let syntax =
+            syn::parse_file("trait D { fn d(&self); } struct C; impl D for C { fn d(&self) {} }")
+                .expect("test source");
         let parsed = vec![("lib.rs".to_string(), String::new(), syntax)];
         let meta = collect_metadata(&parsed);
-        let config = StructuralConfig { check_sit: false, ..StructuralConfig::default() };
+        let config = StructuralConfig {
+            check_sit: false,
+            ..StructuralConfig::default()
+        };
         let mut warnings = Vec::new();
         detect_sit(&mut warnings, &meta, &config);
         assert!(warnings.is_empty());

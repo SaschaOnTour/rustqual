@@ -88,8 +88,7 @@ impl<'ast> Visit<'ast> for MatchPatternCollector<'_> {
     fn visit_expr_match(&mut self, node: &'ast syn::ExprMatch) {
         if node.arms.len() >= MIN_MATCH_ARMS && !self.current_fn.is_empty() {
             let normalize = |match_expr: &syn::ExprMatch| {
-                let stmt =
-                    syn::Stmt::Expr(syn::Expr::Match(match_expr.clone()), None);
+                let stmt = syn::Stmt::Expr(syn::Expr::Match(match_expr.clone()), None);
                 let tokens = crate::normalize::normalize_stmts(&[stmt]);
                 crate::normalize::structural_hash(&tokens)
             };
@@ -142,8 +141,7 @@ fn group_repeated_patterns(collected: Vec<CollectedMatch>) -> Vec<RepeatedMatchG
                 return false;
             }
             let mut seen = std::collections::HashSet::new();
-            entries.iter().any(|e| !seen.insert(&e.function_name))
-                || seen.len() >= 2
+            entries.iter().any(|e| !seen.insert(&e.function_name)) || seen.len() >= 2
         })
         .map(|(_hash, entries)| {
             let enum_name = entries
@@ -300,7 +298,10 @@ mod tests {
         let parsed = parse(code);
         let config = DuplicatesConfig::default();
         let result = detect_repeated_matches(&parsed, &config);
-        assert!(result.is_empty(), "matches with <3 arms should not be flagged");
+        assert!(
+            result.is_empty(),
+            "matches with <3 arms should not be flagged"
+        );
     }
 
     #[test]
@@ -355,6 +356,10 @@ mod tests {
         let result = group_repeated_patterns(entries);
         // 3 instances in same function — still flagged (≥ MIN_INSTANCES)
         // The filter checks len >= 2 unique functions OR len >= MIN_INSTANCES with duplicates
-        assert_eq!(result.len(), 1, "3 instances even in same fn should be flagged");
+        assert_eq!(
+            result.len(),
+            1,
+            "3 instances even in same fn should be flagged"
+        );
     }
 }

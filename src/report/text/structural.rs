@@ -5,7 +5,11 @@ use crate::structural::StructuralAnalysis;
 /// Print structural warnings grouped by rule code.
 /// Operation: formatting logic with iteration, no own calls.
 pub(crate) fn print_structural_section(structural: &StructuralAnalysis) {
-    let warnings: Vec<_> = structural.warnings.iter().filter(|w| !w.suppressed).collect();
+    let warnings: Vec<_> = structural
+        .warnings
+        .iter()
+        .filter(|w| !w.suppressed)
+        .collect();
     if warnings.is_empty() {
         return;
     }

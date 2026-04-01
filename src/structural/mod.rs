@@ -103,9 +103,7 @@ pub(crate) struct TraitInfo {
 
 /// Collect structural metadata from all parsed files.
 /// Operation: iterates files and visits AST nodes, no own calls.
-pub(crate) fn collect_metadata(
-    parsed: &[(String, String, syn::File)],
-) -> StructuralMetadata {
+pub(crate) fn collect_metadata(parsed: &[(String, String, syn::File)]) -> StructuralMetadata {
     let mut meta = StructuralMetadata {
         enum_defs: HashMap::new(),
         type_defs: HashMap::new(),
@@ -124,8 +122,7 @@ pub(crate) fn collect_metadata(
 /// Extract metadata from a single top-level item.
 /// Operation: match dispatch on item kind, own calls hidden in closures.
 fn collect_item_metadata(item: &syn::Item, path: &str, meta: &mut StructuralMetadata) {
-    let impl_type_name =
-        |imp: &syn::ItemImpl| -> Option<String> { extract_impl_type_name(imp) };
+    let impl_type_name = |imp: &syn::ItemImpl| -> Option<String> { extract_impl_type_name(imp) };
     let cfg_test = |attrs: &[syn::Attribute]| -> bool { has_cfg_test_attr(attrs) };
     match item {
         syn::Item::Enum(e) => {
@@ -135,8 +132,7 @@ fn collect_item_metadata(item: &syn::Item, path: &str, meta: &mut StructuralMeta
             meta.enum_defs.insert(name, (path.to_string(), variants));
         }
         syn::Item::Struct(s) => {
-            meta.type_defs
-                .insert(s.ident.to_string(), path.to_string());
+            meta.type_defs.insert(s.ident.to_string(), path.to_string());
         }
         syn::Item::Trait(t) => {
             let is_pub = matches!(t.vis, syn::Visibility::Public(_));
@@ -157,10 +153,18 @@ fn collect_item_metadata(item: &syn::Item, path: &str, meta: &mut StructuralMeta
         syn::Item::Impl(imp) => {
             if let Some(ref type_name) = impl_type_name(imp) {
                 if let Some((_, ref tp, _)) = imp.trait_ {
-                    let tn = tp.segments.last().map(|s| s.ident.to_string()).unwrap_or_default();
-                    meta.trait_impls.entry(tn).or_default().push((type_name.clone(), path.to_string()));
+                    let tn = tp
+                        .segments
+                        .last()
+                        .map(|s| s.ident.to_string())
+                        .unwrap_or_default();
+                    meta.trait_impls
+                        .entry(tn)
+                        .or_default()
+                        .push((type_name.clone(), path.to_string()));
                 } else {
-                    meta.inherent_impls.push((type_name.clone(), path.to_string()));
+                    meta.inherent_impls
+                        .push((type_name.clone(), path.to_string()));
                 }
             }
         }

@@ -138,20 +138,12 @@ fn print_violation_detail(func: &FunctionAnalysis) {
     }
 }
 
-/// Print complexity metrics for a function.
-/// Operation: data-driven formatting logic, no own calls.
-fn print_complexity_details(func: &FunctionAnalysis) {
-    let Some(ref m) = func.complexity else { return };
-    let warn = "⚠".yellow();
-
-    if m.logic_count > 0 || m.call_count > 0 || m.max_nesting > 0 {
-        println!(
-            "    {} logic={}, calls={}, nesting={}, cognitive={}, cyclomatic={}",
-            "Complexity:".dimmed(),
-            m.logic_count, m.call_count, m.max_nesting,
-            m.cognitive_complexity, m.cyclomatic_complexity,
-        );
-    }
+/// Build optional warning messages for magic numbers, unsafe blocks, and error handling.
+/// Operation: conditional formatting logic, no own calls.
+fn format_warning_messages(
+    func: &FunctionAnalysis,
+    m: &crate::analyzer::ComplexityMetrics,
+) -> [Option<String>; 3] {
     let magic_msg = (!m.magic_numbers.is_empty()).then(|| {
         let nums: Vec<String> = m.magic_numbers.iter().map(|n| n.to_string()).collect();
         format!("magic numbers: {}", nums.join(", "))
@@ -162,19 +154,69 @@ fn print_complexity_details(func: &FunctionAnalysis) {
     });
     let err_msg = func.error_handling_warning.then(|| {
         let parts: Vec<String> = [
-            (m.unwrap_count, "unwrap"), (m.expect_count, "expect"),
-            (m.panic_count, "panic/unreachable"), (m.todo_count, "todo"),
-        ].iter().filter(|(c, _)| *c > 0).map(|(c, l)| format!("{c} {l}")).collect();
+            (m.unwrap_count, "unwrap"),
+            (m.expect_count, "expect"),
+            (m.panic_count, "panic/unreachable"),
+            (m.todo_count, "todo"),
+        ]
+        .iter()
+        .filter(|(c, _)| *c > 0)
+        .map(|(c, l)| format!("{c} {l}"))
+        .collect();
         format!("error handling: {}", parts.join(", "))
     });
+    [magic_msg, unsafe_msg, err_msg]
+}
+
+/// Print complexity metrics for a function.
+/// Operation: data-driven formatting logic; helper call hidden in closure.
+fn print_complexity_details(func: &FunctionAnalysis) {
+    let Some(ref m) = func.complexity else { return };
+    let warn = "⚠".yellow();
+    let msgs = |f: &FunctionAnalysis, metrics: &crate::analyzer::ComplexityMetrics| {
+        format_warning_messages(f, metrics)
+    };
+
+    if m.logic_count > 0 || m.call_count > 0 || m.max_nesting > 0 {
+        println!(
+            "    {} logic={}, calls={}, nesting={}, cognitive={}, cyclomatic={}",
+            "Complexity:".dimmed(),
+            m.logic_count,
+            m.call_count,
+            m.max_nesting,
+            m.cognitive_complexity,
+            m.cyclomatic_complexity,
+        );
+    }
+    let [magic_msg, unsafe_msg, err_msg] = msgs(func, m);
     [
-        func.cognitive_warning.then(|| format!("cognitive complexity {} exceeds threshold", m.cognitive_complexity)),
-        func.cyclomatic_warning.then(|| format!("cyclomatic complexity {} exceeds threshold", m.cyclomatic_complexity)),
+        func.cognitive_warning.then(|| {
+            format!(
+                "cognitive complexity {} exceeds threshold",
+                m.cognitive_complexity
+            )
+        }),
+        func.cyclomatic_warning.then(|| {
+            format!(
+                "cyclomatic complexity {} exceeds threshold",
+                m.cyclomatic_complexity
+            )
+        }),
         magic_msg,
-        func.nesting_depth_warning.then(|| format!("nesting depth {} exceeds threshold", m.max_nesting)),
-        func.function_length_warning.then(|| format!("function length {} lines exceeds threshold", m.function_lines)),
-        unsafe_msg, err_msg,
-    ].iter().flatten().for_each(|w| println!("    {warn} {w}"));
+        func.nesting_depth_warning
+            .then(|| format!("nesting depth {} exceeds threshold", m.max_nesting)),
+        func.function_length_warning.then(|| {
+            format!(
+                "function length {} lines exceeds threshold",
+                m.function_lines
+            )
+        }),
+        unsafe_msg,
+        err_msg,
+    ]
+    .iter()
+    .flatten()
+    .for_each(|w| println!("    {warn} {w}"));
 }
 
 #[cfg(test)]

@@ -11,7 +11,10 @@ pub(super) fn compute_structural(
     if !config.structural.enabled {
         return None;
     }
-    Some(crate::structural::analyze_structural(parsed, &config.structural))
+    Some(crate::structural::analyze_structural(
+        parsed,
+        &config.structural,
+    ))
 }
 
 /// Mark structural warnings as suppressed based on suppression comments.

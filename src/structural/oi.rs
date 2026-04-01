@@ -13,25 +13,27 @@ pub(crate) fn detect_oi(
     if !config.check_oi {
         return;
     }
-    meta.inherent_impls.iter().for_each(|(type_name, impl_file)| {
-        if let Some(def_file) = meta.type_defs.get(type_name) {
-            let def_module = top_level_module(def_file);
-            let impl_module = top_level_module(impl_file);
-            // Same top-level module is OK (e.g. analyzer/mod.rs + analyzer/types.rs)
-            if def_module != impl_module {
-                warnings.push(StructuralWarning {
-                    file: impl_file.clone(),
-                    line: 1,
-                    name: type_name.clone(),
-                    kind: StructuralWarningKind::OrphanedImpl {
-                        defining_file: def_file.clone(),
-                    },
-                    dimension: Dimension::Coupling,
-                    suppressed: false,
-                });
+    meta.inherent_impls
+        .iter()
+        .for_each(|(type_name, impl_file)| {
+            if let Some(def_file) = meta.type_defs.get(type_name) {
+                let def_module = top_level_module(def_file);
+                let impl_module = top_level_module(impl_file);
+                // Same top-level module is OK (e.g. analyzer/mod.rs + analyzer/types.rs)
+                if def_module != impl_module {
+                    warnings.push(StructuralWarning {
+                        file: impl_file.clone(),
+                        line: 1,
+                        name: type_name.clone(),
+                        kind: StructuralWarningKind::OrphanedImpl {
+                            defining_file: def_file.clone(),
+                        },
+                        dimension: Dimension::Coupling,
+                        suppressed: false,
+                    });
+                }
             }
-        }
-    });
+        });
 }
 
 /// Extract the top-level module name from a file path.
@@ -42,8 +44,8 @@ fn top_level_module(path: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::collect_metadata;
+    use super::*;
 
     fn detect_multi(sources: &[(&str, &str)]) -> Vec<StructuralWarning> {
         let parsed: Vec<(String, String, syn::File)> = sources
@@ -73,7 +75,10 @@ mod tests {
             ("other.rs", "impl Foo { fn bar() {} }"),
         ]);
         assert_eq!(w.len(), 1);
-        assert!(matches!(w[0].kind, StructuralWarningKind::OrphanedImpl { .. }));
+        assert!(matches!(
+            w[0].kind,
+            StructuralWarningKind::OrphanedImpl { .. }
+        ));
     }
 
     #[test]
@@ -90,7 +95,10 @@ mod tests {
         // Trait impls are expected in separate files — collect_metadata only puts
         // inherent impls in inherent_impls, not trait impls
         let w = detect_multi(&[
-            ("types.rs", "pub struct Foo {} pub trait Bar { fn baz(&self); }"),
+            (
+                "types.rs",
+                "pub struct Foo {} pub trait Bar { fn baz(&self); }",
+            ),
             ("other.rs", "impl Bar for Foo { fn baz(&self) {} }"),
         ]);
         assert!(w.is_empty());
@@ -106,11 +114,22 @@ mod tests {
     #[test]
     fn test_disabled_check() {
         let parsed: Vec<(String, String, syn::File)> = vec![
-            ("a.rs".to_string(), "pub struct Foo {}".to_string(), syn::parse_file("pub struct Foo {}").expect("test")),
-            ("b.rs".to_string(), "impl Foo { fn bar() {} }".to_string(), syn::parse_file("impl Foo { fn bar() {} }").expect("test")),
+            (
+                "a.rs".to_string(),
+                "pub struct Foo {}".to_string(),
+                syn::parse_file("pub struct Foo {}").expect("test"),
+            ),
+            (
+                "b.rs".to_string(),
+                "impl Foo { fn bar() {} }".to_string(),
+                syn::parse_file("impl Foo { fn bar() {} }").expect("test"),
+            ),
         ];
         let meta = collect_metadata(&parsed);
-        let config = StructuralConfig { check_oi: false, ..StructuralConfig::default() };
+        let config = StructuralConfig {
+            check_oi: false,
+            ..StructuralConfig::default()
+        };
         let mut warnings = Vec::new();
         detect_oi(&mut warnings, &meta, &config);
         assert!(warnings.is_empty());

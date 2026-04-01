@@ -217,13 +217,21 @@ mod tests {
     fn test_sdp_violation_default_not_suppressed() {
         let graph = ModuleGraph {
             modules: vec![
-                "a".into(), "b".into(), "x".into(), "y".into(), "p".into(), "q".into(),
+                "a".into(),
+                "b".into(),
+                "x".into(),
+                "y".into(),
+                "p".into(),
+                "q".into(),
             ],
             forward: vec![vec![1], vec![4, 5], vec![0], vec![0], vec![], vec![]],
         };
         let metrics = compute_coupling_metrics(&graph);
         let violations = check_sdp(&graph, &metrics);
         assert_eq!(violations.len(), 1);
-        assert!(!violations[0].suppressed, "SDP violations should default to not suppressed");
+        assert!(
+            !violations[0].suppressed,
+            "SDP violations should default to not suppressed"
+        );
     }
 }

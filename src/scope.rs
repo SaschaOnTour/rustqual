@@ -141,8 +141,16 @@ fn is_trivial_method_call(mc: &syn::ExprMethodCall) -> bool {
     if mc.args.is_empty() {
         return matches!(
             method_name.as_str(),
-            "len" | "is_empty" | "clone" | "as_ref" | "as_mut" | "as_str"
-                | "to_owned" | "to_string" | "borrow" | "borrow_mut"
+            "len"
+                | "is_empty"
+                | "clone"
+                | "as_ref"
+                | "as_mut"
+                | "as_str"
+                | "to_owned"
+                | "to_string"
+                | "borrow"
+                | "borrow_mut"
         );
     }
     if mc.args.len() != 1 || !matches!(method_name.as_str(), "get") {
@@ -384,9 +392,7 @@ mod tests {
 
     #[test]
     fn test_trivial_method_field_access() {
-        let scope = build_scope(
-            "struct S { x: i32 } impl S { fn x(&self) -> i32 { self.x } }",
-        );
+        let scope = build_scope("struct S { x: i32 } impl S { fn x(&self) -> i32 { self.x } }");
         assert!(scope.trivial_methods.contains("x"));
     }
 
@@ -462,8 +468,7 @@ mod tests {
 
     #[test]
     fn test_own_function_type_default_blocked() {
-        let scope =
-            build_scope("struct MyType; impl MyType { fn default() -> Self { MyType } }");
+        let scope = build_scope("struct MyType; impl MyType { fn default() -> Self { MyType } }");
         assert!(
             !scope.is_own_function("MyType::default"),
             "MyType::default() should NOT be own function (default is universal)"
@@ -472,9 +477,8 @@ mod tests {
 
     #[test]
     fn test_own_function_type_from_blocked() {
-        let scope = build_scope(
-            "struct MyType; impl MyType { fn from(x: i32) -> Self { MyType } }",
-        );
+        let scope =
+            build_scope("struct MyType; impl MyType { fn from(x: i32) -> Self { MyType } }");
         assert!(
             !scope.is_own_function("MyType::from"),
             "MyType::from() should NOT be own function (from is universal)"
@@ -622,9 +626,7 @@ mod tests {
 
     #[test]
     fn test_trait_def_only_no_impl() {
-        let scope = build_scope(
-            "trait Provider { fn fetch_data(&self) -> Vec<u8>; }",
-        );
+        let scope = build_scope("trait Provider { fn fetch_data(&self) -> Vec<u8>; }");
         assert!(
             scope.trait_only_methods.contains("fetch_data"),
             "Method only in trait definition should be trait-only"

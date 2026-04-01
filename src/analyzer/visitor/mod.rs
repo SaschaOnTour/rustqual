@@ -297,7 +297,8 @@ pub(super) fn is_delegation_only_body(stmts: &[syn::Stmt]) -> bool {
 /// Operation: iterator + boolean logic, no own calls (check_delegation_stack via closure).
 pub(super) fn is_match_dispatch(arms: &[syn::Arm]) -> bool {
     let check = |body: &syn::Expr| check_delegation_stack(vec![body]);
-    arms.iter().all(|arm| arm.guard.is_none() && check(&arm.body))
+    arms.iter()
+        .all(|arm| arm.guard.is_none() && check(&arm.body))
 }
 
 /// Check if a match arm body is trivial (no nested control flow).
@@ -834,8 +835,7 @@ mod tests {
 
     #[test]
     fn test_match_not_dispatch_logic_in_arm() {
-        let arms =
-            parse_match_arms("match x { 0 => { let d = call(); d + 1 }, _ => call_b() }");
+        let arms = parse_match_arms("match x { 0 => { let d = call(); d + 1 }, _ => call_b() }");
         assert!(!is_match_dispatch(&arms));
     }
 
@@ -853,9 +853,8 @@ mod tests {
 
     #[test]
     fn test_match_dispatch_tuple_pattern() {
-        let arms = parse_match_arms(
-            "match (a, b) { (Some(_), Some(p)) => call_a(p), _ => call_b() }",
-        );
+        let arms =
+            parse_match_arms("match (a, b) { (Some(_), Some(p)) => call_a(p), _ => call_b() }");
         assert!(is_match_dispatch(&arms));
     }
 
@@ -864,7 +863,10 @@ mod tests {
     #[test]
     fn test_magic_number_in_array_index_not_flagged() {
         let v = visit_code("let x = arr[3];");
-        assert!(v.magic_numbers.is_empty(), "Array index 3 should not be flagged");
+        assert!(
+            v.magic_numbers.is_empty(),
+            "Array index 3 should not be flagged"
+        );
     }
 
     #[test]
@@ -879,6 +881,9 @@ mod tests {
         let v = visit_code("let x = matrix[3][4];");
         // Only the index expressions (3, 4) should be suppressed; no other magic numbers
         let flagged: Vec<&str> = v.magic_numbers.iter().map(|m| m.value.as_str()).collect();
-        assert!(flagged.is_empty(), "Nested array indices should not be flagged, got: {flagged:?}");
+        assert!(
+            flagged.is_empty(),
+            "Nested array indices should not be flagged, got: {flagged:?}"
+        );
     }
 }

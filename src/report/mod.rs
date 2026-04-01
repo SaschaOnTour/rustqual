@@ -3,6 +3,7 @@ mod baseline;
 mod dot;
 pub(crate) mod findings_list;
 mod github;
+mod github_annotations;
 mod html;
 mod json;
 mod json_srp;
@@ -15,12 +16,12 @@ mod text;
 
 pub use baseline::{create_baseline, print_comparison};
 pub use dot::print_dot;
-pub use github::print_coupling_annotations;
-pub use github::print_dry_annotations;
 pub use github::print_github;
-pub use github::print_srp_annotations;
-pub use github::print_structural_annotations;
-pub use github::print_tq_annotations;
+pub use github_annotations::print_coupling_annotations;
+pub use github_annotations::print_dry_annotations;
+pub use github_annotations::print_srp_annotations;
+pub use github_annotations::print_structural_annotations;
+pub use github_annotations::print_tq_annotations;
 // print_dry_section re-exported below
 pub use html::print_html;
 pub use json::print_json;
@@ -182,11 +183,15 @@ impl Summary {
                 + self.repeated_match_groups) as f64
                 / n)
                 .min(1.0),
-            1.0 - ((self.srp_struct_warnings + self.srp_module_warnings + self.srp_param_warnings
+            1.0 - ((self.srp_struct_warnings
+                + self.srp_module_warnings
+                + self.srp_param_warnings
                 + self.structural_srp_warnings) as f64
                 / n)
                 .min(1.0),
-            1.0 - ((self.coupling_warnings + self.coupling_cycles * 2 + self.sdp_violations
+            1.0 - ((self.coupling_warnings
+                + self.coupling_cycles * 2
+                + self.sdp_violations
                 + self.structural_coupling_warnings) as f64
                 / n)
                 .min(1.0),

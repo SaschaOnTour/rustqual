@@ -12,8 +12,20 @@ pub struct FindingEntry {
 }
 
 impl FindingEntry {
-    fn new(file: &str, line: usize, category: &'static str, detail: String, context: String) -> Self {
-        Self { file: file.to_string(), line, category, detail, function_name: context }
+    fn new(
+        file: &str,
+        line: usize,
+        category: &'static str,
+        detail: String,
+        context: String,
+    ) -> Self {
+        Self {
+            file: file.to_string(),
+            line,
+            category,
+            detail,
+            function_name: context,
+        }
     }
 }
 
@@ -52,7 +64,9 @@ pub fn print_findings(entries: &[FindingEntry]) {
 /// Operation: iterates function results checking flags; no own calls.
 fn collect_function_findings(results: &[FunctionAnalysis], entries: &mut Vec<FindingEntry>) {
     results.iter().filter(|f| !f.suppressed).for_each(|f| {
-        let e = |cat, detail: String| FindingEntry::new(&f.file, f.line, cat, detail, f.qualified_name.clone());
+        let e = |cat, detail: String| {
+            FindingEntry::new(&f.file, f.line, cat, detail, f.qualified_name.clone())
+        };
         if matches!(f.classification, Classification::Violation { .. }) {
             entries.push(e("VIOLATION", "logic + calls".to_string()));
         }
@@ -66,7 +80,13 @@ fn collect_function_findings(results: &[FunctionAnalysis], entries: &mut Vec<Fin
         }
         if let Some(ref m) = f.complexity {
             m.magic_numbers.iter().for_each(|mn| {
-                entries.push(FindingEntry::new(&f.file, mn.line, "MAGIC_NUMBER", mn.value.clone(), f.qualified_name.clone()));
+                entries.push(FindingEntry::new(
+                    &f.file,
+                    mn.line,
+                    "MAGIC_NUMBER",
+                    mn.value.clone(),
+                    f.qualified_name.clone(),
+                ));
             });
         }
         if f.nesting_depth_warning {
@@ -93,29 +113,71 @@ fn collect_dry_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntr
     analysis.duplicates.iter().for_each(|group| {
         let kind = match &group.kind {
             crate::dry::DuplicateKind::Exact => "exact".to_string(),
-            crate::dry::DuplicateKind::NearDuplicate { similarity } => format!("{:.0}% similar", similarity * 100.0),
+            crate::dry::DuplicateKind::NearDuplicate { similarity } => {
+                format!("{:.0}% similar", similarity * 100.0)
+            }
         };
         group.entries.iter().for_each(|e| {
-            entries.push(FindingEntry::new(&e.file, e.line, "DUPLICATE", kind.clone(), e.qualified_name.clone()));
+            entries.push(FindingEntry::new(
+                &e.file,
+                e.line,
+                "DUPLICATE",
+                kind.clone(),
+                e.qualified_name.clone(),
+            ));
         });
     });
     analysis.dead_code.iter().for_each(|w| {
-        entries.push(FindingEntry::new(&w.file, w.line, "DEAD_CODE", format!("{:?}", w.kind).to_lowercase(), w.qualified_name.clone()));
+        entries.push(FindingEntry::new(
+            &w.file,
+            w.line,
+            "DEAD_CODE",
+            format!("{:?}", w.kind).to_lowercase(),
+            w.qualified_name.clone(),
+        ));
     });
     analysis.fragments.iter().for_each(|group| {
         group.entries.iter().for_each(|e| {
-            entries.push(FindingEntry::new(&e.file, e.start_line, "FRAGMENT", format!("{} stmts", group.statement_count), e.function_name.clone()));
+            entries.push(FindingEntry::new(
+                &e.file,
+                e.start_line,
+                "FRAGMENT",
+                format!("{} stmts", group.statement_count),
+                e.function_name.clone(),
+            ));
         });
     });
     analysis.boilerplate.iter().for_each(|b| {
-        entries.push(FindingEntry::new(&b.file, b.line, "BOILERPLATE", b.pattern_id.clone(), b.struct_name.clone().unwrap_or_default()));
+        entries.push(FindingEntry::new(
+            &b.file,
+            b.line,
+            "BOILERPLATE",
+            b.pattern_id.clone(),
+            b.struct_name.clone().unwrap_or_default(),
+        ));
     });
-    analysis.wildcard_warnings.iter().filter(|w| !w.suppressed).for_each(|w| {
-        entries.push(FindingEntry::new(&w.file, w.line, "WILDCARD", w.module_path.clone(), String::new()));
-    });
+    analysis
+        .wildcard_warnings
+        .iter()
+        .filter(|w| !w.suppressed)
+        .for_each(|w| {
+            entries.push(FindingEntry::new(
+                &w.file,
+                w.line,
+                "WILDCARD",
+                w.module_path.clone(),
+                String::new(),
+            ));
+        });
     analysis.repeated_matches.iter().for_each(|group| {
         group.entries.iter().for_each(|e| {
-            entries.push(FindingEntry::new(&e.file, e.line, "REPEATED_MATCH", group.enum_name.clone(), e.function_name.clone()));
+            entries.push(FindingEntry::new(
+                &e.file,
+                e.line,
+                "REPEATED_MATCH",
+                group.enum_name.clone(),
+                e.function_name.clone(),
+            ));
         });
     });
 }
@@ -127,15 +189,42 @@ fn collect_srp_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntr
         Some(s) => s,
         None => return,
     };
-    srp.struct_warnings.iter().filter(|w| !w.suppressed).for_each(|w| {
-        entries.push(FindingEntry::new(&w.file, w.line, "SRP_STRUCT", format!("LCOM4={}", w.lcom4), w.struct_name.clone()));
-    });
-    srp.module_warnings.iter().filter(|w| !w.suppressed).for_each(|w| {
-        entries.push(FindingEntry::new(&w.file, 1, "SRP_MODULE", format!("{} lines", w.production_lines), w.module.clone()));
-    });
-    srp.param_warnings.iter().filter(|w| !w.suppressed).for_each(|w| {
-        entries.push(FindingEntry::new(&w.file, w.line, "SRP_PARAMS", format!("{} params", w.parameter_count), w.function_name.clone()));
-    });
+    srp.struct_warnings
+        .iter()
+        .filter(|w| !w.suppressed)
+        .for_each(|w| {
+            entries.push(FindingEntry::new(
+                &w.file,
+                w.line,
+                "SRP_STRUCT",
+                format!("LCOM4={}", w.lcom4),
+                w.struct_name.clone(),
+            ));
+        });
+    srp.module_warnings
+        .iter()
+        .filter(|w| !w.suppressed)
+        .for_each(|w| {
+            entries.push(FindingEntry::new(
+                &w.file,
+                1,
+                "SRP_MODULE",
+                format!("{} lines", w.production_lines),
+                w.module.clone(),
+            ));
+        });
+    srp.param_warnings
+        .iter()
+        .filter(|w| !w.suppressed)
+        .for_each(|w| {
+            entries.push(FindingEntry::new(
+                &w.file,
+                w.line,
+                "SRP_PARAMS",
+                format!("{} params", w.parameter_count),
+                w.function_name.clone(),
+            ));
+        });
 }
 
 /// Collect coupling findings (SDP violations).
@@ -145,9 +234,18 @@ fn collect_coupling_findings(analysis: &AnalysisResult, entries: &mut Vec<Findin
         Some(c) => c,
         None => return,
     };
-    ca.sdp_violations.iter().filter(|v| !v.suppressed).for_each(|v| {
-        entries.push(FindingEntry::new("", 0, "SDP", format!("{} -> {}", v.from_module, v.to_module), v.from_module.clone()));
-    });
+    ca.sdp_violations
+        .iter()
+        .filter(|v| !v.suppressed)
+        .for_each(|v| {
+            entries.push(FindingEntry::new(
+                "",
+                0,
+                "SDP",
+                format!("{} -> {}", v.from_module, v.to_module),
+                v.from_module.clone(),
+            ));
+        });
 }
 
 /// Collect TQ findings.
@@ -165,7 +263,13 @@ fn collect_tq_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntry
             crate::tq::TqWarningKind::Uncovered => "TQ_UNCOVERED",
             crate::tq::TqWarningKind::UntestedLogic { .. } => "TQ_UNTESTED_LOGIC",
         };
-        entries.push(FindingEntry::new(&w.file, w.line, cat, String::new(), w.function_name.clone()));
+        entries.push(FindingEntry::new(
+            &w.file,
+            w.line,
+            cat,
+            String::new(),
+            w.function_name.clone(),
+        ));
     });
 }
 
@@ -177,14 +281,22 @@ fn collect_structural_findings(analysis: &AnalysisResult, entries: &mut Vec<Find
         None => return,
     };
     st.warnings.iter().filter(|w| !w.suppressed).for_each(|w| {
-        entries.push(FindingEntry::new(&w.file, w.line, "STRUCTURAL", w.kind.code().to_string(), w.name.clone()));
+        entries.push(FindingEntry::new(
+            &w.file,
+            w.line,
+            "STRUCTURAL",
+            w.kind.code().to_string(),
+            w.name.clone(),
+        ));
     });
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analyzer::{Classification, ComplexityMetrics, FunctionAnalysis, MagicNumberOccurrence};
+    use crate::analyzer::{
+        Classification, ComplexityMetrics, FunctionAnalysis, MagicNumberOccurrence,
+    };
     use crate::report::{AnalysisResult, Summary};
 
     fn make_fa(name: &str, file: &str, line: usize) -> FunctionAnalysis {
@@ -243,8 +355,14 @@ mod tests {
         let mut fa = make_fa("test_fn", "src/lib.rs", 10);
         fa.complexity = Some(ComplexityMetrics {
             magic_numbers: vec![
-                MagicNumberOccurrence { line: 12, value: "42".to_string() },
-                MagicNumberOccurrence { line: 15, value: "99".to_string() },
+                MagicNumberOccurrence {
+                    line: 12,
+                    value: "42".to_string(),
+                },
+                MagicNumberOccurrence {
+                    line: 15,
+                    value: "99".to_string(),
+                },
             ],
             ..Default::default()
         });

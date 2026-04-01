@@ -1,4 +1,5 @@
 mod sections;
+mod srp_tables;
 mod structural_table;
 mod tables;
 mod tq_table;
@@ -108,7 +109,14 @@ fn html_dashboard(summary: &Summary) -> String {
         }
     };
 
-    let names = ["IOSP", "Complexity", "DRY", "SRP", "Coupling", "Test Quality"];
+    let names = [
+        "IOSP",
+        "Complexity",
+        "DRY",
+        "SRP",
+        "Coupling",
+        "Test Quality",
+    ];
     let scores = &summary.dimension_scores;
     let q = summary.quality_score;
 

@@ -19,10 +19,12 @@ use crate::scope::ProjectScope;
 
 use metrics::{
     apply_parameter_warnings, build_file_call_graph, compute_coupling, compute_srp,
-    count_coupling_warnings, count_srp_warnings, mark_coupling_suppressions,
-    mark_sdp_suppressions, mark_srp_suppressions, run_dry_detection, run_guarded_detection,
+    count_coupling_warnings, count_srp_warnings, mark_coupling_suppressions, mark_sdp_suppressions,
+    mark_srp_suppressions, run_dry_detection, run_guarded_detection,
 };
-use structural_metrics::{compute_structural, count_structural_warnings, mark_structural_suppressions};
+use structural_metrics::{
+    compute_structural, count_structural_warnings, mark_structural_suppressions,
+};
 use tq_metrics::{compute_tq, count_tq_warnings, mark_tq_suppressions};
 use warnings::{
     apply_complexity_warnings, apply_extended_warnings, apply_file_suppressions,
@@ -224,7 +226,10 @@ pub(crate) fn output_results(
             report::print_dry_annotations(analysis);
             analysis.srp.iter().for_each(report::print_srp_annotations);
             analysis.tq.iter().for_each(report::print_tq_annotations);
-            analysis.structural.iter().for_each(report::print_structural_annotations);
+            analysis
+                .structural
+                .iter()
+                .for_each(report::print_structural_annotations);
         }
         super::OutputFormat::Dot => report::print_dot(&analysis.results),
         super::OutputFormat::Sarif => report::print_sarif(analysis),
@@ -239,7 +244,10 @@ pub(crate) fn output_results(
             report::print_dry_section(analysis);
             analysis.srp.iter().for_each(report::print_srp_section);
             analysis.tq.iter().for_each(report::print_tq_section);
-            analysis.structural.iter().for_each(report::print_structural_section);
+            analysis
+                .structural
+                .iter()
+                .for_each(report::print_structural_section);
             if suggestions {
                 report::print_suggestions(&analysis.results);
             }

@@ -85,9 +85,7 @@ fn is_test_function(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analyzer::{
-        compute_severity, Classification, ComplexityMetrics, LogicOccurrence,
-    };
+    use crate::analyzer::{compute_severity, Classification, ComplexityMetrics, LogicOccurrence};
 
     fn make_func(name: &str, file: &str, line: usize) -> FunctionAnalysis {
         let severity = compute_severity(&Classification::Operation);
@@ -116,15 +114,9 @@ mod tests {
         }
     }
 
-    fn make_lcov_data(
-        fn_hits: &[(&str, u64)],
-        line_hits: &[(usize, u64)],
-    ) -> LcovFileData {
+    fn make_lcov_data(fn_hits: &[(&str, u64)], line_hits: &[(usize, u64)]) -> LcovFileData {
         LcovFileData {
-            function_hits: fn_hits
-                .iter()
-                .map(|(n, c)| (n.to_string(), *c))
-                .collect(),
+            function_hits: fn_hits.iter().map(|(n, c)| (n.to_string(), *c)).collect(),
             line_hits: line_hits.iter().copied().collect(),
         }
     }
@@ -204,10 +196,7 @@ mod tests {
         });
         let results = vec![func];
         let mut lcov = HashMap::new();
-        lcov.insert(
-            "src/lib.rs".to_string(),
-            make_lcov_data(&[], &[(15, 0)]),
-        );
+        lcov.insert("src/lib.rs".to_string(), make_lcov_data(&[], &[(15, 0)]));
         let warnings = detect_untested_logic(&results, &lcov);
         assert_eq!(warnings.len(), 1);
         match &warnings[0].kind {
@@ -231,10 +220,7 @@ mod tests {
         });
         let results = vec![func];
         let mut lcov = HashMap::new();
-        lcov.insert(
-            "src/lib.rs".to_string(),
-            make_lcov_data(&[], &[(15, 3)]),
-        );
+        lcov.insert("src/lib.rs".to_string(), make_lcov_data(&[], &[(15, 3)]));
         let warnings = detect_untested_logic(&results, &lcov);
         assert!(warnings.is_empty());
     }
@@ -260,10 +246,7 @@ mod tests {
         let func = make_func("process", "src/lib.rs", 10);
         let results = vec![func];
         let mut lcov = HashMap::new();
-        lcov.insert(
-            "src/lib.rs".to_string(),
-            make_lcov_data(&[], &[(15, 0)]),
-        );
+        lcov.insert("src/lib.rs".to_string(), make_lcov_data(&[], &[(15, 0)]));
         let warnings = detect_untested_logic(&results, &lcov);
         assert!(warnings.is_empty());
     }
@@ -291,7 +274,11 @@ mod tests {
             make_lcov_data(&[], &[(15, 0), (20, 0)]),
         );
         let warnings = detect_untested_logic(&results, &lcov);
-        assert_eq!(warnings.len(), 1, "one warning per function, not per logic line");
+        assert_eq!(
+            warnings.len(),
+            1,
+            "one warning per function, not per logic line"
+        );
         match &warnings[0].kind {
             TqWarningKind::UntestedLogic { uncovered_lines } => {
                 assert_eq!(uncovered_lines.len(), 2);

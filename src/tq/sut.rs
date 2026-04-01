@@ -32,9 +32,10 @@ pub(crate) fn detect_no_sut_tests(
                     || scope.functions.contains(target)
                     || scope.methods.contains(target)
                     || reaches_prod.contains(target)
-            }) || test_fn.type_qualified_calls.iter().any(|type_name| {
-                scope.types.contains(type_name)
-            });
+            }) || test_fn
+                .type_qualified_calls
+                .iter()
+                .any(|type_name| scope.types.contains(type_name));
             if !calls_prod {
                 warnings.push(TqWarning {
                     file: path.clone(),
@@ -157,7 +158,10 @@ fn path_to_name(path: &syn::Path) -> String {
 fn path_type_prefix(path: &syn::Path) -> Option<String> {
     let len = path.segments.len();
     if len >= 2 {
-        path.segments.iter().nth(len - 2).map(|s| s.ident.to_string())
+        path.segments
+            .iter()
+            .nth(len - 2)
+            .map(|s| s.ident.to_string())
     } else {
         None
     }
@@ -288,7 +292,10 @@ mod tests {
         let parsed = vec![("test.rs".to_string(), source.to_string(), syntax)];
         let reaches_prod = HashSet::new();
         let warnings = detect_no_sut_tests(&parsed, &scope, &declared, &reaches_prod);
-        assert!(warnings.is_empty(), "MyType::new() should be recognized as SUT call");
+        assert!(
+            warnings.is_empty(),
+            "MyType::new() should be recognized as SUT call"
+        );
     }
 
     #[test]
@@ -308,7 +315,10 @@ mod tests {
         let parsed = vec![("test.rs".to_string(), source.to_string(), syntax)];
         let reaches_prod = HashSet::new();
         let warnings = detect_no_sut_tests(&parsed, &scope, &declared, &reaches_prod);
-        assert!(warnings.is_empty(), "Config::load() should be recognized as SUT call");
+        assert!(
+            warnings.is_empty(),
+            "Config::load() should be recognized as SUT call"
+        );
     }
 
     #[test]
