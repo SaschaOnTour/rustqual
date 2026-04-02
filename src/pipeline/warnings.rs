@@ -21,7 +21,8 @@ pub(super) fn exclude_test_violations(results: &mut [FunctionAnalysis]) {
 pub(super) fn apply_file_suppressions(fa: &mut FunctionAnalysis, suppressions: &[Suppression]) {
     let covers_iosp = |s: &Suppression| s.covers(crate::findings::Dimension::Iosp);
     let covers_cx = |s: &Suppression| s.covers(crate::findings::Dimension::Complexity);
-    let is_adjacent = |s: &Suppression| s.line == fa.line || (fa.line > 1 && s.line == fa.line - 1);
+    let window = crate::findings::ANNOTATION_WINDOW;
+    let is_adjacent = |s: &Suppression| s.line <= fa.line && fa.line - s.line <= window;
 
     fa.suppressed = fa.suppressed
         || suppressions

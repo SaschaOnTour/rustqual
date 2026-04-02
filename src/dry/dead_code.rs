@@ -45,15 +45,18 @@ pub fn detect_dead_code(
     merge_warnings(uncalled, test_only)
 }
 
-/// Mark functions that have a `// qual:api` annotation on the preceding line.
+/// Mark functions that have a `// qual:api` annotation within the annotation window.
 /// Operation: iterates declarations checking line proximity to API markers.
 fn mark_api_declarations(
     mut declared: Vec<super::DeclaredFunction>,
     api_lines: &std::collections::HashMap<String, std::collections::HashSet<usize>>,
 ) -> Vec<super::DeclaredFunction> {
+    let window = crate::findings::ANNOTATION_WINDOW;
     declared.iter_mut().for_each(|d| {
         if let Some(lines) = api_lines.get(&d.file) {
-            if lines.contains(&d.line) || (d.line > 1 && lines.contains(&(d.line - 1))) {
+            let in_window =
+                (0..=window).any(|off| d.line >= off && lines.contains(&(d.line - off)));
+            if in_window {
                 d.is_api = true;
             }
         }
@@ -1019,6 +1022,9 @@ mod tests {
         let code = r#"
             // qual:api
             pub fn public_api() { let x = 1; }
+
+            // spacer to move internal_unused outside annotation window
+            // another spacer line
             fn internal_unused() { let y = 2; }
         "#;
         let parsed = parse(code);

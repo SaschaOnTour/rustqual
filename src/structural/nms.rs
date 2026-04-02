@@ -90,8 +90,11 @@ impl<'ast> Visit<'ast> for MutationChecker {
                 }
             }
             syn::Expr::MethodCall(mc) => {
-                // Any method call on self.field is conservatively a mutation
-                if is_self_field(&mc.receiver) || is_self_path(&mc.receiver) {
+                // Any method call on self.field or self.field[i] is conservatively a mutation
+                if is_self_field(&mc.receiver)
+                    || is_self_path(&mc.receiver)
+                    || is_self_indexed_field(&mc.receiver)
+                {
                     self.has_mutation = true;
                 }
             }
@@ -145,6 +148,12 @@ fn is_self_field(expr: &syn::Expr) -> bool {
         syn::Expr::Field(f) => matches!(&*f.base, syn::Expr::Path(p) if p.path.is_ident("self")),
         _ => false,
     }
+}
+
+/// Check if expression is `self.field[i]` (indexed field access).
+/// Operation: pattern matching.
+fn is_self_indexed_field(expr: &syn::Expr) -> bool {
+    matches!(expr, syn::Expr::Index(idx) if is_self_field(&idx.expr))
 }
 
 /// Check if expression is `self`.
@@ -232,5 +241,16 @@ mod tests {
     fn test_empty_body_not_flagged() {
         let w = detect_in("struct S; impl S { fn foo(&mut self) {} }");
         assert!(w.is_empty());
+    }
+
+    #[test]
+    fn test_indexed_field_method_call_not_flagged() {
+        let w = detect_in(
+            "struct S { items: Vec<Vec<i32>> } impl S { fn add(&mut self, i: usize, v: i32) { self.items[i].push(v); } }",
+        );
+        assert!(
+            w.is_empty(),
+            "self.items[i].push(v) should be recognized as mutation"
+        );
     }
 }
