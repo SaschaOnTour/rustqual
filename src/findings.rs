@@ -57,6 +57,11 @@ impl Suppression {
     }
 }
 
+/// Maximum number of lines between an annotation comment and the function/struct it applies to.
+/// Allows stacking multiple annotations (e.g., `// qual:api` + `// qual:allow(iosp)`) and
+/// accommodates `#[derive]` attributes between comment and definition.
+pub const ANNOTATION_WINDOW: usize = 3;
+
 /// Check if a trimmed line is a `// qual:api` marker.
 /// Operation: string prefix check.
 pub fn is_api_marker(trimmed: &str) -> bool {

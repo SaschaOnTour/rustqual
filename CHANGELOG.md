@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.9] - 2026-04-02
+
+### Fixed
+- **Stacked annotations**: Multiple `// qual:*` annotations before a function now all work (e.g., `// qual:api` + `// qual:allow(iosp)`). Expanded adjacency window from 1 line to 3 lines (`ANNOTATION_WINDOW` constant in `findings.rs`).
+- **NMS false positive**: `self.field[index].method()` (indexed field method call) is now correctly recognized as a mutation of `&mut self`. Previously only `self.field.method()` was detected.
+
 ## [0.3.6] - 2026-03-29
 
 ### Added
