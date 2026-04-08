@@ -168,7 +168,7 @@ pub(super) fn collect_dry_findings(
             w.line,
         ));
     });
-    for g in fragments {
+    for g in fragments.iter().filter(|g| !g.suppressed) {
         g.entries.iter().for_each(|e| {
             findings.push(finding(
                 "DRY-003",

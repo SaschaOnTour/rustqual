@@ -91,23 +91,27 @@ fn html_fragments_category(fragments: &[crate::dry::fragments::FragmentGroup]) -
     }
     let esc = |s: &str| html_escape(s);
     let mut html = String::from("<h3>Duplicate Fragments</h3>\n");
-    fragments.iter().enumerate().for_each(|(i, g)| {
-        html.push_str(&format!(
-            "<p><strong>Fragment {}</strong>: {} matching statements</p>\n<ul>\n",
-            i + 1,
-            g.statement_count,
-        ));
-        g.entries.iter().for_each(|e| {
+    fragments
+        .iter()
+        .filter(|g| !g.suppressed)
+        .enumerate()
+        .for_each(|(i, g)| {
             html.push_str(&format!(
-                "  <li>{} ({}:{}\u{2013}{})</li>\n",
-                esc(&e.qualified_name),
-                esc(&e.file),
-                e.start_line,
-                e.end_line,
+                "<p><strong>Fragment {}</strong>: {} matching statements</p>\n<ul>\n",
+                i + 1,
+                g.statement_count,
             ));
+            g.entries.iter().for_each(|e| {
+                html.push_str(&format!(
+                    "  <li>{} ({}:{}\u{2013}{})</li>\n",
+                    esc(&e.qualified_name),
+                    esc(&e.file),
+                    e.start_line,
+                    e.end_line,
+                ));
+            });
+            html.push_str("</ul>\n");
         });
-        html.push_str("</ul>\n");
-    });
     html
 }
 
@@ -214,18 +218,21 @@ fn html_repeated_matches_table(
          <th>Enum</th><th>Function</th><th>File</th><th>Line</th><th>Arms</th>\
          </tr></thead>\n<tbody>\n",
     );
-    repeated_matches.iter().for_each(|g| {
-        g.entries.iter().for_each(|e| {
-            html.push_str(&format!(
-                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n",
-                esc(&g.enum_name),
-                esc(&e.function_name),
-                esc(&e.file),
-                e.line,
-                e.arm_count,
-            ));
+    repeated_matches
+        .iter()
+        .filter(|g| !g.suppressed)
+        .for_each(|g| {
+            g.entries.iter().for_each(|e| {
+                html.push_str(&format!(
+                    "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n",
+                    esc(&g.enum_name),
+                    esc(&e.function_name),
+                    esc(&e.file),
+                    e.line,
+                    e.arm_count,
+                ));
+            });
         });
-    });
     html.push_str("</tbody></table>\n");
     html
 }

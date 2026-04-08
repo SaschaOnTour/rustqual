@@ -140,17 +140,21 @@ fn collect_dry_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntr
             w.qualified_name.clone(),
         ));
     });
-    analysis.fragments.iter().for_each(|group| {
-        group.entries.iter().for_each(|e| {
-            entries.push(FindingEntry::new(
-                &e.file,
-                e.start_line,
-                "FRAGMENT",
-                format!("{} stmts", group.statement_count),
-                e.function_name.clone(),
-            ));
+    analysis
+        .fragments
+        .iter()
+        .filter(|g| !g.suppressed)
+        .for_each(|group| {
+            group.entries.iter().for_each(|e| {
+                entries.push(FindingEntry::new(
+                    &e.file,
+                    e.start_line,
+                    "FRAGMENT",
+                    format!("{} stmts", group.statement_count),
+                    e.function_name.clone(),
+                ));
+            });
         });
-    });
     analysis.boilerplate.iter().for_each(|b| {
         entries.push(FindingEntry::new(
             &b.file,
@@ -173,17 +177,21 @@ fn collect_dry_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntr
                 String::new(),
             ));
         });
-    analysis.repeated_matches.iter().for_each(|group| {
-        group.entries.iter().for_each(|e| {
-            entries.push(FindingEntry::new(
-                &e.file,
-                e.line,
-                "REPEATED_MATCH",
-                group.enum_name.clone(),
-                e.function_name.clone(),
-            ));
+    analysis
+        .repeated_matches
+        .iter()
+        .filter(|g| !g.suppressed)
+        .for_each(|group| {
+            group.entries.iter().for_each(|e| {
+                entries.push(FindingEntry::new(
+                    &e.file,
+                    e.line,
+                    "REPEATED_MATCH",
+                    group.enum_name.clone(),
+                    e.function_name.clone(),
+                ));
+            });
         });
-    });
 }
 
 /// Collect SRP findings.

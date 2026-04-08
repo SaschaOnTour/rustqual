@@ -1195,4 +1195,22 @@ mod tests {
             "&format_item passed as argument should be recognized as a call"
         );
     }
+
+    #[test]
+    fn test_struct_field_function_pointer_recognized_as_call() {
+        let code = r#"
+            struct Config { handler: fn() -> i32 }
+            fn my_handler() -> i32 { 42 }
+            fn setup() -> Config {
+                Config { handler: my_handler }
+            }
+        "#;
+        let parsed = parse(code);
+        let cfg_test_files = collect_cfg_test_file_paths(&parsed);
+        let (prod_calls, _test_calls) = collect_all_calls(&parsed, &cfg_test_files);
+        assert!(
+            prod_calls.contains("my_handler"),
+            "Bare function name in struct field should be recognized as a call"
+        );
+    }
 }

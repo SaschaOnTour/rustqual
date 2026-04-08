@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.6] - 2026-04-08
+
+### Fixed
+- **`qual:allow(dry)` now suppresses all DRY findings**: RepeatedMatchGroup (DRY-005) and FragmentGroup now have `suppressed: bool` fields. `qual:allow(dry)` on any member suppresses the finding. Previously only DuplicateGroup was suppressible.
+- All 6 report formats filter suppressed fragments and repeated matches.
+
+### Changed
+- `DrySuppressible` trait + generic `mark_dry_suppressions()` replaces 3 duplicate suppression functions. Extracted to `pipeline/dry_suppressions.rs`.
+- Test count: 849 — Function count: 468
+
+## [0.4.5] - 2026-04-08
+
+### Fixed
+- **Struct field function pointers**: Bare function names in struct initialization (`Config { handler: my_function }`) are now recognized as usage by `CallTargetCollector` via `visit_expr_struct`. Fixes false-positive dead code warnings (DRY-003).
+
+### Changed
+- README: removed duplicate Recursive Annotation section.
+- Test count: 847 — Function count: 462
+
 ## [0.4.4] - 2026-04-08
 
 ### Changed

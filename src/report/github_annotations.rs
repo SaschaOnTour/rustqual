@@ -15,7 +15,7 @@ pub fn print_dry_annotations(analysis: &super::AnalysisResult) {
             w.file, w.line, w.qualified_name, w.suggestion,
         );
     }
-    for g in &analysis.fragments {
+    for g in analysis.fragments.iter().filter(|g| !g.suppressed) {
         let names: Vec<&str> = g
             .entries
             .iter()
@@ -42,7 +42,7 @@ pub fn print_dry_annotations(analysis: &super::AnalysisResult) {
             w.file, w.line, w.module_path,
         );
     }
-    for g in &analysis.repeated_matches {
+    for g in analysis.repeated_matches.iter().filter(|g| !g.suppressed) {
         let fns: Vec<&str> = g.entries.iter().map(|e| e.function_name.as_str()).collect();
         println!(
             "::notice::DRY-005: Repeated match on '{}' in: {}",

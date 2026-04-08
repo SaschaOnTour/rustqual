@@ -15,6 +15,7 @@ const MAX_WINDOW_GROUP_SIZE: usize = 50;
 pub struct FragmentGroup {
     pub entries: Vec<FragmentEntry>,
     pub statement_count: usize,
+    pub suppressed: bool,
 }
 
 /// An individual fragment location within a function.
@@ -204,6 +205,7 @@ fn merge_into_fragments(
                     },
                 ],
                 statement_count: stmt_count,
+                suppressed: false,
             });
 
             k = end + 1;

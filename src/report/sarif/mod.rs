@@ -203,6 +203,7 @@ fn collect_repeated_match_findings(
 ) -> Vec<serde_json::Value> {
     groups
         .iter()
+        .filter(|g| !g.suppressed)
         .flat_map(|g| {
             g.entries.iter().map(move |e| {
                 serde_json::json!({
