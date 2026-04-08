@@ -83,9 +83,12 @@ pub fn classify_function(
     config: &Config,
     scope: &ProjectScope,
     fn_name: &str,
+    type_context: (Option<&str>, &syn::Signature),
 ) -> (Classification, Option<ComplexityMetrics>, Vec<String>) {
     is_trivial_body(body).unwrap_or_else(|| {
-        let mut visitor = BodyVisitor::new(config, scope, Some(fn_name));
+        let param_types = crate::analyzer::extract_param_types(type_context.1);
+        let mut visitor =
+            BodyVisitor::new(config, scope, Some(fn_name), type_context.0, param_types);
         body.stmts.iter().for_each(|stmt| visitor.visit_stmt(stmt));
         let logic = visitor.logic;
         let own_calls = visitor.own_calls;
@@ -408,7 +411,7 @@ mod tests {
                 None
             })
             .unwrap();
-        let (class, _, _) = classify_function(&f_fn.block, &config, &scope, "f");
+        let (class, _, _) = classify_function(&f_fn.block, &config, &scope, "f", (None, &f_fn.sig));
         assert_eq!(
             class,
             Classification::Integration,
@@ -444,7 +447,7 @@ mod tests {
                 None
             })
             .unwrap();
-        let (class, _, _) = classify_function(&f_fn.block, &config, &scope, "f");
+        let (class, _, _) = classify_function(&f_fn.block, &config, &scope, "f", (None, &f_fn.sig));
         assert!(
             matches!(class, Classification::Violation { .. }),
             "For-loop with logic should be Violation, got {:?}",

@@ -1,39 +1,7 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use syn::visit::Visit;
 use syn::{File, ImplItem, TraitItem};
-
-/// Names that are so ubiquitous across Rust that they should never be
-/// counted as "own" calls, even when the project defines them (e.g. via
-/// trait implementations like `Display::fmt` or `Default::default`).
-const UNIVERSAL_METHODS: &[&str] = &[
-    "new",
-    "default",
-    "from",
-    "into",
-    "try_from",
-    "try_into",
-    "clone",
-    "clone_from",
-    "fmt",
-    "to_string",
-    "eq",
-    "ne",
-    "partial_cmp",
-    "cmp",
-    "hash",
-    "drop",
-    "deref",
-    "deref_mut",
-    "as_ref",
-    "as_mut",
-    "borrow",
-    "borrow_mut",
-    "from_str",
-    "index",
-    "index_mut",
-    "next",
-];
 
 /// Collects all declared function/method/type names across a project.
 ///
@@ -52,6 +20,8 @@ pub struct ProjectScope {
     /// Methods that only appear in trait contexts (trait defs or trait impls), never in inherent impls.
     /// Dot-syntax calls to these are polymorphic dispatch, not own calls.
     pub trait_only_methods: HashSet<String>,
+    /// Methods grouped by parent type name: `"Config" → {"load", "save"}`.
+    pub methods_by_type: HashMap<String, HashSet<String>>,
 }
 
 impl ProjectScope {
@@ -65,6 +35,7 @@ impl ProjectScope {
             non_trivial_methods: HashSet::new(),
             trait_method_names: HashSet::new(),
             concrete_method_names: HashSet::new(),
+            methods_by_type: HashMap::new(),
         };
         files
             .iter()
@@ -83,6 +54,7 @@ impl ProjectScope {
                 .difference(&collector.concrete_method_names)
                 .cloned()
                 .collect(),
+            methods_by_type: collector.methods_by_type,
         }
     }
 
@@ -90,31 +62,42 @@ impl ProjectScope {
     ///
     /// - Single segment (`classify_function`): checks `functions`
     /// - Multi-segment (`Config::load`): checks if first segment is in `types`
-    /// - `Self::method`: checks against UNIVERSAL_METHODS
+    /// - `Self::method`: checks `methods` excluding trait-only
+    /// - PascalCase final segment: enum variant constructor, not a call
     ///
     /// Operation: if-let + comparison logic, no own calls.
     pub fn is_own_function(&self, name: &str) -> bool {
         if let Some((prefix, method)) = name.split_once("::") {
             if prefix == "Self" {
-                return !UNIVERSAL_METHODS.contains(&method)
-                    && self.methods.contains(method)
-                    && !self.trait_only_methods.contains(method);
+                return self.methods.contains(method) && !self.trait_only_methods.contains(method);
             }
-            self.types.contains(prefix) && !UNIVERSAL_METHODS.contains(&method)
+            self.types.contains(prefix)
+                && !method.starts_with(char::is_uppercase)
+                && !self.trait_only_methods.contains(method)
         } else {
             self.functions.contains(name)
         }
     }
 
     /// Is `name` an own *method* call (dot-style: `.method()`)?
-    ///
-    /// True only if the name appears in `methods` AND is not a universal method.
+    /// Fallback for receivers with unknown type.
     /// Operation: boolean logic, no own calls.
     pub fn is_own_method(&self, name: &str) -> bool {
         self.methods.contains(name)
-            && !UNIVERSAL_METHODS.contains(&name)
             && !self.trivial_methods.contains(name)
             && !self.trait_only_methods.contains(name)
+    }
+
+    /// Is `.method()` an own call when called on `self` inside an impl of `parent_type`?
+    /// Layer 1: checks if this specific type defines the method.
+    /// Operation: lookup logic, no own calls.
+    pub fn is_own_self_method(&self, method: &str, parent_type: &str) -> bool {
+        self.methods_by_type
+            .get(parent_type)
+            .map(|m| m.contains(method))
+            .unwrap_or(false)
+            && !self.trivial_methods.contains(method)
+            && !self.trait_only_methods.contains(method)
     }
 }
 
@@ -209,6 +192,8 @@ struct ScopeCollector {
     trait_method_names: HashSet<String>,
     /// Methods from inherent (non-trait) impl blocks only.
     concrete_method_names: HashSet<String>,
+    /// Methods grouped by parent type.
+    methods_by_type: HashMap<String, HashSet<String>>,
 }
 
 impl<'ast> Visit<'ast> for ScopeCollector {
@@ -218,16 +203,25 @@ impl<'ast> Visit<'ast> for ScopeCollector {
     }
 
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
-        if let syn::Type::Path(tp) = &*node.self_ty {
-            if let Some(seg) = tp.path.segments.last() {
+        let type_name = if let syn::Type::Path(tp) = &*node.self_ty {
+            tp.path.segments.last().map(|seg| {
                 self.types.insert(seg.ident.to_string());
-            }
-        }
+                seg.ident.to_string()
+            })
+        } else {
+            None
+        };
         let is_trait_impl = node.trait_.is_some();
         for item in &node.items {
             if let ImplItem::Fn(method) = item {
                 let name = method.sig.ident.to_string();
                 self.methods.insert(name.clone());
+                if let Some(ref tn) = type_name {
+                    self.methods_by_type
+                        .entry(tn.clone())
+                        .or_default()
+                        .insert(name.clone());
+                }
                 if is_trait_impl {
                     self.trait_method_names.insert(name.clone());
                 } else {
@@ -351,9 +345,10 @@ mod tests {
     }
 
     #[test]
-    fn test_own_function_self_universal() {
+    fn test_own_function_self_inherent_is_own() {
+        // Inherent impl method IS an own call (no longer blocked by UNIVERSAL_METHODS)
         let scope = build_scope("struct X; impl X { fn default(&self) {} }");
-        assert!(!scope.is_own_function("Self::default"));
+        assert!(scope.is_own_function("Self::default"));
     }
 
     #[test]
@@ -377,9 +372,10 @@ mod tests {
     }
 
     #[test]
-    fn test_own_method_universal_blocked() {
+    fn test_own_method_inherent_is_own() {
+        // Inherent impl constructor IS an own method (type-resolution handles disambiguation)
         let scope = build_scope("struct A; impl A { fn new() -> Self { A } }");
-        assert!(!scope.is_own_method("new"));
+        assert!(scope.is_own_method("new"));
     }
 
     #[test]
@@ -458,30 +454,24 @@ mod tests {
     // ── Bug 4: Type::new() / Type::default() Not Own Call ──────────
 
     #[test]
-    fn test_own_function_type_universal_blocked() {
+    fn test_own_function_type_inherent_is_own() {
+        // Inherent impl constructors ARE own calls (type-resolution handles disambiguation)
         let scope = build_scope("struct MyType; impl MyType { fn new() -> Self { MyType } }");
         assert!(
-            !scope.is_own_function("MyType::new"),
-            "MyType::new() should NOT be own function (new is universal)"
+            scope.is_own_function("MyType::new"),
+            "MyType::new() IS an own function (inherent impl)"
         );
     }
 
     #[test]
-    fn test_own_function_type_default_blocked() {
-        let scope = build_scope("struct MyType; impl MyType { fn default() -> Self { MyType } }");
-        assert!(
-            !scope.is_own_function("MyType::default"),
-            "MyType::default() should NOT be own function (default is universal)"
+    fn test_own_function_trait_impl_blocked() {
+        // Trait impl methods are NOT own calls (polymorphic dispatch)
+        let scope = build_scope(
+            "struct MyType; trait Foo { fn foo(&self); } impl Foo for MyType { fn foo(&self) {} }",
         );
-    }
-
-    #[test]
-    fn test_own_function_type_from_blocked() {
-        let scope =
-            build_scope("struct MyType; impl MyType { fn from(x: i32) -> Self { MyType } }");
         assert!(
-            !scope.is_own_function("MyType::from"),
-            "MyType::from() should NOT be own function (from is universal)"
+            !scope.is_own_function("MyType::foo"),
+            "Trait impl method should NOT be own function"
         );
     }
 
@@ -666,6 +656,44 @@ mod tests {
         assert!(
             scope.is_own_method("value"),
             "Collided method should be counted as own call"
+        );
+    }
+
+    #[test]
+    fn test_enum_variant_constructor_not_own_call() {
+        let code = r#"
+            enum ChunkKind {
+                Function,
+                Method,
+                Other(String),
+            }
+            impl ChunkKind {
+                fn as_str(&self) -> &str { "" }
+            }
+            fn determine_kind(key: &str) -> ChunkKind {
+                match key {
+                    "fn" => ChunkKind::Function,
+                    "method" => ChunkKind::Method,
+                    _ => ChunkKind::Other(key.to_string()),
+                }
+            }
+        "#;
+        let syntax = syn::parse_file(code).unwrap();
+        let scope = ProjectScope::from_files(&[("test.rs", &syntax)]);
+
+        // PascalCase variants should NOT be own calls
+        assert!(
+            !scope.is_own_function("ChunkKind::Function"),
+            "Enum variant ChunkKind::Function should not be an own call"
+        );
+        assert!(
+            !scope.is_own_function("ChunkKind::Other"),
+            "Enum variant ChunkKind::Other should not be an own call"
+        );
+        // snake_case methods SHOULD be own calls
+        assert!(
+            scope.is_own_function("ChunkKind::as_str"),
+            "Method ChunkKind::as_str should be an own call"
         );
     }
 }

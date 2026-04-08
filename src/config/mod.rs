@@ -18,11 +18,6 @@ pub use sections::{
 #[derive(Debug, Deserialize, Clone)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
-    /// External crate or module prefixes that are allowed inside operations.
-    /// Calls to these are NOT counted as "own function calls".
-    /// Examples: ["std", "log", "anyhow", "tokio"]
-    pub external_prefixes: Vec<String>,
-
     /// Function name patterns to ignore entirely (e.g. test helpers, macros).
     pub ignore_functions: Vec<String>,
 
@@ -83,28 +78,6 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            external_prefixes: vec![
-                "std".into(),
-                "core".into(),
-                "alloc".into(),
-                "log".into(),
-                "tracing".into(),
-                "anyhow".into(),
-                "thiserror".into(),
-                "serde".into(),
-                "println".into(),
-                "eprintln".into(),
-                "format".into(),
-                "vec".into(),
-                "dbg".into(),
-                "todo".into(),
-                "unimplemented".into(),
-                "panic".into(),
-                "assert".into(),
-                "assert_eq".into(),
-                "assert_ne".into(),
-                "debug_assert".into(),
-            ],
             ignore_functions: vec![],
             exclude_files: vec![],
             strict_closures: false,
@@ -205,12 +178,6 @@ impl Config {
     }
 
     /// Check if a function call path looks like an external/allowed call.
-    pub fn is_external_call(&self, call_path: &str) -> bool {
-        self.external_prefixes
-            .iter()
-            .any(|prefix| call_path == prefix || call_path.starts_with(&format!("{prefix}::")))
-    }
-
     /// Check if a function name should be ignored (supports full glob patterns).
     /// Trivial: single delegation to match_any_pattern.
     pub fn is_ignored_function(&self, name: &str) -> bool {
@@ -243,34 +210,6 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
-
-    // ── is_external_call ──────────────────────────────────────────────
-
-    #[test]
-    fn test_external_exact_match() {
-        let cfg = Config::default();
-        assert!(cfg.is_external_call("println"));
-    }
-
-    #[test]
-    fn test_external_prefix_match() {
-        let cfg = Config::default();
-        assert!(cfg.is_external_call("std::fs::read"));
-    }
-
-    #[test]
-    fn test_external_no_false_prefix() {
-        let cfg = Config::default();
-        // "stdout" starts with "std" but there is no "::" separator,
-        // and it is not an exact match for "std", so it must be false.
-        assert!(!cfg.is_external_call("stdout"));
-    }
-
-    #[test]
-    fn test_external_no_match() {
-        let cfg = Config::default();
-        assert!(!cfg.is_external_call("my_func"));
-    }
 
     // ── is_ignored_function ───────────────────────────────────────────
 
@@ -340,7 +279,6 @@ mod tests {
     fn test_config_loads_rustqual_toml() {
         let tmp = TempDir::new().unwrap();
         let toml_content = r#"
-external_prefixes = ["custom_crate", "other"]
 ignore_functions = ["skip_me"]
 exclude_files = ["generated/**"]
 strict_closures = true
@@ -349,7 +287,6 @@ strict_iterator_chains = true
         fs::write(tmp.path().join("rustqual.toml"), toml_content).unwrap();
 
         let mut cfg = Config::load(tmp.path()).unwrap();
-        assert_eq!(cfg.external_prefixes, vec!["custom_crate", "other"]);
         assert_eq!(cfg.ignore_functions, vec!["skip_me"]);
         assert_eq!(cfg.exclude_files, vec!["generated/**"]);
         assert!(cfg.strict_closures);
@@ -365,7 +302,6 @@ strict_iterator_chains = true
         let tmp = TempDir::new().unwrap();
         // No rustqual.toml in the temp directory → should fall back to defaults.
         let cfg = Config::load(tmp.path()).unwrap();
-        assert_eq!(cfg.external_prefixes, Config::default().external_prefixes);
         assert!(!cfg.strict_closures);
     }
 
@@ -399,7 +335,6 @@ unknown_field = true
     #[test]
     fn test_default_values() {
         let cfg = Config::default();
-        assert!(cfg.external_prefixes.contains(&"std".to_string()));
         assert!(!cfg.strict_closures);
         assert!(!cfg.strict_iterator_chains);
         assert!(!cfg.allow_recursion);
@@ -422,8 +357,6 @@ unknown_field = true
     fn test_load_with_sub_configs() {
         let tmp = TempDir::new().unwrap();
         let toml_content = r#"
-external_prefixes = ["std"]
-
 [complexity]
 enabled = false
 max_cognitive = 20
@@ -444,7 +377,7 @@ similarity_threshold = 0.90
     fn test_new_fields_default_false() {
         let tmp = TempDir::new().unwrap();
         let toml_content = r#"
-external_prefixes = ["std"]
+strict_closures = false
 "#;
         fs::write(tmp.path().join("rustqual.toml"), toml_content).unwrap();
         let cfg = Config::load(tmp.path()).unwrap();
