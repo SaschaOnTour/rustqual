@@ -180,6 +180,7 @@ fn build_json_string(analysis: &AnalysisResult) -> String {
 
     let json_fragments: Vec<JsonFragmentGroup> = fragments
         .iter()
+        .filter(|g| !g.suppressed)
         .map(|g| JsonFragmentGroup {
             statement_count: g.statement_count,
             entries: g

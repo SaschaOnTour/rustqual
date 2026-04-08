@@ -14,6 +14,7 @@ const MIN_INSTANCES: usize = 3;
 pub struct RepeatedMatchGroup {
     pub enum_name: String,
     pub entries: Vec<RepeatedMatchEntry>,
+    pub suppressed: bool,
 }
 
 /// A single occurrence of a repeated match pattern.
@@ -159,6 +160,7 @@ fn group_repeated_patterns(collected: Vec<CollectedMatch>) -> Vec<RepeatedMatchG
                         arm_count: e.arm_count,
                     })
                     .collect(),
+                suppressed: false,
             }
         })
         .collect();

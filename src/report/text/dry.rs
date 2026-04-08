@@ -35,7 +35,11 @@ fn print_dry_header(analysis: &AnalysisResult) {
 fn print_repeated_match_entries(
     repeated_matches: &[crate::dry::match_patterns::RepeatedMatchGroup],
 ) {
-    for (i, group) in repeated_matches.iter().enumerate() {
+    for (i, group) in repeated_matches
+        .iter()
+        .filter(|g| !g.suppressed)
+        .enumerate()
+    {
         println!(
             "  {} Repeated match [{}] Group {}: {} arms, {} instances",
             "⚠".yellow(),
@@ -82,7 +86,7 @@ fn print_duplicate_entries(duplicates: &[crate::dry::functions::DuplicateGroup])
 /// Print duplicate fragment group entries.
 /// Operation: iteration and formatting logic, no own calls.
 fn print_fragment_entries(fragments: &[crate::dry::fragments::FragmentGroup]) {
-    for (i, group) in fragments.iter().enumerate() {
+    for (i, group) in fragments.iter().filter(|g| !g.suppressed).enumerate() {
         println!(
             "  {} Fragment {}: {} matching statements",
             "⚠".yellow(),

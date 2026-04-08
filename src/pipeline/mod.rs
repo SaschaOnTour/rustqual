@@ -1,5 +1,6 @@
 // qual:allow(coupling) reason: "orchestrator module — high instability is expected"
 pub(crate) mod discovery;
+pub(crate) mod dry_suppressions;
 mod metrics;
 mod structural_metrics;
 mod tq_metrics;
@@ -144,17 +145,20 @@ fn run_secondary_analysis(
     count_coupling_warnings(coupling.as_ref(), &config.coupling, summary);
 
     let mut dry = run_dry_detection(parsed, config, suppression_lines, &api_lines, summary);
-    metrics::mark_duplicate_suppressions(&mut dry.duplicates, suppression_lines);
+    dry_suppressions::mark_dry_suppressions(&mut dry.duplicates, suppression_lines);
     let inverse_lines = discovery::collect_inverse_lines(parsed);
-    metrics::mark_inverse_suppressions(&mut dry.duplicates, &inverse_lines);
+    dry_suppressions::mark_inverse_suppressions(&mut dry.duplicates, &inverse_lines);
     summary.duplicate_groups = dry.duplicates.iter().filter(|g| !g.suppressed).count();
-    let repeated_matches = run_guarded_detection(
+    dry_suppressions::mark_dry_suppressions(&mut dry.fragments, suppression_lines);
+    summary.fragment_groups = dry.fragments.iter().filter(|g| !g.suppressed).count();
+    let mut repeated_matches = run_guarded_detection(
         config.duplicates.detect_repeated_matches,
         |p, c| crate::dry::match_patterns::detect_repeated_matches(p, &c.duplicates),
         parsed,
         config,
     );
-    summary.repeated_match_groups = repeated_matches.len();
+    dry_suppressions::mark_dry_suppressions(&mut repeated_matches, suppression_lines);
+    summary.repeated_match_groups = repeated_matches.iter().filter(|g| !g.suppressed).count();
 
     metrics::count_sdp_violations(coupling.as_ref(), &config.coupling, summary);
 

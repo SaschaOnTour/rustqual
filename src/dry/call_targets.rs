@@ -133,6 +133,20 @@ impl<'ast> Visit<'ast> for CallTargetCollector {
         syn::visit::visit_expr_method_call(self, node);
     }
 
+    fn visit_expr_struct(&mut self, node: &'ast syn::ExprStruct) {
+        let target = if self.in_test {
+            &mut self.test_calls
+        } else {
+            &mut self.production_calls
+        };
+        node.fields.iter().for_each(|field| {
+            if let syn::Expr::Path(p) = &field.expr {
+                insert_path_segments(target, &p.path);
+            }
+        });
+        syn::visit::visit_expr_struct(self, node);
+    }
+
     fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
         let prev = self.in_test;
         if super::has_cfg_test(&node.attrs) {
