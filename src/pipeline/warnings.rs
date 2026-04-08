@@ -1,7 +1,46 @@
+use std::collections::HashSet;
+
 use crate::analyzer::{Classification, FunctionAnalysis};
 use crate::config::Config;
 use crate::findings::Suppression;
 use crate::report::Summary;
+
+/// Reclassify Violations that only call leaf functions as Operations.
+/// A leaf is a function with no own calls (Operation or Trivial).
+/// Iterates until stable to handle cascading leaves.
+/// Operation: loop + set operations, no own calls.
+pub(crate) fn apply_leaf_reclassification(results: &mut [FunctionAnalysis]) {
+    loop {
+        let leaf_names: HashSet<String> = results
+            .iter()
+            .filter(|f| f.own_calls.is_empty())
+            .flat_map(|f| {
+                [
+                    f.name.clone(),
+                    f.qualified_name.clone(),
+                    format!(".{}()", f.name),
+                ]
+            })
+            .collect();
+
+        let mut changed = false;
+        results.iter_mut().for_each(|fa| {
+            if matches!(fa.classification, Classification::Violation { .. })
+                && fa.own_calls.iter().all(|call| leaf_names.contains(call))
+            {
+                fa.classification = Classification::Operation;
+                fa.own_calls.clear();
+                fa.severity = None;
+                fa.effort_score = None;
+                changed = true;
+            }
+        });
+
+        if !changed {
+            break;
+        }
+    }
+}
 
 /// Reclassify IOSP violations in test functions as Trivial.
 /// Operation: iterates results, reclassifies matching entries.

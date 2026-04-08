@@ -56,16 +56,26 @@ const BEFORE_IOSP: &str = r#"
 struct UserService;
 struct User { name: String, email: String, age: u32 }
 
+fn log_action(_msg: &str) {}
 fn create_user(name: &str, email: &str, age: u32) -> User {
+    log_action("creating user");
     User { name: name.to_string(), email: email.to_string(), age }
 }
-fn save_to_database(_user: &User) {}
-fn send_welcome_email(_user: &User) {}
-fn charge_payment(_user: &User, _amount: f64) {}
-fn send_receipt(_user: &User, _amount: f64) {}
+fn save_to_database(_user: &User) {
+    log_action("saving");
+}
+fn send_welcome_email(_user: &User) {
+    log_action("emailing");
+}
+fn charge_payment(_user: &User, _amount: f64) {
+    log_action("charging");
+}
+fn send_receipt(_user: &User, _amount: f64) {
+    log_action("receipt");
+}
 
 impl UserService {
-    // VIOLATION: mixes validation logic with calls
+    // VIOLATION: mixes validation logic with calls to non-leaf functions
     fn register_user(name: &str, email: &str, age: u32) -> Result<User, String> {
         if name.is_empty() {
             return Err("Name required".into());
@@ -82,7 +92,7 @@ impl UserService {
         Ok(user)
     }
 
-    // VIOLATION: mixes calculation with calls
+    // VIOLATION: mixes calculation with calls to non-leaf functions
     fn process_order(user: &User, amount: f64) -> Result<f64, String> {
         let discount = if amount > 100.0 { 0.1 } else { 0.0 };
         let final_amount = amount * (1.0 - discount);
@@ -97,13 +107,23 @@ const AFTER_IOSP: &str = r#"
 struct UserService;
 struct User { name: String, email: String, age: u32 }
 
+fn log_action(_msg: &str) {}
 fn create_user(name: &str, email: &str, age: u32) -> User {
+    log_action("creating user");
     User { name: name.to_string(), email: email.to_string(), age }
 }
-fn save_to_database(_user: &User) {}
-fn send_welcome_email(_user: &User) {}
-fn charge_payment(_user: &User, _amount: f64) {}
-fn send_receipt(_user: &User, _amount: f64) {}
+fn save_to_database(_user: &User) {
+    log_action("saving");
+}
+fn send_welcome_email(_user: &User) {
+    log_action("emailing");
+}
+fn charge_payment(_user: &User, _amount: f64) {
+    log_action("charging");
+}
+fn send_receipt(_user: &User, _amount: f64) {
+    log_action("receipt");
+}
 
 impl UserService {
     // INTEGRATION: pure delegation, no own logic
