@@ -15,7 +15,9 @@ pub(super) fn compute_tq(
     if !config.test.enabled {
         return None;
     }
-    let declared_fns = crate::dry::collect_declared_functions(parsed);
+    let mut declared_fns = crate::dry::collect_declared_functions(parsed);
+    let api_lines = crate::pipeline::discovery::collect_api_lines(parsed);
+    crate::dry::dead_code::mark_api_declarations(&mut declared_fns, &api_lines);
     let cfg_test_files = crate::dry::dead_code::collect_cfg_test_file_paths(parsed);
     let (prod_calls, test_calls) =
         crate::dry::dead_code::collect_all_calls(parsed, &cfg_test_files);

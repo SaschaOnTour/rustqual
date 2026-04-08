@@ -147,45 +147,60 @@ pub(crate) fn filter_to_changed(all: Vec<PathBuf>, changed: &[PathBuf]) -> Vec<P
         .collect()
 }
 
-/// Collect all suppression comment lines from source files.
-/// Supports `// qual:allow`, `// qual:allow(dim)`, and legacy `// iosp:allow`.
-/// Operation: scans source text for suppression markers (parse_suppression
-/// called via filter_map closure for IOSP compliance).
-pub(crate) fn collect_suppression_lines(
+/// Scan source lines and collect per-file results via a closure.
+/// Trivial: generic iteration infrastructure, no own calls.
+fn collect_per_file<T, F>(
     parsed: &[(String, String, syn::File)],
-) -> std::collections::HashMap<String, Vec<Suppression>> {
+    extract: F,
+) -> std::collections::HashMap<String, Vec<T>>
+where
+    F: Fn(usize, &str) -> Option<T>,
+{
     let mut result = std::collections::HashMap::new();
     for (path, source, _) in parsed {
-        let suppressions: Vec<Suppression> = source
+        let items: Vec<T> = source
             .lines()
             .enumerate()
-            .filter_map(|(i, line)| parse_suppression(i + 1, line.trim()))
+            .filter_map(|(i, line)| extract(i + 1, line.trim()))
             .collect();
-        if !suppressions.is_empty() {
-            result.insert(path.clone(), suppressions);
+        if !items.is_empty() {
+            result.insert(path.clone(), items);
         }
     }
     result
 }
 
+/// Collect all suppression comment lines from source files.
+/// Trivial: delegates to collect_per_file with parse_suppression.
+pub(crate) fn collect_suppression_lines(
+    parsed: &[(String, String, syn::File)],
+) -> std::collections::HashMap<String, Vec<Suppression>> {
+    collect_per_file(parsed, |line_num, trimmed| {
+        parse_suppression(line_num, trimmed)
+    })
+}
+
 /// Collect `// qual:api` marker line numbers per file.
-/// Operation: iterates source lines checking for API markers.
+/// Trivial: delegates to collect_per_file with is_api_marker.
 pub(crate) fn collect_api_lines(
     parsed: &[(String, String, syn::File)],
 ) -> std::collections::HashMap<String, std::collections::HashSet<usize>> {
-    let mut result = std::collections::HashMap::new();
-    for (path, source, _) in parsed {
-        let lines: std::collections::HashSet<usize> = source
-            .lines()
-            .enumerate()
-            .filter(|(_, line)| crate::findings::is_api_marker(line.trim()))
-            .map(|(i, _)| i + 1)
-            .collect();
-        if !lines.is_empty() {
-            result.insert(path.clone(), lines);
-        }
-    }
-    result
+    collect_per_file(parsed, |line_num, trimmed| {
+        crate::findings::is_api_marker(trimmed).then_some(line_num)
+    })
+    .into_iter()
+    .map(|(k, v)| (k, v.into_iter().collect()))
+    .collect()
+}
+
+/// Collect `// qual:inverse(fn_name)` marker lines per file.
+/// Trivial: delegates to collect_per_file with parse_inverse_marker.
+pub(crate) fn collect_inverse_lines(
+    parsed: &[(String, String, syn::File)],
+) -> std::collections::HashMap<String, Vec<(usize, String)>> {
+    collect_per_file(parsed, |line_num, trimmed| {
+        crate::findings::parse_inverse_marker(trimmed).map(|name| (line_num, name))
+    })
 }
 
 #[cfg(test)]

@@ -100,7 +100,10 @@ impl<'a> Analyzer<'a> {
                     .analyze_item_fn(f, file_path, None, false)
                     .into_iter()
                     .collect::<Vec<_>>(),
-                Item::Impl(i) => self.analyze_impl(i, file_path, false),
+                Item::Impl(i) => {
+                    let test = crate::dry::has_cfg_test(&i.attrs);
+                    self.analyze_impl(i, file_path, test)
+                }
                 Item::Trait(t) => self.analyze_trait(t, file_path, false),
                 Item::Mod(m) => self.analyze_mod(m, file_path, false),
                 _ => vec![],
@@ -249,7 +252,10 @@ impl<'a> Analyzer<'a> {
                             .analyze_item_fn(f, file_path, None, mod_is_test)
                             .into_iter()
                             .collect::<Vec<_>>(),
-                        Item::Impl(i) => self.analyze_impl(i, file_path, mod_is_test),
+                        Item::Impl(i) => {
+                            let test = mod_is_test || crate::dry::has_cfg_test(&i.attrs);
+                            self.analyze_impl(i, file_path, test)
+                        }
                         Item::Trait(t) => self.analyze_trait(t, file_path, mod_is_test),
                         Item::Mod(m) => self.analyze_mod(m, file_path, mod_is_test),
                         _ => vec![],
@@ -1234,5 +1240,39 @@ fn violator(x: i32) {
         let results = parse_and_analyze(code);
         let f = results.iter().find(|f| f.name == "regular").unwrap();
         assert!(!f.is_test, "Regular function should have is_test=false");
+    }
+
+    #[test]
+    fn test_cfg_test_impl_methods_are_test() {
+        let code = r#"
+            pub struct Config { pub name: String }
+
+            impl Config {
+                pub fn new(name: String) -> Self { Self { name } }
+            }
+
+            #[cfg(test)]
+            impl Config {
+                fn test_helper(&self) -> bool { true }
+                pub fn another_helper() -> i32 { if true { 1 } else { 2 } }
+            }
+        "#;
+        let results = parse_and_analyze(code);
+        let helper = results.iter().find(|f| f.name == "test_helper").unwrap();
+        assert!(
+            helper.is_test,
+            "Method inside #[cfg(test)] impl should have is_test=true"
+        );
+        let another = results.iter().find(|f| f.name == "another_helper").unwrap();
+        assert!(
+            another.is_test,
+            "Pub method inside #[cfg(test)] impl should have is_test=true"
+        );
+        // Regular impl method should NOT be test
+        let new_fn = results.iter().find(|f| f.name == "new").unwrap();
+        assert!(
+            !new_fn.is_test,
+            "Method in regular impl should have is_test=false"
+        );
     }
 }

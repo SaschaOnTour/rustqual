@@ -56,7 +56,7 @@ fn print_repeated_match_entries(
 /// Print duplicate function group entries.
 /// Operation: iteration and formatting logic, no own calls.
 fn print_duplicate_entries(duplicates: &[crate::dry::functions::DuplicateGroup]) {
-    for (i, group) in duplicates.iter().enumerate() {
+    for (i, group) in duplicates.iter().filter(|g| !g.suppressed).enumerate() {
         let kind_label = match &group.kind {
             crate::dry::functions::DuplicateKind::Exact => "Exact duplicate".to_string(),
             crate::dry::functions::DuplicateKind::NearDuplicate { similarity } => {

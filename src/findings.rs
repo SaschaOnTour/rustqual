@@ -68,6 +68,16 @@ pub fn is_api_marker(trimmed: &str) -> bool {
     trimmed == "// qual:api" || trimmed.starts_with("// qual:api ")
 }
 
+/// Parse a `// qual:inverse(fn_name)` marker, returning the target function name.
+/// Operation: string parsing logic.
+pub fn parse_inverse_marker(trimmed: &str) -> Option<String> {
+    trimmed
+        .strip_prefix("// qual:inverse(")
+        .and_then(|rest| rest.strip_suffix(')'))
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+}
+
 /// Parse a suppression comment line into a Suppression struct.
 /// Trivial: delegates to sub-parsers via closure chains.
 pub fn parse_suppression(line_number: usize, trimmed: &str) -> Option<Suppression> {
@@ -266,5 +276,31 @@ mod tests {
     #[test]
     fn test_api_marker_not_counted_as_suppression() {
         assert!(parse_suppression(1, "// qual:api").is_none());
+    }
+
+    #[test]
+    fn test_inverse_marker_parsed() {
+        assert_eq!(
+            parse_inverse_marker("// qual:inverse(parse)"),
+            Some("parse".to_string())
+        );
+    }
+
+    #[test]
+    fn test_inverse_marker_with_spaces() {
+        assert_eq!(
+            parse_inverse_marker("// qual:inverse( as_str )"),
+            Some("as_str".to_string())
+        );
+    }
+
+    #[test]
+    fn test_inverse_marker_empty_rejected() {
+        assert_eq!(parse_inverse_marker("// qual:inverse()"), None);
+    }
+
+    #[test]
+    fn test_inverse_marker_not_suppression() {
+        assert!(parse_suppression(1, "// qual:inverse(parse)").is_none());
     }
 }

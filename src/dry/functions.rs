@@ -1,7 +1,161 @@
 use std::collections::HashMap;
 
-use super::FunctionHashEntry;
+use syn::spanned::Spanned;
+use syn::visit::Visit;
+
+use super::{has_cfg_test, has_test_attr, qualify_name, FileVisitor, FunctionHashEntry};
 use crate::config::sections::DuplicatesConfig;
+
+// ── FunctionCollector (for DRY hashing) ─────────────────────────
+
+/// AST visitor that collects function bodies and computes their normalized hashes.
+pub(crate) struct FunctionCollector<'a> {
+    pub(crate) config: &'a DuplicatesConfig,
+    pub(crate) file: String,
+    pub(crate) entries: Vec<FunctionHashEntry>,
+    in_test: bool,
+    parent_type: Option<String>,
+    is_trait_impl: bool,
+}
+
+impl<'a> FunctionCollector<'a> {
+    pub(crate) fn new(config: &'a DuplicatesConfig) -> Self {
+        Self {
+            config,
+            file: String::new(),
+            entries: Vec::new(),
+            in_test: false,
+            parent_type: None,
+            is_trait_impl: false,
+        }
+    }
+}
+
+impl FileVisitor for FunctionCollector<'_> {
+    fn reset_for_file(&mut self, file_path: &str) {
+        self.file = file_path.to_string();
+        self.in_test = false;
+        self.parent_type = None;
+        self.is_trait_impl = false;
+    }
+}
+
+impl FunctionCollector<'_> {
+    /// Build a hash entry for a function body, applying config filters.
+    /// Operation: config checks + normalize/hash calls in closure (lenient).
+    fn build_hash_entry(
+        &self,
+        name: &str,
+        line: usize,
+        body: &syn::Block,
+        is_test_fn: bool,
+        is_trait_impl: bool,
+    ) -> Option<FunctionHashEntry> {
+        let is_test = self.in_test || is_test_fn;
+        if self.config.ignore_tests && is_test {
+            return None;
+        }
+        if self.config.ignore_trait_impls && is_trait_impl {
+            return None;
+        }
+
+        // Closure hides own calls to normalize_body/structural_hash (lenient mode).
+        let compute = |b: &syn::Block| {
+            let tokens = crate::normalize::normalize_body(b);
+            let hash = crate::normalize::structural_hash(&tokens);
+            (tokens, hash)
+        };
+        let (tokens, hash) = compute(body);
+
+        if tokens.len() < self.config.min_tokens {
+            return None;
+        }
+
+        let span = body.span();
+        let line_count = span.end().line.saturating_sub(span.start().line) + 1;
+        if line_count < self.config.min_lines {
+            return None;
+        }
+
+        let qualify = |parent: &Option<String>, n: &str| qualify_name(parent, n);
+        let qualified_name = qualify(&self.parent_type, name);
+
+        Some(FunctionHashEntry {
+            name: name.to_string(),
+            qualified_name,
+            file: self.file.clone(),
+            line,
+            hash,
+            token_count: tokens.len(),
+            tokens,
+        })
+    }
+}
+
+impl<'ast> Visit<'ast> for FunctionCollector<'_> {
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        let name = node.sig.ident.to_string();
+        let line = node.sig.ident.span().start().line;
+        let is_test = has_test_attr(&node.attrs);
+        if let Some(entry) = self.build_hash_entry(&name, line, &node.block, is_test, false) {
+            self.entries.push(entry);
+        }
+        syn::visit::visit_item_fn(self, node);
+    }
+
+    fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
+        let prev_parent = self.parent_type.take();
+        let prev_is_trait = self.is_trait_impl;
+        let prev_in_test = self.in_test;
+
+        if has_cfg_test(&node.attrs) {
+            self.in_test = true;
+        }
+
+        self.is_trait_impl = node.trait_.is_some();
+        if let syn::Type::Path(tp) = &*node.self_ty {
+            if let Some(seg) = tp.path.segments.last() {
+                self.parent_type = Some(seg.ident.to_string());
+            }
+        }
+
+        syn::visit::visit_item_impl(self, node);
+
+        self.parent_type = prev_parent;
+        self.is_trait_impl = prev_is_trait;
+        self.in_test = prev_in_test;
+    }
+
+    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+        let name = node.sig.ident.to_string();
+        let line = node.sig.ident.span().start().line;
+        let is_test = has_test_attr(&node.attrs);
+        if let Some(entry) =
+            self.build_hash_entry(&name, line, &node.block, is_test, self.is_trait_impl)
+        {
+            self.entries.push(entry);
+        }
+    }
+
+    fn visit_trait_item_fn(&mut self, node: &'ast syn::TraitItemFn) {
+        if let Some(ref block) = node.default {
+            let name = node.sig.ident.to_string();
+            let line = node.sig.ident.span().start().line;
+            if let Some(entry) = self.build_hash_entry(&name, line, block, false, true) {
+                self.entries.push(entry);
+            }
+        }
+    }
+
+    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+        let prev_in_test = self.in_test;
+        if has_cfg_test(&node.attrs) {
+            self.in_test = true;
+        }
+        syn::visit::visit_item_mod(self, node);
+        self.in_test = prev_in_test;
+    }
+}
 
 /// Near-duplicate bucket size: functions with token counts within this range
 /// are compared pairwise for Jaccard similarity.
@@ -17,6 +171,7 @@ const MAX_BUCKET_SIZE: usize = 50;
 pub struct DuplicateGroup {
     pub entries: Vec<DuplicateEntry>,
     pub kind: DuplicateKind,
+    pub suppressed: bool,
 }
 
 /// An individual function in a duplicate group.
@@ -86,6 +241,7 @@ fn group_exact_duplicates(entries: &[FunctionHashEntry]) -> (Vec<DuplicateGroup>
             groups.push(DuplicateGroup {
                 entries: group_entries,
                 kind: DuplicateKind::Exact,
+                suppressed: false,
             });
         } else {
             remaining.extend(indices);
@@ -145,6 +301,7 @@ fn find_near_duplicates(
                             },
                         ],
                         kind: DuplicateKind::NearDuplicate { similarity: sim },
+                        suppressed: false,
                     });
                 }
             }

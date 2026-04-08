@@ -107,6 +107,28 @@ impl<'ast> Visit<'ast> for SelfRefChecker {
                 return;
             }
         }
+        if let syn::Expr::Macro(m) = expr {
+            if m.mac
+                .path
+                .segments
+                .last()
+                .map(|s| s.ident == "matches")
+                .unwrap_or(false)
+            {
+                let first_is_self = m
+                    .mac
+                    .tokens
+                    .clone()
+                    .into_iter()
+                    .next()
+                    .map(|t| t.to_string() == "self")
+                    .unwrap_or(false);
+                if first_is_self {
+                    self.has_self_ref = true;
+                    return;
+                }
+            }
+        }
         syn::visit::visit_expr(self, expr);
     }
 }
@@ -171,5 +193,16 @@ mod tests {
     fn test_mut_self_selfless_flagged() {
         let w = detect_in("struct S; impl S { fn foo(&mut self) -> i32 { 42 } }");
         assert_eq!(w.len(), 1);
+    }
+
+    #[test]
+    fn test_matches_macro_self_not_flagged() {
+        let w = detect_in(
+            "struct S { x: bool } impl S { fn foo(&self) -> bool { matches!(self, S { x: true }) } }",
+        );
+        assert!(
+            w.is_empty(),
+            "matches!(self, ...) should count as self reference"
+        );
     }
 }

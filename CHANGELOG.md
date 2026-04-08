@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-04-08
+
+### Added
+- **`// qual:inverse(fn_name)` annotation**: Marks inverse method pairs (e.g., `as_str`/`parse`, `encode`/`decode`). Suppresses near-duplicate DRY findings between paired functions without counting against the suppression ratio. Parsed by `parse_inverse_marker()` in `findings.rs`, collected by `collect_inverse_lines()` in `pipeline/discovery.rs`.
+- **`qual:allow(dry)` suppression for duplicate groups**: `// qual:allow(dry)` on any member of a duplicate pair now correctly suppresses the finding. Previously only single-function findings were suppressible.
+- `suppressed: bool` field on `DuplicateGroup` — enables per-group suppression.
+- `mark_duplicate_suppressions()` and `mark_inverse_suppressions()` in `pipeline/metrics.rs`.
+- **LCOM4 self-method-call resolution**: Methods calling `self.conn()` now transitively share the field accesses of the called method. `self_method_calls` tracked per method, resolved one level deep in `build_field_method_index()`. Fixes false high LCOM4 for types using accessor methods.
+- `self_method_calls: HashSet<String>` field on `MethodFieldData`.
+- `build_field_method_index()` extracted as Operation in `srp/cohesion.rs`.
+- `collect_per_file()` generic helper in `pipeline/discovery.rs` — eliminates near-duplicate code in `collect_suppression_lines`, `collect_api_lines`, `collect_inverse_lines`.
+- 15 new unit tests across all fixed areas.
+
+### Fixed
+- **`#[cfg(test)] impl` propagation**: Methods inside `#[cfg(test)] impl Type { ... }` blocks are now correctly recognized as test code (`in_test = true`). Fixes DRY-003 false positives for test helpers in cfg-test impl blocks. Both `DeclaredFnCollector` and `FunctionCollector` (dry) and the IOSP analyzer now propagate the flag.
+- **`matches!(self, ...)` SLM detection**: The SLM (Self-less Methods) check now recognizes `matches!(self, ...)` as a self-reference by inspecting macro token streams. Previously flagged as "self never referenced".
+- **`qual:api` TQ-003 pipeline fix**: `compute_tq()` now calls `mark_api_declarations()` on its declared functions, so `// qual:api` correctly excludes functions from untested-function detection. Previously, TQ analysis collected fresh `DeclaredFunction` objects without API markings.
+- **Function pointer references in dead code**: `&function_name` passed as an argument is now recognized as a usage by `CallTargetCollector`. `record_path_args()` unwraps `Expr::Reference` to extract the inner path.
+- All 6 report formats (text, JSON, SARIF, HTML, GitHub annotations, findings list) now filter suppressed duplicate groups.
+
+### Changed
+- **SRP refactoring**: `FunctionCollector` moved from `dry/mod.rs` to `dry/functions.rs`, `DeclaredFnCollector` moved to `dry/dead_code.rs`. Reduces `dry/mod.rs` production lines from 304 to ~125.
+- `mark_api_declarations()` changed from private to `pub(crate)`, signature changed to `&mut [DeclaredFunction]` (was by-value).
+- Test count: 836 tests (829 unit + 4 integration + 3 showcase)
+- Function count: 454
+
 ## [0.3.9] - 2026-04-02
 
 ### Fixed

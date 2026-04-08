@@ -1,7 +1,7 @@
 /// Print `::notice` annotations for DRY/boilerplate/wildcard/repeated-match findings.
 /// Operation: iteration + formatting logic, no own calls.
 pub fn print_dry_annotations(analysis: &super::AnalysisResult) {
-    for g in &analysis.duplicates {
+    for g in analysis.duplicates.iter().filter(|g| !g.suppressed) {
         let names: Vec<&str> = g
             .entries
             .iter()

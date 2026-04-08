@@ -141,6 +141,21 @@ mod tests {
     }
 
     #[test]
+    fn test_api_fn_excluded() {
+        let mut declared = vec![make_declared("handle_overview", false)];
+        declared[0].is_api = true;
+        let prod_calls: HashSet<String> = ["handle_overview".to_string()].into();
+        let tested = HashSet::new();
+        let config = Config::default();
+
+        let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
+        assert!(
+            warnings.is_empty(),
+            "qual:api functions should be excluded from TQ-003"
+        );
+    }
+
+    #[test]
     fn test_trait_impl_excluded() {
         let mut declared = vec![make_declared("fmt", false)];
         declared[0].is_trait_impl = true;

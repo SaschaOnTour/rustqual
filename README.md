@@ -435,6 +435,32 @@ pub fn decode(data: &[u8], config: &Config) -> Result<Vec<f32>> {
 
 Unlike `// qual:allow`, API markers do **not** count against the suppression ratio. Use `// qual:api` for functions that are part of your library's public interface — they have no callers within the project because they're meant to be called by external consumers.
 
+### Inverse Annotation
+
+Mark inverse method pairs with `// qual:inverse(fn_name)` to suppress near-duplicate DRY findings between them:
+
+```rust
+// qual:inverse(parse)
+pub fn as_str(&self) -> &str {
+    match self {
+        Self::Function => "fn",
+        Self::Method => "method",
+        // ...
+    }
+}
+
+// qual:inverse(as_str)
+pub fn parse(s: &str) -> Self {
+    match s {
+        "fn" => Self::Function,
+        "method" => Self::Method,
+        // ...
+    }
+}
+```
+
+Common use cases: `serialize`/`deserialize`, `encode`/`decode`, `to_bytes`/`from_bytes`. Like `// qual:api`, inverse markers do **not** count against the suppression ratio — they document intentional structural similarity.
+
 ### Lenient vs. Strict Mode
 
 By default the analyzer runs in **lenient mode**. This makes it practical for idiomatic Rust code:

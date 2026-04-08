@@ -135,6 +135,7 @@ fn build_json_string(analysis: &AnalysisResult) -> String {
 
     let json_duplicates: Vec<JsonDuplicateGroup> = duplicates
         .iter()
+        .filter(|g| !g.suppressed)
         .map(|g| {
             let (kind, similarity) = match &g.kind {
                 crate::dry::DuplicateKind::Exact => ("exact".to_string(), None),
