@@ -30,11 +30,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `self_method_calls: HashSet<String>` field on `MethodFieldData`.
 - `build_field_method_index()` extracted as Operation in `srp/cohesion.rs`.
 - `collect_per_file()` generic helper in `pipeline/discovery.rs` — eliminates near-duplicate code in `collect_suppression_lines`, `collect_api_lines`, `collect_inverse_lines`.
-- **Type-aware method-call resolution**: `.method()` calls now use 3-layer resolution: (1) receiver type from `self`/parameter types, (2) fallback to flat scope check. Eliminates false-positive IOSP violations from std method name collisions (e.g., `.insert()` on HashMap no longer flagged when project also defines `insert`).
-- `methods_by_type: HashMap<String, HashSet<String>>` on `ProjectScope` — tracks which methods belong to which types.
-- `extract_param_types()` in `analyzer/mod.rs` — extracts parameter name → type mappings from function signatures.
-- `resolve_receiver_type()` and `is_type_resolved_own_method()` on `BodyVisitor`.
-- **PascalCase enum variant exclusion**: `Type::Variant(...)` calls where the final segment starts with an uppercase letter are no longer counted as own calls — they are data construction, not function orchestration.
 - 20 new unit tests across all fixed areas.
 
 ### Fixed
