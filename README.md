@@ -479,7 +479,26 @@ fn cmd_quality(clear: bool) -> Result<()> {
 
 Without leaf detection, `cmd_quality` would be a Violation (logic + own call). With it, the call to `get_config` is recognized as terminal — no orchestration involved.
 
-Leaf detection cascades: if a function calls only leaves, it becomes an Operation (and thus a leaf itself), benefiting its callers.
+More broadly, calls to **any non-Violation function** are treated as safe — this includes Operations (pure logic), Trivials (empty/simple), and Integrations (pure delegation). Only calls to other Violations (functions that themselves mix logic and non-safe calls) remain true Violations. This cascades iteratively until stable.
+
+> **Design note — pragmatic IOSP relaxation:** In strict IOSP, *any* call to an own function from a function with logic constitutes a Violation. rustqual relaxes this: only calls to Violations count as concern-mixing. Calls to well-structured functions (Operations, Integrations, Trivials) are treated as safe building blocks. This eliminates false positives for common patterns while preserving true Violations where tangled code calls other tangled code (e.g., mutually recursive Violations).
+
+### Recursive Annotation
+
+Mark intentionally recursive functions with `// qual:recursive` to prevent the self-call from being counted as an own call:
+
+```rust
+// qual:recursive
+fn traverse(node: &Node) -> Vec<String> {
+    let mut result = vec![node.name.clone()];
+    for child in &node.children {
+        result.extend(traverse(child));  // self-call not counted
+    }
+    result
+}
+```
+
+Without the annotation, `traverse` would be a Violation (loop logic + self-call). With it, the self-call is removed before classification. Like `// qual:api` and `// qual:inverse`, recursive markers do **not** count against the suppression ratio.
 
 > **Design note — pragmatic IOSP relaxation:** In strict IOSP, *any* call to an own function from a function with logic constitutes a Violation, regardless of the callee's structure. Leaf detection relaxes this: calls to Operations (C=0) are treated like calls to language primitives, since they are self-contained units that don't orchestrate further. This is a deliberate trade-off — it eliminates false positives for common patterns (calling helpers like `get_config()` or `map_err()` from functions with control flow) while preserving true Violations where logic is mixed with calls to functions that themselves orchestrate other code. Calls to Integrations (L=0, C>0) are **not** treated as safe — they represent genuine orchestration, and mixing logic with delegation calls remains a Violation per IOSP.
 

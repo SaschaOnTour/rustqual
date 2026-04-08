@@ -362,12 +362,11 @@ mod tests {
     #[test]
     fn test_violation_mixed() {
         let code = r#"
-            fn inner() {}
-            fn helper() { inner(); }
+            fn helper(x: i32) { if x > 0 { violator(x); } }
             fn violator(x: i32) {
                 let _y = x;
                 if _y > 0 {
-                    helper();
+                    helper(_y);
                 }
             }
         "#;
@@ -382,12 +381,11 @@ mod tests {
 
     #[test]
     fn test_violation_locations() {
-        let code = r#"fn inner() {}
-fn helper() { inner(); }
+        let code = r#"fn helper(x: i32) { if x > 0 { violator(x); } }
 fn violator(x: i32) {
     let _y = x;
     if _y > 0 {
-        helper();
+        helper(_y);
     }
 }
 "#;
@@ -402,15 +400,15 @@ fn violator(x: i32) {
             assert!(
                 logic_locations
                     .iter()
-                    .any(|l| l.kind == "if" && l.line == 5),
-                "Expected 'if' on line 5, got: {:?}",
+                    .any(|l| l.kind == "if" && l.line == 4),
+                "Expected 'if' on line 4, got: {:?}",
                 logic_locations
             );
             assert!(
                 call_locations
                     .iter()
-                    .any(|c| c.name == "helper" && c.line == 6),
-                "Expected 'helper' call on line 6, got: {:?}",
+                    .any(|c| c.name == "helper" && c.line == 5),
+                "Expected 'helper' call on line 5, got: {:?}",
                 call_locations
             );
         } else {
@@ -930,11 +928,10 @@ fn violator(x: i32) {
     #[test]
     fn test_severity_low() {
         let code = r#"
-            fn inner() {}
-            fn helper() { inner(); }
+            fn helper(x: bool) { if x { f(false); } }
             fn f(x: bool) {
                 let _y = x;
-                if x { helper(); }
+                if x { helper(true); }
             }
         "#;
         let results = parse_and_analyze(code);
@@ -1158,9 +1155,8 @@ fn violator(x: i32) {
     #[test]
     fn test_match_with_logic_in_arm_is_violation() {
         let code = r#"
-            fn inner() {}
-            fn call_a(_x: i32) { inner(); }
-            fn call_b() { inner(); }
+            fn call_a(_x: i32) { if _x > 0 { dispatch(_x - 1); } }
+            fn call_b() { dispatch(0); }
             fn dispatch(x: i32) {
                 match x {
                     0 => call_a(x + 1),
@@ -1180,9 +1176,8 @@ fn violator(x: i32) {
     #[test]
     fn test_match_with_guard_is_violation() {
         let code = r#"
-            fn inner() {}
-            fn call_a() { inner(); }
-            fn call_b() { inner(); }
+            fn call_a() { if true { dispatch(0); } }
+            fn call_b() { dispatch(1); }
             fn dispatch(x: i32) {
                 match x {
                     n if n > 0 => call_a(),
@@ -1437,15 +1432,17 @@ fn violator(x: i32) {
 
     #[test]
     fn test_non_leaf_call_still_violation() {
-        // orchestrator is NOT a leaf (C>0, it calls helper).
-        // caller has logic + calls orchestrator → Violation (non-leaf call).
+        // bad_a and bad_b form a cycle — both are Violations that can't be reclassified.
+        // caller has logic + calls bad_a → stays Violation.
         let code = r#"
-            fn helper() -> i32 { 42 }
-            fn orchestrator() -> i32 {
-                helper()
+            fn bad_a(x: bool) -> i32 {
+                if x { bad_b(false) } else { 0 }
+            }
+            fn bad_b(x: bool) -> i32 {
+                if x { bad_a(true) } else { 1 }
             }
             fn caller(x: bool) -> i32 {
-                if x { orchestrator() } else { 0 }
+                if x { bad_a(true) } else { 0 }
             }
         "#;
         let results = parse_and_analyze(code);
@@ -1530,8 +1527,6 @@ fn violator(x: i32) {
 
     #[test]
     fn test_recursive_annotation_makes_self_call_safe() {
-        // Without qual:recursive: recursive + logic = Violation
-        // With qual:recursive: self-call doesn't count → Operation
         let code = r#"
             // qual:recursive
             fn traverse(node: &str) -> i32 {
@@ -1550,7 +1545,6 @@ fn violator(x: i32) {
 
     #[test]
     fn test_recursive_without_annotation_is_violation() {
-        // No annotation: recursive + logic = Violation
         let code = r#"
             fn inner() {}
             fn traverse(node: &str) -> i32 {
@@ -1564,6 +1558,70 @@ fn violator(x: i32) {
         assert!(
             matches!(f.classification, Classification::Violation { .. }),
             "Without annotation, recursive + non-leaf call + logic = Violation, got {:?}",
+            f.classification
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Integration-as-safe-target tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_call_to_integration_is_safe() {
+        let code = r#"
+            fn log_action() {}
+            fn db_save() { log_action(); }
+            fn handler(x: bool) -> i32 {
+                if x { db_save(); 1 } else { 0 }
+            }
+        "#;
+        let results = parse_and_analyze(code);
+        let f = results.iter().find(|f| f.name == "handler").unwrap();
+        assert!(
+            matches!(f.classification, Classification::Operation),
+            "Call to Integration (L=0, C>0) + logic should be Operation, got {:?}",
+            f.classification
+        );
+    }
+
+    #[test]
+    fn test_call_to_violation_stays_violation() {
+        let code = r#"
+            fn bad_a(x: bool) -> i32 {
+                if x { bad_b(false) } else { 0 }
+            }
+            fn bad_b(x: bool) -> i32 {
+                if x { bad_a(true) } else { 1 }
+            }
+            fn caller(y: bool) -> i32 {
+                if y { bad_a(true) } else { -1 }
+            }
+        "#;
+        let results = parse_and_analyze(code);
+        let f = results.iter().find(|f| f.name == "caller").unwrap();
+        assert!(
+            matches!(f.classification, Classification::Violation { .. }),
+            "Call to mutually-recursive Violation + logic should stay Violation, got {:?}",
+            f.classification
+        );
+    }
+
+    #[test]
+    fn test_mixed_leaf_and_integration_calls_safe() {
+        let code = r#"
+            fn log_it() {}
+            fn get_config() -> i32 { if true { 1 } else { 2 } }
+            fn db_fetch() -> i32 { log_it(); 42 }
+            fn process(x: bool) -> i32 {
+                let cfg = get_config();
+                if x { db_fetch() + cfg } else { cfg }
+            }
+        "#;
+        let results = parse_and_analyze(code);
+        let f = results.iter().find(|f| f.name == "process").unwrap();
+        assert!(
+            matches!(f.classification, Classification::Operation),
+            "Calls to leaf + integration + logic should be Operation, got {:?}",
             f.classification
         );
     }
