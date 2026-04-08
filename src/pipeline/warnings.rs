@@ -1,9 +1,30 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::analyzer::{Classification, FunctionAnalysis};
 use crate::config::Config;
 use crate::findings::Suppression;
 use crate::report::Summary;
+
+/// Remove self-calls from `own_calls` for functions marked with `// qual:recursive`.
+/// Operation: iterates results, checks annotation window, filters self-calls.
+pub(crate) fn apply_recursive_annotations(
+    results: &mut [FunctionAnalysis],
+    recursive_lines: &HashMap<String, HashSet<usize>>,
+) {
+    let window = crate::findings::ANNOTATION_WINDOW;
+    results.iter_mut().for_each(|fa| {
+        let is_marked = recursive_lines
+            .get(&fa.file)
+            .map(|lines| (0..=window).any(|off| fa.line >= off && lines.contains(&(fa.line - off))))
+            .unwrap_or(false);
+        if is_marked {
+            let self_name = &fa.name;
+            let qualified = &fa.qualified_name;
+            fa.own_calls
+                .retain(|call| call != self_name && call != qualified);
+        }
+    });
+}
 
 /// Reclassify Violations that only call leaf functions as Operations.
 /// A leaf is a function with no own calls (Operation or Trivial).

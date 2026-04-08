@@ -1,5 +1,5 @@
 // qual:allow(coupling) reason: "orchestrator module — high instability is expected"
-mod discovery;
+pub(crate) mod discovery;
 mod metrics;
 mod structural_metrics;
 mod tq_metrics;
@@ -63,6 +63,8 @@ pub(crate) fn run_analysis(
         .collect();
 
     exclude_test_violations(&mut all_results);
+    let recursive_lines = discovery::collect_recursive_lines(parsed);
+    warnings::apply_recursive_annotations(&mut all_results, &recursive_lines);
     warnings::apply_leaf_reclassification(&mut all_results);
     let mut summary = Summary::from_results(&all_results);
     apply_complexity_warnings(&mut all_results, config, &mut summary);

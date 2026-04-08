@@ -193,6 +193,19 @@ pub(crate) fn collect_api_lines(
     .collect()
 }
 
+/// Collect `// qual:recursive` marker line numbers per file.
+/// Trivial: delegates to collect_per_file with is_recursive_marker.
+pub(crate) fn collect_recursive_lines(
+    parsed: &[(String, String, syn::File)],
+) -> std::collections::HashMap<String, std::collections::HashSet<usize>> {
+    collect_per_file(parsed, |line_num, trimmed| {
+        crate::findings::is_recursive_marker(trimmed).then_some(line_num)
+    })
+    .into_iter()
+    .map(|(k, v)| (k, v.into_iter().collect()))
+    .collect()
+}
+
 /// Collect `// qual:inverse(fn_name)` marker lines per file.
 /// Trivial: delegates to collect_per_file with parse_inverse_marker.
 pub(crate) fn collect_inverse_lines(

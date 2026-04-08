@@ -307,6 +307,9 @@ mod tests {
         let config = Config::default();
         let analyzer = Analyzer::new(&config, &scope);
         let mut results = analyzer.analyze_file(&syntax, "test.rs");
+        let parsed = vec![("test.rs".to_string(), code.to_string(), syntax)];
+        let recursive_lines = crate::pipeline::discovery::collect_recursive_lines(&parsed);
+        crate::pipeline::warnings::apply_recursive_annotations(&mut results, &recursive_lines);
         crate::pipeline::warnings::apply_leaf_reclassification(&mut results);
         results
     }
@@ -1517,6 +1520,50 @@ fn violator(x: i32) {
         assert!(
             matches!(f.classification, Classification::Operation),
             "Cascading leaf: top calls middle (which calls only leaves) should be Operation, got {:?}",
+            f.classification
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // qual:recursive annotation tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_recursive_annotation_makes_self_call_safe() {
+        // Without qual:recursive: recursive + logic = Violation
+        // With qual:recursive: self-call doesn't count → Operation
+        let code = r#"
+            // qual:recursive
+            fn traverse(node: &str) -> i32 {
+                if node.is_empty() { return 0; }
+                traverse(node)
+            }
+        "#;
+        let results = parse_and_analyze(code);
+        let f = results.iter().find(|f| f.name == "traverse").unwrap();
+        assert!(
+            matches!(f.classification, Classification::Operation),
+            "qual:recursive should make self-call safe → Operation, got {:?}",
+            f.classification
+        );
+    }
+
+    #[test]
+    fn test_recursive_without_annotation_is_violation() {
+        // No annotation: recursive + logic = Violation
+        let code = r#"
+            fn inner() {}
+            fn traverse(node: &str) -> i32 {
+                if node.is_empty() { return 0; }
+                inner();
+                traverse(node)
+            }
+        "#;
+        let results = parse_and_analyze(code);
+        let f = results.iter().find(|f| f.name == "traverse").unwrap();
+        assert!(
+            matches!(f.classification, Classification::Violation { .. }),
+            "Without annotation, recursive + non-leaf call + logic = Violation, got {:?}",
             f.classification
         );
     }

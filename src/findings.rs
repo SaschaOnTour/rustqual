@@ -68,6 +68,12 @@ pub fn is_api_marker(trimmed: &str) -> bool {
     trimmed == "// qual:api" || trimmed.starts_with("// qual:api ")
 }
 
+/// Check if a trimmed line is a `// qual:recursive` marker.
+/// Operation: string prefix check.
+pub fn is_recursive_marker(trimmed: &str) -> bool {
+    trimmed == "// qual:recursive" || trimmed.starts_with("// qual:recursive ")
+}
+
 /// Parse a `// qual:inverse(fn_name)` marker, returning the target function name.
 /// Operation: string parsing logic.
 pub fn parse_inverse_marker(trimmed: &str) -> Option<String> {
