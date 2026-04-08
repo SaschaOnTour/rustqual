@@ -75,6 +75,8 @@ pub(crate) struct MethodFieldData {
     pub parent_type: String,
     pub field_accesses: HashSet<String>,
     pub call_targets: HashSet<String>,
+    /// Method names called on self (e.g. `self.conn()`).
+    pub self_method_calls: HashSet<String>,
     /// True if this is a constructor (static method returning Self).
     pub is_constructor: bool,
 }
@@ -182,6 +184,7 @@ impl<'ast, 'a> Visit<'ast> for ImplMethodCollector<'a> {
                 let mut body_visitor = MethodBodyVisitor {
                     field_accesses: HashSet::new(),
                     call_targets: HashSet::new(),
+                    self_method_calls: HashSet::new(),
                 };
                 body_visitor.visit_block(&method.block);
                 self.methods.push(MethodFieldData {
@@ -189,6 +192,7 @@ impl<'ast, 'a> Visit<'ast> for ImplMethodCollector<'a> {
                     parent_type: type_name.clone(),
                     field_accesses: body_visitor.field_accesses,
                     call_targets: body_visitor.call_targets,
+                    self_method_calls: body_visitor.self_method_calls,
                     is_constructor,
                 });
             }
@@ -201,6 +205,7 @@ impl<'ast, 'a> Visit<'ast> for ImplMethodCollector<'a> {
 struct MethodBodyVisitor {
     field_accesses: HashSet<String>,
     call_targets: HashSet<String>,
+    self_method_calls: HashSet<String>,
 }
 
 impl<'ast> Visit<'ast> for MethodBodyVisitor {
@@ -231,8 +236,9 @@ impl<'ast> Visit<'ast> for MethodBodyVisitor {
             }
             // Detect method calls: obj.method()
             syn::Expr::MethodCall(mc) => {
-                // Only track non-self method calls for fan-out
-                if !is_self_expr(&mc.receiver) {
+                if is_self_expr(&mc.receiver) {
+                    self.self_method_calls.insert(mc.method.to_string());
+                } else {
                     self.call_targets.insert(mc.method.to_string());
                 }
                 syn::visit::visit_expr(self, expr);

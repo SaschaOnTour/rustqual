@@ -110,23 +110,27 @@ fn collect_function_findings(results: &[FunctionAnalysis], entries: &mut Vec<Fin
 /// Collect DRY findings (duplicates, dead code, fragments, boilerplate, wildcards).
 /// Operation: iterates DRY analysis results; no own calls.
 fn collect_dry_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntry>) {
-    analysis.duplicates.iter().for_each(|group| {
-        let kind = match &group.kind {
-            crate::dry::DuplicateKind::Exact => "exact".to_string(),
-            crate::dry::DuplicateKind::NearDuplicate { similarity } => {
-                format!("{:.0}% similar", similarity * 100.0)
-            }
-        };
-        group.entries.iter().for_each(|e| {
-            entries.push(FindingEntry::new(
-                &e.file,
-                e.line,
-                "DUPLICATE",
-                kind.clone(),
-                e.qualified_name.clone(),
-            ));
+    analysis
+        .duplicates
+        .iter()
+        .filter(|g| !g.suppressed)
+        .for_each(|group| {
+            let kind = match &group.kind {
+                crate::dry::DuplicateKind::Exact => "exact".to_string(),
+                crate::dry::DuplicateKind::NearDuplicate { similarity } => {
+                    format!("{:.0}% similar", similarity * 100.0)
+                }
+            };
+            group.entries.iter().for_each(|e| {
+                entries.push(FindingEntry::new(
+                    &e.file,
+                    e.line,
+                    "DUPLICATE",
+                    kind.clone(),
+                    e.qualified_name.clone(),
+                ));
+            });
         });
-    });
     analysis.dead_code.iter().for_each(|w| {
         entries.push(FindingEntry::new(
             &w.file,

@@ -159,6 +159,54 @@ pub(super) fn run_dry_detection(
     }
 }
 
+/// Mark duplicate groups as suppressed when any member has `// qual:allow(dry)`.
+/// Operation: iterates groups checking entries against suppression lines.
+pub(super) fn mark_duplicate_suppressions(
+    groups: &mut [crate::dry::functions::DuplicateGroup],
+    suppression_lines: &std::collections::HashMap<String, Vec<Suppression>>,
+) {
+    let dry_dim = crate::findings::Dimension::Dry;
+    let window = crate::findings::ANNOTATION_WINDOW;
+    groups.iter_mut().for_each(|g| {
+        g.suppressed = g.entries.iter().any(|entry| {
+            suppression_lines
+                .get(&entry.file)
+                .map(|sups| {
+                    sups.iter().any(|sup| {
+                        let in_window = sup.line <= entry.line && entry.line - sup.line <= window;
+                        in_window && sup.covers(dry_dim)
+                    })
+                })
+                .unwrap_or(false)
+        });
+    });
+}
+
+/// Mark duplicate groups as suppressed when members are `// qual:inverse(fn)` pairs.
+/// Operation: iterates groups checking entries against inverse annotation lines.
+pub(super) fn mark_inverse_suppressions(
+    groups: &mut [crate::dry::functions::DuplicateGroup],
+    inverse_lines: &std::collections::HashMap<String, Vec<(usize, String)>>,
+) {
+    let window = crate::findings::ANNOTATION_WINDOW;
+    groups.iter_mut().filter(|g| !g.suppressed).for_each(|g| {
+        g.suppressed = g.entries.iter().any(|entry| {
+            inverse_lines
+                .get(&entry.file)
+                .map(|inv| {
+                    inv.iter().any(|(line, target)| {
+                        let in_window = *line <= entry.line && entry.line - line <= window;
+                        in_window
+                            && g.entries.iter().any(|other| {
+                                other.name == *target || other.qualified_name == *target
+                            })
+                    })
+                })
+                .unwrap_or(false)
+        });
+    });
+}
+
 /// Mark SRP warnings as suppressed based on `// qual:allow(srp)` comments.
 /// Operation: iteration + suppression matching via closures (no own calls).
 pub(super) fn mark_srp_suppressions(
@@ -530,6 +578,146 @@ mod tests {
         assert_eq!(
             summary.sdp_violations, 1,
             "Only unsuppressed violations counted"
+        );
+    }
+
+    #[test]
+    fn test_mark_duplicate_suppressions() {
+        use crate::dry::functions::{DuplicateEntry, DuplicateGroup, DuplicateKind};
+
+        let mut groups = vec![DuplicateGroup {
+            entries: vec![
+                DuplicateEntry {
+                    name: "as_str".to_string(),
+                    qualified_name: "Foo::as_str".to_string(),
+                    file: "test.rs".to_string(),
+                    line: 5,
+                },
+                DuplicateEntry {
+                    name: "parse".to_string(),
+                    qualified_name: "Foo::parse".to_string(),
+                    file: "test.rs".to_string(),
+                    line: 15,
+                },
+            ],
+            kind: DuplicateKind::NearDuplicate { similarity: 0.91 },
+            suppressed: false,
+        }];
+
+        // Suppression on line 4 (one line before as_str at line 5) with dry dimension
+        let sup = Suppression {
+            line: 4,
+            dimensions: vec![crate::findings::Dimension::Dry],
+            reason: None,
+        };
+        let suppression_lines: std::collections::HashMap<String, Vec<Suppression>> =
+            [("test.rs".to_string(), vec![sup])].into();
+
+        mark_duplicate_suppressions(&mut groups, &suppression_lines);
+        assert!(
+            groups[0].suppressed,
+            "Group should be suppressed when any member has qual:allow(dry)"
+        );
+    }
+
+    #[test]
+    fn test_duplicate_without_suppression_not_marked() {
+        use crate::dry::functions::{DuplicateEntry, DuplicateGroup, DuplicateKind};
+
+        let mut groups = vec![DuplicateGroup {
+            entries: vec![
+                DuplicateEntry {
+                    name: "foo".to_string(),
+                    qualified_name: "foo".to_string(),
+                    file: "test.rs".to_string(),
+                    line: 5,
+                },
+                DuplicateEntry {
+                    name: "bar".to_string(),
+                    qualified_name: "bar".to_string(),
+                    file: "test.rs".to_string(),
+                    line: 15,
+                },
+            ],
+            kind: DuplicateKind::Exact,
+            suppressed: false,
+        }];
+
+        let suppression_lines: std::collections::HashMap<String, Vec<Suppression>> =
+            std::collections::HashMap::new();
+
+        mark_duplicate_suppressions(&mut groups, &suppression_lines);
+        assert!(
+            !groups[0].suppressed,
+            "Group without suppression should not be marked"
+        );
+    }
+
+    #[test]
+    fn test_inverse_annotation_suppresses_duplicate() {
+        use crate::dry::functions::{DuplicateEntry, DuplicateGroup, DuplicateKind};
+
+        let mut groups = vec![DuplicateGroup {
+            entries: vec![
+                DuplicateEntry {
+                    name: "as_str".to_string(),
+                    qualified_name: "Foo::as_str".to_string(),
+                    file: "test.rs".to_string(),
+                    line: 5,
+                },
+                DuplicateEntry {
+                    name: "parse".to_string(),
+                    qualified_name: "Foo::parse".to_string(),
+                    file: "test.rs".to_string(),
+                    line: 15,
+                },
+            ],
+            kind: DuplicateKind::NearDuplicate { similarity: 0.91 },
+            suppressed: false,
+        }];
+
+        // qual:inverse(parse) on line 4 (one before as_str at line 5)
+        let inverse_lines: std::collections::HashMap<String, Vec<(usize, String)>> =
+            [("test.rs".to_string(), vec![(4, "parse".to_string())])].into();
+
+        mark_inverse_suppressions(&mut groups, &inverse_lines);
+        assert!(
+            groups[0].suppressed,
+            "Inverse-annotated pair should be suppressed"
+        );
+    }
+
+    #[test]
+    fn test_inverse_annotation_must_target_group_member() {
+        use crate::dry::functions::{DuplicateEntry, DuplicateGroup, DuplicateKind};
+
+        let mut groups = vec![DuplicateGroup {
+            entries: vec![
+                DuplicateEntry {
+                    name: "foo".to_string(),
+                    qualified_name: "foo".to_string(),
+                    file: "test.rs".to_string(),
+                    line: 5,
+                },
+                DuplicateEntry {
+                    name: "bar".to_string(),
+                    qualified_name: "bar".to_string(),
+                    file: "test.rs".to_string(),
+                    line: 15,
+                },
+            ],
+            kind: DuplicateKind::Exact,
+            suppressed: false,
+        }];
+
+        // qual:inverse(baz) targets a function not in the group
+        let inverse_lines: std::collections::HashMap<String, Vec<(usize, String)>> =
+            [("test.rs".to_string(), vec![(4, "baz".to_string())])].into();
+
+        mark_inverse_suppressions(&mut groups, &inverse_lines);
+        assert!(
+            !groups[0].suppressed,
+            "Inverse targeting non-member should not suppress"
         );
     }
 }

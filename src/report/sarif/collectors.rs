@@ -148,7 +148,7 @@ pub(super) fn collect_dry_findings(
             }}]
         })
     };
-    for g in duplicates {
+    for g in duplicates.iter().filter(|g| !g.suppressed) {
         let names: Vec<&str> = g
             .entries
             .iter()

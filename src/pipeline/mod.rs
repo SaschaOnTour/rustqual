@@ -140,7 +140,11 @@ fn run_secondary_analysis(
     mark_sdp_suppressions(coupling.as_mut());
     count_coupling_warnings(coupling.as_ref(), &config.coupling, summary);
 
-    let dry = run_dry_detection(parsed, config, suppression_lines, &api_lines, summary);
+    let mut dry = run_dry_detection(parsed, config, suppression_lines, &api_lines, summary);
+    metrics::mark_duplicate_suppressions(&mut dry.duplicates, suppression_lines);
+    let inverse_lines = discovery::collect_inverse_lines(parsed);
+    metrics::mark_inverse_suppressions(&mut dry.duplicates, &inverse_lines);
+    summary.duplicate_groups = dry.duplicates.iter().filter(|g| !g.suppressed).count();
     let repeated_matches = run_guarded_detection(
         config.duplicates.detect_repeated_matches,
         |p, c| crate::dry::match_patterns::detect_repeated_matches(p, &c.duplicates),

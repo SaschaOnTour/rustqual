@@ -31,7 +31,8 @@ pub fn build_struct_warnings(
                 return None;
             }
 
-            let (lcom4, clusters) = compute_lcom4(&method_list, &s.fields);
+            let field_idx = build_field_method_index(&method_list, &s.fields);
+            let (lcom4, clusters) = compute_lcom4(&method_list, &s.fields, &field_idx);
             let fan_out = compute_fan_out(&method_list);
             let composite =
                 compute_composite_score(lcom4, s.fields.len(), method_list.len(), fan_out, config);
@@ -56,12 +57,51 @@ pub fn build_struct_warnings(
         .collect()
 }
 
+/// Build the field-to-methods index, resolving self-method calls one level deep.
+/// Operation: iterates methods, expands field accesses from self-call targets.
+fn build_field_method_index<'a>(
+    methods: &[&'a MethodFieldData],
+    struct_fields: &'a [String],
+) -> HashMap<&'a str, Vec<usize>> {
+    let direct_fields: HashMap<&str, &HashSet<String>> = methods
+        .iter()
+        .map(|m| (m.method_name.as_str(), &m.field_accesses))
+        .collect();
+
+    let mut field_to_methods: HashMap<&str, Vec<usize>> = HashMap::new();
+    methods.iter().enumerate().for_each(|(i, m)| {
+        let mut fields_to_add: Vec<&str> = if m.is_constructor {
+            struct_fields.iter().map(|f| f.as_str()).collect()
+        } else {
+            m.field_accesses
+                .iter()
+                .filter(|f| struct_fields.iter().any(|sf| sf == *f))
+                .map(|f| f.as_str())
+                .collect()
+        };
+        // Resolve self-method calls: add callee's direct field accesses
+        m.self_method_calls.iter().for_each(|callee| {
+            if let Some(callee_fields) = direct_fields.get(callee.as_str()) {
+                callee_fields
+                    .iter()
+                    .filter(|f| struct_fields.iter().any(|sf| sf == *f))
+                    .for_each(|f| fields_to_add.push(f.as_str()));
+            }
+        });
+        fields_to_add.iter().for_each(|&field| {
+            field_to_methods.entry(field).or_default().push(i);
+        });
+    });
+    field_to_methods
+}
+
 /// Compute LCOM4: number of connected components in the method-field graph.
 /// Operation: Union-Find on method indices connected by shared field accesses.
 /// Uses closures to wrap UnionFind calls for IOSP lenient-mode compliance.
 fn compute_lcom4(
     methods: &[&MethodFieldData],
     struct_fields: &[String],
+    field_to_methods: &HashMap<&str, Vec<usize>>,
 ) -> (usize, Vec<ResponsibilityCluster>) {
     let n = methods.len();
     if n == 0 {
@@ -72,23 +112,6 @@ fn compute_lcom4(
     let mut uf = make_uf(n);
     let unite = |uf: &mut UnionFind, a, b| uf.union(a, b);
     let components = |uf: &mut UnionFind| uf.component_members();
-    // Build field -> method indices map.
-    // Constructors (returning Self) conceptually touch ALL struct fields.
-    let mut field_to_methods: HashMap<&str, Vec<usize>> = HashMap::new();
-    methods.iter().enumerate().for_each(|(i, m)| {
-        let fields_to_add: Vec<&str> = if m.is_constructor {
-            struct_fields.iter().map(|f| f.as_str()).collect()
-        } else {
-            m.field_accesses
-                .iter()
-                .filter(|f| struct_fields.iter().any(|sf| sf == *f))
-                .map(|f| f.as_str())
-                .collect()
-        };
-        fields_to_add.iter().for_each(|&field| {
-            field_to_methods.entry(field).or_default().push(i);
-        });
-    });
     // Union methods that share fields
     field_to_methods.values().for_each(|indices| {
         indices.windows(2).for_each(|w| unite(&mut uf, w[0], w[1]));
@@ -176,6 +199,23 @@ mod tests {
             parent_type: parent.to_string(),
             field_accesses: fields.iter().map(|s| s.to_string()).collect(),
             call_targets: calls.iter().map(|s| s.to_string()).collect(),
+            self_method_calls: HashSet::new(),
+            is_constructor: false,
+        }
+    }
+
+    fn make_method_with_self_calls(
+        name: &str,
+        parent: &str,
+        fields: &[&str],
+        self_calls: &[&str],
+    ) -> MethodFieldData {
+        MethodFieldData {
+            method_name: name.to_string(),
+            parent_type: parent.to_string(),
+            field_accesses: fields.iter().map(|s| s.to_string()).collect(),
+            call_targets: HashSet::new(),
+            self_method_calls: self_calls.iter().map(|s| s.to_string()).collect(),
             is_constructor: false,
         }
     }
@@ -186,6 +226,7 @@ mod tests {
             parent_type: parent.to_string(),
             field_accesses: HashSet::new(),
             call_targets: calls.iter().map(|s| s.to_string()).collect(),
+            self_method_calls: HashSet::new(),
             is_constructor: true,
         }
     }
@@ -207,7 +248,11 @@ mod tests {
         let m3 = make_method("c", "Foo", &["x"], &[]);
         let methods: Vec<&MethodFieldData> = vec![&m1, &m2, &m3];
         let fields = vec!["x".to_string(), "y".to_string()];
-        let (lcom4, clusters) = compute_lcom4(&methods, &fields);
+        let (lcom4, clusters) = compute_lcom4(
+            &methods,
+            &fields,
+            &build_field_method_index(&methods, &fields),
+        );
         assert_eq!(lcom4, 1);
         assert_eq!(clusters.len(), 1);
     }
@@ -221,7 +266,11 @@ mod tests {
         let m4 = make_method("d", "Foo", &["y"], &[]);
         let methods: Vec<&MethodFieldData> = vec![&m1, &m2, &m3, &m4];
         let fields = vec!["x".to_string(), "y".to_string()];
-        let (lcom4, clusters) = compute_lcom4(&methods, &fields);
+        let (lcom4, clusters) = compute_lcom4(
+            &methods,
+            &fields,
+            &build_field_method_index(&methods, &fields),
+        );
         assert_eq!(lcom4, 2);
         assert_eq!(clusters.len(), 2);
     }
@@ -234,7 +283,11 @@ mod tests {
         let m3 = make_method("c", "Foo", &["z"], &[]);
         let methods: Vec<&MethodFieldData> = vec![&m1, &m2, &m3];
         let fields = vec!["x".to_string(), "y".to_string(), "z".to_string()];
-        let (lcom4, _) = compute_lcom4(&methods, &fields);
+        let (lcom4, _) = compute_lcom4(
+            &methods,
+            &fields,
+            &build_field_method_index(&methods, &fields),
+        );
         assert_eq!(lcom4, 3);
     }
 
@@ -242,7 +295,11 @@ mod tests {
     fn test_lcom4_empty_methods() {
         let methods: Vec<&MethodFieldData> = vec![];
         let fields = vec!["x".to_string()];
-        let (lcom4, clusters) = compute_lcom4(&methods, &fields);
+        let (lcom4, clusters) = compute_lcom4(
+            &methods,
+            &fields,
+            &build_field_method_index(&methods, &fields),
+        );
         assert_eq!(lcom4, 0);
         assert!(clusters.is_empty());
     }
@@ -254,7 +311,11 @@ mod tests {
         let m2 = make_method("b", "Foo", &[], &["helper"]);
         let methods: Vec<&MethodFieldData> = vec![&m1, &m2];
         let fields = vec!["x".to_string()];
-        let (lcom4, _) = compute_lcom4(&methods, &fields);
+        let (lcom4, _) = compute_lcom4(
+            &methods,
+            &fields,
+            &build_field_method_index(&methods, &fields),
+        );
         assert_eq!(lcom4, 2);
     }
 
@@ -415,7 +476,11 @@ mod tests {
         let m3 = make_method("c", "Foo", &["y"], &[]);
         let methods: Vec<&MethodFieldData> = vec![&m1, &m2, &m3];
         let fields = vec!["x".to_string(), "y".to_string()];
-        let (lcom4, _) = compute_lcom4(&methods, &fields);
+        let (lcom4, _) = compute_lcom4(
+            &methods,
+            &fields,
+            &build_field_method_index(&methods, &fields),
+        );
         assert_eq!(
             lcom4, 1,
             "Transitively connected methods should form one component"
@@ -428,7 +493,11 @@ mod tests {
         let m2 = make_method("b", "Foo", &["y"], &[]);
         let methods: Vec<&MethodFieldData> = vec![&m1, &m2];
         let fields = vec!["x".to_string(), "y".to_string()];
-        let (_, clusters) = compute_lcom4(&methods, &fields);
+        let (_, clusters) = compute_lcom4(
+            &methods,
+            &fields,
+            &build_field_method_index(&methods, &fields),
+        );
         assert_eq!(clusters.len(), 2);
         // Each cluster should have exactly one method and one field
         for c in &clusters {
@@ -445,7 +514,11 @@ mod tests {
         let m3 = make_constructor("new", "Foo", &[]);
         let methods: Vec<&MethodFieldData> = vec![&m1, &m2, &m3];
         let fields = vec!["x".to_string(), "y".to_string()];
-        let (lcom4, _) = compute_lcom4(&methods, &fields);
+        let (lcom4, _) = compute_lcom4(
+            &methods,
+            &fields,
+            &build_field_method_index(&methods, &fields),
+        );
         // Constructor touches all fields → connects get_x and get_y → LCOM4 = 1
         assert_eq!(
             lcom4, 1,
@@ -460,7 +533,11 @@ mod tests {
         let m2 = make_method("get_y", "Foo", &["y"], &[]);
         let methods: Vec<&MethodFieldData> = vec![&m1, &m2];
         let fields = vec!["x".to_string(), "y".to_string()];
-        let (lcom4, _) = compute_lcom4(&methods, &fields);
+        let (lcom4, _) = compute_lcom4(
+            &methods,
+            &fields,
+            &build_field_method_index(&methods, &fields),
+        );
         assert_eq!(lcom4, 2, "Without constructor, disjoint groups remain");
     }
 
@@ -473,7 +550,11 @@ mod tests {
         let m4 = make_constructor("default", "Config", &[]);
         let methods: Vec<&MethodFieldData> = vec![&m1, &m2, &m3, &m4];
         let fields = vec!["a".to_string(), "b".to_string(), "c".to_string()];
-        let (lcom4, _) = compute_lcom4(&methods, &fields);
+        let (lcom4, _) = compute_lcom4(
+            &methods,
+            &fields,
+            &build_field_method_index(&methods, &fields),
+        );
         assert_eq!(lcom4, 1, "Default constructor should unify all clusters");
     }
 
@@ -484,7 +565,34 @@ mod tests {
         let m2 = make_method("b", "Foo", &["x"], &[]);
         let methods: Vec<&MethodFieldData> = vec![&m1, &m2];
         let fields = vec!["x".to_string()]; // foreign_field is not a struct field
-        let (lcom4, _) = compute_lcom4(&methods, &fields);
+        let (lcom4, _) = compute_lcom4(
+            &methods,
+            &fields,
+            &build_field_method_index(&methods, &fields),
+        );
         assert_eq!(lcom4, 1, "Both methods share 'x', foreign field ignored");
+    }
+
+    #[test]
+    fn test_lcom4_self_method_call_resolves_field_access() {
+        // conn() accesses self.conn directly
+        // query() calls self.conn() — should transitively share 'conn' field
+        // insert() calls self.conn() — should also share 'conn' field
+        // Without resolution: query and insert have no direct field access → LCOM4=3
+        // With resolution: all three share 'conn' → LCOM4=1
+        let conn = make_method("conn", "Database", &["conn"], &[]);
+        let query = make_method_with_self_calls("query", "Database", &[], &["conn"]);
+        let insert = make_method_with_self_calls("insert", "Database", &[], &["conn"]);
+        let methods: Vec<&MethodFieldData> = vec![&conn, &query, &insert];
+        let fields = vec!["conn".to_string()];
+        let (lcom4, _) = compute_lcom4(
+            &methods,
+            &fields,
+            &build_field_method_index(&methods, &fields),
+        );
+        assert_eq!(
+            lcom4, 1,
+            "Methods sharing field via self.conn() call should be one component"
+        );
     }
 }

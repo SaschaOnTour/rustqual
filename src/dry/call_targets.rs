@@ -97,7 +97,11 @@ impl CallTargetCollector {
             &mut self.production_calls
         };
         args.iter().for_each(|arg| {
-            if let syn::Expr::Path(p) = arg {
+            let expr = match arg {
+                syn::Expr::Reference(r) => &*r.expr,
+                other => other,
+            };
+            if let syn::Expr::Path(p) = expr {
                 insert_path_segments(target, &p.path);
             }
         });

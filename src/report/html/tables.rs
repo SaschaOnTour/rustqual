@@ -26,7 +26,7 @@ fn html_dry_header(analysis: &crate::report::AnalysisResult) -> String {
         .iter()
         .filter(|w| !w.suppressed)
         .count();
-    let total = analysis.duplicates.len()
+    let total = analysis.duplicates.iter().filter(|g| !g.suppressed).count()
         + analysis.fragments.len()
         + analysis.dead_code.len()
         + analysis.boilerplate.len()
@@ -48,34 +48,38 @@ fn html_dry_header(analysis: &crate::report::AnalysisResult) -> String {
 /// Build HTML for duplicate function groups.
 /// Operation: iteration and formatting logic, no own calls (html_escape via closure).
 fn html_duplicates_category(duplicates: &[crate::dry::functions::DuplicateGroup]) -> String {
-    if duplicates.is_empty() {
+    if duplicates.iter().all(|g| g.suppressed) {
         return String::new();
     }
     let esc = |s: &str| html_escape(s);
     let mut html = String::from("<h3>Duplicate Functions</h3>\n");
-    duplicates.iter().enumerate().for_each(|(i, g)| {
-        let kind_label = match &g.kind {
-            crate::dry::functions::DuplicateKind::Exact => "Exact".to_string(),
-            crate::dry::functions::DuplicateKind::NearDuplicate { similarity } => {
-                format!("{:.0}% similar", similarity * PERCENTAGE_MULTIPLIER)
-            }
-        };
-        html.push_str(&format!(
-            "<p><strong>Group {}</strong>: {} ({} functions)</p>\n<ul>\n",
-            i + 1,
-            esc(&kind_label),
-            g.entries.len(),
-        ));
-        g.entries.iter().for_each(|e| {
+    duplicates
+        .iter()
+        .filter(|g| !g.suppressed)
+        .enumerate()
+        .for_each(|(i, g)| {
+            let kind_label = match &g.kind {
+                crate::dry::functions::DuplicateKind::Exact => "Exact".to_string(),
+                crate::dry::functions::DuplicateKind::NearDuplicate { similarity } => {
+                    format!("{:.0}% similar", similarity * PERCENTAGE_MULTIPLIER)
+                }
+            };
             html.push_str(&format!(
-                "  <li>{} ({}:{})</li>\n",
-                esc(&e.qualified_name),
-                esc(&e.file),
-                e.line,
+                "<p><strong>Group {}</strong>: {} ({} functions)</p>\n<ul>\n",
+                i + 1,
+                esc(&kind_label),
+                g.entries.len(),
             ));
+            g.entries.iter().for_each(|e| {
+                html.push_str(&format!(
+                    "  <li>{} ({}:{})</li>\n",
+                    esc(&e.qualified_name),
+                    esc(&e.file),
+                    e.line,
+                ));
+            });
+            html.push_str("</ul>\n");
         });
-        html.push_str("</ul>\n");
-    });
     html
 }
 
