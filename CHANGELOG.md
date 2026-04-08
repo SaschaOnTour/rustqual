@@ -5,14 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.4.3] - 2026-04-08
-
-### Added
-- **`// qual:recursive` annotation**: Marks intentionally recursive functions. Self-calls are removed from own-call lists before classification, preventing false Violations. Does not count against suppression ratio. Parsed by `is_recursive_marker()` in `findings.rs`, collected by `collect_recursive_lines()`, applied by `apply_recursive_annotations()` in `pipeline/warnings.rs`.
-- README documentation: pragmatic IOSP relaxation design note explaining leaf detection trade-off vs strict IOSP.
+## [0.4.4] - 2026-04-08
 
 ### Changed
-- Test count: 843 — Function count: 462
+- **Safe targets extended to non-Violations**: `apply_leaf_reclassification()` now treats ALL non-Violation functions as safe call targets — not just C=0 leaves. Calls to Integrations (L=0, C>0) no longer trigger Violations in the caller. Only calls to other Violations (mutually recursive or genuinely tangled functions) remain true Violations. This is a pragmatic IOSP relaxation documented in README.
+- **`// qual:recursive` annotation**: Marks intentionally recursive functions. Self-calls are removed from own-call lists before reclassification. Does not count against suppression ratio.
+- README: design note documenting safe-target reclassification as pragmatic IOSP relaxation.
+- Test count: 844 — Function count: 459
 
 ## [0.4.2] - 2026-04-08
 

@@ -26,15 +26,15 @@ pub(crate) fn apply_recursive_annotations(
     });
 }
 
-/// Reclassify Violations that only call leaf functions as Operations.
-/// A leaf is a function with no own calls (Operation or Trivial).
-/// Iterates until stable to handle cascading leaves.
+/// Reclassify Violations whose own calls all target safe functions.
+/// Safe = any non-Violation (Operations, Trivials, and Integrations).
+/// Iterates until stable to handle cascading reclassification.
 /// Operation: loop + set operations, no own calls.
 pub(crate) fn apply_leaf_reclassification(results: &mut [FunctionAnalysis]) {
     loop {
-        let leaf_names: HashSet<String> = results
+        let safe_names: HashSet<String> = results
             .iter()
-            .filter(|f| f.own_calls.is_empty())
+            .filter(|f| !matches!(f.classification, Classification::Violation { .. }))
             .flat_map(|f| {
                 [
                     f.name.clone(),
@@ -47,7 +47,7 @@ pub(crate) fn apply_leaf_reclassification(results: &mut [FunctionAnalysis]) {
         let mut changed = false;
         results.iter_mut().for_each(|fa| {
             if matches!(fa.classification, Classification::Violation { .. })
-                && fa.own_calls.iter().all(|call| leaf_names.contains(call))
+                && fa.own_calls.iter().all(|call| safe_names.contains(call))
             {
                 fa.classification = Classification::Operation;
                 fa.own_calls.clear();

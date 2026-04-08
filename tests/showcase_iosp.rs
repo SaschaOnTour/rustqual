@@ -56,26 +56,13 @@ const BEFORE_IOSP: &str = r#"
 struct UserService;
 struct User { name: String, email: String, age: u32 }
 
-fn log_action(_msg: &str) {}
 fn create_user(name: &str, email: &str, age: u32) -> User {
-    log_action("creating user");
     User { name: name.to_string(), email: email.to_string(), age }
-}
-fn save_to_database(_user: &User) {
-    log_action("saving");
-}
-fn send_welcome_email(_user: &User) {
-    log_action("emailing");
-}
-fn charge_payment(_user: &User, _amount: f64) {
-    log_action("charging");
-}
-fn send_receipt(_user: &User, _amount: f64) {
-    log_action("receipt");
 }
 
 impl UserService {
-    // VIOLATION: mixes validation logic with calls to non-leaf functions
+    // VIOLATION: mixes validation logic with calls — register_user and process_order
+    // call each other (mutual dependency), creating non-resolvable violations.
     fn register_user(name: &str, email: &str, age: u32) -> Result<User, String> {
         if name.is_empty() {
             return Err("Name required".into());
@@ -87,17 +74,15 @@ impl UserService {
             return Err("Must be 18+".into());
         }
         let user = create_user(name, email, age);
-        save_to_database(&user);
-        send_welcome_email(&user);
+        Self::process_order(&user, 0.0)?;
         Ok(user)
     }
 
-    // VIOLATION: mixes calculation with calls to non-leaf functions
+    // VIOLATION: mixes calculation with calls (mutual dependency with register_user)
     fn process_order(user: &User, amount: f64) -> Result<f64, String> {
         let discount = if amount > 100.0 { 0.1 } else { 0.0 };
         let final_amount = amount * (1.0 - discount);
-        charge_payment(user, final_amount);
-        send_receipt(user, final_amount);
+        Self::register_user(&user.name, &user.email, user.age)?;
         Ok(final_amount)
     }
 }
@@ -107,23 +92,13 @@ const AFTER_IOSP: &str = r#"
 struct UserService;
 struct User { name: String, email: String, age: u32 }
 
-fn log_action(_msg: &str) {}
 fn create_user(name: &str, email: &str, age: u32) -> User {
-    log_action("creating user");
     User { name: name.to_string(), email: email.to_string(), age }
 }
-fn save_to_database(_user: &User) {
-    log_action("saving");
-}
-fn send_welcome_email(_user: &User) {
-    log_action("emailing");
-}
-fn charge_payment(_user: &User, _amount: f64) {
-    log_action("charging");
-}
-fn send_receipt(_user: &User, _amount: f64) {
-    log_action("receipt");
-}
+fn save_to_database(_user: &User) {}
+fn send_welcome_email(_user: &User) {}
+fn charge_payment(_user: &User, _amount: f64) {}
+fn send_receipt(_user: &User, _amount: f64) {}
 
 impl UserService {
     // INTEGRATION: pure delegation, no own logic

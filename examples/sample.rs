@@ -54,10 +54,10 @@ fn process_payment(order: &Order) -> Result<Payment, String> {
     // Own function call
     let method = determine_payment_method(order);
 
-    // More logic
+    // More logic + mutual dependency with generate_report → non-resolvable violation
     if method == PaymentMethod::CreditCard {
         let fee = order.total * 0.03;
-        // Another own call inside a branch — classic IOSP violation
+        let _report = generate_report(&[]);
         charge_credit_card(order.total + fee)
     } else {
         process_bank_transfer(order.total)
@@ -71,11 +71,15 @@ fn generate_report(data: &[Record]) -> String {
     let header = build_report_header(data);
     result.push_str(&header);
 
-    // Logic mixed in
+    // Logic mixed in + mutual dependency with process_payment → non-resolvable violation
     for record in data {
         if record.is_active {
-            let line = format_record(record); // own call inside loop
+            let line = format_record(record);
             result.push_str(&line);
+            let _ = process_payment(&Order {
+                total: 0.0,
+                discount_pct: 0.0,
+            });
         }
     }
 
