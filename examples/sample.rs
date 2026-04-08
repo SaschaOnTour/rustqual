@@ -142,19 +142,25 @@ fn create_user(_: &RegistrationInput) -> User {
 fn send_welcome_email(_: &User) {
     todo!()
 }
+fn log_action(_: &str) {}
 fn determine_payment_method(_: &Order) -> PaymentMethod {
+    log_action("determining");
     todo!()
 }
 fn charge_credit_card(_: f64) -> Result<Payment, String> {
+    log_action("charging");
     todo!()
 }
 fn process_bank_transfer(_: f64) -> Result<Payment, String> {
+    log_action("transferring");
     todo!()
 }
 fn build_report_header(_: &[Record]) -> String {
+    log_action("header");
     todo!()
 }
 fn format_record(_: &Record) -> String {
+    log_action("formatting");
     todo!()
 }
 

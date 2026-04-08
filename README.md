@@ -461,6 +461,26 @@ pub fn parse(s: &str) -> Self {
 
 Common use cases: `serialize`/`deserialize`, `encode`/`decode`, `to_bytes`/`from_bytes`. Like `// qual:api`, inverse markers do **not** count against the suppression ratio — they document intentional structural similarity.
 
+### Automatic Leaf Detection
+
+Functions with no own calls (Operations and Trivials) are automatically recognized as **leaf functions**. Calls to leaves do not count as "own calls" for the caller:
+
+```rust
+fn get_config() -> Config {          // Operation (C=0) → leaf
+    if let Ok(c) = load_file() { c } else { Config::default() }
+}
+
+fn cmd_quality(clear: bool) -> Result<()> {
+    let config = get_config();       // calling a leaf → not an own call
+    if clear { /* logic */ }         // logic only → Operation, not Violation
+    Ok(())
+}
+```
+
+Without leaf detection, `cmd_quality` would be a Violation (logic + own call). With it, the call to `get_config` is recognized as terminal — no orchestration involved.
+
+Leaf detection cascades: if a function calls only leaves, it becomes an Operation (and thus a leaf itself), benefiting its callers.
+
 ### Lenient vs. Strict Mode
 
 By default the analyzer runs in **lenient mode**. This makes it practical for idiomatic Rust code:

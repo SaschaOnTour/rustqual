@@ -3,7 +3,7 @@ mod discovery;
 mod metrics;
 mod structural_metrics;
 mod tq_metrics;
-mod warnings;
+pub(crate) mod warnings;
 
 pub(crate) use discovery::{
     collect_filtered_files, collect_rust_files, collect_suppression_lines, filter_to_changed,
@@ -63,6 +63,7 @@ pub(crate) fn run_analysis(
         .collect();
 
     exclude_test_violations(&mut all_results);
+    warnings::apply_leaf_reclassification(&mut all_results);
     let mut summary = Summary::from_results(&all_results);
     apply_complexity_warnings(&mut all_results, config, &mut summary);
     apply_extended_warnings(&mut all_results, config, &mut summary);

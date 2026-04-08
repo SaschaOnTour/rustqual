@@ -306,7 +306,9 @@ mod tests {
         let scope = ProjectScope::from_files(&scope_files);
         let config = Config::default();
         let analyzer = Analyzer::new(&config, &scope);
-        analyzer.analyze_file(&syntax, "test.rs")
+        let mut results = analyzer.analyze_file(&syntax, "test.rs");
+        crate::pipeline::warnings::apply_leaf_reclassification(&mut results);
+        results
     }
 
     /// Helper: parse code with a custom config.
@@ -357,7 +359,8 @@ mod tests {
     #[test]
     fn test_violation_mixed() {
         let code = r#"
-            fn helper() {}
+            fn inner() {}
+            fn helper() { inner(); }
             fn violator(x: i32) {
                 let _y = x;
                 if _y > 0 {
@@ -376,7 +379,8 @@ mod tests {
 
     #[test]
     fn test_violation_locations() {
-        let code = r#"fn helper() {}
+        let code = r#"fn inner() {}
+fn helper() { inner(); }
 fn violator(x: i32) {
     let _y = x;
     if _y > 0 {
@@ -395,15 +399,15 @@ fn violator(x: i32) {
             assert!(
                 logic_locations
                     .iter()
-                    .any(|l| l.kind == "if" && l.line == 4),
-                "Expected 'if' on line 4, got: {:?}",
+                    .any(|l| l.kind == "if" && l.line == 5),
+                "Expected 'if' on line 5, got: {:?}",
                 logic_locations
             );
             assert!(
                 call_locations
                     .iter()
-                    .any(|c| c.name == "helper" && c.line == 5),
-                "Expected 'helper' call on line 5, got: {:?}",
+                    .any(|c| c.name == "helper" && c.line == 6),
+                "Expected 'helper' call on line 6, got: {:?}",
                 call_locations
             );
         } else {
@@ -923,7 +927,8 @@ fn violator(x: i32) {
     #[test]
     fn test_severity_low() {
         let code = r#"
-            fn helper() {}
+            fn inner() {}
+            fn helper() { inner(); }
             fn f(x: bool) {
                 let _y = x;
                 if x { helper(); }
@@ -1022,8 +1027,8 @@ fn violator(x: i32) {
     // ---------------------------------------------------------------
 
     #[test]
-    fn test_type_new_is_own_call() {
-        // Type::new() IS an own call — project function in inherent impl.
+    fn test_leaf_constructor_call_is_operation() {
+        // Adx::new() is Trivial (leaf). Calling a leaf + logic = Operation.
         let code = r#"
             struct Adx { period: usize }
             impl Adx {
@@ -1037,8 +1042,8 @@ fn violator(x: i32) {
         let results = parse_and_analyze(code);
         let f = results.iter().find(|r| r.name == "compute").unwrap();
         assert!(
-            matches!(f.classification, Classification::Violation { .. }),
-            "Adx::new() IS own call + logic → Violation, got {:?}",
+            matches!(f.classification, Classification::Operation),
+            "Adx::new() is leaf → calling it + logic = Operation, got {:?}",
             f.classification
         );
     }
@@ -1150,8 +1155,9 @@ fn violator(x: i32) {
     #[test]
     fn test_match_with_logic_in_arm_is_violation() {
         let code = r#"
-            fn call_a(_x: i32) {}
-            fn call_b() {}
+            fn inner() {}
+            fn call_a(_x: i32) { inner(); }
+            fn call_b() { inner(); }
             fn dispatch(x: i32) {
                 match x {
                     0 => call_a(x + 1),
@@ -1171,8 +1177,9 @@ fn violator(x: i32) {
     #[test]
     fn test_match_with_guard_is_violation() {
         let code = r#"
-            fn call_a() {}
-            fn call_b() {}
+            fn inner() {}
+            fn call_a() { inner(); }
+            fn call_b() { inner(); }
             fn dispatch(x: i32) {
                 match x {
                     n if n > 0 => call_a(),
@@ -1395,6 +1402,121 @@ fn violator(x: i32) {
         assert!(
             matches!(f.classification, Classification::Operation),
             "v.push() on Vec param — not an own call, should be Operation, got {:?}",
+            f.classification
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Automatic leaf detection tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_leaf_call_not_counted_as_own_call() {
+        // get_config is a leaf (C=0, Operation).
+        // cmd_quality calls get_config + has logic → should be Operation (leaf calls don't count).
+        let code = r#"
+            fn get_config() -> i32 {
+                if true { 1 } else { 2 }
+            }
+            fn cmd_quality(clear: bool) -> i32 {
+                let config = get_config();
+                if clear { config + 1 } else { config }
+            }
+        "#;
+        let results = parse_and_analyze(code);
+        let f = results.iter().find(|f| f.name == "cmd_quality").unwrap();
+        assert!(
+            matches!(f.classification, Classification::Operation),
+            "Calling a leaf (get_config) + logic should be Operation, got {:?}",
+            f.classification
+        );
+    }
+
+    #[test]
+    fn test_non_leaf_call_still_violation() {
+        // orchestrator is NOT a leaf (C>0, it calls helper).
+        // caller has logic + calls orchestrator → Violation (non-leaf call).
+        let code = r#"
+            fn helper() -> i32 { 42 }
+            fn orchestrator() -> i32 {
+                helper()
+            }
+            fn caller(x: bool) -> i32 {
+                if x { orchestrator() } else { 0 }
+            }
+        "#;
+        let results = parse_and_analyze(code);
+        let f = results.iter().find(|f| f.name == "caller").unwrap();
+        assert!(
+            matches!(f.classification, Classification::Violation { .. }),
+            "Calling a non-leaf (orchestrator) + logic should be Violation, got {:?}",
+            f.classification
+        );
+    }
+
+    #[test]
+    fn test_multiple_leaf_calls_still_operation() {
+        // Both helpers are leaves (C=0). Calling multiple leaves + logic → Operation.
+        let code = r#"
+            fn validate(s: &str) -> bool { s.len() > 3 }
+            fn normalize(s: &str) -> String { s.to_lowercase() }
+            fn process(input: &str) -> Option<String> {
+                if validate(input) {
+                    Some(normalize(input))
+                } else {
+                    None
+                }
+            }
+        "#;
+        let results = parse_and_analyze(code);
+        let f = results.iter().find(|f| f.name == "process").unwrap();
+        assert!(
+            matches!(f.classification, Classification::Operation),
+            "Calling only leaves + logic should be Operation, got {:?}",
+            f.classification
+        );
+    }
+
+    #[test]
+    fn test_pure_integration_unchanged() {
+        // Integration (only calls, no logic) stays Integration — unaffected by leaf detection.
+        let code = r#"
+            fn step_a() {}
+            fn step_b() {}
+            fn pipeline() {
+                step_a();
+                step_b();
+            }
+        "#;
+        let results = parse_and_analyze(code);
+        let f = results.iter().find(|f| f.name == "pipeline").unwrap();
+        assert!(
+            matches!(f.classification, Classification::Integration),
+            "Pure Integration should stay Integration, got {:?}",
+            f.classification
+        );
+    }
+
+    #[test]
+    fn test_cascading_leaf_detection() {
+        // step_a and step_b are leaves (C=0).
+        // middle calls only leaves → after leaf detection, middle is Operation → also a leaf.
+        // top calls middle + has logic → should be Operation (middle is transitively a leaf).
+        let code = r#"
+            fn step_a() -> i32 { if true { 1 } else { 0 } }
+            fn step_b() -> i32 { 42 }
+            fn middle() -> i32 {
+                if step_a() > 0 { step_b() } else { 0 }
+            }
+            fn top(x: bool) -> i32 {
+                if x { middle() } else { -1 }
+            }
+        "#;
+        let results = parse_and_analyze(code);
+        let f = results.iter().find(|f| f.name == "top").unwrap();
+        assert!(
+            matches!(f.classification, Classification::Operation),
+            "Cascading leaf: top calls middle (which calls only leaves) should be Operation, got {:?}",
             f.classification
         );
     }

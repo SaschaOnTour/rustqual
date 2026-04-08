@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-04-08
+
+### Added
+- **Automatic leaf detection**: Functions classified as Operation (C=0) or Trivial are automatically recognized as "leaves". Calls to leaf functions no longer count as own calls for the caller, eliminating false IOSP violations when mixing logic with calls to simple helpers (e.g., `get_config()`, `map_err()`). Iterates until stable for cascading leaf detection.
+- `apply_leaf_reclassification()` in `pipeline/warnings.rs` — post-processing step that reclassifies Violations calling only leaves as Operations.
+- 5 new unit tests for leaf detection (single leaf, multiple leaves, non-leaf still violation, pure integration unchanged, cascading).
+
+### Changed
+- Test count: 841 — Function count: 459
+- Showcase and integration test fixtures updated to use non-leaf helpers where Violations are expected.
+
 ## [0.4.1] - 2026-04-08
 
 ### Added
