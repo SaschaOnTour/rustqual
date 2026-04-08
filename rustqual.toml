@@ -2,31 +2,6 @@
 #
 # Place this file in your project root.
 
-# External crate/function prefixes that are allowed inside operations.
-# Calls matching these prefixes are NOT counted as "own function calls".
-external_prefixes = [
-    "std",
-    "core",
-    "alloc",
-    "log",
-    "tracing",
-    "anyhow",
-    "thiserror",
-    "serde",
-    "tokio",
-    "println",
-    "eprintln",
-    "format",
-    "vec",
-    "dbg",
-    "todo",
-    "unimplemented",
-    "panic",
-    "assert",
-    "assert_eq",
-    "assert_ne",
-    "debug_assert",
-]
 
 # Function names (or patterns with trailing *) to exclude from analysis.
 ignore_functions = [

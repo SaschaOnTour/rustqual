@@ -53,32 +53,6 @@ pub fn generate_default_config() -> &'static str {
 
 # ── Function Classification ──────────────────────────────────────────────
 
-# External crate/function prefixes that are allowed inside operations.
-# Calls matching these prefixes are NOT counted as "own function calls".
-external_prefixes = [
-    "std",
-    "core",
-    "alloc",
-    "log",
-    "tracing",
-    "anyhow",
-    "thiserror",
-    "serde",
-    "tokio",
-    "println",
-    "eprintln",
-    "format",
-    "vec",
-    "dbg",
-    "todo",
-    "unimplemented",
-    "panic",
-    "assert",
-    "assert_eq",
-    "assert_ne",
-    "debug_assert",
-]
-
 # Function names (or glob patterns) to exclude from analysis.
 # Examples: "main", "test_*", "visit_*"
 ignore_functions = [
@@ -223,12 +197,6 @@ fn format_tailored_config(m: &ProjectMetrics, thresholds: &[usize; 4]) -> String
 
 # ── Function Classification ──────────────────────────────────────────────
 
-external_prefixes = [
-    "std", "core", "alloc", "log", "tracing", "anyhow", "thiserror",
-    "serde", "tokio", "println", "eprintln", "format", "vec", "dbg",
-    "todo", "unimplemented", "panic", "assert", "assert_eq", "assert_ne",
-    "debug_assert",
-]
 ignore_functions = ["main", "test_*"]
 exclude_files = []
 strict_closures = false
@@ -352,7 +320,6 @@ mod tests {
     #[test]
     fn test_generate_default_config_contents() {
         let content = generate_default_config();
-        assert!(content.contains("external_prefixes"));
         assert!(content.contains("ignore_functions"));
         assert!(content.contains("strict_closures"));
         assert!(content.contains("allow_recursion"));

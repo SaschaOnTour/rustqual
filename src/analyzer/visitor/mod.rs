@@ -1,5 +1,7 @@
 mod visit;
 
+use std::collections::HashMap;
+
 use crate::config::Config;
 use crate::scope::ProjectScope;
 
@@ -51,10 +53,20 @@ pub(crate) struct BodyVisitor<'a> {
     pub panic_count: usize,
     /// Number of `todo!` macro invocations (all contexts).
     pub todo_count: usize,
+    /// Current impl type (for self.method() resolution).
+    pub(super) parent_type: Option<String>,
+    /// Parameter name → type name mapping (for receiver type resolution).
+    pub(super) param_types: HashMap<String, String>,
 }
 
 impl<'a> BodyVisitor<'a> {
-    pub fn new(config: &'a Config, scope: &'a ProjectScope, fn_name: Option<&str>) -> Self {
+    pub fn new(
+        config: &'a Config,
+        scope: &'a ProjectScope,
+        fn_name: Option<&str>,
+        parent_type: Option<&str>,
+        param_types: HashMap<String, String>,
+    ) -> Self {
         Self {
             config,
             scope,
@@ -78,7 +90,33 @@ impl<'a> BodyVisitor<'a> {
             expect_count: 0,
             panic_count: 0,
             todo_count: 0,
+            parent_type: parent_type.map(String::from),
+            param_types,
         }
+    }
+
+    /// Resolve the type of a method call receiver expression.
+    /// Returns Some(type_name) for `self` and simple parameter identifiers.
+    /// Operation: pattern matching logic, no own calls.
+    pub(super) fn resolve_receiver_type(&self, receiver: &syn::Expr) -> Option<&str> {
+        match receiver {
+            syn::Expr::Path(p) if p.path.is_ident("self") => self.parent_type.as_deref(),
+            syn::Expr::Path(p) => {
+                let ident = p.path.get_ident()?.to_string();
+                self.param_types.get(&ident).map(|s| s.as_str())
+            }
+            _ => None,
+        }
+    }
+
+    /// Check if a method call is an own call using type-aware resolution.
+    /// Layer 1: receiver type known → check type's methods.
+    /// Layer 2 fallback: receiver type unknown → check scope (conservative).
+    /// Operation: conditional logic, no own calls.
+    pub(super) fn is_type_resolved_own_method(&self, method: &str, receiver: &syn::Expr) -> bool {
+        self.resolve_receiver_type(receiver)
+            .map(|rt| self.scope.is_own_self_method(method, rt))
+            .unwrap_or_else(|| self.scope.is_own_method(method))
     }
 
     /// Check if we're inside a closure or async block in lenient mode.
@@ -350,7 +388,7 @@ mod tests {
     fn test_new_defaults() {
         let config = Config::default();
         let scope = empty_scope();
-        let visitor = BodyVisitor::new(&config, &scope, Some("test_fn"));
+        let visitor = BodyVisitor::new(&config, &scope, Some("test_fn"), None, HashMap::new());
         assert!(visitor.logic.is_empty());
         assert!(visitor.own_calls.is_empty());
         assert_eq!(visitor.max_nesting, 0);
@@ -370,7 +408,7 @@ mod tests {
     fn test_new_without_fn_name() {
         let config = Config::default();
         let scope = empty_scope();
-        let visitor = BodyVisitor::new(&config, &scope, None);
+        let visitor = BodyVisitor::new(&config, &scope, None, None, HashMap::new());
         assert!(visitor.current_fn_name.is_none());
     }
 
@@ -378,7 +416,7 @@ mod tests {
     fn test_in_lenient_nested_context_closure() {
         let config = Config::default();
         let scope = empty_scope();
-        let mut visitor = BodyVisitor::new(&config, &scope, None);
+        let mut visitor = BodyVisitor::new(&config, &scope, None, None, HashMap::new());
         assert!(!visitor.in_lenient_nested_context());
         visitor.closure_depth = 1;
         assert!(visitor.in_lenient_nested_context());
@@ -389,7 +427,7 @@ mod tests {
         let mut config = Config::default();
         config.strict_closures = true;
         let scope = empty_scope();
-        let mut visitor = BodyVisitor::new(&config, &scope, None);
+        let mut visitor = BodyVisitor::new(&config, &scope, None, None, HashMap::new());
         visitor.closure_depth = 1;
         assert!(!visitor.in_lenient_nested_context());
     }
@@ -398,7 +436,7 @@ mod tests {
     fn test_in_lenient_nested_context_async_block() {
         let config = Config::default();
         let scope = empty_scope();
-        let mut visitor = BodyVisitor::new(&config, &scope, None);
+        let mut visitor = BodyVisitor::new(&config, &scope, None, None, HashMap::new());
         visitor.async_block_depth = 1;
         assert!(visitor.in_lenient_nested_context());
     }
@@ -425,7 +463,7 @@ mod tests {
     fn test_is_recursive_call_match() {
         let config = Config::default();
         let scope = empty_scope();
-        let visitor = BodyVisitor::new(&config, &scope, Some("my_func"));
+        let visitor = BodyVisitor::new(&config, &scope, Some("my_func"), None, HashMap::new());
         assert!(visitor.is_recursive_call("my_func"));
     }
 
@@ -433,7 +471,7 @@ mod tests {
     fn test_is_recursive_call_qualified() {
         let config = Config::default();
         let scope = empty_scope();
-        let visitor = BodyVisitor::new(&config, &scope, Some("bar"));
+        let visitor = BodyVisitor::new(&config, &scope, Some("bar"), None, HashMap::new());
         assert!(visitor.is_recursive_call("Foo::bar"));
     }
 
@@ -441,7 +479,7 @@ mod tests {
     fn test_is_recursive_call_no_fn_name() {
         let config = Config::default();
         let scope = empty_scope();
-        let visitor = BodyVisitor::new(&config, &scope, None);
+        let visitor = BodyVisitor::new(&config, &scope, None, None, HashMap::new());
         assert!(!visitor.is_recursive_call("anything"));
     }
 
@@ -449,7 +487,7 @@ mod tests {
     fn test_enter_exit_nesting() {
         let config = Config::default();
         let scope = empty_scope();
-        let mut visitor = BodyVisitor::new(&config, &scope, None);
+        let mut visitor = BodyVisitor::new(&config, &scope, None, None, HashMap::new());
         assert_eq!(visitor.nesting_depth, 0);
         assert_eq!(visitor.max_nesting, 0);
 
@@ -498,7 +536,7 @@ mod tests {
     fn test_record_logic_normal() {
         let config = Config::default();
         let scope = empty_scope();
-        let mut visitor = BodyVisitor::new(&config, &scope, None);
+        let mut visitor = BodyVisitor::new(&config, &scope, None, None, HashMap::new());
         visitor.record_logic("if", proc_macro2::Span::call_site());
         assert_eq!(visitor.logic.len(), 1);
         assert_eq!(visitor.logic[0].kind, "if");
@@ -508,7 +546,7 @@ mod tests {
     fn test_record_logic_skipped_in_closure() {
         let config = Config::default();
         let scope = empty_scope();
-        let mut visitor = BodyVisitor::new(&config, &scope, None);
+        let mut visitor = BodyVisitor::new(&config, &scope, None, None, HashMap::new());
         visitor.closure_depth = 1;
         visitor.record_logic("if", proc_macro2::Span::call_site());
         assert!(visitor.logic.is_empty());
@@ -518,7 +556,7 @@ mod tests {
     fn test_record_logic_in_for_iter() {
         let config = Config::default();
         let scope = empty_scope();
-        let mut visitor = BodyVisitor::new(&config, &scope, None);
+        let mut visitor = BodyVisitor::new(&config, &scope, None, None, HashMap::new());
         visitor.in_for_iter = true;
         visitor.record_logic("comparison", proc_macro2::Span::call_site());
         assert!(visitor.logic.is_empty());
@@ -528,7 +566,7 @@ mod tests {
     fn test_record_logic_in_async_block_lenient() {
         let config = Config::default();
         let scope = empty_scope();
-        let mut visitor = BodyVisitor::new(&config, &scope, None);
+        let mut visitor = BodyVisitor::new(&config, &scope, None, None, HashMap::new());
         visitor.async_block_depth = 1;
         visitor.record_logic("if", proc_macro2::Span::call_site());
         assert!(visitor.logic.is_empty());
@@ -540,7 +578,7 @@ mod tests {
         // Leak config and scope to satisfy lifetime requirements
         let config: &'static Config = Box::leak(Box::default());
         let scope: &'static ProjectScope = Box::leak(Box::default());
-        let mut visitor = BodyVisitor::new(config, scope, Some("test_fn"));
+        let mut visitor = BodyVisitor::new(config, scope, Some("test_fn"), None, HashMap::new());
         let block: syn::Block = syn::parse_str(&format!("{{ {code} }}")).unwrap();
         block.stmts.iter().for_each(|stmt| visitor.visit_stmt(stmt));
         visitor
@@ -736,7 +774,7 @@ mod tests {
         let mut config = Config::default();
         config.complexity.detect_magic_numbers = false;
         let scope = empty_scope();
-        let mut visitor = BodyVisitor::new(&config, &scope, Some("test_fn"));
+        let mut visitor = BodyVisitor::new(&config, &scope, Some("test_fn"), None, HashMap::new());
         let block: syn::Block = syn::parse_str("{ let x = 42; }").unwrap();
         block.stmts.iter().for_each(|stmt| visitor.visit_stmt(stmt));
         assert!(visitor.magic_numbers.is_empty());

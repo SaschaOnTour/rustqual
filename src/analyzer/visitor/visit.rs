@@ -257,9 +257,7 @@ impl<'a, 'ast> Visit<'ast> for BodyVisitor<'a> {
                 } else if let Some(name) = Self::extract_call_name(func) {
                     if self.config.allow_recursion && self.is_recursive_call(&name) {
                         // Recursive call — skip when allow_recursion is enabled
-                    } else if self.scope.is_own_function(&name)
-                        && !self.config.is_external_call(&name)
-                    {
+                    } else if self.scope.is_own_function(&name) {
                         self.own_calls.push(CallOccurrence {
                             name,
                             line: func.span().start().line,
@@ -270,7 +268,9 @@ impl<'a, 'ast> Visit<'ast> for BodyVisitor<'a> {
                 return;
             }
 
-            Expr::MethodCall(ExprMethodCall { method, .. }) => {
+            Expr::MethodCall(ExprMethodCall {
+                method, receiver, ..
+            }) => {
                 let method_name = method.to_string();
                 // Error handling: count in ALL contexts (including closures)
                 match method_name.as_str() {
@@ -286,9 +286,7 @@ impl<'a, 'ast> Visit<'ast> for BodyVisitor<'a> {
                         // skip — iterator adaptor, not an "own call"
                     } else if self.config.allow_recursion && self.is_recursive_call(&method_name) {
                         // Recursive call — skip
-                    } else if self.scope.is_own_method(&method_name)
-                        && !self.config.is_external_call(&method_name)
-                    {
+                    } else if self.is_type_resolved_own_method(&method_name, receiver) {
                         self.own_calls.push(CallOccurrence {
                             name: format!(".{method_name}()"),
                             line: method.span().start().line,

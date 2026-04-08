@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-04-08
+
+### Added
+- **Type-aware method-call resolution**: `.method()` calls now use receiver type info (self type, parameter types) to determine if a call is own or external. Eliminates false-positive IOSP violations from std method name collisions.
+- `methods_by_type` on `ProjectScope`, `extract_param_types()`, `resolve_receiver_type()`, `is_type_resolved_own_method()` on `BodyVisitor`.
+- **PascalCase enum variant exclusion**: `Type::Variant(...)` not counted as own calls.
+
+### Changed
+- **BREAKING: `external_prefixes` removed** from config. Type-aware resolution replaces manual prefix lists. Remove `external_prefixes` from `rustqual.toml` to fix.
+- **BREAKING: `UNIVERSAL_METHODS` removed**. `trait_only_methods` + type-aware resolution handle all cases.
+- `classify_function()` accepts `type_context` tuple for receiver resolution.
+- `BodyVisitor` gains `parent_type` and `param_types` fields.
+- Test count: 836 — Function count: 458
+
 ## [0.4.0] - 2026-04-08
 
 ### Added
@@ -16,20 +30,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `self_method_calls: HashSet<String>` field on `MethodFieldData`.
 - `build_field_method_index()` extracted as Operation in `srp/cohesion.rs`.
 - `collect_per_file()` generic helper in `pipeline/discovery.rs` — eliminates near-duplicate code in `collect_suppression_lines`, `collect_api_lines`, `collect_inverse_lines`.
-- 15 new unit tests across all fixed areas.
+- 20 new unit tests across all fixed areas.
 
 ### Fixed
 - **`#[cfg(test)] impl` propagation**: Methods inside `#[cfg(test)] impl Type { ... }` blocks are now correctly recognized as test code (`in_test = true`). Fixes DRY-003 false positives for test helpers in cfg-test impl blocks. Both `DeclaredFnCollector` and `FunctionCollector` (dry) and the IOSP analyzer now propagate the flag.
 - **`matches!(self, ...)` SLM detection**: The SLM (Self-less Methods) check now recognizes `matches!(self, ...)` as a self-reference by inspecting macro token streams. Previously flagged as "self never referenced".
 - **`qual:api` TQ-003 pipeline fix**: `compute_tq()` now calls `mark_api_declarations()` on its declared functions, so `// qual:api` correctly excludes functions from untested-function detection. Previously, TQ analysis collected fresh `DeclaredFunction` objects without API markings.
 - **Function pointer references in dead code**: `&function_name` passed as an argument is now recognized as a usage by `CallTargetCollector`. `record_path_args()` unwraps `Expr::Reference` to extract the inner path.
+- **Enum variant constructors**: `ChunkKind::Other(...)`, `RefKind::Call` etc. no longer counted as own calls (PascalCase heuristic).
+- **Error-handling dispatch**: `match op() { Ok(r) => ..., Err(e) => ... }` patterns benefit from the type-aware resolution — std method calls in arms no longer flagged.
 - All 6 report formats (text, JSON, SARIF, HTML, GitHub annotations, findings list) now filter suppressed duplicate groups.
 
 ### Changed
+- **BREAKING: `external_prefixes` removed** from config. Type-aware method resolution replaces the manual prefix lists. Old `rustqual.toml` files with `external_prefixes` will error — remove the field to fix.
+- **BREAKING: `UNIVERSAL_METHODS` removed** from scope. `trait_only_methods` + type-aware resolution handle all cases previously covered by the hardcoded list.
 - **SRP refactoring**: `FunctionCollector` moved from `dry/mod.rs` to `dry/functions.rs`, `DeclaredFnCollector` moved to `dry/dead_code.rs`. Reduces `dry/mod.rs` production lines from 304 to ~125.
 - `mark_api_declarations()` changed from private to `pub(crate)`, signature changed to `&mut [DeclaredFunction]` (was by-value).
+- `classify_function()` accepts `type_context: (Option<&str>, &Signature)` for receiver type resolution.
+- `BodyVisitor` gains `parent_type` and `param_types` fields for type-aware method classification.
 - Test count: 836 tests (829 unit + 4 integration + 3 showcase)
-- Function count: 454
+- Function count: 458
 
 ## [0.3.9] - 2026-04-02
 

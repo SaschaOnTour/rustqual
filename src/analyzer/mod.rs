@@ -11,6 +11,36 @@ use crate::scope::ProjectScope;
 
 use classify::extract_type_name;
 
+/// Extract simple type names from function parameters for receiver type resolution.
+/// Operation: iteration + pattern matching on type AST, no own calls.
+fn extract_param_types(sig: &syn::Signature) -> std::collections::HashMap<String, String> {
+    sig.inputs
+        .iter()
+        .filter_map(|arg| {
+            if let syn::FnArg::Typed(pt) = arg {
+                let name = if let syn::Pat::Ident(pi) = &*pt.pat {
+                    pi.ident.to_string()
+                } else {
+                    return None;
+                };
+                extract_simple_type(&pt.ty).map(|t| (name, t))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// Extract the simple type name from a type, unwrapping references and mutability.
+/// Operation: recursive pattern matching, no own calls.
+fn extract_simple_type(ty: &syn::Type) -> Option<String> {
+    match ty {
+        syn::Type::Reference(r) => extract_simple_type(&r.elem),
+        syn::Type::Path(p) => p.path.segments.last().map(|s| s.ident.to_string()),
+        _ => None,
+    }
+}
+
 /// Count non-self parameters in a function signature.
 /// Operation: simple iteration + filtering logic.
 fn count_non_self_params(sig: &syn::Signature) -> usize {
@@ -117,12 +147,14 @@ impl<'a> Analyzer<'a> {
         &self,
         name: String,
         file_path: &str,
-        line: usize,
         body: &syn::Block,
         parent_type: Option<String>,
+        sig: &syn::Signature,
     ) -> FunctionAnalysis {
+        let type_ctx = (parent_type.as_deref(), sig);
         let (classification, complexity, own_calls) =
-            classify_function(body, self.config, self.scope, &name);
+            classify_function(body, self.config, self.scope, &name, type_ctx);
+        let line = sig.ident.span().start().line;
         build_function_analysis(
             name,
             file_path,
@@ -145,13 +177,8 @@ impl<'a> Analyzer<'a> {
     ) -> Option<FunctionAnalysis> {
         let name = item_fn.sig.ident.to_string();
         (!self.config.is_ignored_function(&name)).then(|| {
-            let mut fa = self.classify_and_build(
-                name,
-                file_path,
-                item_fn.sig.ident.span().start().line,
-                &item_fn.block,
-                parent_type,
-            );
+            let mut fa =
+                self.classify_and_build(name, file_path, &item_fn.block, parent_type, &item_fn.sig);
             fa.parameter_count = count_non_self_params(&item_fn.sig);
             fa.is_test = in_test || crate::dry::has_test_attr(&item_fn.attrs);
             fa
@@ -180,9 +207,9 @@ impl<'a> Analyzer<'a> {
                     let mut fa = self.classify_and_build(
                         name,
                         file_path,
-                        method.sig.ident.span().start().line,
                         &method.block,
                         type_name.clone(),
+                        &method.sig,
                     );
                     fa.parameter_count = count_non_self_params(&method.sig);
                     fa.is_trait_impl = trait_impl;
@@ -217,9 +244,9 @@ impl<'a> Analyzer<'a> {
                     let mut fa = self.classify_and_build(
                         name,
                         file_path,
-                        method.sig.ident.span().start().line,
                         block,
                         Some(trait_name.clone()),
+                        &method.sig,
                     );
                     fa.parameter_count = count_non_self_params(&method.sig);
                     fa.is_trait_impl = true;
@@ -995,7 +1022,8 @@ fn violator(x: i32) {
     // ---------------------------------------------------------------
 
     #[test]
-    fn test_type_new_not_own_call() {
+    fn test_type_new_is_own_call() {
+        // Type::new() IS an own call — project function in inherent impl.
         let code = r#"
             struct Adx { period: usize }
             impl Adx {
@@ -1008,10 +1036,9 @@ fn violator(x: i32) {
         "#;
         let results = parse_and_analyze(code);
         let f = results.iter().find(|r| r.name == "compute").unwrap();
-        assert_eq!(
-            f.classification,
-            Classification::Operation,
-            "Adx::new() should not be own call, got {:?}",
+        assert!(
+            matches!(f.classification, Classification::Violation { .. }),
+            "Adx::new() IS own call + logic → Violation, got {:?}",
             f.classification
         );
     }
@@ -1273,6 +1300,102 @@ fn violator(x: i32) {
         assert!(
             !new_fn.is_test,
             "Method in regular impl should have is_test=false"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // Bug 2: Method-call type resolution tests
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn test_method_on_non_project_type_not_own_call() {
+        // Cache defines .clear(), but reset_name calls .clear() on a String parameter.
+        // String::clear is NOT an own call — different type.
+        let code = r#"
+            struct Cache { data: Vec<i32> }
+            impl Cache {
+                fn clear(&mut self) {
+                    self.data = Vec::new();
+                }
+            }
+            fn reset_name(name: &mut String) {
+                if name.is_empty() { return; }
+                name.clear();
+            }
+        "#;
+        let results = parse_and_analyze(code);
+        let f = results.iter().find(|f| f.name == "reset_name").unwrap();
+        assert!(
+            matches!(f.classification, Classification::Operation),
+            "name.clear() is String::clear, not Cache::clear — should be Operation, got {:?}",
+            f.classification
+        );
+    }
+
+    #[test]
+    fn test_self_method_call_is_own_call() {
+        // self.process() IS an own call — it's on the same type
+        let code = r#"
+            struct Engine;
+            impl Engine {
+                fn process(&self) -> i32 { 42 }
+                fn run(&self) {
+                    self.process();
+                }
+            }
+        "#;
+        let results = parse_and_analyze(code);
+        let f = results.iter().find(|f| f.name == "run").unwrap();
+        assert!(
+            matches!(f.classification, Classification::Integration),
+            "self.process() is own call — should be Integration, got {:?}",
+            f.classification
+        );
+    }
+
+    #[test]
+    fn test_method_on_param_project_type_is_own_call() {
+        // db.query() where db is a project type parameter — IS an own call
+        let code = r#"
+            struct Database;
+            impl Database {
+                fn query(&self) -> Vec<String> { vec![] }
+            }
+            fn fetch(db: &Database) {
+                db.query();
+            }
+        "#;
+        let results = parse_and_analyze(code);
+        let f = results.iter().find(|f| f.name == "fetch").unwrap();
+        assert!(
+            matches!(f.classification, Classification::Integration),
+            "db.query() on project type param — should be Integration, got {:?}",
+            f.classification
+        );
+    }
+
+    #[test]
+    fn test_method_name_collision_resolved_by_type() {
+        // Both Formatter and Vec have "push". Formatter::push is own,
+        // but v.push() on a Vec parameter should NOT be an own call.
+        let code = r#"
+            struct Formatter { parts: Vec<String> }
+            impl Formatter {
+                fn push(&mut self, s: String) {
+                    self.parts.push(s);
+                }
+            }
+            fn collect_items(v: &mut Vec<String>) {
+                if v.is_empty() { return; }
+                v.push("done".to_string());
+            }
+        "#;
+        let results = parse_and_analyze(code);
+        let f = results.iter().find(|f| f.name == "collect_items").unwrap();
+        assert!(
+            matches!(f.classification, Classification::Operation),
+            "v.push() on Vec param — not an own call, should be Operation, got {:?}",
+            f.classification
         );
     }
 }
