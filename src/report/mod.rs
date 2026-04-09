@@ -197,18 +197,19 @@ impl Summary {
                 .min(1.0),
             1.0 - (tq_count as f64 / n).min(1.0),
         ];
-        // Scale by number of dimensions so findings count at full value.
+        // Scale by number of active (non-zero weight) dimensions so findings count at full value.
         // Without scaling: 20 findings / 100 functions → 90% (dampened by weights summing to 1.0).
-        // With scaling: 20/100 → 80% (each finding counts fully, weighted by dimension importance).
-        // Formula: score = 1 - num_dims * (1 - weighted_avg), clamped to [0, 1].
-        let num_dims = weights.len() as f64;
+        // With scaling: 20/100 → ~80% (each finding counts fully, weighted by dimension importance).
+        // Formula: score = 1 - active_dims * (1 - weighted_avg), clamped to [0, 1].
+        let active_dims = weights.iter().filter(|&&w| w > f64::EPSILON).count() as f64;
         let weighted_avg: f64 = self
             .dimension_scores
             .iter()
             .zip(weights.iter())
             .map(|(s, w)| s * w)
             .sum();
-        self.quality_score = (1.0 - num_dims * (1.0 - weighted_avg)).clamp(0.0, 1.0);
+        let scale = if active_dims > 0.0 { active_dims } else { 1.0 };
+        self.quality_score = (1.0 - scale * (1.0 - weighted_avg)).clamp(0.0, 1.0);
     }
 
     /// Total number of findings across all dimensions.
