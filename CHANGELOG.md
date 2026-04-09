@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2026-04-09
+
+### Fixed
+- **`./src/` path rejected on Windows**: The dot-directory filter excluded `.` (current directory) because `".".starts_with('.')` is true. Now skips hidden dirs (`.git`, `.tmp`) while preserving `.` and `..`.
+- **OI false positives on Windows**: `top_level_module()` only split on `/`, causing backslash paths to be treated as different modules. Now normalizes `\` to `/`.
+- **Internal path normalization**: `display_path` in `read_and_parse_files` and `rel` in `collect_filtered_files` now normalize backslashes at the source. Ensures consistent forward-slash paths across all dimensions and reports.
+- **Empty location in findings**: Findings without file location (e.g. SDP) no longer render as `:0`.
+- 4 new tests for path handling: dot-prefix path, hidden dir exclusion, target dir exclusion, forward-slash normalization.
+- Test count: 862 — Function count: 476
+
 ## [0.5.2] - 2026-04-09
 
 ### Changed
