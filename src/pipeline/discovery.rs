@@ -38,7 +38,11 @@ pub(crate) fn collect_filtered_files(path: &Path, config: &Config) -> Vec<PathBu
     collect_rust_files(path)
         .into_iter()
         .filter(|f| {
-            let rel = f.strip_prefix(path).unwrap_or(f).to_string_lossy();
+            let rel = f
+                .strip_prefix(path)
+                .unwrap_or(f)
+                .to_string_lossy()
+                .replace('\\', "/");
             !config.is_excluded_file(&rel)
         })
         .collect()

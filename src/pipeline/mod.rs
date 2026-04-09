@@ -258,8 +258,8 @@ pub(crate) fn output_results(
                 .iter()
                 .for_each(|ca| report::print_coupling_section(ca, coupling_config, verbose));
             if verbose {
-                // Verbose: full file-grouped output + detail sections
-                report::print_report(&analysis.results, &analysis.summary, verbose, &findings);
+                // Verbose: file-grouped output + detail sections (summary already printed above)
+                report::print_files_only(&analysis.results);
                 report::print_dry_section(analysis);
                 analysis.srp.iter().for_each(report::print_srp_section);
                 analysis.tq.iter().for_each(report::print_tq_section);

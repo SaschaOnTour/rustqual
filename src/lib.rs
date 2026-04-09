@@ -329,7 +329,11 @@ pub fn run() -> Result<(), i32> {
     }
     if cli.findings {
         let entries = crate::report::findings_list::collect_all_findings(&analysis);
-        crate::report::findings_list::print_findings(&entries);
+        if entries.is_empty() {
+            println!("No findings.");
+        } else {
+            crate::report::findings_list::print_findings(&entries);
+        }
     } else {
         pipeline::output_results(
             &analysis,

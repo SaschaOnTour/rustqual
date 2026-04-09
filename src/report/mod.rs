@@ -29,7 +29,7 @@ pub use sarif::print_sarif;
 pub use suggestions::print_suggestions;
 pub use text::print_coupling_section;
 pub use text::print_dry_section;
-pub use text::print_report;
+pub use text::print_files_only;
 pub use text::print_srp_section;
 pub(crate) use text::print_structural_section;
 pub use text::print_summary_only;
