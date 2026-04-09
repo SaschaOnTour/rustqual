@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-04-09
+
+### Changed
+- **Cleaner default output**: Summary shown first with total findings count in header line. File-grouped output only with `--verbose`. Default mode shows compact findings list with "═══ N Findings ═══" heading. Removed "Loaded config from ..." message, "N quality findings. Run with --verbose" footer, and file headers without context.
+- **Coupling section**: Explanation text ("Incoming = modules depending on this one...") and "Modules analyzed: N" only shown with `--verbose`.
+- **Windows path support**: Backslash paths (e.g., `.\src\` from PowerShell) are normalized to forward slashes on input.
+
+### Fixed
+- **OI false positives on Windows**: `top_level_module()` in the Orphaned Impl check only split on `/`, causing backslash paths like `db\queries\chunks.rs` to be treated as a different module than `db\connection.rs`. Now normalizes `\` to `/` before splitting. This caused 9 false OI findings on Windows that didn't appear on Linux/WSL.
+- Test count: 858 — Function count: 476
+
 ## [0.5.1] - 2026-04-09
 
 ### Added

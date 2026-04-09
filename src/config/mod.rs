@@ -169,7 +169,6 @@ impl Config {
                     .map_err(|e| format!("Failed to read {}: {e}", config_path.display()))?;
                 let config: Config = toml::from_str(&content)
                     .map_err(|e| format!("Failed to parse {}: {e}", config_path.display()))?;
-                eprintln!("Loaded config from {}", config_path.display());
                 return Ok(config);
             }
             dir = d.parent();

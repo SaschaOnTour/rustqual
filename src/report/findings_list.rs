@@ -43,18 +43,28 @@ pub fn collect_all_findings(analysis: &AnalysisResult) -> Vec<FindingEntry> {
     entries
 }
 
-/// Print findings in one-line-per-finding format.
+/// Print findings in one-line-per-finding format with heading.
 /// Operation: formatting logic, no own calls.
 pub fn print_findings(entries: &[FindingEntry]) {
     if entries.is_empty() {
-        println!("No findings.");
         return;
     }
+    let n = entries.len();
+    let heading = format!("═══ {} Finding{} ═══", n, if n == 1 { "" } else { "s" });
+    println!("\n{}", colored::Colorize::bold(heading.as_str()));
     entries.iter().for_each(|e| {
-        println!(
-            "{}:{}  {}  {}  in {}",
-            e.file, e.line, e.category, e.detail, e.function_name
-        );
+        let detail = if e.function_name.is_empty() {
+            e.detail.clone()
+        } else if e.detail.is_empty() {
+            format!("in {}", e.function_name)
+        } else {
+            format!("{}  in {}", e.detail, e.function_name)
+        };
+        if e.file.is_empty() {
+            println!("  {}  {}", e.category, detail);
+        } else {
+            println!("  {}:{}  {}  {}", e.file, e.line, e.category, detail);
+        }
     });
 }
 

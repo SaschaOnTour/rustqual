@@ -17,16 +17,19 @@ use crate::analyzer::{Classification, FunctionAnalysis, Severity};
 
 use super::Summary;
 
-/// Print a full report to stdout.
-/// Integration: orchestrates file section and summary section.
-pub fn print_report(
-    results: &[FunctionAnalysis],
+/// Print summary section (scores, dimension breakdown, suppression info).
+/// Integration: delegates to summary section printer.
+pub fn print_summary_only(
     summary: &Summary,
-    verbose: bool,
     findings: &[crate::report::findings_list::FindingEntry],
 ) {
-    print_files_section(results, verbose);
     summary::print_summary_section(summary, findings);
+}
+
+/// Print only the file-grouped function listings (verbose mode).
+/// Trivial: delegates to print_files_section.
+pub fn print_files_only(results: &[FunctionAnalysis]) {
+    print_files_section(results, true);
 }
 
 /// Print per-file function listings.
@@ -259,14 +262,14 @@ mod tests {
     fn test_print_report_empty_no_panic() {
         let results: Vec<FunctionAnalysis> = vec![];
         let summary = Summary::from_results(&results);
-        print_report(&results, &summary, false, &[]);
+        print_summary_only(&summary, &[]);
     }
 
     #[test]
     fn test_print_report_no_violations_no_panic() {
         let results = vec![make_result("good_fn", Classification::Integration)];
         let summary = Summary::from_results(&results);
-        print_report(&results, &summary, false, &[]);
+        print_summary_only(&summary, &[]);
     }
 
     #[test]
@@ -287,7 +290,7 @@ mod tests {
             },
         )];
         let summary = Summary::from_results(&results);
-        print_report(&results, &summary, false, &[]);
+        print_summary_only(&summary, &[]);
     }
 
     #[test]
@@ -313,7 +316,8 @@ mod tests {
             ),
         ];
         let summary = Summary::from_results(&results);
-        print_report(&results, &summary, true, &[]);
+        print_summary_only(&summary, &[]);
+        print_files_only(&results);
     }
 
     #[test]
@@ -327,7 +331,8 @@ mod tests {
         });
         let results = vec![func];
         let summary = Summary::from_results(&results);
-        print_report(&results, &summary, true, &[]);
+        print_summary_only(&summary, &[]);
+        print_files_only(&results);
     }
 
     #[test]
@@ -350,6 +355,7 @@ mod tests {
         func.suppressed = true;
         let results = vec![func];
         let summary = Summary::from_results(&results);
-        print_report(&results, &summary, true, &[]);
+        print_summary_only(&summary, &[]);
+        print_files_only(&results);
     }
 }
