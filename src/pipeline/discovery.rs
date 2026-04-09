@@ -305,4 +305,88 @@ mod tests {
         let result = get_git_changed_files(dir.path(), "HEAD");
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_collect_rust_files_dot_prefix_path() {
+        // Simulates `./src/` — the "." component should not be filtered as hidden
+        let dir = tempfile::Builder::new()
+            .prefix("rustqual_test_")
+            .tempdir()
+            .unwrap();
+        let sub = dir.path().join("src");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("main.rs"), "fn main() {}").unwrap();
+
+        // Access via ./src by using the parent with a "." prefix
+        let dot_path = dir.path().join(".");
+        let dot_src = dot_path.join("src");
+        let files = collect_rust_files(&dot_src);
+        assert!(
+            !files.is_empty(),
+            "collect_rust_files should find files via ./src path"
+        );
+    }
+
+    #[test]
+    fn test_collect_rust_files_hidden_dir_excluded() {
+        let dir = tempfile::Builder::new()
+            .prefix("rustqual_test_")
+            .tempdir()
+            .unwrap();
+        let hidden = dir.path().join(".hidden");
+        std::fs::create_dir_all(&hidden).unwrap();
+        std::fs::write(hidden.join("lib.rs"), "fn foo() {}").unwrap();
+        // Also add a visible file
+        std::fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
+
+        let files = collect_rust_files(dir.path());
+        assert!(
+            files
+                .iter()
+                .all(|f| !f.to_string_lossy().contains(".hidden")),
+            "Hidden directories should be excluded"
+        );
+        assert!(!files.is_empty(), "Visible files should still be found");
+    }
+
+    #[test]
+    fn test_collect_rust_files_target_dir_excluded() {
+        let dir = tempfile::Builder::new()
+            .prefix("rustqual_test_")
+            .tempdir()
+            .unwrap();
+        let target = dir.path().join("target");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("generated.rs"), "fn gen() {}").unwrap();
+        std::fs::write(dir.path().join("lib.rs"), "fn lib() {}").unwrap();
+
+        let files = collect_rust_files(dir.path());
+        assert!(
+            files
+                .iter()
+                .all(|f| !f.to_string_lossy().contains("target")),
+            "target/ directory should be excluded"
+        );
+        assert!(!files.is_empty());
+    }
+
+    #[test]
+    fn test_display_path_uses_forward_slashes() {
+        let dir = tempfile::Builder::new()
+            .prefix("rustqual_test_")
+            .tempdir()
+            .unwrap();
+        let sub = dir.path().join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("mod.rs"), "fn f() {}").unwrap();
+
+        let parsed = read_and_parse_files(&collect_rust_files(dir.path()), dir.path());
+        assert!(!parsed.is_empty());
+        // Display path should use forward slashes, not backslashes
+        assert!(
+            !parsed[0].0.contains('\\'),
+            "Display path should use forward slashes, got: {}",
+            parsed[0].0
+        );
+    }
 }
