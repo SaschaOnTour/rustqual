@@ -7,7 +7,7 @@ pub fn print_coupling_section(
     config: &crate::config::sections::CouplingConfig,
     verbose: bool,
 ) {
-    print_coupling_header(analysis);
+    print_coupling_header(analysis, verbose);
     print_coupling_cycles(analysis);
     print_coupling_sdp_violations(analysis);
     print_coupling_table(analysis, config, verbose);
@@ -15,9 +15,11 @@ pub fn print_coupling_section(
 
 /// Print coupling section header with module count.
 /// Operation: formatting logic, no own calls.
-fn print_coupling_header(analysis: &crate::coupling::CouplingAnalysis) {
+fn print_coupling_header(analysis: &crate::coupling::CouplingAnalysis, verbose: bool) {
     println!("\n{}", "═══ Coupling ═══".bold());
-    println!("  Modules analyzed: {}", analysis.metrics.len());
+    if verbose {
+        println!("  Modules analyzed: {}", analysis.metrics.len());
+    }
 }
 
 /// Print circular dependency cycles.
@@ -63,7 +65,11 @@ fn print_coupling_table(
     config: &crate::config::sections::CouplingConfig,
     verbose: bool,
 ) {
-    print_coupling_legend(&analysis.metrics);
+    if verbose {
+        print_coupling_legend(&analysis.metrics);
+    } else if !analysis.metrics.is_empty() {
+        println!("\n    {:<20} {:>3}  {:>3}  Instability", "", "In", "Out");
+    }
     print_coupling_rows(&analysis.metrics, config, verbose);
     print_coupling_cycle_status(&analysis.cycles);
 }

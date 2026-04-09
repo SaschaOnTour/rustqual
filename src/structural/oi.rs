@@ -39,7 +39,11 @@ pub(crate) fn detect_oi(
 /// Extract the top-level module name from a file path.
 /// Operation: string splitting.
 fn top_level_module(path: &str) -> String {
-    path.split('/').next().unwrap_or(path).replace(".rs", "")
+    path.replace('\\', "/")
+        .split('/')
+        .next()
+        .unwrap_or(path)
+        .replace(".rs", "")
 }
 
 #[cfg(test)]
@@ -109,6 +113,23 @@ mod tests {
         // Type not defined in any parsed file
         let w = detect_multi(&[("other.rs", "impl ExternalType { fn bar() {} }")]);
         assert!(w.is_empty(), "external type should not be flagged");
+    }
+
+    #[test]
+    fn test_same_module_backslash_paths_not_flagged() {
+        // Windows-style backslash paths: same top-level module "db"
+        let w = detect_multi(&[
+            ("db\\connection.rs", "pub struct Database {}"),
+            (
+                "db\\queries\\chunks.rs",
+                "impl Database { fn get_chunks() {} }",
+            ),
+        ]);
+        assert!(
+            w.is_empty(),
+            "Same top-level module with backslash paths should not be flagged, got {:?}",
+            w.iter().map(|w| &w.file).collect::<Vec<_>>()
+        );
     }
 
     #[test]

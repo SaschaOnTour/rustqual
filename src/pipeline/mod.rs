@@ -250,18 +250,27 @@ pub(crate) fn output_results(
         super::OutputFormat::Html => report::print_html(analysis),
         super::OutputFormat::Text => {
             let findings = crate::report::findings_list::collect_all_findings(analysis);
-            report::print_report(&analysis.results, &analysis.summary, verbose, &findings);
+            // Summary first — always shown
+            report::print_summary_only(&analysis.summary, &findings);
+            // Coupling table — always shown (explanation text only with --verbose)
             analysis
                 .coupling
                 .iter()
                 .for_each(|ca| report::print_coupling_section(ca, coupling_config, verbose));
-            report::print_dry_section(analysis);
-            analysis.srp.iter().for_each(report::print_srp_section);
-            analysis.tq.iter().for_each(report::print_tq_section);
-            analysis
-                .structural
-                .iter()
-                .for_each(report::print_structural_section);
+            if verbose {
+                // Verbose: full file-grouped output + detail sections
+                report::print_report(&analysis.results, &analysis.summary, verbose, &findings);
+                report::print_dry_section(analysis);
+                analysis.srp.iter().for_each(report::print_srp_section);
+                analysis.tq.iter().for_each(report::print_tq_section);
+                analysis
+                    .structural
+                    .iter()
+                    .for_each(report::print_structural_section);
+            } else {
+                // Default: compact findings list
+                crate::report::findings_list::print_findings(&findings);
+            }
             if suggestions {
                 report::print_suggestions(&analysis.results);
             }

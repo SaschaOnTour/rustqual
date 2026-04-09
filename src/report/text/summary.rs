@@ -22,11 +22,22 @@ fn print_summary_header(summary: &Summary) {
     let pct = |v: f64| v * PERCENTAGE_MULTIPLIER;
     println!();
     println!("{}", "═══ Summary ═══".bold());
-    println!(
-        "  Functions: {}    Quality Score: {:.1}%",
-        summary.total,
-        pct(summary.quality_score)
-    );
+    let total_findings = summary.total_findings();
+    if total_findings > 0 {
+        println!(
+            "  Functions: {}    Quality Score: {:.1}%    {} finding{}",
+            summary.total,
+            pct(summary.quality_score),
+            total_findings,
+            if total_findings == 1 { "" } else { "s" }
+        );
+    } else {
+        println!(
+            "  Functions: {}    Quality Score: {:.1}%",
+            summary.total,
+            pct(summary.quality_score)
+        );
+    }
     println!();
     let s = summary;
     let iosp_detail = if s.violations > 0 {
@@ -218,18 +229,7 @@ fn print_summary_suppression(summary: &Summary) {
 fn print_summary_footer(summary: &Summary) {
     let findings = |s: &Summary| s.total_findings();
     let total = findings(summary);
-    if total > 0 {
-        println!();
-        println!(
-            "{}",
-            format!(
-                "{total} quality finding{}. Run with --verbose for details.",
-                if total == 1 { "" } else { "s" },
-            )
-            .yellow()
-            .bold()
-        );
-    } else {
+    if total == 0 {
         println!();
         println!("{}", "All quality checks passed! \u{2713}".green().bold());
     }

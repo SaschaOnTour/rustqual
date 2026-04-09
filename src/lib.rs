@@ -261,7 +261,10 @@ pub fn run() -> Result<(), i32> {
     if args.len() > 1 && args[1] == "qual" {
         args.remove(1);
     }
-    let cli = Cli::parse_from(args);
+    let mut cli = Cli::parse_from(args);
+    // Normalize Windows backslash paths to forward slashes
+    let normalized = cli.path.to_string_lossy().replace('\\', "/");
+    cli.path = std::path::PathBuf::from(normalized);
 
     if cli.init {
         let files = pipeline::collect_rust_files(&cli.path);

@@ -66,7 +66,7 @@ pub(crate) fn read_and_parse_files(
                     .strip_prefix(base_path)
                     .unwrap_or(file_path)
                     .to_string_lossy()
-                    .to_string();
+                    .replace('\\', "/");
                 Some((display_path, source))
             })
             .collect()

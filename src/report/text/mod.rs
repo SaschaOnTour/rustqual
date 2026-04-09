@@ -17,7 +17,16 @@ use crate::analyzer::{Classification, FunctionAnalysis, Severity};
 
 use super::Summary;
 
-/// Print a full report to stdout.
+/// Print summary and findings only (default non-verbose mode).
+/// Integration: delegates to summary section printer.
+pub fn print_summary_only(
+    summary: &Summary,
+    findings: &[crate::report::findings_list::FindingEntry],
+) {
+    summary::print_summary_section(summary, findings);
+}
+
+/// Print a full report to stdout (verbose mode).
 /// Integration: orchestrates file section and summary section.
 pub fn print_report(
     results: &[FunctionAnalysis],
