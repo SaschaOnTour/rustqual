@@ -17,7 +17,7 @@ use crate::analyzer::{Classification, FunctionAnalysis, Severity};
 
 use super::Summary;
 
-/// Print summary and findings only (default non-verbose mode).
+/// Print summary section (scores, dimension breakdown, suppression info).
 /// Integration: delegates to summary section printer.
 pub fn print_summary_only(
     summary: &Summary,

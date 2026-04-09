@@ -60,7 +60,11 @@ pub fn print_findings(entries: &[FindingEntry]) {
         } else {
             format!("{}  in {}", e.detail, e.function_name)
         };
-        println!("  {}:{}  {}  {}", e.file, e.line, e.category, detail);
+        if e.file.is_empty() {
+            println!("  {}  {}", e.category, detail);
+        } else {
+            println!("  {}:{}  {}  {}", e.file, e.line, e.category, detail);
+        }
     });
 }
 
