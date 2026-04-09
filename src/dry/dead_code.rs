@@ -172,12 +172,9 @@ pub(crate) fn mark_api_declarations(
     declared: &mut [super::DeclaredFunction],
     api_lines: &std::collections::HashMap<String, std::collections::HashSet<usize>>,
 ) {
-    let window = crate::findings::ANNOTATION_WINDOW;
     declared.iter_mut().for_each(|d| {
         if let Some(lines) = api_lines.get(&d.file) {
-            let in_window =
-                (0..=window).any(|off| d.line >= off && lines.contains(&(d.line - off)));
-            if in_window {
+            if crate::findings::has_annotation_in_window(lines, d.line) {
                 d.is_api = true;
             }
         }

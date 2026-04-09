@@ -18,12 +18,16 @@ pub fn print_dry_section(analysis: &AnalysisResult) {
 /// Operation: conditional formatting, no own calls.
 fn print_dry_header(analysis: &AnalysisResult) {
     let has_wildcards = analysis.wildcard_warnings.iter().any(|w| !w.suppressed);
-    if analysis.duplicates.is_empty()
+    let has_duplicates = analysis.duplicates.iter().any(|g| !g.suppressed);
+    let has_fragments = analysis.fragments.iter().any(|g| !g.suppressed);
+    let has_boilerplate = analysis.boilerplate.iter().any(|b| !b.suppressed);
+    let has_repeated = analysis.repeated_matches.iter().any(|g| !g.suppressed);
+    if !has_duplicates
         && analysis.dead_code.is_empty()
-        && analysis.fragments.is_empty()
-        && analysis.boilerplate.is_empty()
+        && !has_fragments
+        && !has_boilerplate
         && !has_wildcards
-        && analysis.repeated_matches.is_empty()
+        && !has_repeated
     {
         return;
     }
@@ -125,7 +129,7 @@ fn print_dead_code_entries(dead_code: &[crate::dry::dead_code::DeadCodeWarning])
 /// Print boilerplate pattern entries.
 /// Operation: iteration and formatting logic, no own calls.
 fn print_boilerplate_entries(boilerplate: &[crate::dry::boilerplate::BoilerplateFind]) {
-    for bp in boilerplate {
+    for bp in boilerplate.iter().filter(|b| !b.suppressed) {
         let name = bp.struct_name.as_deref().unwrap_or("(anonymous)");
         println!(
             "  {} [{}] {} ({}:{}) — {}",

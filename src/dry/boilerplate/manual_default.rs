@@ -61,6 +61,7 @@ pub(super) fn check_manual_default(
                             "Manual Default implementation where all fields use default values"
                                 .to_string(),
                         suggestion: "Consider using #[derive(Default)]".to_string(),
+                        suppressed: false,
                     })
                 }
             })

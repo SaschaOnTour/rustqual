@@ -182,9 +182,9 @@ pub(super) fn collect_dry_findings(
             ));
         });
     }
-    boilerplate.iter().for_each(|b| {
+    boilerplate.iter().filter(|b| !b.suppressed).for_each(|b| {
         findings.push(finding(
-            &format!("BP-{}", &b.pattern_id),
+            &b.pattern_id,
             "note",
             format!("{} — {}", b.description, b.suggestion),
             &b.file,

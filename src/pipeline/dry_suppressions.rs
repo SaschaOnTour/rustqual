@@ -42,6 +42,15 @@ impl DrySuppressible for crate::dry::fragments::FragmentGroup {
     }
 }
 
+impl DrySuppressible for crate::dry::boilerplate::BoilerplateFind {
+    fn set_suppressed(&mut self, val: bool) {
+        self.suppressed = val;
+    }
+    fn entry_locations(&self) -> Vec<(&str, usize)> {
+        vec![(self.file.as_str(), self.line)]
+    }
+}
+
 /// Mark DRY finding groups as suppressed when any entry has `// qual:allow(dry)`.
 /// Operation: iterates groups checking entries against suppression lines.
 pub(crate) fn mark_dry_suppressions<T: DrySuppressible>(
@@ -49,15 +58,13 @@ pub(crate) fn mark_dry_suppressions<T: DrySuppressible>(
     suppression_lines: &std::collections::HashMap<String, Vec<Suppression>>,
 ) {
     let dry_dim = crate::findings::Dimension::Dry;
-    let window = crate::findings::ANNOTATION_WINDOW;
     groups.iter_mut().for_each(|g| {
         let suppressed = g.entry_locations().iter().any(|(file, line)| {
             suppression_lines
                 .get(*file)
                 .map(|sups| {
                     sups.iter().any(|sup| {
-                        let in_window = sup.line <= *line && line - sup.line <= window;
-                        in_window && sup.covers(dry_dim)
+                        crate::findings::is_within_window(sup.line, *line) && sup.covers(dry_dim)
                     })
                 })
                 .unwrap_or(false)

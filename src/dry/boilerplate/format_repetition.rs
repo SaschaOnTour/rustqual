@@ -73,6 +73,7 @@ pub(super) fn check_format_repetition(
                     ),
                     suggestion: "Extract repeated format string into a helper function or constant"
                         .to_string(),
+                    suppressed: false,
                 });
             });
     }

@@ -155,15 +155,19 @@ fn collect_dry_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntr
                 ));
             });
         });
-    analysis.boilerplate.iter().for_each(|b| {
-        entries.push(FindingEntry::new(
-            &b.file,
-            b.line,
-            "BOILERPLATE",
-            b.pattern_id.clone(),
-            b.struct_name.clone().unwrap_or_default(),
-        ));
-    });
+    analysis
+        .boilerplate
+        .iter()
+        .filter(|b| !b.suppressed)
+        .for_each(|b| {
+            entries.push(FindingEntry::new(
+                &b.file,
+                b.line,
+                "BOILERPLATE",
+                b.pattern_id.clone(),
+                b.struct_name.clone().unwrap_or_default(),
+            ));
+        });
     analysis
         .wildcard_warnings
         .iter()
