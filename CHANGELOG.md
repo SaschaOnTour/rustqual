@@ -10,16 +10,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **`// qual:allow(unsafe)` annotation**: Suppresses unsafe-block warnings on individual functions without affecting other complexity findings. Not parsed as a blanket suppression — does not count against suppression ratio.
 - **Boilerplate suppression**: `BoilerplateFind` now has `suppressed: bool`. `qual:allow(dry)` on any boilerplate finding suppresses it. `DrySuppressible` trait extended with impl for `BoilerplateFind`.
+- **SARIF BP-001..BP-010 rule definitions**: All 10 boilerplate patterns now have proper SARIF rule entries in `sarif_rules()`. SARIF ruleId uses `b.pattern_id` directly (e.g., `BP-003`).
+- `is_within_window()` and `has_annotation_in_window()` utility functions in `findings.rs` — consolidates 5+ duplicated annotation-window check patterns.
 
 ### Fixed
 - **BP-003 reports per getter, not per struct**: Each trivial getter/setter is now a separate finding on the function line, enabling `qual:allow(dry)` suppression per function.
 - **`qual:allow(unsafe)` no longer parsed as blanket suppression**: Previously, `qual:allow(unsafe)` was silently treated as `qual:allow` (suppress all) because "unsafe" wasn't a recognized dimension. Now intercepted before suppression parsing.
+- **SARIF boilerplate ruleId**: Was `BP-BP-003` (double prefix), now correctly `BP-003`.
 
 ### Changed
 - `is_unsafe_allowed()` extracted as standalone function in `pipeline/warnings.rs`.
 - `apply_extended_warnings()` accepts `unsafe_allow_lines` parameter.
 - `pipeline/dry_suppressions.rs`: `DrySuppressible` impl for `BoilerplateFind`.
-- Test count: 856 — Function count: 475
+- Text/HTML DRY section headers respect suppressed state for all finding types.
+- Test count: 857 — Function count: 475
 
 ## [0.5.0] - 2026-04-09
 

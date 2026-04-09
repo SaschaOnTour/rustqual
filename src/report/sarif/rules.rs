@@ -53,6 +53,19 @@ pub(super) fn sarif_rules() -> Vec<serde_json::Value> {
         rule("DEH", "Downcast escape hatch: use of Any::downcast"),
         rule("IET", "Inconsistent error types in module"),
         rule("DRY-005", "Repeated match pattern across functions"),
+        rule("BP-001", "Trivial From implementation (derivable)"),
+        rule("BP-002", "Trivial Display implementation (derivable)"),
+        rule(
+            "BP-003",
+            "Trivial getter/setter (consider field visibility)",
+        ),
+        rule("BP-004", "Builder pattern (consider derive macro)"),
+        rule("BP-005", "Manual Default implementation (derivable)"),
+        rule("BP-006", "Repetitive match mapping"),
+        rule("BP-007", "Error enum boilerplate (consider thiserror)"),
+        rule("BP-008", "Clone-heavy conversion"),
+        rule("BP-009", "Struct update boilerplate"),
+        rule("BP-010", "Format string repetition"),
         rule("SUP-001", "Suppression ratio exceeds configured maximum"),
     ]
 }
@@ -71,4 +84,21 @@ fn rule(id: &str, description: &str) -> serde_json::Value {
         );
     }
     entry
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sarif_rules_contain_boilerplate_patterns() {
+        let rules = sarif_rules();
+        let ids: Vec<&str> = rules.iter().filter_map(|r| r["id"].as_str()).collect();
+        for bp in [
+            "BP-001", "BP-002", "BP-003", "BP-004", "BP-005", "BP-006", "BP-007", "BP-008",
+            "BP-009", "BP-010",
+        ] {
+            assert!(ids.contains(&bp), "SARIF rules should contain {bp}");
+        }
+    }
 }
