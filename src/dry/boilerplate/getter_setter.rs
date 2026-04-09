@@ -1,5 +1,3 @@
-use syn::spanned::Spanned;
-
 use super::{is_self_field_access, single_return_expr, BoilerplateFind};
 use crate::config::sections::BoilerplateConfig;
 
@@ -26,15 +24,14 @@ pub(super) fn check_manual_getter_setter(
             if imp.trait_.is_some() {
                 continue;
             }
-            let count = imp
+            let getter_methods: Vec<&syn::ImplItemFn> = imp
                 .items
                 .iter()
-                .filter(|i| {
+                .filter_map(|i| {
                     if let syn::ImplItem::Fn(m) = i {
                         let is_getter = m.block.stmts.len() == 1
                             && m.sig.inputs.len() == 1
                             && {
-                                // Body is &self.field or self.field
                                 if let Some(expr) = single_return_expr(&m.block) {
                                     is_self_field_access(expr)
                                         || matches!(expr, syn::Expr::Reference(r) if is_self_field_access(&r.expr))
@@ -49,28 +46,32 @@ pub(super) fn check_manual_getter_setter(
                                 syn::Stmt::Expr(syn::Expr::Assign(a), Some(_))
                                     if is_self_field_access(&a.left)
                             );
-                        is_getter || is_setter
+                        if is_getter || is_setter { Some(m) } else { None }
                     } else {
-                        false
+                        None
                     }
                 })
-                .count();
-            if count >= MIN_GETTER_SETTER_COUNT {
+                .collect();
+            if getter_methods.len() >= MIN_GETTER_SETTER_COUNT {
                 let struct_name = if let syn::Type::Path(tp) = &*imp.self_ty {
                     tp.path.segments.last().map(|s| s.ident.to_string())
                 } else {
                     None
                 };
-                findings.push(BoilerplateFind {
-                    pattern_id: "BP-003".to_string(),
-                    file: file.clone(),
-                    line: imp.self_ty.span().start().line,
-                    struct_name,
-                    description: format!(
-                        "{count} trivial getter/setter methods — consider field visibility or accessor macros"
-                    ),
-                    suggestion: "Consider making fields pub or using a getter/setter derive macro"
-                        .to_string(),
+                getter_methods.iter().for_each(|m| {
+                    findings.push(BoilerplateFind {
+                        pattern_id: "BP-003".to_string(),
+                        file: file.clone(),
+                        line: m.sig.ident.span().start().line,
+                        struct_name: struct_name.clone(),
+                        description:
+                            "trivial getter/setter — consider field visibility or accessor macro"
+                                .to_string(),
+                        suggestion:
+                            "Consider making fields pub or using a getter/setter derive macro"
+                                .to_string(),
+                        suppressed: false,
+                    });
                 });
             }
         }

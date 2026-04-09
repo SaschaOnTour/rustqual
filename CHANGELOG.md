@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-04-09
+
+### Added
+- **`// qual:allow(unsafe)` annotation**: Suppresses unsafe-block warnings on individual functions without affecting other complexity findings. Not parsed as a blanket suppression — does not count against suppression ratio.
+- **Boilerplate suppression**: `BoilerplateFind` now has `suppressed: bool`. `qual:allow(dry)` on any boilerplate finding suppresses it. `DrySuppressible` trait extended with impl for `BoilerplateFind`.
+
+### Fixed
+- **BP-003 reports per getter, not per struct**: Each trivial getter/setter is now a separate finding on the function line, enabling `qual:allow(dry)` suppression per function.
+- **`qual:allow(unsafe)` no longer parsed as blanket suppression**: Previously, `qual:allow(unsafe)` was silently treated as `qual:allow` (suppress all) because "unsafe" wasn't a recognized dimension. Now intercepted before suppression parsing.
+
+### Changed
+- `is_unsafe_allowed()` extracted as standalone function in `pipeline/warnings.rs`.
+- `apply_extended_warnings()` accepts `unsafe_allow_lines` parameter.
+- `pipeline/dry_suppressions.rs`: `DrySuppressible` impl for `BoilerplateFind`.
+- Test count: 856 — Function count: 473
+
 ## [0.5.0] - 2026-04-09
 
 ### Changed

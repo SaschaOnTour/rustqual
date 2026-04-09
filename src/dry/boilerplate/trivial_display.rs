@@ -70,6 +70,7 @@ pub(super) fn check_trivial_display(
                         description: "Trivial Display implementation with a single write! call"
                             .to_string(),
                         suggestion: suggest.clone(),
+                        suppressed: false,
                     })
                 }
             })

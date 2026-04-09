@@ -27,7 +27,7 @@ pub fn print_dry_annotations(analysis: &super::AnalysisResult) {
             names.join(", "),
         );
     }
-    for b in &analysis.boilerplate {
+    for b in analysis.boilerplate.iter().filter(|b| !b.suppressed) {
         println!(
             "::notice file={},line={}::{} — {}",
             b.file, b.line, b.description, b.suggestion,

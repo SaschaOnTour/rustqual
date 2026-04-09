@@ -83,6 +83,7 @@ pub(super) fn check_repetitive_struct_update(
                     type_name
                 ),
                 suggestion: "Use struct update syntax: `Type { changed, ..base }`".to_string(),
+                suppressed: false,
             })
         })
     };

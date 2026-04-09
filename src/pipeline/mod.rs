@@ -69,7 +69,8 @@ pub(crate) fn run_analysis(
     warnings::apply_leaf_reclassification(&mut all_results);
     let mut summary = Summary::from_results(&all_results);
     apply_complexity_warnings(&mut all_results, config, &mut summary);
-    apply_extended_warnings(&mut all_results, config, &mut summary);
+    let unsafe_allow_lines = discovery::collect_unsafe_allow_lines(parsed);
+    apply_extended_warnings(&mut all_results, config, &mut summary, &unsafe_allow_lines);
 
     let secondary = run_secondary_analysis(
         parsed,
@@ -151,6 +152,8 @@ fn run_secondary_analysis(
     summary.duplicate_groups = dry.duplicates.iter().filter(|g| !g.suppressed).count();
     dry_suppressions::mark_dry_suppressions(&mut dry.fragments, suppression_lines);
     summary.fragment_groups = dry.fragments.iter().filter(|g| !g.suppressed).count();
+    dry_suppressions::mark_dry_suppressions(&mut dry.boilerplate, suppression_lines);
+    summary.boilerplate_warnings = dry.boilerplate.iter().filter(|b| !b.suppressed).count();
     let mut repeated_matches = run_guarded_detection(
         config.duplicates.detect_repeated_matches,
         |p, c| crate::dry::match_patterns::detect_repeated_matches(p, &c.duplicates),

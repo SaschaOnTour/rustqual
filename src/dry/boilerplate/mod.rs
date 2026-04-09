@@ -11,6 +11,7 @@ pub struct BoilerplateFind {
     pub struct_name: Option<String>,
     pub description: String,
     pub suggestion: String,
+    pub suppressed: bool,
 }
 
 // ── Pattern enablement macro ───────────────────────────────────
@@ -314,6 +315,32 @@ mod tests {
             !findings.iter().any(|f| f.pattern_id == "BP-003"),
             "Only 2 getters should not be flagged"
         );
+    }
+
+    #[test]
+    fn test_bp003_reports_per_getter_not_per_struct() {
+        let code = r#"
+            struct Config { a: i32, b: String, c: bool }
+            impl Config {
+                fn a(&self) -> &i32 { &self.a }
+                fn b(&self) -> &String { &self.b }
+                fn c(&self) -> &bool { &self.c }
+            }
+        "#;
+        let findings = detect_boilerplate(&parse(code), &BoilerplateConfig::default());
+        let bp003: Vec<_> = findings
+            .iter()
+            .filter(|f| f.pattern_id == "BP-003")
+            .collect();
+        assert_eq!(
+            bp003.len(),
+            3,
+            "BP-003 should report one finding per getter, got {}",
+            bp003.len()
+        );
+        // Each finding should be on a different line (the getter function line)
+        let lines: std::collections::HashSet<usize> = bp003.iter().map(|f| f.line).collect();
+        assert_eq!(lines.len(), 3, "Each BP-003 should be on a different line");
     }
 
     // ── BP-004 ─────────────────────────────────────────────────

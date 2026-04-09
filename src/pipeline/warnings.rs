@@ -11,11 +11,10 @@ pub(crate) fn apply_recursive_annotations(
     results: &mut [FunctionAnalysis],
     recursive_lines: &HashMap<String, HashSet<usize>>,
 ) {
-    let window = crate::findings::ANNOTATION_WINDOW;
     results.iter_mut().for_each(|fa| {
         let is_marked = recursive_lines
             .get(&fa.file)
-            .map(|lines| (0..=window).any(|off| fa.line >= off && lines.contains(&(fa.line - off))))
+            .map(|lines| crate::findings::has_annotation_in_window(lines, fa.line))
             .unwrap_or(false);
         if is_marked {
             let self_name = &fa.name;
@@ -138,10 +137,24 @@ fn has_error_handling_issue(
 
 /// Set nesting depth, function length, unsafe, and error-handling warning flags.
 /// Operation: iterates results applying extended complexity threshold checks.
+/// Check if a function has a `// qual:allow(unsafe)` annotation within the window.
+/// Check if a function has a `// qual:allow(unsafe)` annotation within the window.
+/// Operation: delegation to has_annotation_in_window.
+fn is_unsafe_allowed(
+    fa: &FunctionAnalysis,
+    unsafe_allow_lines: &HashMap<String, HashSet<usize>>,
+) -> bool {
+    unsafe_allow_lines
+        .get(&fa.file)
+        .map(|lines| crate::findings::has_annotation_in_window(lines, fa.line))
+        .unwrap_or(false)
+}
+
 pub(super) fn apply_extended_warnings(
     results: &mut [FunctionAnalysis],
     config: &Config,
     summary: &mut Summary,
+    unsafe_allow_lines: &HashMap<String, HashSet<usize>>,
 ) {
     if !config.complexity.enabled {
         return;
@@ -154,8 +167,9 @@ pub(super) fn apply_extended_warnings(
 
     let is_active = |fa: &FunctionAnalysis| !fa.suppressed && !fa.complexity_suppressed;
 
-    let has_unsafe_issue =
-        |m: &crate::analyzer::ComplexityMetrics| check_unsafe && m.unsafe_blocks > 0;
+    let has_unsafe_issue = |fa: &FunctionAnalysis, m: &crate::analyzer::ComplexityMetrics| {
+        check_unsafe && m.unsafe_blocks > 0 && !is_unsafe_allowed(fa, unsafe_allow_lines)
+    };
 
     let check_err = |fa: &FunctionAnalysis, m: &crate::analyzer::ComplexityMetrics| {
         has_error_handling_issue(fa, m, check_errors, expect_threshold)
@@ -177,7 +191,7 @@ pub(super) fn apply_extended_warnings(
                 fa.function_length_warning = true;
                 summary.function_length_warnings += 1;
             }
-            if has_unsafe_issue(m) {
+            if has_unsafe_issue(fa, m) {
                 fa.unsafe_warning = true;
                 summary.unsafe_warnings += 1;
             }
@@ -329,7 +343,7 @@ mod tests {
             max_nesting: 5,
             ..Default::default()
         })];
-        apply_extended_warnings(&mut results, &config, &mut summary);
+        apply_extended_warnings(&mut results, &config, &mut summary, &HashMap::new());
         assert!(results[0].nesting_depth_warning, "Should flag nesting > 4");
         assert_eq!(summary.nesting_depth_warnings, 1);
     }
@@ -342,7 +356,7 @@ mod tests {
             max_nesting: 4,
             ..Default::default()
         })];
-        apply_extended_warnings(&mut results, &config, &mut summary);
+        apply_extended_warnings(&mut results, &config, &mut summary, &HashMap::new());
         assert!(!results[0].nesting_depth_warning, "4 == threshold, no warn");
     }
 
@@ -354,7 +368,7 @@ mod tests {
             function_lines: 61,
             ..Default::default()
         })];
-        apply_extended_warnings(&mut results, &config, &mut summary);
+        apply_extended_warnings(&mut results, &config, &mut summary, &HashMap::new());
         assert!(results[0].function_length_warning, "Should flag >60 lines");
         assert_eq!(summary.function_length_warnings, 1);
     }
@@ -367,7 +381,7 @@ mod tests {
             function_lines: 60,
             ..Default::default()
         })];
-        apply_extended_warnings(&mut results, &config, &mut summary);
+        apply_extended_warnings(&mut results, &config, &mut summary, &HashMap::new());
         assert!(
             !results[0].function_length_warning,
             "60 == threshold, no warn"
@@ -382,7 +396,7 @@ mod tests {
             unsafe_blocks: 1,
             ..Default::default()
         })];
-        apply_extended_warnings(&mut results, &config, &mut summary);
+        apply_extended_warnings(&mut results, &config, &mut summary, &HashMap::new());
         assert!(results[0].unsafe_warning, "Should flag unsafe blocks");
         assert_eq!(summary.unsafe_warnings, 1);
     }
@@ -395,7 +409,7 @@ mod tests {
             unwrap_count: 1,
             ..Default::default()
         })];
-        apply_extended_warnings(&mut results, &config, &mut summary);
+        apply_extended_warnings(&mut results, &config, &mut summary, &HashMap::new());
         assert!(results[0].error_handling_warning, "Should flag unwrap");
         assert_eq!(summary.error_handling_warnings, 1);
     }
@@ -409,7 +423,7 @@ mod tests {
             expect_count: 3,
             ..Default::default()
         })];
-        apply_extended_warnings(&mut results, &config, &mut summary);
+        apply_extended_warnings(&mut results, &config, &mut summary, &HashMap::new());
         assert!(
             !results[0].error_handling_warning,
             "expect allowed, no warn"
@@ -425,7 +439,7 @@ mod tests {
             expect_count: 1,
             ..Default::default()
         })];
-        apply_extended_warnings(&mut results, &config, &mut summary);
+        apply_extended_warnings(&mut results, &config, &mut summary, &HashMap::new());
         assert!(
             results[0].error_handling_warning,
             "expect not allowed, should warn"
@@ -445,7 +459,7 @@ mod tests {
         });
         func.suppressed = true;
         let mut results = vec![func];
-        apply_extended_warnings(&mut results, &config, &mut summary);
+        apply_extended_warnings(&mut results, &config, &mut summary, &HashMap::new());
         assert!(!results[0].nesting_depth_warning);
         assert!(!results[0].function_length_warning);
         assert!(!results[0].unsafe_warning);
@@ -463,7 +477,7 @@ mod tests {
         });
         func.complexity_suppressed = true;
         let mut results = vec![func];
-        apply_extended_warnings(&mut results, &config, &mut summary);
+        apply_extended_warnings(&mut results, &config, &mut summary, &HashMap::new());
         assert!(!results[0].nesting_depth_warning);
         assert!(!results[0].function_length_warning);
     }
@@ -519,7 +533,7 @@ mod tests {
         });
         fa.is_test = true;
         let mut results = vec![fa];
-        apply_extended_warnings(&mut results, &config, &mut summary);
+        apply_extended_warnings(&mut results, &config, &mut summary, &HashMap::new());
         assert!(!results[0].error_handling_warning);
         assert_eq!(summary.error_handling_warnings, 0);
     }
@@ -534,8 +548,48 @@ mod tests {
         });
         fa.is_test = false;
         let mut results = vec![fa];
-        apply_extended_warnings(&mut results, &config, &mut summary);
+        apply_extended_warnings(&mut results, &config, &mut summary, &HashMap::new());
         assert!(results[0].error_handling_warning);
         assert_eq!(summary.error_handling_warnings, 1);
+    }
+
+    #[test]
+    fn test_unsafe_suppressed_by_allow_annotation() {
+        let config = Config::default();
+        let mut summary = Summary::default();
+        let mut fa = make_func_with_metrics(ComplexityMetrics {
+            unsafe_blocks: 1,
+            ..Default::default()
+        });
+        fa.line = 5;
+        let mut results = vec![fa];
+
+        // qual:allow(unsafe) on line 4 (one line before fn at line 5)
+        let unsafe_lines: HashMap<String, HashSet<usize>> =
+            [("test.rs".to_string(), [4].into_iter().collect())].into();
+
+        apply_extended_warnings(&mut results, &config, &mut summary, &unsafe_lines);
+        assert!(
+            !results[0].unsafe_warning,
+            "qual:allow(unsafe) should suppress unsafe warning"
+        );
+        assert_eq!(summary.unsafe_warnings, 0);
+    }
+
+    #[test]
+    fn test_unsafe_without_allow_still_warned() {
+        let config = Config::default();
+        let mut summary = Summary::default();
+        let mut results = vec![make_func_with_metrics(ComplexityMetrics {
+            unsafe_blocks: 1,
+            ..Default::default()
+        })];
+
+        apply_extended_warnings(&mut results, &config, &mut summary, &HashMap::new());
+        assert!(
+            results[0].unsafe_warning,
+            "Without annotation, unsafe should still warn"
+        );
+        assert_eq!(summary.unsafe_warnings, 1);
     }
 }

@@ -125,7 +125,7 @@ fn print_dead_code_entries(dead_code: &[crate::dry::dead_code::DeadCodeWarning])
 /// Print boilerplate pattern entries.
 /// Operation: iteration and formatting logic, no own calls.
 fn print_boilerplate_entries(boilerplate: &[crate::dry::boilerplate::BoilerplateFind]) {
-    for bp in boilerplate {
+    for bp in boilerplate.iter().filter(|b| !b.suppressed) {
         let name = bp.struct_name.as_deref().unwrap_or("(anonymous)");
         println!(
             "  {} [{}] {} ({}:{}) — {}",

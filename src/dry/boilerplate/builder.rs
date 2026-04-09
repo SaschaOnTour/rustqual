@@ -81,6 +81,7 @@ pub(super) fn check_builder_boilerplate(
                         "{count} builder-style methods with repetitive set-and-return pattern"
                     ),
                     suggestion: suggest.to_string(),
+                    suppressed: false,
                 });
             }
         }

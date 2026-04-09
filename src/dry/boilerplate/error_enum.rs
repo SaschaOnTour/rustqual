@@ -79,6 +79,7 @@ pub(super) fn check_error_enum_boilerplate(
                         "{count} trivial From impls for {type_name} — error enum boilerplate"
                     ),
                     suggestion: suggest.to_string(),
+                    suppressed: false,
                 });
             }
         }

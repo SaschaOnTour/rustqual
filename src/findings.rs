@@ -62,10 +62,31 @@ impl Suppression {
 /// accommodates `#[derive]` attributes between comment and definition.
 pub const ANNOTATION_WINDOW: usize = 3;
 
+/// Check if `target_line` is within the annotation window below `annotation_line`.
+/// Operation: arithmetic comparison.
+pub fn is_within_window(annotation_line: usize, target_line: usize) -> bool {
+    annotation_line <= target_line && target_line - annotation_line <= ANNOTATION_WINDOW
+}
+
+/// Check if any line in a set is within the annotation window above `target_line`.
+/// Operation: range iteration with set lookup.
+pub fn has_annotation_in_window(
+    lines: &std::collections::HashSet<usize>,
+    target_line: usize,
+) -> bool {
+    (0..=ANNOTATION_WINDOW).any(|off| target_line >= off && lines.contains(&(target_line - off)))
+}
+
 /// Check if a trimmed line is a `// qual:api` marker.
 /// Operation: string prefix check.
 pub fn is_api_marker(trimmed: &str) -> bool {
     trimmed == "// qual:api" || trimmed.starts_with("// qual:api ")
+}
+
+/// Check if a trimmed line is a `// qual:allow(unsafe)` marker.
+/// Operation: string check.
+pub fn is_unsafe_allow_marker(trimmed: &str) -> bool {
+    trimmed == "// qual:allow(unsafe)" || trimmed.starts_with("// qual:allow(unsafe) ")
 }
 
 /// Check if a trimmed line is a `// qual:recursive` marker.
@@ -87,6 +108,10 @@ pub fn parse_inverse_marker(trimmed: &str) -> Option<String> {
 /// Parse a suppression comment line into a Suppression struct.
 /// Trivial: delegates to sub-parsers via closure chains.
 pub fn parse_suppression(line_number: usize, trimmed: &str) -> Option<Suppression> {
+    // qual:allow(unsafe) is a separate annotation, not a suppression
+    if is_unsafe_allow_marker(trimmed) {
+        return None;
+    }
     trimmed
         .strip_prefix("// qual:allow")
         .map(|rest| parse_qual_allow(line_number, rest))

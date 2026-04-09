@@ -160,7 +160,7 @@ fn html_boilerplate_table(boilerplate: &[crate::dry::boilerplate::BoilerplateFin
          <th>Description</th><th>Suggestion</th>\
          </tr></thead>\n<tbody>\n",
     );
-    boilerplate.iter().for_each(|b| {
+    boilerplate.iter().filter(|b| !b.suppressed).for_each(|b| {
         let name = b.struct_name.as_deref().unwrap_or("\u{2014}");
         html.push_str(&format!(
             "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td>\

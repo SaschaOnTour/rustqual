@@ -40,6 +40,7 @@ pub(super) fn check_clone_heavy_conversion(
                         suggestion:
                             "Consider implementing From/Into or restructuring to avoid cloning"
                                 .to_string(),
+                        suppressed: false,
                     });
                 }
             }

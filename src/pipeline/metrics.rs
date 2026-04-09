@@ -734,4 +734,33 @@ mod tests {
             "FragmentGroup should be suppressed by qual:allow(dry)"
         );
     }
+
+    #[test]
+    fn test_boilerplate_suppression() {
+        use crate::dry::boilerplate::BoilerplateFind;
+
+        let mut findings = vec![BoilerplateFind {
+            pattern_id: "BP-003".to_string(),
+            file: "test.rs".to_string(),
+            line: 10,
+            struct_name: Some("MyStruct".to_string()),
+            description: "3 trivial getters".to_string(),
+            suggestion: "Consider derive macro".to_string(),
+            suppressed: false,
+        }];
+
+        let sup = Suppression {
+            line: 9,
+            dimensions: vec![crate::findings::Dimension::Dry],
+            reason: None,
+        };
+        let suppression_lines: std::collections::HashMap<String, Vec<Suppression>> =
+            [("test.rs".to_string(), vec![sup])].into();
+
+        mark_dry_suppressions(&mut findings, &suppression_lines);
+        assert!(
+            findings[0].suppressed,
+            "BoilerplateFind should be suppressed by qual:allow(dry)"
+        );
+    }
 }

@@ -58,6 +58,7 @@ pub(super) fn check_repetitive_match(
                             match_expr.arms.len()
                         ),
                         suggestion: suggest.to_string(),
+                        suppressed: false,
                     });
                 }
             }

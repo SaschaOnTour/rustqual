@@ -70,6 +70,7 @@ pub(super) fn check_trivial_from(
                         description: "Trivial From implementation that just wraps a value"
                             .to_string(),
                         suggestion: suggest.clone(),
+                        suppressed: false,
                     })
                 }
             })
