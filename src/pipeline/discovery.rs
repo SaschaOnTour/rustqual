@@ -25,7 +25,7 @@ pub(crate) fn collect_rust_files(path: &Path) -> Vec<PathBuf> {
             e.path().extension().is_some_and(|ext| ext == "rs")
                 && !e.path().components().any(|c| {
                     let s = c.as_os_str().to_string_lossy();
-                    s == "target" || s.starts_with('.')
+                    s == "target" || (s.starts_with('.') && s != "." && s != "..")
                 })
         })
         .map(|e| e.into_path())
@@ -387,6 +387,26 @@ mod tests {
             !parsed[0].0.contains('\\'),
             "Display path should use forward slashes, got: {}",
             parsed[0].0
+        );
+    }
+
+    #[test]
+    fn test_collect_rust_files_dotdot_path() {
+        // Simulates `../other/src` — the ".." component should not be filtered as hidden
+        let dir = tempfile::Builder::new()
+            .prefix("rustqual_test_")
+            .tempdir()
+            .unwrap();
+        let sub = dir.path().join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("lib.rs"), "fn f() {}").unwrap();
+
+        // Access via parent/../sub
+        let dotdot_path = dir.path().join("sub").join("..").join("sub");
+        let files = collect_rust_files(&dotdot_path);
+        assert!(
+            !files.is_empty(),
+            "collect_rust_files should find files via ../sub path"
         );
     }
 }
