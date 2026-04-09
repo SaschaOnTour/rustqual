@@ -532,6 +532,7 @@ mod tests {
         let cli = Cli::parse_from(["test", "--min-quality-score", "50.0"]);
         let mut summary = crate::report::Summary {
             total: 10,
+            iosp_score: 1.0,
             ..Default::default()
         };
         summary.compute_quality_score(&crate::config::sections::DEFAULT_QUALITY_WEIGHTS);
