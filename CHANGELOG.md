@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-04-09
+
+### Changed
+- **BREAKING: Quality score formula rescaled**. The old formula dampened findings because each dimension independently divided by total analyzed functions. With 20 findings / 100 functions, the old score was ~90%; now it correctly reflects ~73%. Formula: `score = 1 - active_dims * (1 - weighted_avg)`, clamped to [0, 1]. Only active (non-zero weight) dimensions count. 100% is only achievable with 0 findings. 100% violations now scores 0% (was 75%).
+- Test count: 852 — Function count: 468
+
 ## [0.4.6] - 2026-04-08
 
 ### Fixed

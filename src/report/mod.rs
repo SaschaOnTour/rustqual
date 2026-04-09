@@ -197,12 +197,19 @@ impl Summary {
                 .min(1.0),
             1.0 - (tq_count as f64 / n).min(1.0),
         ];
-        self.quality_score = self
+        // Scale by the number of active (non-zero weight) dimensions so the weighted-average
+        // deficit is not diluted simply because the weights sum to 1.0 across multiple dimensions.
+        // This preserves dimension weighting while making a given number of findings reduce
+        // the overall score proportionally to the total function count.
+        let active_dims = weights.iter().filter(|&&w| w > f64::EPSILON).count() as f64;
+        let weighted_avg: f64 = self
             .dimension_scores
             .iter()
             .zip(weights.iter())
             .map(|(s, w)| s * w)
             .sum();
+        let scale = if active_dims > 0.0 { active_dims } else { 1.0 };
+        self.quality_score = (1.0 - scale * (1.0 - weighted_avg)).clamp(0.0, 1.0);
     }
 
     /// Total number of findings across all dimensions.
@@ -605,6 +612,64 @@ mod tests {
         assert!(summary.quality_score < 1.0);
         assert!(summary.dimension_scores[1] < 1.0); // complexity
         assert!(summary.dimension_scores[2] < 1.0); // DRY
+    }
+
+    #[test]
+    fn test_score_reflects_total_findings_realistically() {
+        // 100 functions, 10 IOSP violations + 10 complexity warnings = 20 findings
+        // With default weights (IOSP=0.25, CX=0.20), score should be significantly < 90%
+        let mut summary = Summary {
+            total: 100,
+            violations: 10,
+            iosp_score: 0.9, // 10/100 violations
+            complexity_warnings: 10,
+            ..Default::default()
+        };
+        summary.compute_quality_score(&crate::config::sections::DEFAULT_QUALITY_WEIGHTS);
+        assert!(
+            summary.quality_score < 0.85,
+            "20 findings / 100 functions should be < 85%, got {:.1}%",
+            summary.quality_score * 100.0
+        );
+        assert!(
+            summary.quality_score > 0.50,
+            "20 findings / 100 functions should be > 50%, got {:.1}%",
+            summary.quality_score * 100.0
+        );
+    }
+
+    #[test]
+    fn test_score_100_percent_only_with_zero_findings() {
+        // Any finding should prevent 100%
+        let mut summary = Summary {
+            total: 100,
+            iosp_score: 1.0,
+            magic_number_warnings: 1,
+            ..Default::default()
+        };
+        summary.compute_quality_score(&crate::config::sections::DEFAULT_QUALITY_WEIGHTS);
+        assert!(
+            summary.quality_score < 1.0,
+            "1 finding should prevent 100%, got {:.1}%",
+            summary.quality_score * 100.0
+        );
+    }
+
+    #[test]
+    fn test_score_all_violations_is_near_zero() {
+        // 100/100 IOSP violations → score should be very low, not 75%
+        let mut summary = Summary {
+            total: 100,
+            violations: 100,
+            iosp_score: 0.0, // 100% violations
+            ..Default::default()
+        };
+        summary.compute_quality_score(&crate::config::sections::DEFAULT_QUALITY_WEIGHTS);
+        assert!(
+            summary.quality_score < 0.10,
+            "100% violations should give score < 10%, got {:.1}%",
+            summary.quality_score * 100.0
+        );
     }
 
     #[test]
