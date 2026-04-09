@@ -150,7 +150,7 @@ fn html_dead_code_table(dead_code: &[crate::dry::dead_code::DeadCodeWarning]) ->
 /// Build HTML table for boilerplate pattern findings.
 /// Operation: iteration and formatting logic, no own calls (html_escape via closure).
 fn html_boilerplate_table(boilerplate: &[crate::dry::boilerplate::BoilerplateFind]) -> String {
-    if boilerplate.is_empty() {
+    if boilerplate.iter().all(|b| b.suppressed) {
         return String::new();
     }
     let esc = |s: &str| html_escape(s);

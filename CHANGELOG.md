@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `is_unsafe_allowed()` extracted as standalone function in `pipeline/warnings.rs`.
 - `apply_extended_warnings()` accepts `unsafe_allow_lines` parameter.
 - `pipeline/dry_suppressions.rs`: `DrySuppressible` impl for `BoilerplateFind`.
-- Test count: 856 — Function count: 473
+- Test count: 856 — Function count: 475
 
 ## [0.5.0] - 2026-04-09
 

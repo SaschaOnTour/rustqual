@@ -135,9 +135,6 @@ fn has_error_handling_issue(
             > 0)
 }
 
-/// Set nesting depth, function length, unsafe, and error-handling warning flags.
-/// Operation: iterates results applying extended complexity threshold checks.
-/// Check if a function has a `// qual:allow(unsafe)` annotation within the window.
 /// Check if a function has a `// qual:allow(unsafe)` annotation within the window.
 /// Operation: delegation to has_annotation_in_window.
 fn is_unsafe_allowed(
