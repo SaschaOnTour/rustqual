@@ -197,10 +197,10 @@ impl Summary {
                 .min(1.0),
             1.0 - (tq_count as f64 / n).min(1.0),
         ];
-        // Scale by number of active (non-zero weight) dimensions so findings count at full value.
-        // Without scaling: 20 findings / 100 functions → 90% (dampened by weights summing to 1.0).
-        // With scaling: 20/100 → ~80% (each finding counts fully, weighted by dimension importance).
-        // Formula: score = 1 - active_dims * (1 - weighted_avg), clamped to [0, 1].
+        // Scale by the number of active (non-zero weight) dimensions so the weighted-average
+        // deficit is not diluted simply because the weights sum to 1.0 across multiple dimensions.
+        // This preserves dimension weighting while making a given number of findings reduce
+        // the overall score proportionally to the total function count.
         let active_dims = weights.iter().filter(|&&w| w > f64::EPSILON).count() as f64;
         let weighted_avg: f64 = self
             .dimension_scores
