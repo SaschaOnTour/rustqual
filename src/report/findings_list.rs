@@ -646,7 +646,9 @@ mod tests {
             "expected a COUPLING finding for db with instability detail"
         );
         assert!(
-            findings.iter().any(|f| f.category == "CYCLE" && f.detail.contains("a > b")),
+            findings
+                .iter()
+                .any(|f| f.category == "CYCLE" && f.detail.contains("a > b")),
             "expected a CYCLE finding describing the a > b cycle"
         );
     }
