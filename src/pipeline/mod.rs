@@ -20,8 +20,8 @@ use crate::scope::ProjectScope;
 
 use metrics::{
     apply_parameter_warnings, build_file_call_graph, compute_coupling, compute_srp,
-    count_coupling_warnings, count_srp_warnings, mark_coupling_suppressions, mark_sdp_suppressions,
-    mark_srp_suppressions, run_dry_detection, run_guarded_detection,
+    count_coupling_warnings, count_dry_findings, count_srp_warnings, mark_coupling_suppressions,
+    mark_sdp_suppressions, mark_srp_suppressions, run_dry_detection, run_guarded_detection,
 };
 use structural_metrics::{
     compute_structural, count_structural_warnings, mark_structural_suppressions,
@@ -149,11 +149,8 @@ fn run_secondary_analysis(
     dry_suppressions::mark_dry_suppressions(&mut dry.duplicates, suppression_lines);
     let inverse_lines = discovery::collect_inverse_lines(parsed);
     dry_suppressions::mark_inverse_suppressions(&mut dry.duplicates, &inverse_lines);
-    summary.duplicate_groups = dry.duplicates.iter().filter(|g| !g.suppressed).count();
     dry_suppressions::mark_dry_suppressions(&mut dry.fragments, suppression_lines);
-    summary.fragment_groups = dry.fragments.iter().filter(|g| !g.suppressed).count();
     dry_suppressions::mark_dry_suppressions(&mut dry.boilerplate, suppression_lines);
-    summary.boilerplate_warnings = dry.boilerplate.iter().filter(|b| !b.suppressed).count();
     let mut repeated_matches = run_guarded_detection(
         config.duplicates.detect_repeated_matches,
         |p, c| crate::dry::match_patterns::detect_repeated_matches(p, &c.duplicates),
@@ -161,7 +158,7 @@ fn run_secondary_analysis(
         config,
     );
     dry_suppressions::mark_dry_suppressions(&mut repeated_matches, suppression_lines);
-    summary.repeated_match_groups = repeated_matches.iter().filter(|g| !g.suppressed).count();
+    count_dry_findings(&dry, &repeated_matches, summary);
 
     metrics::count_sdp_violations(coupling.as_ref(), &config.coupling, summary);
 

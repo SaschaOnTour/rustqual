@@ -446,4 +446,158 @@ mod tests {
         let findings = collect_all_findings(&analysis);
         assert!(findings.is_empty());
     }
+
+    // ── Consistency tests: total_findings() must match collect_all_findings().len() ──
+
+    #[test]
+    fn test_total_findings_consistent_magic_numbers() {
+        let mut analysis = empty_analysis();
+        let mut fa = make_fa("fn1", "src/lib.rs", 10);
+        fa.complexity = Some(ComplexityMetrics {
+            magic_numbers: vec![
+                MagicNumberOccurrence {
+                    line: 12,
+                    value: "42".to_string(),
+                },
+                MagicNumberOccurrence {
+                    line: 15,
+                    value: "99".to_string(),
+                },
+            ],
+            ..Default::default()
+        });
+        analysis.results = vec![fa];
+        // Pipeline must count per-occurrence, not per-function
+        analysis.summary.magic_number_warnings = 2;
+        let findings = collect_all_findings(&analysis);
+        assert_eq!(
+            analysis.summary.total_findings(),
+            findings.len(),
+            "total_findings() must equal collect_all_findings().len()"
+        );
+    }
+
+    #[test]
+    fn test_total_findings_consistent_duplicates() {
+        use crate::dry::functions::{DuplicateEntry, DuplicateGroup, DuplicateKind};
+        let mut analysis = empty_analysis();
+        analysis.duplicates = vec![DuplicateGroup {
+            entries: vec![
+                DuplicateEntry {
+                    name: "fn_a".to_string(),
+                    qualified_name: "mod::fn_a".to_string(),
+                    file: "src/a.rs".to_string(),
+                    line: 10,
+                },
+                DuplicateEntry {
+                    name: "fn_b".to_string(),
+                    qualified_name: "mod::fn_b".to_string(),
+                    file: "src/b.rs".to_string(),
+                    line: 20,
+                },
+            ],
+            kind: DuplicateKind::Exact,
+            suppressed: false,
+        }];
+        // Pipeline must count per-entry (2), not per-group (1)
+        analysis.summary.duplicate_groups = 2;
+        let findings = collect_all_findings(&analysis);
+        assert_eq!(
+            analysis.summary.total_findings(),
+            findings.len(),
+            "total_findings() must equal collect_all_findings().len()"
+        );
+    }
+
+    #[test]
+    fn test_total_findings_consistent_fragments() {
+        use crate::dry::fragments::{FragmentEntry, FragmentGroup};
+        let mut analysis = empty_analysis();
+        analysis.fragments = vec![FragmentGroup {
+            entries: vec![
+                FragmentEntry {
+                    function_name: "fn_a".to_string(),
+                    qualified_name: "mod::fn_a".to_string(),
+                    file: "src/a.rs".to_string(),
+                    start_line: 10,
+                    end_line: 15,
+                },
+                FragmentEntry {
+                    function_name: "fn_b".to_string(),
+                    qualified_name: "mod::fn_b".to_string(),
+                    file: "src/b.rs".to_string(),
+                    start_line: 20,
+                    end_line: 25,
+                },
+                FragmentEntry {
+                    function_name: "fn_c".to_string(),
+                    qualified_name: "mod::fn_c".to_string(),
+                    file: "src/c.rs".to_string(),
+                    start_line: 30,
+                    end_line: 35,
+                },
+            ],
+            statement_count: 3,
+            suppressed: false,
+        }];
+        // Pipeline must count per-entry (3), not per-group (1)
+        analysis.summary.fragment_groups = 3;
+        let findings = collect_all_findings(&analysis);
+        assert_eq!(
+            analysis.summary.total_findings(),
+            findings.len(),
+            "total_findings() must equal collect_all_findings().len()"
+        );
+    }
+
+    #[test]
+    fn test_total_findings_consistent_mixed() {
+        use crate::dry::functions::{DuplicateEntry, DuplicateGroup, DuplicateKind};
+        let mut analysis = empty_analysis();
+        // 1 function with 2 magic numbers
+        let mut fa = make_fa("fn1", "src/lib.rs", 10);
+        fa.complexity = Some(ComplexityMetrics {
+            magic_numbers: vec![
+                MagicNumberOccurrence {
+                    line: 12,
+                    value: "400".to_string(),
+                },
+                MagicNumberOccurrence {
+                    line: 13,
+                    value: "800".to_string(),
+                },
+            ],
+            ..Default::default()
+        });
+        analysis.results = vec![fa];
+        // 1 duplicate group with 2 entries
+        analysis.duplicates = vec![DuplicateGroup {
+            entries: vec![
+                DuplicateEntry {
+                    name: "fn_a".to_string(),
+                    qualified_name: "mod::fn_a".to_string(),
+                    file: "src/a.rs".to_string(),
+                    line: 100,
+                },
+                DuplicateEntry {
+                    name: "fn_b".to_string(),
+                    qualified_name: "mod::fn_b".to_string(),
+                    file: "src/b.rs".to_string(),
+                    line: 200,
+                },
+            ],
+            kind: DuplicateKind::Exact,
+            suppressed: false,
+        }];
+        analysis.summary.magic_number_warnings = 2;
+        analysis.summary.duplicate_groups = 2;
+        let findings = collect_all_findings(&analysis);
+        // 2 magic numbers + 2 duplicate entries = 4 findings
+        assert_eq!(findings.len(), 4);
+        assert_eq!(
+            analysis.summary.total_findings(),
+            findings.len(),
+            "total_findings() must equal collect_all_findings().len() — was the bug from issue report"
+        );
+    }
 }

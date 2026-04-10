@@ -72,7 +72,7 @@ pub struct Summary {
     pub iosp_score: f64,
     /// Number of functions exceeding complexity thresholds.
     pub complexity_warnings: usize,
-    /// Number of functions containing magic numbers.
+    /// Number of individual magic number occurrences across all functions.
     pub magic_number_warnings: usize,
     /// Number of functions exceeding nesting depth threshold.
     pub nesting_depth_warnings: usize,
@@ -86,11 +86,11 @@ pub struct Summary {
     pub coupling_warnings: usize,
     /// Number of circular dependencies found.
     pub coupling_cycles: usize,
-    /// Number of duplicate function groups found.
+    /// Number of individual entries across all duplicate function groups.
     pub duplicate_groups: usize,
     /// Number of dead code warnings.
     pub dead_code_warnings: usize,
-    /// Number of duplicate fragment groups found.
+    /// Number of individual entries across all duplicate fragment groups.
     pub fragment_groups: usize,
     /// Number of boilerplate pattern findings.
     pub boilerplate_warnings: usize,
@@ -102,7 +102,7 @@ pub struct Summary {
     pub srp_param_warnings: usize,
     /// Number of wildcard import warnings.
     pub wildcard_import_warnings: usize,
-    /// Number of repeated match pattern groups (DRY-005).
+    /// Number of individual entries across all repeated match pattern groups (DRY-005).
     pub repeated_match_groups: usize,
     /// Number of Stable Dependencies Principle violations.
     pub sdp_violations: usize,

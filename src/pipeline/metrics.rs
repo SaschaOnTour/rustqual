@@ -105,8 +105,6 @@ pub(super) fn run_dry_detection(
         parsed,
         config,
     );
-    summary.duplicate_groups = duplicates.len();
-
     let dead_code = run_guarded_detection(
         config.duplicates.enabled,
         |p, c| {
@@ -126,8 +124,6 @@ pub(super) fn run_dry_detection(
         parsed,
         config,
     );
-    summary.fragment_groups = fragments.len();
-
     let boilerplate = run_guarded_detection(
         config.boilerplate.enabled,
         |p, c| crate::dry::boilerplate::detect_boilerplate(p, &c.boilerplate),
@@ -157,6 +153,33 @@ pub(super) fn run_dry_detection(
         boilerplate,
         wildcard_warnings,
     }
+}
+
+/// Count unsuppressed DRY finding entries and update summary.
+/// Operation: iteration + filtering + summation on DRY result vectors (no own calls).
+pub(super) fn count_dry_findings(
+    dry: &DryResults,
+    repeated_matches: &[crate::dry::match_patterns::RepeatedMatchGroup],
+    summary: &mut Summary,
+) {
+    summary.duplicate_groups = dry
+        .duplicates
+        .iter()
+        .filter(|g| !g.suppressed)
+        .map(|g| g.entries.len())
+        .sum();
+    summary.fragment_groups = dry
+        .fragments
+        .iter()
+        .filter(|g| !g.suppressed)
+        .map(|g| g.entries.len())
+        .sum();
+    summary.boilerplate_warnings = dry.boilerplate.iter().filter(|b| !b.suppressed).count();
+    summary.repeated_match_groups = repeated_matches
+        .iter()
+        .filter(|g| !g.suppressed)
+        .map(|g| g.entries.len())
+        .sum();
 }
 
 /// Mark SRP warnings as suppressed based on `// qual:allow(srp)` comments.
