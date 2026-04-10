@@ -30,6 +30,8 @@ pub struct CouplingMetrics {
     pub outgoing: Vec<String>,
     /// Whether this module's coupling warnings are suppressed via `// qual:allow(coupling)`.
     pub suppressed: bool,
+    /// Whether this module exceeds coupling thresholds (set by pipeline).
+    pub warning: bool,
 }
 
 /// A strongly connected component (cycle) in the module graph.

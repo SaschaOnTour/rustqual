@@ -143,7 +143,7 @@ fn run_secondary_analysis(
     let mut coupling = compute_coupling(parsed, config);
     mark_coupling_suppressions(coupling.as_mut(), suppression_lines);
     mark_sdp_suppressions(coupling.as_mut());
-    count_coupling_warnings(coupling.as_ref(), &config.coupling, summary);
+    count_coupling_warnings(coupling.as_mut(), &config.coupling, summary);
 
     let mut dry = run_dry_detection(parsed, config, suppression_lines, &api_lines, summary);
     dry_suppressions::mark_dry_suppressions(&mut dry.duplicates, suppression_lines);
@@ -553,6 +553,7 @@ mod tests {
                         "scope".to_string(),
                     ],
                     suppressed: false,
+                    warning: false,
                 },
                 crate::coupling::CouplingMetrics {
                     module_name: "config".to_string(),
@@ -566,6 +567,7 @@ mod tests {
                     ],
                     outgoing: vec![],
                     suppressed: false,
+                    warning: false,
                 },
             ],
             cycles: vec![],
@@ -633,6 +635,7 @@ mod tests {
                 incoming: vec![],
                 outgoing: vec![],
                 suppressed: false,
+                warning: false,
             }],
             cycles: vec![],
             sdp_violations: vec![],
@@ -666,26 +669,26 @@ mod tests {
         let config = crate::config::sections::CouplingConfig::default();
         let mut summary = Summary::from_results(&[]);
 
-        count_coupling_warnings(Some(&analysis), &config, &mut summary);
+        count_coupling_warnings(Some(&mut analysis), &config, &mut summary);
 
         assert_eq!(summary.coupling_warnings, 0); // pipeline warning suppressed
     }
 
     #[test]
     fn test_count_coupling_warnings_counts_unsuppressed() {
-        let analysis = make_coupling_analysis();
+        let mut analysis = make_coupling_analysis();
 
         let config = crate::config::sections::CouplingConfig::default();
         let mut summary = Summary::from_results(&[]);
 
-        count_coupling_warnings(Some(&analysis), &config, &mut summary);
+        count_coupling_warnings(Some(&mut analysis), &config, &mut summary);
 
         assert_eq!(summary.coupling_warnings, 1); // pipeline exceeds threshold
     }
 
     #[test]
     fn test_count_coupling_warnings_leaf_module_excluded() {
-        let analysis = crate::coupling::CouplingAnalysis {
+        let mut analysis = crate::coupling::CouplingAnalysis {
             metrics: vec![crate::coupling::CouplingMetrics {
                 module_name: "watch".to_string(),
                 afferent: 0, // leaf module
@@ -694,6 +697,7 @@ mod tests {
                 incoming: vec![],
                 outgoing: vec!["config".to_string(), "pipeline".to_string()],
                 suppressed: false,
+                warning: false,
             }],
             cycles: vec![],
             sdp_violations: vec![],
@@ -702,7 +706,7 @@ mod tests {
         let config = crate::config::sections::CouplingConfig::default();
         let mut summary = Summary::from_results(&[]);
 
-        count_coupling_warnings(Some(&analysis), &config, &mut summary);
+        count_coupling_warnings(Some(&mut analysis), &config, &mut summary);
 
         assert_eq!(summary.coupling_warnings, 0); // leaf excluded
     }

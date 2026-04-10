@@ -142,11 +142,12 @@ fn collect_dry_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntr
             });
         });
     analysis.dead_code.iter().for_each(|w| {
+        let detail = format!("{:?}", w.kind).to_lowercase();
         entries.push(FindingEntry::new(
             &w.file,
             w.line,
             "DEAD_CODE",
-            format!("{:?}", w.kind).to_lowercase(),
+            detail,
             w.qualified_name.clone(),
         ));
     });
@@ -156,11 +157,12 @@ fn collect_dry_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntr
         .filter(|g| !g.suppressed)
         .for_each(|group| {
             group.entries.iter().for_each(|e| {
+                let detail = format!("{} stmts", group.statement_count);
                 entries.push(FindingEntry::new(
                     &e.file,
                     e.start_line,
                     "FRAGMENT",
-                    format!("{} stmts", group.statement_count),
+                    detail,
                     e.function_name.clone(),
                 ));
             });
@@ -170,12 +172,13 @@ fn collect_dry_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntr
         .iter()
         .filter(|b| !b.suppressed)
         .for_each(|b| {
+            let name = b.struct_name.clone().unwrap_or_default();
             entries.push(FindingEntry::new(
                 &b.file,
                 b.line,
                 "BOILERPLATE",
                 b.pattern_id.clone(),
-                b.struct_name.clone().unwrap_or_default(),
+                name,
             ));
         });
     analysis
@@ -211,10 +214,7 @@ fn collect_dry_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntr
 /// Collect SRP findings.
 /// Operation: iterates SRP warnings; no own calls.
 fn collect_srp_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntry>) {
-    let srp = match &analysis.srp {
-        Some(s) => s,
-        None => return,
-    };
+    let Some(srp) = &analysis.srp else { return };
     srp.struct_warnings
         .iter()
         .filter(|w| !w.suppressed)
@@ -253,22 +253,34 @@ fn collect_srp_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntr
         });
 }
 
-/// Collect coupling findings (SDP violations).
+/// Collect coupling findings (threshold warnings, cycles, SDP violations).
 /// Operation: iterates coupling analysis; no own calls.
 fn collect_coupling_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntry>) {
-    let ca = match &analysis.coupling {
-        Some(c) => c,
-        None => return,
-    };
+    let Some(ca) = &analysis.coupling else { return };
+    ca.metrics.iter().filter(|m| m.warning).for_each(|m| {
+        let detail = format!("I={:.2} Ca={} Ce={}", m.instability, m.afferent, m.efferent);
+        entries.push(FindingEntry::new(
+            "",
+            0,
+            "COUPLING",
+            detail,
+            m.module_name.clone(),
+        ));
+    });
+    ca.cycles.iter().for_each(|c| {
+        let detail = c.modules.join(" > ");
+        entries.push(FindingEntry::new("", 0, "CYCLE", detail, String::new()));
+    });
     ca.sdp_violations
         .iter()
         .filter(|v| !v.suppressed)
         .for_each(|v| {
+            let detail = format!("{} -> {}", v.from_module, v.to_module);
             entries.push(FindingEntry::new(
                 "",
                 0,
                 "SDP",
-                format!("{} -> {}", v.from_module, v.to_module),
+                detail,
                 v.from_module.clone(),
             ));
         });
@@ -277,10 +289,7 @@ fn collect_coupling_findings(analysis: &AnalysisResult, entries: &mut Vec<Findin
 /// Collect TQ findings.
 /// Operation: iterates TQ warnings; no own calls.
 fn collect_tq_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntry>) {
-    let tq = match &analysis.tq {
-        Some(t) => t,
-        None => return,
-    };
+    let Some(tq) = &analysis.tq else { return };
     tq.warnings.iter().filter(|w| !w.suppressed).for_each(|w| {
         let cat = match &w.kind {
             crate::tq::TqWarningKind::NoAssertion => "TQ_NO_ASSERT",
@@ -302,9 +311,8 @@ fn collect_tq_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntry
 /// Collect structural findings.
 /// Operation: iterates structural warnings; no own calls.
 fn collect_structural_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntry>) {
-    let st = match &analysis.structural {
-        Some(s) => s,
-        None => return,
+    let Some(st) = &analysis.structural else {
+        return;
     };
     st.warnings.iter().filter(|w| !w.suppressed).for_each(|w| {
         entries.push(FindingEntry::new(
@@ -447,7 +455,9 @@ mod tests {
         assert!(findings.is_empty());
     }
 
-    // ── Consistency tests: total_findings() must match collect_all_findings().len() ──
+    // ── Contract tests: when summary counts match per-entry semantics,
+    // total_findings() must equal collect_all_findings().len().
+    // Pipeline integration is tested by test_self_analysis_no_violations. ──
 
     #[test]
     fn test_total_findings_consistent_magic_numbers() {
@@ -598,6 +608,36 @@ mod tests {
             analysis.summary.total_findings(),
             findings.len(),
             "total_findings() must equal collect_all_findings().len() — was the bug from issue report"
+        );
+    }
+
+    #[test]
+    fn test_total_findings_consistent_coupling() {
+        let mut analysis = empty_analysis();
+        analysis.coupling = Some(crate::coupling::CouplingAnalysis {
+            metrics: vec![crate::coupling::CouplingMetrics {
+                module_name: "db".to_string(),
+                afferent: 2,
+                efferent: 5,
+                instability: 0.71,
+                incoming: vec![],
+                outgoing: vec![],
+                suppressed: false,
+                warning: true,
+            }],
+            cycles: vec![crate::coupling::CycleReport {
+                modules: vec!["a".to_string(), "b".to_string()],
+            }],
+            sdp_violations: vec![],
+        });
+        // 1 coupling warning + 1 cycle = 2
+        analysis.summary.coupling_warnings = 1;
+        analysis.summary.coupling_cycles = 1;
+        let findings = collect_all_findings(&analysis);
+        assert_eq!(
+            analysis.summary.total_findings(),
+            findings.len(),
+            "coupling warnings and cycles must appear in findings list"
         );
     }
 }

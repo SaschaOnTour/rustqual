@@ -49,18 +49,19 @@ pub(super) fn mark_coupling_suppressions(
 /// because I=1.0 is the natural, harmless state for leaf modules.
 /// Suppressed modules are excluded from all coupling warnings.
 pub(super) fn count_coupling_warnings(
-    analysis: Option<&crate::coupling::CouplingAnalysis>,
+    analysis: Option<&mut crate::coupling::CouplingAnalysis>,
     config: &crate::config::sections::CouplingConfig,
     summary: &mut Summary,
 ) {
     let Some(analysis) = analysis else { return };
-    for m in &analysis.metrics {
+    for m in &mut analysis.metrics {
         if m.suppressed {
             continue;
         }
         let instability_exceeded = m.afferent > 0 && m.instability > config.max_instability;
         if instability_exceeded || m.afferent > config.max_fan_in || m.efferent > config.max_fan_out
         {
+            m.warning = true;
             summary.coupling_warnings += 1;
         }
     }
@@ -130,8 +131,6 @@ pub(super) fn run_dry_detection(
         parsed,
         config,
     );
-    summary.boilerplate_warnings = boilerplate.len();
-
     let mut wildcard_warnings = run_guarded_detection(
         config.duplicates.detect_wildcard_imports,
         |p, c| {
@@ -466,6 +465,7 @@ mod tests {
             incoming: vec![],
             outgoing: vec![],
             suppressed,
+            warning: false,
         }
     }
 
