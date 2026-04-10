@@ -37,6 +37,60 @@ fn build_ai_value(analysis: &AnalysisResult, config: &crate::config::Config) -> 
     obj
 }
 
+/// Pre-built indexes for O(1) enrichment lookups.
+struct EnrichIndex<'a> {
+    results: std::collections::HashMap<(&'a str, usize), &'a crate::analyzer::FunctionAnalysis>,
+    duplicates:
+        std::collections::HashMap<(&'a str, usize), &'a crate::dry::functions::DuplicateGroup>,
+    fragments:
+        std::collections::HashMap<(&'a str, usize), &'a crate::dry::fragments::FragmentGroup>,
+    srp_structs: std::collections::HashMap<(&'a str, usize), &'a crate::srp::SrpWarning>,
+}
+
+/// Build enrichment indexes from analysis data for O(1) lookups.
+/// Operation: iteration + HashMap construction, no own calls.
+fn build_enrich_index(analysis: &AnalysisResult) -> EnrichIndex<'_> {
+    let results = analysis
+        .results
+        .iter()
+        .map(|fa| ((fa.file.as_str(), fa.line), fa))
+        .collect();
+    let duplicates = analysis
+        .duplicates
+        .iter()
+        .flat_map(|g| {
+            g.entries
+                .iter()
+                .map(move |e| ((e.file.as_str(), e.line), g))
+        })
+        .collect();
+    let fragments = analysis
+        .fragments
+        .iter()
+        .flat_map(|g| {
+            g.entries
+                .iter()
+                .map(move |e| ((e.file.as_str(), e.start_line), g))
+        })
+        .collect();
+    let srp_structs = analysis
+        .srp
+        .as_ref()
+        .map(|s| {
+            s.struct_warnings
+                .iter()
+                .map(|w| ((w.file.as_str(), w.line), w))
+                .collect()
+        })
+        .unwrap_or_default();
+    EnrichIndex {
+        results,
+        duplicates,
+        fragments,
+        srp_structs,
+    }
+}
+
 /// Build findings grouped by file as a JSON object with enriched details.
 /// Operation: sequential grouping + value construction, no own calls.
 fn build_findings_value(
@@ -44,6 +98,7 @@ fn build_findings_value(
     analysis: &AnalysisResult,
     config: &crate::config::Config,
 ) -> Value {
+    let index = build_enrich_index(analysis);
     let mut map = serde_json::Map::new();
     let mut current_file = String::new();
     let mut current_entries: Vec<Value> = Vec::new();
@@ -67,7 +122,7 @@ fn build_findings_value(
             current_file = key;
         }
         let cat = map_category(e.category);
-        let detail = enrich_detail(e, analysis, config);
+        let detail = enrich_detail(e, &index, config);
         current_entries.push(json!({
             "category": cat,
             "line": e.line,
@@ -83,22 +138,41 @@ fn build_findings_value(
 }
 
 /// Enrich a finding's detail string with actionable context.
-/// Operation: match on category + lookup in analysis data, no own calls.
+/// Operation: match on category + O(1) index lookup, no own calls.
 fn enrich_detail(
     entry: &crate::report::findings_list::FindingEntry,
-    analysis: &AnalysisResult,
+    index: &EnrichIndex<'_>,
     config: &crate::config::Config,
 ) -> String {
     let with_max = |threshold: usize| format!("{} (max {threshold})", entry.detail);
+    let key = (entry.file.as_str(), entry.line);
     match entry.category {
-        "VIOLATION" => enrich_violation(entry, &analysis.results),
-        "DUPLICATE" => enrich_partners(entry, &analysis.duplicates, "with"),
-        "FRAGMENT" => enrich_partners(entry, &analysis.fragments, "also in"),
+        "VIOLATION" => enrich_violation(entry, index.results.get(&key).copied()),
+        "DUPLICATE" => {
+            let partners = index.duplicates.get(&key).map(|g| {
+                g.entries
+                    .iter()
+                    .filter(|e| !(e.file == entry.file && e.line == entry.line))
+                    .map(|e| format!("{}:{}", e.file, e.line))
+                    .collect()
+            });
+            format_partners(&entry.detail, partners.unwrap_or_default(), "with")
+        }
+        "FRAGMENT" => {
+            let partners = index.fragments.get(&key).map(|g| {
+                g.entries
+                    .iter()
+                    .filter(|e| !(e.file == entry.file && e.start_line == entry.line))
+                    .map(|e| format!("{}:{}", e.file, e.start_line))
+                    .collect()
+            });
+            format_partners(&entry.detail, partners.unwrap_or_default(), "also in")
+        }
         "COGNITIVE" => with_max(config.complexity.max_cognitive),
         "CYCLOMATIC" => with_max(config.complexity.max_cyclomatic),
         "LONG_FN" => with_max(config.complexity.max_function_lines),
         "NESTING" => with_max(config.complexity.max_nesting_depth),
-        "SRP_STRUCT" => enrich_srp_struct(entry, analysis),
+        "SRP_STRUCT" => enrich_srp_struct(entry, index.srp_structs.get(&key).copied()),
         "SRP_MODULE" => with_max(config.srp.file_length_baseline),
         "SRP_PARAMS" => with_max(config.srp.max_parameters),
         _ => entry.detail.clone(),
@@ -106,19 +180,12 @@ fn enrich_detail(
 }
 
 /// Enrich SRP struct detail with method and field counts.
-/// Operation: search + format logic, no own calls.
+/// Operation: format logic, no own calls.
 fn enrich_srp_struct(
     entry: &crate::report::findings_list::FindingEntry,
-    analysis: &AnalysisResult,
+    warning: Option<&crate::srp::SrpWarning>,
 ) -> String {
-    let Some(srp) = &analysis.srp else {
-        return entry.detail.clone();
-    };
-    let w = srp
-        .struct_warnings
-        .iter()
-        .find(|w| w.file == entry.file && w.line == entry.line);
-    let Some(w) = w else {
+    let Some(w) = warning else {
         return entry.detail.clone();
     };
     format!(
@@ -128,14 +195,11 @@ fn enrich_srp_struct(
 }
 
 /// Enrich violation detail with logic and call line numbers.
-/// Operation: search + format logic, no own calls.
+/// Operation: format logic, no own calls.
 fn enrich_violation(
     entry: &crate::report::findings_list::FindingEntry,
-    results: &[crate::analyzer::FunctionAnalysis],
+    fa: Option<&crate::analyzer::FunctionAnalysis>,
 ) -> String {
-    let fa = results
-        .iter()
-        .find(|f| f.file == entry.file && f.line == entry.line);
     let Some(fa) = fa else {
         return entry.detail.clone();
     };
@@ -164,64 +228,13 @@ fn enrich_violation(
     }
 }
 
-/// Trait for DRY finding groups that have partner locations.
-trait HasPartnerLocations {
-    fn partner_locations(&self, file: &str, line: usize) -> Vec<(String, usize)>;
-    fn contains_entry(&self, file: &str, line: usize) -> bool;
-}
-
-impl HasPartnerLocations for crate::dry::functions::DuplicateGroup {
-    fn partner_locations(&self, file: &str, line: usize) -> Vec<(String, usize)> {
-        self.entries
-            .iter()
-            .filter(|e| !(e.file == file && e.line == line))
-            .map(|e| (e.file.clone(), e.line))
-            .collect()
-    }
-    fn contains_entry(&self, file: &str, line: usize) -> bool {
-        self.entries
-            .iter()
-            .any(|e| e.file == file && e.line == line)
-    }
-}
-
-impl HasPartnerLocations for crate::dry::fragments::FragmentGroup {
-    fn partner_locations(&self, file: &str, line: usize) -> Vec<(String, usize)> {
-        self.entries
-            .iter()
-            .filter(|e| !(e.file == file && e.start_line == line))
-            .map(|e| (e.file.clone(), e.start_line))
-            .collect()
-    }
-    fn contains_entry(&self, file: &str, line: usize) -> bool {
-        self.entries
-            .iter()
-            .any(|e| e.file == file && e.start_line == line)
-    }
-}
-
-/// Enrich detail with partner locations from grouped findings.
-/// Operation: trait-based search + format logic, no own calls.
-fn enrich_partners<G: HasPartnerLocations>(
-    entry: &crate::report::findings_list::FindingEntry,
-    groups: &[G],
-    join_word: &str,
-) -> String {
-    let group = groups
-        .iter()
-        .find(|g| g.contains_entry(&entry.file, entry.line));
-    let Some(group) = group else {
-        return entry.detail.clone();
-    };
-    let partners: Vec<String> = group
-        .partner_locations(&entry.file, entry.line)
-        .iter()
-        .map(|(f, l)| format!("{f}:{l}"))
-        .collect();
+/// Format partner locations into enriched detail.
+/// Operation: format logic, no own calls.
+fn format_partners(detail: &str, partners: Vec<String>, join_word: &str) -> String {
     if partners.is_empty() {
-        return entry.detail.clone();
+        return detail.to_string();
     }
-    format!("{} {join_word} {}", entry.detail, partners.join(", "))
+    format!("{detail} {join_word} {}", partners.join(", "))
 }
 
 // ── Minimal TOON encoder ────────────────────────────────────
@@ -266,13 +279,18 @@ fn is_tabular(arr: &[Value]) -> bool {
     let Some(Value::Object(first)) = arr.first() else {
         return false;
     };
+    let all_primitive =
+        |o: &serde_json::Map<String, Value>| o.values().all(|v| !v.is_object() && !v.is_array());
+    if !all_primitive(first) {
+        return false;
+    }
     let keys: Vec<&String> = first.keys().collect();
     arr[1..].iter().all(|v| {
         v.as_object()
             .map(|o| {
                 o.len() == keys.len()
                     && keys.iter().all(|k| o.contains_key(k.as_str()))
-                    && o.values().all(|v| !v.is_object() && !v.is_array())
+                    && all_primitive(o)
             })
             .unwrap_or(false)
     })
@@ -442,6 +460,14 @@ mod tests {
         assert!(!is_tabular(&[json!({"a": 1}), json!({"b": 2})]));
         assert!(!is_tabular(&[json!({"a": [1]}), json!({"a": [2]})]));
         assert!(!is_tabular(&[json!({"a": 1})]));
+    }
+
+    #[test]
+    fn test_is_tabular_rejects_nested_in_first_row() {
+        assert!(!is_tabular(&[
+            json!({"a": {"nested": 1}}),
+            json!({"a": {"nested": 2}}),
+        ]));
     }
 
     // ── Category mapping tests ──────────────────────────────────
@@ -800,7 +826,8 @@ mod tests {
             function_name: "fn1".into(),
         };
         let config = crate::config::Config::default();
-        let detail = enrich_detail(&entry, &analysis, &config);
+        let index = build_enrich_index(&analysis);
+        let detail = enrich_detail(&entry, &index, &config);
         assert!(detail.contains("12"), "should contain value, got: {detail}");
         assert!(
             detail.contains(&format!("max {}", config.complexity.max_cognitive)),
@@ -820,7 +847,8 @@ mod tests {
             function_name: "fn1".into(),
         };
         let config = crate::config::Config::default();
-        let detail = enrich_detail(&entry, &analysis, &config);
+        let index = build_enrich_index(&analysis);
+        let detail = enrich_detail(&entry, &index, &config);
         assert!(
             detail.contains("72 lines"),
             "should contain line count, got: {detail}"
@@ -843,7 +871,8 @@ mod tests {
             function_name: "fn1".into(),
         };
         let config = crate::config::Config::default();
-        let detail = enrich_detail(&entry, &analysis, &config);
+        let index = build_enrich_index(&analysis);
+        let detail = enrich_detail(&entry, &index, &config);
         assert!(
             detail.contains("depth 5"),
             "should contain depth, got: {detail}"
@@ -883,7 +912,8 @@ mod tests {
             function_name: "BigStruct".into(),
         };
         let config = crate::config::Config::default();
-        let detail = enrich_detail(&entry, &analysis, &config);
+        let index = build_enrich_index(&analysis);
+        let detail = enrich_detail(&entry, &index, &config);
         assert!(
             detail.contains("LCOM4=3"),
             "should contain LCOM4, got: {detail}"
@@ -910,7 +940,8 @@ mod tests {
             function_name: "lib".into(),
         };
         let config = crate::config::Config::default();
-        let detail = enrich_detail(&entry, &analysis, &config);
+        let index = build_enrich_index(&analysis);
+        let detail = enrich_detail(&entry, &index, &config);
         assert!(
             detail.contains("310 lines"),
             "should contain line count, got: {detail}"
@@ -933,7 +964,8 @@ mod tests {
             function_name: "fn1".into(),
         };
         let config = crate::config::Config::default();
-        let detail = enrich_detail(&entry, &analysis, &config);
+        let index = build_enrich_index(&analysis);
+        let detail = enrich_detail(&entry, &index, &config);
         assert!(
             detail.contains("7 params"),
             "should contain param count, got: {detail}"

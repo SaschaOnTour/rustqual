@@ -10,10 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **`--format ai` (TOON output)**: Token-optimized output for AI agents using [TOON format](https://toonformat.dev/). Findings are grouped by file (file paths appear once), categories use human-readable snake_case (`magic_number`, `duplicate`, `violation`), and details are enriched with actionable context (partner locations for duplicates/fragments, logic/call line numbers for violations, threshold values for complexity findings). ~66% fewer tokens than JSON.
 - **`--format ai-json` (compact JSON)**: Same enriched structure as `--format ai` but serialized as JSON — fallback for AI tools that don't support TOON.
-- New dependency: `toon-format` v0.2 (official TOON encoder).
+- Custom minimal TOON encoder (~80 lines, no new dependencies).
 - `output_results()` now takes `&Config` instead of `&CouplingConfig`, enabling AI format to include threshold information in enriched details.
-- 20 new tests for AI output (category mapping, finding grouping, detail enrichment, TOON/JSON serialization).
-- Test count: 888 — Function count: 491
+- 29 new tests for AI output (TOON encoder, category mapping, finding grouping, detail enrichment, serialization).
+- Test count: 899 — Function count: 496
 
 ## [0.5.4] - 2026-04-10
 
