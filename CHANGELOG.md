@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] - 2026-04-10
+
+### Fixed
+- **Inconsistent findings count**: Summary header reported fewer findings than the Findings section. `total_findings()` counted magic numbers per-function (1) and duplicates/fragments/repeated matches per-group (1), while the findings list counted per-occurrence (2) and per-entry (2). Now both use per-occurrence/per-entry counting, making the numbers consistent.
+- **Missing coupling findings in findings list**: Coupling threshold warnings and circular dependencies were counted in `total_findings()` but not emitted by `collect_all_findings()`. Added `warning: bool` flag on `CouplingMetrics` (set by `count_coupling_warnings`), new `COUPLING` and `CYCLE` categories in `collect_coupling_findings`.
+- Extracted `count_dry_findings()` Operation in `pipeline/metrics.rs` to consolidate DRY entry counting and keep `run_secondary_analysis` under the function length threshold.
+- Removed redundant pre-suppression counts for duplicates, fragments, and boilerplate in `run_dry_detection` (overwritten after suppression marking).
+- 5 new consistency tests verifying `total_findings() == collect_all_findings().len()`.
+- Test count: 868 — Function count: 477
+
 ## [0.5.3] - 2026-04-09
 
 ### Fixed

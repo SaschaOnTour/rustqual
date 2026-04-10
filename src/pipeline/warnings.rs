@@ -113,9 +113,7 @@ pub(super) fn apply_complexity_warnings(
                 fa.cyclomatic_warning = m.cyclomatic_complexity > config.complexity.max_cyclomatic;
                 summary.complexity_warnings += 1;
             }
-            if !m.magic_numbers.is_empty() {
-                summary.magic_number_warnings += 1;
-            }
+            summary.magic_number_warnings += m.magic_numbers.len();
         }
     }
 }

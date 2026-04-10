@@ -154,7 +154,7 @@ fn print_inline_locations(dim_name: &str, findings: &[FindingEntry]) {
     let dim_cats = dimension_categories(dim_name);
     findings
         .iter()
-        .filter(|f| dim_cats.contains(&f.category))
+        .filter(|f| dim_cats.contains(&f.category) && !f.file.is_empty())
         .for_each(|f| {
             let loc = if f.detail.is_empty() {
                 f.function_name.clone()
@@ -187,7 +187,7 @@ fn dimension_categories(dim_name: &str) -> &[&str] {
             "REPEATED_MATCH",
         ],
         "SRP" => &["SRP_STRUCT", "SRP_MODULE", "SRP_PARAMS", "STRUCTURAL"],
-        "Coupling" => &["COUPLING", "SDP"],
+        "Coupling" => &["COUPLING", "CYCLE", "SDP"],
         "Test Quality" => &[
             "TQ_NO_ASSERT",
             "TQ_NO_SUT",

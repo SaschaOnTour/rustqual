@@ -142,11 +142,12 @@ fn collect_dry_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntr
             });
         });
     analysis.dead_code.iter().for_each(|w| {
+        let detail = format!("{:?}", w.kind).to_lowercase();
         entries.push(FindingEntry::new(
             &w.file,
             w.line,
             "DEAD_CODE",
-            format!("{:?}", w.kind).to_lowercase(),
+            detail,
             w.qualified_name.clone(),
         ));
     });
@@ -156,11 +157,12 @@ fn collect_dry_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntr
         .filter(|g| !g.suppressed)
         .for_each(|group| {
             group.entries.iter().for_each(|e| {
+                let detail = format!("{} stmts", group.statement_count);
                 entries.push(FindingEntry::new(
                     &e.file,
                     e.start_line,
                     "FRAGMENT",
-                    format!("{} stmts", group.statement_count),
+                    detail,
                     e.function_name.clone(),
                 ));
             });
@@ -170,12 +172,13 @@ fn collect_dry_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntr
         .iter()
         .filter(|b| !b.suppressed)
         .for_each(|b| {
+            let name = b.struct_name.clone().unwrap_or_default();
             entries.push(FindingEntry::new(
                 &b.file,
                 b.line,
                 "BOILERPLATE",
                 b.pattern_id.clone(),
-                b.struct_name.clone().unwrap_or_default(),
+                name,
             ));
         });
     analysis
@@ -211,10 +214,7 @@ fn collect_dry_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntr
 /// Collect SRP findings.
 /// Operation: iterates SRP warnings; no own calls.
 fn collect_srp_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntry>) {
-    let srp = match &analysis.srp {
-        Some(s) => s,
-        None => return,
-    };
+    let Some(srp) = &analysis.srp else { return };
     srp.struct_warnings
         .iter()
         .filter(|w| !w.suppressed)
@@ -253,22 +253,34 @@ fn collect_srp_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntr
         });
 }
 
-/// Collect coupling findings (SDP violations).
+/// Collect coupling findings (threshold warnings, cycles, SDP violations).
 /// Operation: iterates coupling analysis; no own calls.
 fn collect_coupling_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntry>) {
-    let ca = match &analysis.coupling {
-        Some(c) => c,
-        None => return,
-    };
+    let Some(ca) = &analysis.coupling else { return };
+    ca.metrics.iter().filter(|m| m.warning).for_each(|m| {
+        let detail = format!("I={:.2} Ca={} Ce={}", m.instability, m.afferent, m.efferent);
+        entries.push(FindingEntry::new(
+            "",
+            0,
+            "COUPLING",
+            detail,
+            m.module_name.clone(),
+        ));
+    });
+    ca.cycles.iter().for_each(|c| {
+        let detail = c.modules.join(" > ");
+        entries.push(FindingEntry::new("", 0, "CYCLE", detail, String::new()));
+    });
     ca.sdp_violations
         .iter()
         .filter(|v| !v.suppressed)
         .for_each(|v| {
+            let detail = format!("{} -> {}", v.from_module, v.to_module);
             entries.push(FindingEntry::new(
                 "",
                 0,
                 "SDP",
-                format!("{} -> {}", v.from_module, v.to_module),
+                detail,
                 v.from_module.clone(),
             ));
         });
@@ -277,10 +289,7 @@ fn collect_coupling_findings(analysis: &AnalysisResult, entries: &mut Vec<Findin
 /// Collect TQ findings.
 /// Operation: iterates TQ warnings; no own calls.
 fn collect_tq_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntry>) {
-    let tq = match &analysis.tq {
-        Some(t) => t,
-        None => return,
-    };
+    let Some(tq) = &analysis.tq else { return };
     tq.warnings.iter().filter(|w| !w.suppressed).for_each(|w| {
         let cat = match &w.kind {
             crate::tq::TqWarningKind::NoAssertion => "TQ_NO_ASSERT",
@@ -302,9 +311,8 @@ fn collect_tq_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntry
 /// Collect structural findings.
 /// Operation: iterates structural warnings; no own calls.
 fn collect_structural_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntry>) {
-    let st = match &analysis.structural {
-        Some(s) => s,
-        None => return,
+    let Some(st) = &analysis.structural else {
+        return;
     };
     st.warnings.iter().filter(|w| !w.suppressed).for_each(|w| {
         entries.push(FindingEntry::new(
@@ -445,5 +453,203 @@ mod tests {
         analysis.results = vec![fa];
         let findings = collect_all_findings(&analysis);
         assert!(findings.is_empty());
+    }
+
+    // ── Contract tests: when summary counts match per-entry semantics,
+    // total_findings() must equal collect_all_findings().len().
+    // Pipeline integration is tested by test_self_analysis_no_violations. ──
+
+    #[test]
+    fn test_total_findings_consistent_magic_numbers() {
+        let mut analysis = empty_analysis();
+        let mut fa = make_fa("fn1", "src/lib.rs", 10);
+        fa.complexity = Some(ComplexityMetrics {
+            magic_numbers: vec![
+                MagicNumberOccurrence {
+                    line: 12,
+                    value: "42".to_string(),
+                },
+                MagicNumberOccurrence {
+                    line: 15,
+                    value: "99".to_string(),
+                },
+            ],
+            ..Default::default()
+        });
+        analysis.results = vec![fa];
+        // Pipeline must count per-occurrence, not per-function
+        analysis.summary.magic_number_warnings = 2;
+        let findings = collect_all_findings(&analysis);
+        assert_eq!(
+            analysis.summary.total_findings(),
+            findings.len(),
+            "total_findings() must equal collect_all_findings().len()"
+        );
+    }
+
+    #[test]
+    fn test_total_findings_consistent_duplicates() {
+        use crate::dry::functions::{DuplicateEntry, DuplicateGroup, DuplicateKind};
+        let mut analysis = empty_analysis();
+        analysis.duplicates = vec![DuplicateGroup {
+            entries: vec![
+                DuplicateEntry {
+                    name: "fn_a".to_string(),
+                    qualified_name: "mod::fn_a".to_string(),
+                    file: "src/a.rs".to_string(),
+                    line: 10,
+                },
+                DuplicateEntry {
+                    name: "fn_b".to_string(),
+                    qualified_name: "mod::fn_b".to_string(),
+                    file: "src/b.rs".to_string(),
+                    line: 20,
+                },
+            ],
+            kind: DuplicateKind::Exact,
+            suppressed: false,
+        }];
+        // Pipeline must count per-entry (2), not per-group (1)
+        analysis.summary.duplicate_groups = 2;
+        let findings = collect_all_findings(&analysis);
+        assert_eq!(
+            analysis.summary.total_findings(),
+            findings.len(),
+            "total_findings() must equal collect_all_findings().len()"
+        );
+    }
+
+    #[test]
+    fn test_total_findings_consistent_fragments() {
+        use crate::dry::fragments::{FragmentEntry, FragmentGroup};
+        let mut analysis = empty_analysis();
+        analysis.fragments = vec![FragmentGroup {
+            entries: vec![
+                FragmentEntry {
+                    function_name: "fn_a".to_string(),
+                    qualified_name: "mod::fn_a".to_string(),
+                    file: "src/a.rs".to_string(),
+                    start_line: 10,
+                    end_line: 15,
+                },
+                FragmentEntry {
+                    function_name: "fn_b".to_string(),
+                    qualified_name: "mod::fn_b".to_string(),
+                    file: "src/b.rs".to_string(),
+                    start_line: 20,
+                    end_line: 25,
+                },
+                FragmentEntry {
+                    function_name: "fn_c".to_string(),
+                    qualified_name: "mod::fn_c".to_string(),
+                    file: "src/c.rs".to_string(),
+                    start_line: 30,
+                    end_line: 35,
+                },
+            ],
+            statement_count: 3,
+            suppressed: false,
+        }];
+        // Pipeline must count per-entry (3), not per-group (1)
+        analysis.summary.fragment_groups = 3;
+        let findings = collect_all_findings(&analysis);
+        assert_eq!(
+            analysis.summary.total_findings(),
+            findings.len(),
+            "total_findings() must equal collect_all_findings().len()"
+        );
+    }
+
+    #[test]
+    fn test_total_findings_consistent_mixed() {
+        use crate::dry::functions::{DuplicateEntry, DuplicateGroup, DuplicateKind};
+        let mut analysis = empty_analysis();
+        // 1 function with 2 magic numbers
+        let mut fa = make_fa("fn1", "src/lib.rs", 10);
+        fa.complexity = Some(ComplexityMetrics {
+            magic_numbers: vec![
+                MagicNumberOccurrence {
+                    line: 12,
+                    value: "400".to_string(),
+                },
+                MagicNumberOccurrence {
+                    line: 13,
+                    value: "800".to_string(),
+                },
+            ],
+            ..Default::default()
+        });
+        analysis.results = vec![fa];
+        // 1 duplicate group with 2 entries
+        analysis.duplicates = vec![DuplicateGroup {
+            entries: vec![
+                DuplicateEntry {
+                    name: "fn_a".to_string(),
+                    qualified_name: "mod::fn_a".to_string(),
+                    file: "src/a.rs".to_string(),
+                    line: 100,
+                },
+                DuplicateEntry {
+                    name: "fn_b".to_string(),
+                    qualified_name: "mod::fn_b".to_string(),
+                    file: "src/b.rs".to_string(),
+                    line: 200,
+                },
+            ],
+            kind: DuplicateKind::Exact,
+            suppressed: false,
+        }];
+        analysis.summary.magic_number_warnings = 2;
+        analysis.summary.duplicate_groups = 2;
+        let findings = collect_all_findings(&analysis);
+        // 2 magic numbers + 2 duplicate entries = 4 findings
+        assert_eq!(findings.len(), 4);
+        assert_eq!(
+            analysis.summary.total_findings(),
+            findings.len(),
+            "total_findings() must equal collect_all_findings().len() — was the bug from issue report"
+        );
+    }
+
+    #[test]
+    fn test_total_findings_consistent_coupling() {
+        let mut analysis = empty_analysis();
+        analysis.coupling = Some(crate::coupling::CouplingAnalysis {
+            metrics: vec![crate::coupling::CouplingMetrics {
+                module_name: "db".to_string(),
+                afferent: 2,
+                efferent: 5,
+                instability: 0.71,
+                incoming: vec![],
+                outgoing: vec![],
+                suppressed: false,
+                warning: true,
+            }],
+            cycles: vec![crate::coupling::CycleReport {
+                modules: vec!["a".to_string(), "b".to_string()],
+            }],
+            sdp_violations: vec![],
+        });
+        // 1 coupling warning + 1 cycle = 2
+        analysis.summary.coupling_warnings = 1;
+        analysis.summary.coupling_cycles = 1;
+        let findings = collect_all_findings(&analysis);
+        assert_eq!(
+            analysis.summary.total_findings(),
+            findings.len(),
+            "coupling warnings and cycles must appear in findings list"
+        );
+        assert!(
+            findings.iter().any(|f| f.category == "COUPLING"
+                && f.function_name == "db"
+                && f.detail.contains("I=0.71")),
+            "expected a COUPLING finding for db with instability detail"
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.category == "CYCLE" && f.detail.contains("a > b")),
+            "expected a CYCLE finding describing the a > b cycle"
+        );
     }
 }

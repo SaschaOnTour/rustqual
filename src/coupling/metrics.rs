@@ -38,6 +38,7 @@ pub(super) fn compute_coupling_metrics(graph: &ModuleGraph) -> Vec<CouplingMetri
                 incoming,
                 outgoing,
                 suppressed: false,
+                warning: false,
             }
         })
         .collect()
