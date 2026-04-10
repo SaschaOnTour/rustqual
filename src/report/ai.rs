@@ -7,8 +7,7 @@ use crate::report::AnalysisResult;
 /// Integration: builds AI value, encodes to TOON, prints.
 pub fn print_ai(analysis: &AnalysisResult, config: &crate::config::Config) {
     let value = build_ai_value(analysis, config);
-    let toon = toon_format::encode_default(&value).unwrap_or_else(|_| format!("{value}"));
-    print!("{toon}");
+    print!("{}", encode_toon(&value, 0));
 }
 
 /// Print analysis results as compact AI-optimized JSON.
@@ -45,14 +44,13 @@ fn build_findings_value(
     analysis: &AnalysisResult,
     config: &crate::config::Config,
 ) -> Value {
-    let global_key = "<global>";
     let mut map = serde_json::Map::new();
     let mut current_file = String::new();
     let mut current_entries: Vec<Value> = Vec::new();
 
     let file_key = |f: &str| {
         if f.is_empty() {
-            global_key.to_string()
+            GLOBAL_FILE_KEY.to_string()
         } else {
             f.to_string()
         }
@@ -61,8 +59,10 @@ fn build_findings_value(
         let key = file_key(&e.file);
         if key != current_file {
             if !current_file.is_empty() {
-                map.insert(current_file.clone(), Value::Array(current_entries.clone()));
-                current_entries.clear();
+                map.insert(
+                    std::mem::take(&mut current_file),
+                    Value::Array(std::mem::take(&mut current_entries)),
+                );
             }
             current_file = key;
         }
@@ -224,6 +224,108 @@ fn enrich_partners<G: HasPartnerLocations>(
     format!("{} {join_word} {}", entry.detail, partners.join(", "))
 }
 
+// ── Minimal TOON encoder ────────────────────────────────────
+
+/// Key used for findings without a file location (e.g., coupling, cycles, SDP).
+const GLOBAL_FILE_KEY: &str = "<global>";
+const INDENT: &str = "  ";
+const TOON_SPECIAL: &[char] = &[',', ':', '"', '\\', '[', ']', '{', '}'];
+
+/// Encode a serde_json::Value as TOON string.
+/// Operation: recursive match on Value variants, no own calls (recursive via closure pattern).
+fn encode_toon(value: &Value, depth: usize) -> String {
+    let indent = INDENT.repeat(depth);
+    match value {
+        Value::Null => "null".to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Number(n) => n.to_string(),
+        Value::String(s) => toon_quote(s),
+        Value::Array(arr) if is_tabular(arr) => encode_tabular(arr, depth),
+        Value::Array(arr) => encode_list(arr, depth),
+        Value::Object(obj) => {
+            let mut lines = Vec::new();
+            obj.iter().for_each(|(k, v)| match v {
+                Value::Object(_) | Value::Array(_) => {
+                    lines.push(format!("{indent}{}:", toon_quote(k)));
+                    let child = encode_toon(v, depth + 1);
+                    lines.push(child);
+                }
+                _ => lines.push(format!("{indent}{}: {}", toon_quote(k), encode_toon(v, 0))),
+            });
+            lines.join("\n")
+        }
+    }
+}
+
+/// Check if an array is tabular (all elements are objects with identical key sets).
+/// Operation: comparison logic, no own calls.
+fn is_tabular(arr: &[Value]) -> bool {
+    if arr.len() < 2 {
+        return false;
+    }
+    let Some(Value::Object(first)) = arr.first() else {
+        return false;
+    };
+    let keys: Vec<&String> = first.keys().collect();
+    arr[1..].iter().all(|v| {
+        v.as_object()
+            .map(|o| {
+                o.len() == keys.len()
+                    && keys.iter().all(|k| o.contains_key(k.as_str()))
+                    && o.values().all(|v| !v.is_object() && !v.is_array())
+            })
+            .unwrap_or(false)
+    })
+}
+
+/// Encode a tabular array as TOON with header row.
+/// Operation: formatting logic, no own calls.
+fn encode_tabular(arr: &[Value], depth: usize) -> String {
+    let indent = INDENT.repeat(depth);
+    let row_indent = INDENT.repeat(depth + 1);
+    let Some(first) = arr[0].as_object() else {
+        return String::new();
+    };
+    let fields: Vec<&String> = first.keys().collect();
+    let header = fields
+        .iter()
+        .map(|f| f.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
+    let mut lines = vec![format!("{indent}[{}]{{{header}}}:", arr.len())];
+    arr.iter().for_each(|row| {
+        let Some(obj) = row.as_object() else { return };
+        let vals: Vec<String> = fields
+            .iter()
+            .map(|f| encode_toon(&obj[f.as_str()], 0))
+            .collect();
+        lines.push(format!("{row_indent}{}", vals.join(",")));
+    });
+    lines.join("\n")
+}
+
+/// Encode a non-tabular array as TOON list.
+/// Operation: formatting logic, no own calls.
+fn encode_list(arr: &[Value], depth: usize) -> String {
+    let row_indent = INDENT.repeat(depth + 1);
+    let mut lines = Vec::new();
+    arr.iter().for_each(|v| {
+        lines.push(format!("{row_indent}- {}", encode_toon(v, 0)));
+    });
+    lines.join("\n")
+}
+
+/// Quote a string if it contains TOON special characters or starts with `-`.
+/// Operation: char scan + escape logic, no own calls.
+fn toon_quote(s: &str) -> String {
+    if s.is_empty() || s.starts_with('-') || s.contains(TOON_SPECIAL) {
+        let escaped = s.replace('\\', "\\\\").replace('"', "\\\"");
+        format!("\"{escaped}\"")
+    } else {
+        s.to_string()
+    }
+}
+
 /// Map FindingEntry.category to human-readable snake_case for AI output.
 /// Operation: match expression, no own calls.
 fn map_category(cat: &str) -> &str {
@@ -261,6 +363,88 @@ fn map_category(cat: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── TOON encoder tests ──────────────────────────────────────
+
+    #[test]
+    fn test_toon_quote_plain() {
+        assert_eq!(toon_quote("hello"), "hello");
+        assert_eq!(toon_quote("foo_bar"), "foo_bar");
+    }
+
+    #[test]
+    fn test_toon_quote_special_chars() {
+        assert_eq!(toon_quote("a,b"), "\"a,b\"");
+        assert_eq!(toon_quote("key: val"), "\"key: val\"");
+        assert_eq!(toon_quote(""), "\"\"");
+    }
+
+    #[test]
+    fn test_toon_quote_dash_start() {
+        assert_eq!(toon_quote("-flag"), "\"-flag\"");
+    }
+
+    #[test]
+    fn test_toon_quote_escapes() {
+        assert_eq!(toon_quote("say \"hi\""), "\"say \\\"hi\\\"\"");
+        assert_eq!(toon_quote("a\\b"), "\"a\\\\b\"");
+    }
+
+    #[test]
+    fn test_encode_toon_primitives() {
+        assert_eq!(encode_toon(&json!(null), 0), "null");
+        assert_eq!(encode_toon(&json!(true), 0), "true");
+        assert_eq!(encode_toon(&json!(42), 0), "42");
+        assert_eq!(encode_toon(&json!("hello"), 0), "hello");
+        assert_eq!(encode_toon(&json!("a,b"), 0), "\"a,b\"");
+    }
+
+    #[test]
+    fn test_encode_toon_flat_object() {
+        let val = json!({"version": "0.5.5", "findings": 0});
+        let toon = encode_toon(&val, 0);
+        assert!(toon.contains("version: 0.5.5"), "got: {toon}");
+        assert!(toon.contains("findings: 0"), "got: {toon}");
+    }
+
+    #[test]
+    fn test_encode_toon_tabular_array() {
+        let val = json!([
+            {"name": "IOSP", "pct": 100.0},
+            {"name": "CX", "pct": 99.8},
+        ]);
+        let toon = encode_toon(&val, 0);
+        assert!(
+            toon.contains("[2]{name,pct}:"),
+            "should have tabular header, got: {toon}"
+        );
+        assert!(toon.contains("IOSP,100.0"), "got: {toon}");
+        assert!(toon.contains("CX,99.8"), "got: {toon}");
+    }
+
+    #[test]
+    fn test_encode_toon_non_tabular_array() {
+        let val = json!(["a", "b", "c"]);
+        let toon = encode_toon(&val, 0);
+        assert!(toon.contains("- a"), "got: {toon}");
+        assert!(toon.contains("- b"), "got: {toon}");
+    }
+
+    #[test]
+    fn test_is_tabular_uniform_objects() {
+        let arr = vec![json!({"a": 1, "b": 2}), json!({"a": 3, "b": 4})];
+        assert!(is_tabular(&arr));
+    }
+
+    #[test]
+    fn test_is_tabular_rejects_mixed() {
+        assert!(!is_tabular(&[json!(1), json!(2)]));
+        assert!(!is_tabular(&[json!({"a": 1}), json!({"b": 2})]));
+        assert!(!is_tabular(&[json!({"a": [1]}), json!({"a": [2]})]));
+        assert!(!is_tabular(&[json!({"a": 1})]));
+    }
+
+    // ── Category mapping tests ──────────────────────────────────
 
     #[test]
     fn test_map_category_all_known() {
@@ -595,11 +779,11 @@ mod tests {
         let value = build_findings_value(&entries, &analysis, &config);
         let obj = value.as_object().unwrap();
         assert!(
-            obj.contains_key("<global>"),
-            "empty-file findings should be under <global>"
+            obj.contains_key(GLOBAL_FILE_KEY),
+            "empty-file findings should be under GLOBAL_FILE_KEY"
         );
         assert!(obj.contains_key("src/a.rs"));
-        let global = obj["<global>"].as_array().unwrap();
+        let global = obj[GLOBAL_FILE_KEY].as_array().unwrap();
         assert_eq!(global.len(), 1);
         assert_eq!(global[0]["category"], "coupling");
     }
@@ -826,7 +1010,7 @@ mod tests {
         let analysis = empty_analysis();
         let config = crate::config::Config::default();
         let value = build_ai_value(&analysis, &config);
-        let toon = toon_format::encode_default(&value).unwrap();
+        let toon = encode_toon(&value, 0);
         assert!(toon.contains("version:"), "TOON should contain version key");
         assert!(toon.contains("findings: 0"), "TOON should show 0 findings");
         assert!(
@@ -891,7 +1075,7 @@ mod tests {
 
         let config = crate::config::Config::default();
         let value = build_ai_value(&analysis, &config);
-        let toon = toon_format::encode_default(&value).unwrap();
+        let toon = encode_toon(&value, 0);
         assert!(toon.contains("findings: 2"), "should show 2 findings");
         assert!(
             toon.contains("findings_by_file:"),
