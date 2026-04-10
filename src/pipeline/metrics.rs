@@ -55,6 +55,7 @@ pub(super) fn count_coupling_warnings(
 ) {
     let Some(analysis) = analysis else { return };
     for m in &mut analysis.metrics {
+        m.warning = false;
         if m.suppressed {
             continue;
         }

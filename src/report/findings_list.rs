@@ -639,5 +639,10 @@ mod tests {
             findings.len(),
             "coupling warnings and cycles must appear in findings list"
         );
+        assert_eq!(findings[0].category, "COUPLING");
+        assert_eq!(findings[0].function_name, "db");
+        assert!(findings[0].detail.contains("I=0.71"));
+        assert_eq!(findings[1].category, "CYCLE");
+        assert!(findings[1].detail.contains("a > b"));
     }
 }
