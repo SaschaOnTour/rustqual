@@ -273,7 +273,7 @@ fn encode_toon(value: &Value, depth: usize) -> String {
 /// Check if an array is tabular (all elements are objects with identical key sets).
 /// Operation: comparison logic, no own calls.
 fn is_tabular(arr: &[Value]) -> bool {
-    if arr.len() < 2 {
+    if arr.is_empty() {
         return false;
     }
     let Some(Value::Object(first)) = arr.first() else {
@@ -455,11 +455,33 @@ mod tests {
     }
 
     #[test]
+    fn test_is_tabular_single_element() {
+        // Single uniform object should be tabular (avoids broken encode_list output)
+        assert!(is_tabular(&[json!({"a": 1, "b": 2})]));
+        // Single primitive should not be tabular
+        assert!(!is_tabular(&[json!(42)]));
+    }
+
+    #[test]
     fn test_is_tabular_rejects_mixed() {
         assert!(!is_tabular(&[json!(1), json!(2)]));
         assert!(!is_tabular(&[json!({"a": 1}), json!({"b": 2})]));
         assert!(!is_tabular(&[json!({"a": [1]}), json!({"a": [2]})]));
-        assert!(!is_tabular(&[json!({"a": 1})]));
+    }
+
+    #[test]
+    fn test_encode_single_finding_per_file() {
+        let val =
+            json!([{"category": "magic_number", "line": 42, "fn": "test_fn", "detail": "99"}]);
+        let toon = encode_toon(&val, 0);
+        // Should use tabular format, not broken list format
+        assert!(
+            toon.contains("[1]{"),
+            "single object array should be tabular, got: {toon}"
+        );
+        assert!(toon.contains("magic_number"), "should contain category, got: {toon}");
+        assert!(toon.contains("42"), "should contain line, got: {toon}");
+        assert!(!toon.contains("- "), "should not use list format, got: {toon}");
     }
 
     #[test]
