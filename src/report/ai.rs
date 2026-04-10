@@ -1,4 +1,4 @@
-// qual:allow(srp) reason: "3 clusters in 212 lines — split not worthwhile"
+// qual:allow(srp) reason: "closely related reporting responsibilities; splitting not worthwhile"
 use serde_json::{json, Value};
 
 use crate::report::AnalysisResult;
@@ -15,7 +15,7 @@ pub fn print_ai(analysis: &AnalysisResult, config: &crate::config::Config) {
 /// Integration: builds AI value, serializes to JSON, prints.
 pub fn print_ai_json(analysis: &AnalysisResult, config: &crate::config::Config) {
     let value = build_ai_value(analysis, config);
-    let json_str = serde_json::to_string_pretty(&value).unwrap_or_default();
+    let json_str = serde_json::to_string(&value).unwrap_or_else(|_| format!("{value}"));
     println!("{json_str}");
 }
 
@@ -45,17 +45,26 @@ fn build_findings_value(
     analysis: &AnalysisResult,
     config: &crate::config::Config,
 ) -> Value {
+    let global_key = "<global>";
     let mut map = serde_json::Map::new();
     let mut current_file = String::new();
     let mut current_entries: Vec<Value> = Vec::new();
 
+    let file_key = |f: &str| {
+        if f.is_empty() {
+            global_key.to_string()
+        } else {
+            f.to_string()
+        }
+    };
     entries.iter().for_each(|e| {
-        if e.file != current_file {
+        let key = file_key(&e.file);
+        if key != current_file {
             if !current_file.is_empty() {
                 map.insert(current_file.clone(), Value::Array(current_entries.clone()));
                 current_entries.clear();
             }
-            current_file = e.file.clone();
+            current_file = key;
         }
         let cat = map_category(e.category);
         let detail = enrich_detail(e, analysis, config);
@@ -560,6 +569,39 @@ mod tests {
             a_detail.contains("also in src/b.rs:30"),
             "should reference partner, got: {a_detail}"
         );
+    }
+
+    #[test]
+    fn test_global_findings_not_dropped() {
+        use crate::report::findings_list::FindingEntry;
+        let entries = vec![
+            FindingEntry {
+                file: "".into(),
+                line: 0,
+                category: "COUPLING",
+                detail: "I=0.71 Ca=2 Ce=5".into(),
+                function_name: "db".into(),
+            },
+            FindingEntry {
+                file: "src/a.rs".into(),
+                line: 10,
+                category: "MAGIC_NUMBER",
+                detail: "42".into(),
+                function_name: "fn_a".into(),
+            },
+        ];
+        let analysis = empty_analysis();
+        let config = crate::config::Config::default();
+        let value = build_findings_value(&entries, &analysis, &config);
+        let obj = value.as_object().unwrap();
+        assert!(
+            obj.contains_key("<global>"),
+            "empty-file findings should be under <global>"
+        );
+        assert!(obj.contains_key("src/a.rs"));
+        let global = obj["<global>"].as_array().unwrap();
+        assert_eq!(global.len(), 1);
+        assert_eq!(global[0]["category"], "coupling");
     }
 
     #[test]
