@@ -479,9 +479,15 @@ mod tests {
             toon.contains("[1]{"),
             "single object array should be tabular, got: {toon}"
         );
-        assert!(toon.contains("magic_number"), "should contain category, got: {toon}");
+        assert!(
+            toon.contains("magic_number"),
+            "should contain category, got: {toon}"
+        );
         assert!(toon.contains("42"), "should contain line, got: {toon}");
-        assert!(!toon.contains("- "), "should not use list format, got: {toon}");
+        assert!(
+            !toon.contains("- "),
+            "should not use list format, got: {toon}"
+        );
     }
 
     #[test]
