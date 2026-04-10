@@ -1,6 +1,6 @@
 [package]
 name = "rustqual"
-version = "0.5.4"
+version = "0.5.5"
 edition = "2021"
 description = "Comprehensive Rust code quality analyzer — six dimensions: Complexity, Coupling, DRY, IOSP, SRP, Test Quality"
 license = "MIT"
@@ -29,6 +29,7 @@ rayon = "1"
 clap_complete = "4"
 derive_more = { version = "1", features = ["display"] }
 notify = "6"
+toon-format = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

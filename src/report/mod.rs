@@ -1,4 +1,5 @@
 // qual:allow(coupling) reason: "report naturally depends on all analysis modules"
+mod ai;
 mod baseline;
 mod dot;
 pub(crate) mod findings_list;
@@ -14,6 +15,7 @@ mod sarif;
 mod suggestions;
 mod text;
 
+pub use ai::{print_ai, print_ai_json};
 pub use baseline::{create_baseline, print_comparison};
 pub use dot::print_dot;
 pub use github::print_github;

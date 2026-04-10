@@ -340,7 +340,7 @@ pub fn run() -> Result<(), i32> {
             &output_format,
             cli.verbose,
             cli.suggestions,
-            &config.coupling,
+            &config,
         );
     }
 
@@ -398,6 +398,19 @@ mod tests {
     #[test]
     fn test_output_format_html() {
         assert_eq!("html".parse::<OutputFormat>().unwrap(), OutputFormat::Html);
+    }
+
+    #[test]
+    fn test_output_format_ai() {
+        assert_eq!("ai".parse::<OutputFormat>().unwrap(), OutputFormat::Ai);
+    }
+
+    #[test]
+    fn test_output_format_ai_json() {
+        assert_eq!(
+            "ai-json".parse::<OutputFormat>().unwrap(),
+            OutputFormat::AiJson
+        );
     }
 
     #[test]
