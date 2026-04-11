@@ -207,13 +207,7 @@ pub(crate) fn analyze_and_output(
     let files = collect_filtered_files(path, config);
     let parsed = read_and_parse_files(&files, path);
     let analysis = run_analysis(&parsed, config);
-    output_results(
-        &analysis,
-        output_format,
-        verbose,
-        suggestions,
-        &config.coupling,
-    );
+    output_results(&analysis, output_format, verbose, suggestions, config);
 }
 
 /// Output results in the requested format.
@@ -223,7 +217,7 @@ pub(crate) fn output_results(
     output_format: &super::OutputFormat,
     verbose: bool,
     suggestions: bool,
-    coupling_config: &crate::config::sections::CouplingConfig,
+    config: &crate::config::Config,
 ) {
     use crate::report;
     match output_format {
@@ -233,7 +227,7 @@ pub(crate) fn output_results(
             analysis
                 .coupling
                 .iter()
-                .for_each(|ca| report::print_coupling_annotations(ca, coupling_config));
+                .for_each(|ca| report::print_coupling_annotations(ca, &config.coupling));
             report::print_dry_annotations(analysis);
             analysis.srp.iter().for_each(report::print_srp_annotations);
             analysis.tq.iter().for_each(report::print_tq_annotations);
@@ -245,6 +239,8 @@ pub(crate) fn output_results(
         super::OutputFormat::Dot => report::print_dot(&analysis.results),
         super::OutputFormat::Sarif => report::print_sarif(analysis),
         super::OutputFormat::Html => report::print_html(analysis),
+        super::OutputFormat::Ai => report::print_ai(analysis, config),
+        super::OutputFormat::AiJson => report::print_ai_json(analysis, config),
         super::OutputFormat::Text => {
             let findings = crate::report::findings_list::collect_all_findings(analysis);
             // Summary first — always shown
@@ -253,7 +249,7 @@ pub(crate) fn output_results(
             analysis
                 .coupling
                 .iter()
-                .for_each(|ca| report::print_coupling_section(ca, coupling_config, verbose));
+                .for_each(|ca| report::print_coupling_section(ca, &config.coupling, verbose));
             if verbose {
                 // Verbose: file-grouped output + detail sections (summary already printed above)
                 report::print_files_only(&analysis.results);
@@ -530,7 +526,7 @@ mod tests {
             &crate::OutputFormat::Text,
             false,
             false,
-            &crate::config::sections::CouplingConfig::default(),
+            &crate::config::Config::default(),
         );
     }
 

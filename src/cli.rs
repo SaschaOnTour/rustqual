@@ -11,6 +11,8 @@ pub(crate) enum OutputFormat {
     Dot,
     Sarif,
     Html,
+    Ai,
+    AiJson,
 }
 
 impl std::str::FromStr for OutputFormat {
@@ -23,8 +25,10 @@ impl std::str::FromStr for OutputFormat {
             "dot" => Ok(Self::Dot),
             "sarif" => Ok(Self::Sarif),
             "html" => Ok(Self::Html),
+            "ai" => Ok(Self::Ai),
+            "ai-json" => Ok(Self::AiJson),
             _ => Err(format!(
-                "Unknown format: {s}. Expected: text, json, github, dot, sarif, html"
+                "Unknown format: {s}. Expected: text, json, github, dot, sarif, html, ai, ai-json"
             )),
         }
     }
@@ -53,7 +57,7 @@ pub(crate) struct Cli {
     #[arg(long)]
     pub json: bool,
 
-    /// Output format: text (default), json, github, dot, sarif, html.
+    /// Output format: text (default), json, github, dot, sarif, html, ai, ai-json.
     #[arg(long, value_name = "FORMAT")]
     pub format: Option<OutputFormat>,
 
