@@ -7,7 +7,7 @@ use crate::report::AnalysisResult;
 /// Integration: builds AI value, encodes to TOON, prints.
 pub fn print_ai(analysis: &AnalysisResult, config: &crate::config::Config) {
     let value = build_ai_value(analysis, config);
-    print!("{}", encode_toon(&value, 0));
+    println!("{}", encode_toon(&value, 0));
 }
 
 /// Print analysis results as compact AI-optimized JSON.
@@ -103,15 +103,12 @@ fn build_findings_value(
     let mut current_file = String::new();
     let mut current_entries: Vec<Value> = Vec::new();
 
-    let file_key = |f: &str| {
-        if f.is_empty() {
-            GLOBAL_FILE_KEY.to_string()
-        } else {
-            f.to_string()
-        }
-    };
     entries.iter().for_each(|e| {
-        let key = file_key(&e.file);
+        let key: &str = if e.file.is_empty() {
+            GLOBAL_FILE_KEY
+        } else {
+            &e.file
+        };
         if key != current_file {
             if !current_file.is_empty() {
                 map.insert(
@@ -119,7 +116,7 @@ fn build_findings_value(
                     Value::Array(std::mem::take(&mut current_entries)),
                 );
             }
-            current_file = key;
+            current_file = key.to_string();
         }
         let cat = map_category(e.category);
         let detail = enrich_detail(e, &index, config);
