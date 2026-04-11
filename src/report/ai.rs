@@ -325,7 +325,13 @@ fn encode_list(arr: &[Value], depth: usize) -> String {
     let row_indent = INDENT.repeat(depth);
     let mut lines = Vec::new();
     arr.iter().for_each(|v| {
-        lines.push(format!("{row_indent}- {}", encode_toon(v, 0)));
+        let encoded = encode_toon(v, depth + 1);
+        if encoded.contains('\n') {
+            lines.push(format!("{row_indent}-"));
+            lines.push(encoded);
+        } else {
+            lines.push(format!("{row_indent}- {encoded}"));
+        }
     });
     lines.join("\n")
 }
@@ -488,6 +494,41 @@ mod tests {
         assert!(
             toon.contains("  inner: 42"),
             "nested key should be at 2-space indent, got: {toon}"
+        );
+    }
+
+    #[test]
+    fn test_encode_list_with_non_tabular_objects() {
+        // Objects with different keys → non-tabular → list format
+        // Each object's fields must be properly indented under the bullet
+        let val = json!([{"a": 1, "x": 2}, {"b": 3}]);
+        let toon = encode_toon(&val, 0);
+        // Each item should have "- " or "-" followed by indented fields
+        assert!(toon.contains("-"), "should use list format, got: {toon}");
+        // Fields should not be at depth 0
+        assert!(
+            !toon.starts_with("a:"),
+            "fields should be indented, got: {toon}"
+        );
+    }
+
+    #[test]
+    fn test_encode_list_nested_under_key_with_multiline_objects() {
+        // Non-tabular objects with multiple fields → multi-line items
+        let val = json!({"items": [{"a": 1, "x": 2}, {"b": 3, "y": 4}]});
+        let toon = encode_toon(&val, 0);
+        assert!(toon.contains("items:"), "got: {toon}");
+        // Multi-line object fields should be indented under the bullet, not at depth 0
+        let lines: Vec<&str> = toon.lines().collect();
+        let field_lines: Vec<&&str> = lines
+            .iter()
+            .filter(|l| l.contains(": ") && !l.contains("items"))
+            .collect();
+        assert!(
+            field_lines
+                .iter()
+                .all(|l| l.starts_with("  ") || l.starts_with("    ")),
+            "all object fields should be indented, got: {toon}"
         );
     }
 
