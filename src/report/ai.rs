@@ -322,7 +322,7 @@ fn encode_tabular(arr: &[Value], depth: usize) -> String {
 /// Encode a non-tabular array as TOON list.
 /// Operation: formatting logic, no own calls.
 fn encode_list(arr: &[Value], depth: usize) -> String {
-    let row_indent = INDENT.repeat(depth + 1);
+    let row_indent = INDENT.repeat(depth);
     let mut lines = Vec::new();
     arr.iter().for_each(|v| {
         lines.push(format!("{row_indent}- {}", encode_toon(v, 0)));
@@ -443,6 +443,52 @@ mod tests {
         let toon = encode_toon(&val, 0);
         assert!(toon.contains("- a"), "got: {toon}");
         assert!(toon.contains("- b"), "got: {toon}");
+    }
+
+    #[test]
+    fn test_encode_toon_list_indentation() {
+        // List nested under an object key: items should be at depth+1 (2 spaces)
+        let val = json!({"items": ["x", "y"]});
+        let toon = encode_toon(&val, 0);
+        // "items:" at depth 0, list items at depth 1 (2 spaces + "- ")
+        assert!(toon.contains("items:"), "got: {toon}");
+        assert!(
+            toon.contains("  - x"),
+            "items should be at 2-space indent, got: {toon}"
+        );
+        assert!(
+            !toon.contains("    - x"),
+            "items should NOT be at 4-space indent, got: {toon}"
+        );
+    }
+
+    #[test]
+    fn test_encode_toon_tabular_indentation() {
+        // Tabular nested under an object key: header at depth+1, rows at depth+2
+        let val = json!({"data": [{"a": 1, "b": 2}, {"a": 3, "b": 4}]});
+        let toon = encode_toon(&val, 0);
+        assert!(toon.contains("data:"), "got: {toon}");
+        // Header at 2 spaces
+        assert!(
+            toon.contains("  [2]{"),
+            "header should be at 2-space indent, got: {toon}"
+        );
+        // Rows at 4 spaces
+        assert!(
+            toon.contains("    1,2") || toon.contains("    3,4"),
+            "rows should be at 4-space indent, got: {toon}"
+        );
+    }
+
+    #[test]
+    fn test_encode_toon_nested_object_indentation() {
+        let val = json!({"outer": {"inner": 42}});
+        let toon = encode_toon(&val, 0);
+        assert!(toon.contains("outer:"), "got: {toon}");
+        assert!(
+            toon.contains("  inner: 42"),
+            "nested key should be at 2-space indent, got: {toon}"
+        );
     }
 
     #[test]
