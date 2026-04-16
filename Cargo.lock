@@ -578,7 +578,7 @@ dependencies = [
 
 [[package]]
 name = "rustqual"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "clap",
  "clap_complete",
@@ -594,6 +594,7 @@ dependencies = [
  "syn",
  "tempfile",
  "toml",
+ "toon-encode",
  "walkdir",
 ]
 
@@ -734,6 +735,16 @@ name = "toml_write"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d99f8c9a7727884afe522e9bd5edbfc91a3312b36a77b5fb8926e4c31a41801"
+
+[[package]]
+name = "toon-encode"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d30c10469eb87531b7bb31d29b05d090a43e6f149c0e00ba29cee63af5ebf952"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "unicode-ident"

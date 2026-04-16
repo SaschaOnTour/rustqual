@@ -78,30 +78,23 @@ impl<'ast> Visit<'ast> for MutationChecker {
         // Check for mutations: self.field = ..., self.field[i] = ...,
         // self.field -= ..., self.field.method(), &mut self.field
         match expr {
-            syn::Expr::Assign(a) => {
-                if is_self_target(&a.left) {
-                    self.has_mutation = true;
-                }
+            syn::Expr::Assign(a) if is_self_target(&a.left) => {
+                self.has_mutation = true;
             }
-            syn::Expr::Binary(b) => {
-                // Compound assignments: +=, -=, *=, etc.
-                if is_compound_assign(&b.op) && is_self_target(&b.left) {
-                    self.has_mutation = true;
-                }
+            // Compound assignments: +=, -=, *=, etc.
+            syn::Expr::Binary(b) if is_compound_assign(&b.op) && is_self_target(&b.left) => {
+                self.has_mutation = true;
             }
-            syn::Expr::MethodCall(mc) => {
-                // Any method call on self.field or self.field[i] is conservatively a mutation
+            // Any method call on self.field or self.field[i] is conservatively a mutation
+            syn::Expr::MethodCall(mc)
                 if is_self_field(&mc.receiver)
                     || is_self_path(&mc.receiver)
-                    || is_self_indexed_field(&mc.receiver)
-                {
-                    self.has_mutation = true;
-                }
+                    || is_self_indexed_field(&mc.receiver) =>
+            {
+                self.has_mutation = true;
             }
-            syn::Expr::Reference(r) => {
-                if r.mutability.is_some() && is_self_target(&r.expr) {
-                    self.has_mutation = true;
-                }
+            syn::Expr::Reference(r) if r.mutability.is_some() && is_self_target(&r.expr) => {
+                self.has_mutation = true;
             }
             _ => {}
         }
