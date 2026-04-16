@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Extracted TOON encoder into dedicated [`toon-encode`](https://github.com/SaschaOnTour/toon-encode) crate** for reuse in other projects. `src/report/ai.rs` now delegates to `toon_encode::encode_toon()` instead of hosting its own encoder.
 - Removed ~280 lines of duplicated code from `ai.rs`: `encode_toon`, `is_tabular`, `encode_tabular`, `encode_list`, `toon_quote` + `INDENT`/`TOON_SPECIAL` constants + 18 pure encoder tests. Rustqual-specific enrichment (`build_ai_value`, `enrich_detail`, `map_category`) remains.
-- Added `toon-encode` as git dependency (pinned to rev `6f79f00a`).
+- Added `toon-encode` as a crates.io dependency (`toon-encode = "0.1"`).
 - Test count: 882 — Function count: 488
 
 ## [0.5.5] - 2026-04-10
