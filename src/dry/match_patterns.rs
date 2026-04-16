@@ -165,7 +165,7 @@ fn group_repeated_patterns(collected: Vec<CollectedMatch>) -> Vec<RepeatedMatchG
         })
         .collect();
 
-    result.sort_by(|a, b| b.entries.len().cmp(&a.entries.len()));
+    result.sort_by_key(|g| std::cmp::Reverse(g.entries.len()));
     result
 }
 

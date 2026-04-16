@@ -168,14 +168,12 @@ fn collect_item_metadata(item: &syn::Item, path: &str, meta: &mut StructuralMeta
                 }
             }
         }
-        syn::Item::Mod(m) => {
-            if !cfg_test(&m.attrs) {
-                m.content.iter().for_each(|(_, items)| {
-                    items
-                        .iter()
-                        .for_each(|i| collect_item_metadata(i, path, meta));
-                });
-            }
+        syn::Item::Mod(m) if !cfg_test(&m.attrs) => {
+            m.content.iter().for_each(|(_, items)| {
+                items
+                    .iter()
+                    .for_each(|i| collect_item_metadata(i, path, meta));
+            });
         }
         _ => {}
     }
@@ -227,14 +225,12 @@ fn visit_item_methods(
                 }
             });
         }
-        syn::Item::Mod(m) => {
-            if !has_cfg_test_attr(&m.attrs) {
-                m.content.iter().for_each(|(_, items)| {
-                    items
-                        .iter()
-                        .for_each(|i| visit_item_methods(i, path, callback));
-                });
-            }
+        syn::Item::Mod(m) if !has_cfg_test_attr(&m.attrs) => {
+            m.content.iter().for_each(|(_, items)| {
+                items
+                    .iter()
+                    .for_each(|i| visit_item_methods(i, path, callback));
+            });
         }
         _ => {}
     }

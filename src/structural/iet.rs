@@ -54,14 +54,12 @@ fn collect_item_errors(item: &syn::Item, error_types: &mut HashSet<String>) {
                 });
             }
         }
-        syn::Item::Mod(m) => {
-            if !super::has_cfg_test_attr(&m.attrs) {
-                m.content.iter().for_each(|(_, items)| {
-                    items
-                        .iter()
-                        .for_each(|i| collect_item_errors(i, error_types));
-                });
-            }
+        syn::Item::Mod(m) if !super::has_cfg_test_attr(&m.attrs) => {
+            m.content.iter().for_each(|(_, items)| {
+                items
+                    .iter()
+                    .for_each(|i| collect_item_errors(i, error_types));
+            });
         }
         _ => {}
     }
