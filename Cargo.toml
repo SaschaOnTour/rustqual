@@ -29,7 +29,7 @@ rayon = "1"
 clap_complete = "4"
 derive_more = { version = "1", features = ["display"] }
 notify = "6"
-toon-encode = { git = "https://github.com/SaschaOnTour/toon-encode", rev = "6f79f00a583208ad64befce97b56dffcd09f345a" }
+toon-encode = "0.1"
 
 [dev-dependencies]
 tempfile = "3"
