@@ -1,4 +1,5 @@
 mod analyzer;
+mod architecture;
 mod cli;
 mod config;
 mod coupling;
