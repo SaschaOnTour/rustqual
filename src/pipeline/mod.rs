@@ -1,12 +1,12 @@
 // qual:allow(coupling) reason: "orchestrator module — high instability is expected"
-pub(crate) mod discovery;
 pub(crate) mod dry_suppressions;
 mod metrics;
 mod structural_metrics;
 mod tq_metrics;
 pub(crate) mod warnings;
 
-pub(crate) use discovery::{
+pub(crate) use crate::adapters::source::filesystem as discovery;
+pub(crate) use crate::adapters::source::filesystem::{
     collect_filtered_files, collect_rust_files, collect_suppression_lines, filter_to_changed,
     get_git_changed_files, read_and_parse_files,
 };

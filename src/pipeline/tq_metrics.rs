@@ -16,7 +16,7 @@ pub(super) fn compute_tq(
         return None;
     }
     let mut declared_fns = crate::adapters::analyzers::dry::collect_declared_functions(parsed);
-    let api_lines = crate::pipeline::discovery::collect_api_lines(parsed);
+    let api_lines = crate::adapters::source::filesystem::collect_api_lines(parsed);
     crate::adapters::analyzers::dry::dead_code::mark_api_declarations(
         &mut declared_fns,
         &api_lines,

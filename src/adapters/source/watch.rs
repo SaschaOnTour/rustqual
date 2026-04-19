@@ -1,8 +1,5 @@
 use std::path::Path;
 
-use crate::config::Config;
-use crate::pipeline::analyze_and_output;
-
 /// Debounce delay in milliseconds between watch re-analyses.
 const DEBOUNCE_MS: u64 = 500;
 
@@ -54,27 +51,15 @@ fn run_watch_loop(rx: std::sync::mpsc::Receiver<()>, mut on_change: impl FnMut()
     }
 }
 
-/// Run watch mode: re-analyze on file changes.
-/// Integration: orchestrates create_file_watcher, run_watch_loop, analyze_and_output.
-pub(crate) fn run_watch_mode(
-    cli: &super::Cli,
-    config: &Config,
-    output_format: &super::OutputFormat,
-) -> Result<(), i32> {
+/// Run watch mode: wire a watcher to `path` and invoke `on_change` on every event.
+/// Integration: orchestrates create_file_watcher and run_watch_loop.
+pub(crate) fn run_watch_mode(path: &Path, on_change: impl FnMut()) -> Result<(), i32> {
     eprintln!(
         "Watching {} for changes... (Ctrl+C to stop)",
-        cli.path.display()
+        path.display()
     );
-    let (rx, _watcher) = create_file_watcher(&cli.path)?;
-    run_watch_loop(rx, || {
-        analyze_and_output(
-            &cli.path,
-            config,
-            output_format,
-            cli.verbose,
-            cli.suggestions,
-        );
-    });
+    let (rx, _watcher) = create_file_watcher(path)?;
+    run_watch_loop(rx, on_change);
     Ok(())
 }
 

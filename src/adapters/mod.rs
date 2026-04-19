@@ -17,4 +17,7 @@
 #![allow(dead_code, unused_imports)]
 
 pub mod analyzers;
+pub mod config;
 pub mod shared;
+pub mod source;
+pub mod suppression;

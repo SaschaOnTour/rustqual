@@ -1,12 +1,12 @@
 mod adapters;
 mod cli;
-mod config;
 mod domain;
-mod findings;
 mod pipeline;
 mod ports;
 mod report;
-mod watch;
+use adapters::config;
+use adapters::source::watch;
+use adapters::suppression::qual_allow as findings;
 
 use std::path::Path;
 
@@ -297,7 +297,15 @@ pub fn run() -> Result<(), i32> {
     }
 
     if cli.watch {
-        return watch::run_watch_mode(&cli, &config, &output_format);
+        return watch::run_watch_mode(&cli.path, || {
+            pipeline::analyze_and_output(
+                &cli.path,
+                &config,
+                &output_format,
+                cli.verbose,
+                cli.suggestions,
+            );
+        });
     }
 
     let files = pipeline::collect_filtered_files(&cli.path, &config);

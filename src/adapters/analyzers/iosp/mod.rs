@@ -310,7 +310,7 @@ mod tests {
         let analyzer = Analyzer::new(&config, &scope);
         let mut results = analyzer.analyze_file(&syntax, "test.rs");
         let parsed = vec![("test.rs".to_string(), code.to_string(), syntax)];
-        let recursive_lines = crate::pipeline::discovery::collect_recursive_lines(&parsed);
+        let recursive_lines = crate::adapters::source::filesystem::collect_recursive_lines(&parsed);
         crate::pipeline::warnings::apply_recursive_annotations(&mut results, &recursive_lines);
         crate::pipeline::warnings::apply_leaf_reclassification(&mut results);
         results
