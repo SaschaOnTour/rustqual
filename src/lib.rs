@@ -292,6 +292,10 @@ pub fn run() -> Result<(), i32> {
     let output_format = determine_output_format(&cli);
     let config = setup_config(&cli)?;
 
+    if let Some(ref target) = cli.explain {
+        return crate::adapters::analyzers::architecture::cli::handle_explain(target, &config);
+    }
+
     if cli.watch {
         return watch::run_watch_mode(&cli, &config, &output_format);
     }

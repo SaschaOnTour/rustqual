@@ -32,7 +32,7 @@ use std::collections::HashMap;
 use syn::spanned::Spanned;
 
 /// Behaviour when a file matches no layer glob.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnmatchedBehavior {
     /// Treat the file as the composition root (no rule applied).
     CompositionRoot,
@@ -41,6 +41,7 @@ pub enum UnmatchedBehavior {
 }
 
 /// Ordered layer definitions with rank lookup.
+#[derive(Debug)]
 pub struct LayerDefinitions {
     ranks: HashMap<String, usize>,
     definitions: Vec<(String, GlobSet)>,

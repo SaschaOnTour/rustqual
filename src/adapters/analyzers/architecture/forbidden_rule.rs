@@ -20,6 +20,7 @@ use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use globset::{GlobMatcher, GlobSet};
 
 /// Pre-compiled rule ready for checking.
+#[derive(Debug)]
 pub struct CompiledForbiddenRule {
     pub from: GlobMatcher,
     pub to: GlobMatcher,

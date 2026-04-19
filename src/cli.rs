@@ -133,4 +133,8 @@ pub(crate) struct Cli {
     /// Path to an LCOV coverage file for test quality analysis (TQ-004, TQ-005).
     #[arg(long, value_name = "LCOV_FILE")]
     pub coverage: Option<PathBuf>,
+
+    /// Diagnostic mode: explain architecture-rule classification for one file.
+    #[arg(long, value_name = "FILE")]
+    pub explain: Option<PathBuf>,
 }
