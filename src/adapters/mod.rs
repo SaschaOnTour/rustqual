@@ -18,6 +18,7 @@
 
 pub mod analyzers;
 pub mod config;
+pub mod report;
 pub mod shared;
 pub mod source;
 pub mod suppression;

@@ -8,16 +8,17 @@ Comprehensive Rust code quality analyzer — six dimensions: Complexity, Couplin
 
 ## Quality Dimensions
 
-rustqual analyzes your Rust code across **six quality dimensions**, each contributing to an overall quality score:
+rustqual analyzes your Rust code across **seven quality dimensions**, each contributing to an overall quality score:
 
 | Dimension    | Weight | What it checks |
 |--------------|--------|----------------|
-| IOSP         | 25%    | Function separation (Integration vs Operation) |
-| Complexity   | 20%    | Cognitive/cyclomatic complexity, magic numbers, nesting depth, function length, unsafe blocks, error handling |
-| DRY          | 20%    | Duplicate functions, fragments, dead code, boilerplate |
-| SRP          | 15%    | Struct cohesion (LCOM4), module length, function clusters, structural checks (BTC, SLM, NMS) |
-| Test Quality | 10%    | Assertion density (TQ-001), test function length (TQ-002), mock-heavy tests (TQ-003), assertion-free tests (TQ-004), coverage gaps (TQ-005) |
-| Coupling     | 10%    | Module instability, circular dependencies, SDP, structural checks (OI, SIT, DEH, IET) |
+| IOSP         | 22%    | Function separation (Integration vs Operation) |
+| Complexity   | 18%    | Cognitive/cyclomatic complexity, magic numbers, nesting depth, function length, unsafe blocks, error handling |
+| DRY          | 13%    | Duplicate functions, fragments, dead code, boilerplate |
+| SRP          | 18%    | Struct cohesion (LCOM4), module length, function clusters, structural checks (BTC, SLM, NMS) |
+| Coupling     | 9%     | Module instability, circular dependencies, SDP, structural checks (OI, SIT, DEH, IET) |
+| Test Quality | 10%    | Assertion density, no-SUT tests, untested functions, coverage gaps, untested logic |
+| Architecture | 10%    | Layer ordering, forbidden-edge rules, symbol patterns (path/method/function/macro/derive/item-kind), trait-signature contracts |
 
 ## What is IOSP?
 
@@ -616,6 +617,97 @@ Seven binary (pass/fail) checks for common Rust structural issues, integrated in
 | IET  | Inconsistent Error Types | Coupling | Modules returning 3+ different error types (missing unified error type) |
 
 Each rule can be individually toggled via `[structural]` config. Suppress with `// qual:allow(srp)` or `// qual:allow(coupling)` depending on the dimension.
+
+### Architecture Dimension (v1.0)
+
+Four rule types check the structural shape of the codebase against an
+explicit layered architecture. Enabled via `[architecture] enabled = true`.
+
+**Layer Rule** — files are assigned to layers via path globs; inner layers
+may not import from outer layers. Example:
+
+```toml
+[architecture.layers]
+order = ["domain", "port", "application", "adapter"]
+unmatched_behavior = "composition_root"
+
+[architecture.layers.domain]
+paths = ["src/domain/**"]
+```
+
+A file in `src/domain/**` importing from `src/adapters/**` is flagged.
+
+**Forbidden Rule** — paired `from` / `to` path globs forbid cross-branch
+imports:
+
+```toml
+[[architecture.forbidden]]
+from = "src/adapters/analyzers/iosp/**"
+to = "src/adapters/analyzers/**"
+except = ["src/adapters/analyzers/iosp/**"]
+reason = "peer analyzers are isolated"
+```
+
+**Symbol Patterns** — ban specific language shapes via seven matchers:
+
+| Matcher | Hits |
+|---------|------|
+| `forbid_path_prefix` | any path reference starting with a banned prefix |
+| `forbid_glob_import` | `use foo::*;` |
+| `forbid_method_call` | `x.unwrap()` / UFCS `Option::unwrap(x)` |
+| `forbid_function_call` | `Box::new(…)` via fully-qualified path |
+| `forbid_macro_call` | `panic!()`, `println!()`, etc. |
+| `forbid_item_kind` | `async_fn`, `unsafe_fn`, `unsafe_impl`, `static_mut`, `extern_c_block`, `inline_cfg_test_module`, `top_level_cfg_test_item` |
+| `forbid_derive` | `#[derive(Serialize)]` |
+
+Scope is XOR: either `allowed_in` (whitelist) or `forbidden_in` (blocklist),
+with `except` as fine-grained overrides. Example:
+
+```toml
+[[architecture.pattern]]
+name = "no_panic_in_production"
+forbid_macro_call = ["panic", "todo", "unreachable"]
+forbidden_in = ["src/**"]
+except = ["**/tests/**"]
+reason = "production code returns typed errors"
+```
+
+**Trait-Signature Rule** — structural checks on trait definitions in scope:
+
+```toml
+[[architecture.trait_contract]]
+name = "port_traits"
+scope = "src/ports/**"
+receiver_may_be = ["shared_ref"]
+methods_must_be_async = true
+forbidden_return_type_contains = ["anyhow::", "Box<dyn"]
+required_supertraits_contain = ["Send", "Sync"]
+must_be_object_safe = true
+```
+
+Checks: `receiver_may_be`, `methods_must_be_async`,
+`forbidden_return_type_contains`, `required_param_type_contains`,
+`required_supertraits_contain`, `must_be_object_safe` (conservative: flags
+`Self` returns and method-level generics), `forbidden_error_variant_contains`.
+
+**`--explain <FILE>`** diagnostic mode prints the file's layer assignment,
+classified imports, and rule hits — useful for understanding why a rule
+fires or when tuning config:
+
+```
+$ cargo run -- --explain src/domain/foo.rs
+═══ Architecture Explain: src/domain/foo.rs ═══
+Layer: domain (rank 0)
+
+Imports (1):
+  line 1: crate::adapters::Foo — crate::adapters → layer adapter
+
+Layer violations:
+  line 1: domain ↛ adapter  via crate::adapters::Foo
+```
+
+See `examples/architecture/` for a runnable mini-fixture per matcher/rule.
+Suppress with `// qual:allow(architecture)` on the file.
 
 ### Baseline Comparison
 

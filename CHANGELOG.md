@@ -5,6 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-04-19
+
+Clean-Architecture refactor and seventh quality dimension. **Breaking**: the
+`[weights]` config schema now has 7 fields instead of 6 (new `architecture`
+weight); projects with an explicit `[weights]` section must add it and
+re-balance so the weights sum to 1.0.
+
+### Added
+- **Architecture dimension** — seventh quality dimension with four rule
+  types: Layer Rule (rank-based import ordering), Forbidden Rule
+  (from/to/except glob triplets), Symbol Patterns (7 matcher families:
+  `forbid_path_prefix`, `forbid_glob_import`, `forbid_method_call`,
+  `forbid_function_call`, `forbid_macro_call`, `forbid_item_kind`,
+  `forbid_derive`), and Trait-Signature Rule (7 checks:
+  `receiver_may_be`, `methods_must_be_async`, `forbidden_return_type_contains`,
+  `required_param_type_contains`, `required_supertraits_contain`,
+  `must_be_object_safe` conservative, `forbidden_error_variant_contains`).
+- **`--explain <FILE>` CLI mode** — diagnostic output per file showing
+  layer assignment, classified imports, and rule hits; makes config
+  tuning in new repos tractable.
+- **Golden example crates** at `examples/architecture/<rule>/` covering
+  every matcher and rule with fixture + minimal rustqual.toml + snapshot
+  test.
+
+### Changed — Clean-Architecture refactor
+- **Layered module structure** with explicit dependency direction:
+  - `src/domain/` — pure value types (`Dimension`, `Finding`,
+    `Severity`, `SourceUnit`, `Suppression`).
+  - `src/ports/` — trait contracts (`SourceLoader`, `SuppressionParser`,
+    `Reporter`, `DimensionAnalyzer`).
+  - `src/app/` — use-cases (`analyze_codebase`, `setup_config`,
+    `apply_exit_gates`).
+  - `src/adapters/` — concrete implementations: `analyzers/` (iosp,
+    complexity, dry, srp, coupling, tq, structural, architecture),
+    `config/` (TOML), `source/` (filesystem, watch), `report/`,
+    `suppression/` (qual_allow), `shared/` (normalize).
+  - `src/cli/` + `src/main.rs` + `src/bin/` — composition root.
+- **Test co-location** — every `#[cfg(test)] mod tests { … }` extracted
+  into `<dir>/tests/<name>.rs` companions. Production files report
+  honest length metrics (all < 300 lines now).
+- **Port-based Architecture analyzer** — the first dimension wired
+  through the `DimensionAnalyzer` port; `analyze_codebase` iterates
+  `&[Box<dyn DimensionAnalyzer>]` instead of hard-coded dimension calls.
+- **7-dimension weights** (`[f64; 7]`): default
+  `iosp=0.22, complexity=0.18, dry=0.13, srp=0.18, coupling=0.09,
+  test_quality=0.10, architecture=0.10`.
+- **`test` → `test_quality` rename** in `[weights]` config (old `test`
+  field rejected with a deserialize error; migrate to `test_quality`).
+
+### Notes on staging
+Architecture rules live in `rustqual.toml` but the dimension itself
+stays `enabled = false` in rustqual's own config — activating the full
+rule set today surfaces real cleanup work (eprintln! in production code,
+syn in ports, clap outside composition root) that is scheduled for a
+follow-up cleanup commit. The infrastructure is complete and unit-tested;
+enforcement is a config flip away.
+
 ## [0.5.6] - 2026-04-16
 
 ### Changed
