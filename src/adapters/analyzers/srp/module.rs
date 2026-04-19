@@ -8,10 +8,10 @@ use super::union_find::UnionFind;
 use super::ModuleSrpWarning;
 
 /// Information about a free (non-method) function collected from the AST.
-struct FreeFunctionInfo {
-    name: String,
-    is_private: bool,
-    statement_count: usize,
+pub(crate) struct FreeFunctionInfo {
+    pub(crate) name: String,
+    pub(crate) is_private: bool,
+    pub(crate) statement_count: usize,
 }
 
 /// AST visitor that collects free function metadata for cohesion analysis.
@@ -37,7 +37,7 @@ impl<'ast, 'a> Visit<'ast> for FreeFunctionCollector<'a> {
 
 /// Collect free functions from a parsed syntax tree.
 /// Operation: creates visitor and walks items.
-fn collect_free_functions(syntax: &syn::File) -> Vec<FreeFunctionInfo> {
+pub(crate) fn collect_free_functions(syntax: &syn::File) -> Vec<FreeFunctionInfo> {
     let mut functions = Vec::new();
     let mut collector = FreeFunctionCollector {
         functions: &mut functions,
@@ -48,7 +48,7 @@ fn collect_free_functions(syntax: &syn::File) -> Vec<FreeFunctionInfo> {
 
 /// Count independent function clusters in a file using Union-Find.
 /// Operation: Union-Find on private substantive functions using call graph.
-fn count_independent_clusters(
+pub(crate) fn count_independent_clusters(
     fn_info: &[FreeFunctionInfo],
     call_graph: &[(String, Vec<String>)],
     min_statements: usize,
@@ -151,7 +151,7 @@ pub fn analyze_module_srp(
 
 /// Count production lines: lines from start of file to first `#[cfg(test)]` module.
 /// Operation: string scanning logic, no own calls.
-fn count_production_lines(source: &str) -> usize {
+pub(crate) fn count_production_lines(source: &str) -> usize {
     let mut count = 0;
     for line in source.lines() {
         let trimmed = line.trim();
@@ -169,7 +169,11 @@ fn count_production_lines(source: &str) -> usize {
 /// Compute file length penalty score.
 /// Returns 0.0 below baseline, 1.0 above ceiling, linear between.
 /// Operation: arithmetic.
-fn compute_file_length_score(production_lines: usize, baseline: usize, ceiling: usize) -> f64 {
+pub(crate) fn compute_file_length_score(
+    production_lines: usize,
+    baseline: usize,
+    ceiling: usize,
+) -> f64 {
     if production_lines <= baseline {
         return 0.0;
     }
@@ -181,461 +185,4 @@ fn compute_file_length_score(production_lines: usize, baseline: usize, ceiling: 
         return 1.0;
     }
     (production_lines - baseline) as f64 / range
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_count_production_lines_simple() {
-        let source = "fn main() {\n    println!(\"hello\");\n}\n";
-        assert_eq!(count_production_lines(source), 3);
-    }
-
-    #[test]
-    fn test_count_production_lines_with_test_module() {
-        let source =
-            "fn main() {}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn test_it() {}\n}\n";
-        // Only "fn main() {}" is production code (1 line of code, blank lines skipped)
-        assert_eq!(count_production_lines(source), 1);
-    }
-
-    #[test]
-    fn test_count_production_lines_skips_comments() {
-        let source = "// This is a comment\nfn foo() {}\n// Another comment\nfn bar() {}\n";
-        assert_eq!(count_production_lines(source), 2);
-    }
-
-    #[test]
-    fn test_count_production_lines_skips_blanks() {
-        let source = "\n\nfn foo() {}\n\n\nfn bar() {}\n\n";
-        assert_eq!(count_production_lines(source), 2);
-    }
-
-    #[test]
-    fn test_count_production_lines_empty() {
-        assert_eq!(count_production_lines(""), 0);
-    }
-
-    #[test]
-    fn test_file_length_score_below_baseline() {
-        let score = compute_file_length_score(100, 300, 800);
-        assert!((score - 0.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_file_length_score_at_baseline() {
-        let score = compute_file_length_score(300, 300, 800);
-        assert!((score - 0.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_file_length_score_above_ceiling() {
-        let score = compute_file_length_score(1000, 300, 800);
-        assert!((score - 1.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_file_length_score_midpoint() {
-        let score = compute_file_length_score(550, 300, 800);
-        assert!((score - 0.5).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_file_length_score_at_ceiling() {
-        let score = compute_file_length_score(800, 300, 800);
-        assert!((score - 1.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn test_analyze_module_srp_below_baseline() {
-        let source = "fn foo() {}\nfn bar() {}\n";
-        let syntax = syn::parse_file(source).unwrap();
-        let parsed = vec![("test.rs".to_string(), source.to_string(), syntax)];
-        let config = SrpConfig::default(); // baseline=300
-        let call_graph = HashMap::new();
-        let cfg_test_files = std::collections::HashSet::new();
-        let warnings = analyze_module_srp(&parsed, &config, &call_graph, &cfg_test_files);
-        assert!(warnings.is_empty());
-    }
-
-    #[test]
-    fn test_analyze_module_srp_above_baseline() {
-        // Generate source with many lines
-        let mut source = String::new();
-        for i in 0..400 {
-            source.push_str(&format!("fn func_{i}() {{ let x = 1; }}\n"));
-        }
-        let syntax = syn::parse_file(&source).unwrap();
-        let parsed = vec![("big.rs".to_string(), source.to_string(), syntax)];
-        let config = SrpConfig::default();
-        let call_graph = HashMap::new();
-        let cfg_test_files = std::collections::HashSet::new();
-        let warnings = analyze_module_srp(&parsed, &config, &call_graph, &cfg_test_files);
-        assert!(!warnings.is_empty());
-        assert_eq!(warnings[0].module, "big.rs");
-        assert!(warnings[0].length_score > 0.0);
-    }
-
-    #[test]
-    fn test_analyze_module_srp_skips_cfg_test_files() {
-        // A file reachable only under `#[cfg(test)]` is exempt from the
-        // module-SRP check. Without this, test-helper files with many
-        // independent #[test] fns get falsely flagged as "too many
-        // independent clusters" or "too many production lines".
-        let mut source = String::new();
-        for i in 0..10 {
-            source.push_str(&format!(
-                "#[test]\nfn test_scenario_{i}() {{ assert!(true); }}\n"
-            ));
-        }
-        let syntax = syn::parse_file(&source).unwrap();
-        let parsed = vec![(
-            "src/some/tests/helpers.rs".to_string(),
-            source.to_string(),
-            syntax,
-        )];
-        let config = SrpConfig::default();
-        let call_graph = HashMap::new();
-        let mut cfg_test_files = std::collections::HashSet::new();
-        cfg_test_files.insert("src/some/tests/helpers.rs".to_string());
-        let warnings = analyze_module_srp(&parsed, &config, &call_graph, &cfg_test_files);
-        assert!(
-            warnings.is_empty(),
-            "cfg-test file must be skipped: {warnings:?}"
-        );
-    }
-
-    #[test]
-    fn test_analyze_module_srp_still_flags_non_cfg_test_files() {
-        // Negative control: without cfg-test tag, a big production file with
-        // many isolated substantive functions is flagged as "too many clusters".
-        let mut source = String::new();
-        for i in 0..10 {
-            source.push_str(&format!(
-                "fn helper_{i}() {{ let a = 1; let b = 2; let c = 3; let d = 4; let e = 5; }}\n"
-            ));
-        }
-        let syntax = syn::parse_file(&source).unwrap();
-        let parsed = vec![("src/prod/module.rs".to_string(), source.to_string(), syntax)];
-        let config = SrpConfig::default();
-        let call_graph = HashMap::new();
-        let cfg_test_files = std::collections::HashSet::new(); // empty
-        let warnings = analyze_module_srp(&parsed, &config, &call_graph, &cfg_test_files);
-        assert!(
-            !warnings.is_empty(),
-            "production file with many unconnected substantive fns must be flagged"
-        );
-    }
-
-    #[test]
-    fn test_analyze_module_srp_test_lines_excluded() {
-        // Production lines below baseline, but with large test module
-        let mut source = String::from("fn foo() {}\nfn bar() {}\n\n#[cfg(test)]\nmod tests {\n");
-        for i in 0..500 {
-            source.push_str(&format!("    fn test_{i}() {{ assert!(true); }}\n"));
-        }
-        source.push_str("}\n");
-        let syntax = syn::parse_file(&source).unwrap();
-        let parsed = vec![("test.rs".to_string(), source.to_string(), syntax)];
-        let config = SrpConfig::default();
-        let call_graph = HashMap::new();
-        let cfg_test_files = std::collections::HashSet::new();
-        let warnings = analyze_module_srp(&parsed, &config, &call_graph, &cfg_test_files);
-        assert!(
-            warnings.is_empty(),
-            "Test code should not count towards production lines"
-        );
-    }
-
-    // ── Free function collector tests ─────────────────────────────
-
-    #[test]
-    fn test_collect_free_functions_basic() {
-        let code = "fn foo() {} pub fn bar() {} fn baz(x: i32) { let a = 1; let b = 2; }";
-        let syntax = syn::parse_file(code).unwrap();
-        let fns = collect_free_functions(&syntax);
-        assert_eq!(fns.len(), 3);
-        assert!(fns[0].is_private);
-        assert!(!fns[1].is_private);
-        assert!(fns[2].is_private);
-        assert_eq!(fns[2].statement_count, 2);
-    }
-
-    #[test]
-    fn test_collect_free_functions_skips_impl_methods() {
-        let code = "struct S; impl S { fn method(&self) {} } fn free() {}";
-        let syntax = syn::parse_file(code).unwrap();
-        let fns = collect_free_functions(&syntax);
-        assert_eq!(fns.len(), 1);
-        assert_eq!(fns[0].name, "free");
-    }
-
-    // ── Independent cluster tests ─────────────────────────────────
-
-    #[test]
-    fn test_clusters_no_functions() {
-        let (count, names) = count_independent_clusters(&[], &[], 5);
-        assert_eq!(count, 0);
-        assert!(names.is_empty());
-    }
-
-    #[test]
-    fn test_clusters_single_private_function() {
-        let fns = vec![FreeFunctionInfo {
-            name: "alpha".to_string(),
-            is_private: true,
-            statement_count: 10,
-        }];
-        let (count, _) = count_independent_clusters(&fns, &[], 5);
-        assert_eq!(count, 1);
-    }
-
-    #[test]
-    fn test_clusters_connected_functions() {
-        let fns = vec![
-            FreeFunctionInfo {
-                name: "a".to_string(),
-                is_private: true,
-                statement_count: 10,
-            },
-            FreeFunctionInfo {
-                name: "b".to_string(),
-                is_private: true,
-                statement_count: 10,
-            },
-            FreeFunctionInfo {
-                name: "c".to_string(),
-                is_private: true,
-                statement_count: 10,
-            },
-        ];
-        // a calls b, b calls c → all connected
-        let calls = vec![
-            ("a".to_string(), vec!["b".to_string()]),
-            ("b".to_string(), vec!["c".to_string()]),
-        ];
-        let (count, names) = count_independent_clusters(&fns, &calls, 5);
-        assert_eq!(count, 1);
-        assert_eq!(names[0].len(), 3);
-    }
-
-    #[test]
-    fn test_clusters_disconnected_functions() {
-        let fns = vec![
-            FreeFunctionInfo {
-                name: "a".to_string(),
-                is_private: true,
-                statement_count: 10,
-            },
-            FreeFunctionInfo {
-                name: "b".to_string(),
-                is_private: true,
-                statement_count: 10,
-            },
-            FreeFunctionInfo {
-                name: "c".to_string(),
-                is_private: true,
-                statement_count: 10,
-            },
-            FreeFunctionInfo {
-                name: "d".to_string(),
-                is_private: true,
-                statement_count: 10,
-            },
-        ];
-        // a calls b, c calls d → 2 clusters
-        let calls = vec![
-            ("a".to_string(), vec!["b".to_string()]),
-            ("c".to_string(), vec!["d".to_string()]),
-        ];
-        let (count, names) = count_independent_clusters(&fns, &calls, 5);
-        assert_eq!(count, 2);
-        assert_eq!(names.len(), 2);
-    }
-
-    #[test]
-    fn test_clusters_public_functions_excluded() {
-        let fns = vec![
-            FreeFunctionInfo {
-                name: "pub_fn".to_string(),
-                is_private: false,
-                statement_count: 10,
-            },
-            FreeFunctionInfo {
-                name: "priv_fn".to_string(),
-                is_private: true,
-                statement_count: 10,
-            },
-        ];
-        let (count, _) = count_independent_clusters(&fns, &[], 5);
-        assert_eq!(count, 1); // only priv_fn counted
-    }
-
-    #[test]
-    fn test_clusters_small_functions_excluded() {
-        let fns = vec![
-            FreeFunctionInfo {
-                name: "small".to_string(),
-                is_private: true,
-                statement_count: 2,
-            },
-            FreeFunctionInfo {
-                name: "big".to_string(),
-                is_private: true,
-                statement_count: 10,
-            },
-        ];
-        let (count, _) = count_independent_clusters(&fns, &[], 5);
-        assert_eq!(count, 1); // only big counted
-    }
-
-    #[test]
-    fn test_clusters_three_independent_triggers_warning() {
-        let fns = vec![
-            FreeFunctionInfo {
-                name: "algo1".to_string(),
-                is_private: true,
-                statement_count: 10,
-            },
-            FreeFunctionInfo {
-                name: "algo2".to_string(),
-                is_private: true,
-                statement_count: 10,
-            },
-            FreeFunctionInfo {
-                name: "algo3".to_string(),
-                is_private: true,
-                statement_count: 10,
-            },
-        ];
-        // No calls between them → 3 independent clusters
-        let (count, names) = count_independent_clusters(&fns, &[], 5);
-        assert_eq!(count, 3);
-        assert_eq!(names.len(), 3);
-    }
-
-    #[test]
-    fn test_clusters_shared_caller_unites_callees() {
-        // Private functions a, b, c are all called by public entry_point
-        // → they serve the same responsibility and should be 1 cluster
-        let fns = vec![
-            FreeFunctionInfo {
-                name: "a".to_string(),
-                is_private: true,
-                statement_count: 10,
-            },
-            FreeFunctionInfo {
-                name: "b".to_string(),
-                is_private: true,
-                statement_count: 10,
-            },
-            FreeFunctionInfo {
-                name: "c".to_string(),
-                is_private: true,
-                statement_count: 10,
-            },
-        ];
-        // entry_point (not in private set) calls a, b, c → unites them
-        let calls = vec![(
-            "entry_point".to_string(),
-            vec!["a".to_string(), "b".to_string(), "c".to_string()],
-        )];
-        let (count, names) = count_independent_clusters(&fns, &calls, 5);
-        assert_eq!(count, 1);
-        assert_eq!(names[0].len(), 3);
-    }
-
-    #[test]
-    fn test_clusters_two_callers_two_groups() {
-        // Two public entry points each calling different private functions
-        // → 2 clusters, not 4
-        let fns = vec![
-            FreeFunctionInfo {
-                name: "a".to_string(),
-                is_private: true,
-                statement_count: 10,
-            },
-            FreeFunctionInfo {
-                name: "b".to_string(),
-                is_private: true,
-                statement_count: 10,
-            },
-            FreeFunctionInfo {
-                name: "c".to_string(),
-                is_private: true,
-                statement_count: 10,
-            },
-            FreeFunctionInfo {
-                name: "d".to_string(),
-                is_private: true,
-                statement_count: 10,
-            },
-        ];
-        let calls = vec![
-            ("pub1".to_string(), vec!["a".to_string(), "b".to_string()]),
-            ("pub2".to_string(), vec!["c".to_string(), "d".to_string()]),
-        ];
-        let (count, names) = count_independent_clusters(&fns, &calls, 5);
-        assert_eq!(count, 2);
-        assert_eq!(names.len(), 2);
-    }
-
-    #[test]
-    fn test_cohesion_warning_without_length_warning() {
-        // File is short (below baseline) but has 3+ independent private algorithms
-        let code = r#"
-fn algo_sort(data: &mut [i32]) {
-    let n = data.len();
-    let mut swapped = true;
-    while swapped {
-        swapped = false;
-        for i in 1..n {
-            if data[i - 1] > data[i] {
-                data.swap(i - 1, i);
-                swapped = true;
-            }
-        }
-    }
-}
-fn algo_search(data: &[i32], target: i32) -> Option<usize> {
-    let mut lo = 0;
-    let mut hi = data.len();
-    while lo < hi {
-        let mid = (lo + hi) / 2;
-        if data[mid] == target {
-            return Some(mid);
-        } else if data[mid] < target {
-            lo = mid + 1;
-        } else {
-            hi = mid;
-        }
-    }
-    None
-}
-fn algo_hash(data: &[u8]) -> u64 {
-    let mut h: u64 = 0;
-    for &b in data {
-        h = h.wrapping_mul(31).wrapping_add(b as u64);
-    }
-    let extra = data.len() as u64;
-    let final_val = h ^ extra;
-    final_val
-}
-"#;
-        let syntax = syn::parse_file(code).unwrap();
-        let parsed = vec![("algos.rs".to_string(), code.to_string(), syntax)];
-        let config = SrpConfig {
-            max_independent_clusters: 3,
-            min_cluster_statements: 3,
-            ..SrpConfig::default()
-        };
-        let call_graph = HashMap::new();
-        let cfg_test_files = std::collections::HashSet::new();
-        let warnings = analyze_module_srp(&parsed, &config, &call_graph, &cfg_test_files);
-        assert_eq!(warnings.len(), 1);
-        assert_eq!(warnings[0].independent_clusters, 3);
-        assert!((warnings[0].length_score - 0.0).abs() < f64::EPSILON);
-    }
 }

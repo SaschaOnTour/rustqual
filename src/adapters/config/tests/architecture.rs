@@ -1,4 +1,6 @@
 use crate::adapters::config::architecture::*;
+use serde::Deserialize;
+use std::collections::HashMap;
 
 #[test]
 fn test_architecture_config_default_is_disabled() {

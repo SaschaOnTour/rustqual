@@ -8,3 +8,6 @@
 #![allow(dead_code, unused_imports)]
 
 pub mod qual_allow;
+
+#[cfg(test)]
+mod tests;
