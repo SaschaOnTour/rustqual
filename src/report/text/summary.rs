@@ -63,7 +63,7 @@ type DimensionEntry = (&'static str, f64, Vec<(usize, &'static str)>);
 /// Build the dimension data array for score printing.
 /// Operation: array construction logic.
 fn build_dimensions(s: &Summary) -> Vec<DimensionEntry> {
-    let [_, cx, dry, srp, cp, tq] = s.dimension_scores;
+    let [_, cx, dry, srp, cp, tq, arch] = s.dimension_scores;
     vec![
         (
             "Complexity",
@@ -116,6 +116,11 @@ fn build_dimensions(s: &Summary) -> Vec<DimensionEntry> {
                 (s.tq_uncovered_warnings, "uncovered"),
                 (s.tq_untested_logic_warnings, "untested logic"),
             ],
+        ),
+        (
+            "Architecture",
+            arch,
+            vec![(s.architecture_warnings, "architecture")],
         ),
     ]
 }

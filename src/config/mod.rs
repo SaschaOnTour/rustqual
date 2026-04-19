@@ -1,3 +1,4 @@
+pub mod architecture;
 pub mod init;
 pub mod sections;
 
@@ -5,10 +6,11 @@ use globset::GlobSet;
 use serde::Deserialize;
 use std::path::Path;
 
+pub use architecture::ArchitectureConfig;
 pub use init::{generate_default_config, generate_tailored_config};
 use sections::DEFAULT_MAX_SUPPRESSION_RATIO;
 pub use sections::{
-    BoilerplateConfig, ComplexityConfig, CouplingConfig, DuplicatesConfig, SrpConfig,
+    BoilerplateConfig, ComplexityConfig, CouplingConfig, DuplicatesConfig, ReportConfig, SrpConfig,
     StructuralConfig, TestConfig, WeightsConfig,
 };
 
@@ -61,10 +63,16 @@ pub struct Config {
     pub structural: StructuralConfig,
 
     /// Test quality analysis configuration.
-    pub test: TestConfig,
+    pub test_quality: TestConfig,
+
+    /// Architecture-Dimension configuration (v1.0).
+    pub architecture: ArchitectureConfig,
 
     /// Quality score dimension weights.
     pub weights: WeightsConfig,
+
+    /// Rustqual-wide report aggregation settings (workspace mode).
+    pub report: ReportConfig,
 
     /// Pre-compiled glob set for ignore_functions patterns.
     #[serde(skip)]
@@ -92,8 +100,10 @@ impl Default for Config {
             srp: SrpConfig::default(),
             coupling: CouplingConfig::default(),
             structural: StructuralConfig::default(),
-            test: TestConfig::default(),
+            test_quality: TestConfig::default(),
+            architecture: ArchitectureConfig::default(),
             weights: WeightsConfig::default(),
+            report: ReportConfig::default(),
             compiled_ignore_fns: None,
             compiled_exclude_files: None,
         }
@@ -194,7 +204,7 @@ impl Config {
 /// Operation: arithmetic check with tolerance.
 pub fn validate_weights(config: &Config) -> Result<(), String> {
     let w = &config.weights;
-    let sum = w.iosp + w.complexity + w.dry + w.srp + w.coupling + w.test;
+    let sum = w.iosp + w.complexity + w.dry + w.srp + w.coupling + w.test_quality + w.architecture;
     if (sum - 1.0).abs() > sections::WEIGHT_SUM_TOLERANCE {
         return Err(format!(
             "Quality weights must sum to 1.0, but sum is {sum:.4}. \

@@ -137,7 +137,7 @@ fn apply_cli_overrides(config: &mut Config, cli: &Cli) {
         config.fail_on_warnings = true;
     }
     if let Some(ref coverage) = cli.coverage {
-        config.test.coverage_file = Some(coverage.display().to_string());
+        config.test_quality.coverage_file = Some(coverage.display().to_string());
     }
 }
 

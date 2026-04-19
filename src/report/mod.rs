@@ -122,10 +122,12 @@ pub struct Summary {
     pub structural_srp_warnings: usize,
     /// Number of structural binary check warnings mapped to Coupling.
     pub structural_coupling_warnings: usize,
+    /// Number of Architecture-Dimension findings (layer/forbidden/pattern/trait_contract).
+    pub architecture_warnings: usize,
     /// Weighted quality score across all dimensions (0.0–1.0).
     pub quality_score: f64,
-    /// Per-dimension scores: [IOSP, Complexity, DRY, SRP, Coupling, Test].
-    pub dimension_scores: [f64; 6],
+    /// Per-dimension scores: [IOSP, Complexity, DRY, SRP, Coupling, TestQuality, Architecture].
+    pub dimension_scores: [f64; 7],
     /// Total number of ALL allow suppressions: `// qual:allow` + `#[allow(...)]`.
     pub all_suppressions: usize,
     /// Whether the suppression ratio exceeds the configured maximum.
@@ -162,7 +164,7 @@ impl Summary {
 
     /// Compute the overall quality score from all dimension findings.
     /// Operation: arithmetic logic on summary fields.
-    pub fn compute_quality_score(&mut self, weights: &[f64; 6]) {
+    pub fn compute_quality_score(&mut self, weights: &[f64; 7]) {
         let n = self.total.max(1) as f64;
         let complexity_count = self.complexity_warnings
             + self.magic_number_warnings
@@ -199,6 +201,7 @@ impl Summary {
                 / n)
                 .min(1.0),
             1.0 - (tq_count as f64 / n).min(1.0),
+            1.0 - (self.architecture_warnings as f64 / n).min(1.0),
         ];
         // Scale by the number of active (non-zero weight) dimensions so the weighted-average
         // deficit is not diluted simply because the weights sum to 1.0 across multiple dimensions.
@@ -563,7 +566,7 @@ mod tests {
         ];
         let mut summary = Summary::from_results(&results);
         summary.compute_quality_score(&crate::config::sections::DEFAULT_QUALITY_WEIGHTS);
-        assert!((summary.quality_score - 1.0).abs() < f64::EPSILON);
+        assert!((summary.quality_score - 1.0).abs() < 1e-10);
     }
 
     #[test]
@@ -597,7 +600,7 @@ mod tests {
         let results: Vec<FunctionAnalysis> = vec![];
         let mut summary = Summary::from_results(&results);
         summary.compute_quality_score(&crate::config::sections::DEFAULT_QUALITY_WEIGHTS);
-        assert!((summary.quality_score - 1.0).abs() < f64::EPSILON);
+        assert!((summary.quality_score - 1.0).abs() < 1e-10);
     }
 
     #[test]

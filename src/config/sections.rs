@@ -54,8 +54,8 @@ pub const DEFAULT_STRUCTURAL_ENABLED: bool = true;
 // Test Quality
 pub const DEFAULT_TEST_ENABLED: bool = true;
 
-// Quality weights: [IOSP, Complexity, DRY, SRP, Coupling, Test]
-pub const DEFAULT_QUALITY_WEIGHTS: [f64; 6] = [0.25, 0.20, 0.15, 0.20, 0.10, 0.10];
+// Quality weights: [IOSP, Complexity, DRY, SRP, Coupling, TestQuality, Architecture]
+pub const DEFAULT_QUALITY_WEIGHTS: [f64; 7] = [0.22, 0.18, 0.13, 0.18, 0.09, 0.10, 0.10];
 
 /// Maximum acceptable deviation from 1.0 for weight sum validation.
 pub const WEIGHT_SUM_TOLERANCE: f64 = 0.001;
@@ -266,6 +266,25 @@ impl Default for TestConfig {
     }
 }
 
+/// Configuration for rustqual-wide report aggregation (used in workspace mode).
+///
+/// Applies to all dimensions, not architecture-specific.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(default, deny_unknown_fields)]
+pub struct ReportConfig {
+    /// Aggregation strategy across workspace member crates.
+    /// Allowed values: "loc_weighted" | "arithmetic".
+    pub aggregation: String,
+}
+
+impl Default for ReportConfig {
+    fn default() -> Self {
+        Self {
+            aggregation: "loc_weighted".to_string(),
+        }
+    }
+}
+
 /// Configuration for quality score dimension weights.
 #[derive(Debug, Deserialize, Clone)]
 #[serde(default, deny_unknown_fields)]
@@ -275,34 +294,38 @@ pub struct WeightsConfig {
     pub dry: f64,
     pub srp: f64,
     pub coupling: f64,
-    pub test: f64,
+    pub test_quality: f64,
+    pub architecture: f64,
 }
 
 impl WeightsConfig {
     /// Convert weights to an array in the standard dimension order.
     /// Operation: trivial field access.
-    pub fn as_array(&self) -> [f64; 6] {
+    pub fn as_array(&self) -> [f64; 7] {
         [
             self.iosp,
             self.complexity,
             self.dry,
             self.srp,
             self.coupling,
-            self.test,
+            self.test_quality,
+            self.architecture,
         ]
     }
 }
 
 impl Default for WeightsConfig {
     fn default() -> Self {
-        let [iosp, complexity, dry, srp, coupling, test] = DEFAULT_QUALITY_WEIGHTS;
+        let [iosp, complexity, dry, srp, coupling, test_quality, architecture] =
+            DEFAULT_QUALITY_WEIGHTS;
         Self {
             iosp,
             complexity,
             dry,
             srp,
             coupling,
-            test,
+            test_quality,
+            architecture,
         }
     }
 }
@@ -414,12 +437,13 @@ mod tests {
     #[test]
     fn test_weights_config_defaults() {
         let w = WeightsConfig::default();
-        assert!((w.iosp - 0.25).abs() < f64::EPSILON);
-        assert!((w.complexity - 0.20).abs() < f64::EPSILON);
-        assert!((w.dry - 0.15).abs() < f64::EPSILON);
-        assert!((w.srp - 0.20).abs() < f64::EPSILON);
-        assert!((w.coupling - 0.10).abs() < f64::EPSILON);
-        assert!((w.test - 0.10).abs() < f64::EPSILON);
+        assert!((w.iosp - 0.22).abs() < f64::EPSILON);
+        assert!((w.complexity - 0.18).abs() < f64::EPSILON);
+        assert!((w.dry - 0.13).abs() < f64::EPSILON);
+        assert!((w.srp - 0.18).abs() < f64::EPSILON);
+        assert!((w.coupling - 0.09).abs() < f64::EPSILON);
+        assert!((w.test_quality - 0.10).abs() < f64::EPSILON);
+        assert!((w.architecture - 0.10).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -432,17 +456,73 @@ mod tests {
     #[test]
     fn test_weights_config_deserialize() {
         let toml_str = r#"
+            iosp = 0.25
+            complexity = 0.18
+            dry = 0.13
+            srp = 0.15
+            coupling = 0.09
+            test_quality = 0.10
+            architecture = 0.10
+        "#;
+        let w: WeightsConfig = toml::from_str(toml_str).unwrap();
+        assert!((w.iosp - 0.25).abs() < f64::EPSILON);
+        assert!((w.complexity - 0.18).abs() < f64::EPSILON);
+        assert!((w.test_quality - 0.10).abs() < f64::EPSILON);
+        assert!((w.architecture - 0.10).abs() < f64::EPSILON);
+    }
+
+    // qual:allow(dry) reason: "parsing test against legacy v0.5.x field is unique"
+    #[test]
+    fn test_weights_config_rejects_legacy_test_field() {
+        // v1.0 Breaking Change: `test` was renamed to `test_quality`.
+        // Configs with the old field name must be explicitly rejected.
+        let toml_str = r#"
             iosp = 0.30
             complexity = 0.20
             dry = 0.15
             srp = 0.15
             coupling = 0.10
             test = 0.10
+            architecture = 0.00
         "#;
-        let w: WeightsConfig = toml::from_str(toml_str).unwrap();
-        assert!((w.iosp - 0.30).abs() < f64::EPSILON);
-        assert!((w.complexity - 0.20).abs() < f64::EPSILON);
-        assert!((w.test - 0.10).abs() < f64::EPSILON);
+        let result: Result<WeightsConfig, _> = toml::from_str(toml_str);
+        assert!(
+            result.is_err(),
+            "Legacy `test` field must be rejected by deny_unknown_fields"
+        );
+    }
+
+    #[test]
+    fn test_quality_weights_have_seven_dimensions() {
+        // v1.0 has seven dimensions; the DEFAULT_QUALITY_WEIGHTS array must reflect that.
+        assert_eq!(DEFAULT_QUALITY_WEIGHTS.len(), 7);
+        let w = WeightsConfig::default();
+        assert_eq!(w.as_array().len(), 7);
+    }
+
+    #[test]
+    fn test_report_config_default_is_loc_weighted() {
+        let c = ReportConfig::default();
+        assert_eq!(c.aggregation, "loc_weighted");
+    }
+
+    #[test]
+    fn test_report_config_parse_arithmetic() {
+        let toml_str = r#"
+            aggregation = "arithmetic"
+        "#;
+        let c: ReportConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(c.aggregation, "arithmetic");
+    }
+
+    #[test]
+    fn test_report_config_rejects_unknown_fields() {
+        let toml_str = r#"
+            aggregation = "loc_weighted"
+            bogus = "x"
+        "#;
+        let result: Result<ReportConfig, _> = toml::from_str(toml_str);
+        assert!(result.is_err());
     }
 
     #[test]

@@ -72,7 +72,7 @@ enabled = true
 
 # ── Test Quality Analysis ──────────────────────────────────────────────
 
-[test]
+[test_quality]
 enabled = true
 # Extra macro names (beyond assert*/debug_assert*) to recognize as assertions in TQ-001.
 # Example: extra_assertion_macros = ["verify", "check", "expect_that"]
@@ -81,9 +81,290 @@ enabled = true
 # ── Quality Score Weights ──────────────────────────────────────────────
 
 [weights]
-iosp = 0.25
-complexity = 0.20
-dry = 0.15
-srp = 0.20
-coupling = 0.10
-test = 0.10
+iosp         = 0.22
+complexity   = 0.18
+dry          = 0.13
+srp          = 0.18
+coupling     = 0.09
+test_quality = 0.10
+architecture = 0.10
+
+
+# ── Architecture Dimension ─────────────────────────────────────────────
+#
+# Rules carry a phase marker (e.g. "Phase 1 live") indicating the phase
+# in which the corresponding tool feature is implemented. Rules before
+# their phase are parsed but ignored; rules at or after their phase are
+# enforced.
+
+[architecture]
+enabled = true
+
+
+# ── Layer definitions (Phase 3 live) ───────────────────────────────────
+#
+# Reihenfolge von innen (Rang 0) nach außen. Application (Rang 2) darf
+# Port (Rang 1) importieren — das ist der Kern der hexagonalen Architektur.
+
+[architecture.layers]
+order = ["domain", "port", "application", "adapter"]
+unmatched_behavior = "composition_root"
+
+[architecture.layers.domain]
+paths = ["src/domain/**"]
+
+[architecture.layers.port]
+paths = ["src/ports/**"]
+
+[architecture.layers.application]
+paths = ["src/app/**"]
+
+[architecture.layers.adapter]
+paths = ["src/adapters/**"]
+
+
+# ── Re-export points (Phase 3 live) ────────────────────────────────────
+
+[architecture.reexport_points]
+paths = ["src/lib.rs", "src/main.rs"]
+
+
+# ── External-crate mapping (Phase 3 live, leer für Single-Crate) ───────
+#
+# Rustqual ist Single-Crate; Workspace-Nutzer mappen hier ihre Crates
+# auf Layer (z.B. "pv_port_*" = "port").
+
+[architecture.external_crates]
+
+
+# ── Forbidden edges (Phase 4 live) ─────────────────────────────────────
+
+# Dimension-Analyzer sind isoliert: keiner importiert einen anderen.
+[[architecture.forbidden]]
+from = "src/adapters/analyzers/iosp/**"
+to = "src/adapters/analyzers/**"
+except = ["src/adapters/analyzers/iosp/**"]
+reason = "Dimension-Analyzer kennen sich nicht gegenseitig"
+
+[[architecture.forbidden]]
+from = "src/adapters/analyzers/complexity/**"
+to = "src/adapters/analyzers/**"
+except = ["src/adapters/analyzers/complexity/**"]
+reason = "Dimension-Analyzer kennen sich nicht gegenseitig"
+
+[[architecture.forbidden]]
+from = "src/adapters/analyzers/dry/**"
+to = "src/adapters/analyzers/**"
+except = ["src/adapters/analyzers/dry/**"]
+reason = "Dimension-Analyzer kennen sich nicht gegenseitig"
+
+[[architecture.forbidden]]
+from = "src/adapters/analyzers/srp/**"
+to = "src/adapters/analyzers/**"
+except = ["src/adapters/analyzers/srp/**"]
+reason = "Dimension-Analyzer kennen sich nicht gegenseitig"
+
+[[architecture.forbidden]]
+from = "src/adapters/analyzers/coupling/**"
+to = "src/adapters/analyzers/**"
+except = ["src/adapters/analyzers/coupling/**"]
+reason = "Dimension-Analyzer kennen sich nicht gegenseitig"
+
+[[architecture.forbidden]]
+from = "src/adapters/analyzers/tq/**"
+to = "src/adapters/analyzers/**"
+except = ["src/adapters/analyzers/tq/**"]
+reason = "Dimension-Analyzer kennen sich nicht gegenseitig"
+
+[[architecture.forbidden]]
+from = "src/adapters/analyzers/structural/**"
+to = "src/adapters/analyzers/**"
+except = ["src/adapters/analyzers/structural/**"]
+reason = "Dimension-Analyzer kennen sich nicht gegenseitig"
+
+[[architecture.forbidden]]
+from = "src/adapters/analyzers/architecture/**"
+to = "src/adapters/analyzers/**"
+except = ["src/adapters/analyzers/architecture/**"]
+reason = "Dimension-Analyzer kennen sich nicht gegenseitig"
+
+# Analyzer produzieren Findings, keine Reports
+[[architecture.forbidden]]
+from = "src/adapters/analyzers/**"
+to = "src/adapters/report/**"
+reason = "Analyzer erzeugen Findings; Reporter konsumieren sie separat"
+
+# Reporter konsumieren Findings, analysieren nicht
+[[architecture.forbidden]]
+from = "src/adapters/report/**"
+to = "src/adapters/analyzers/**"
+reason = "Reporter konsumieren Findings, analysieren nicht"
+
+# Adapter kennen Application nicht (folgt aus Layer-Reihenfolge,
+# explizites Verbot verhindert Adapter → App Import)
+[[architecture.forbidden]]
+from = "src/adapters/**"
+to = "src/app/**"
+reason = "Adapter kennt Ports + Domain, aber keine Application-Use-Cases"
+
+
+# ── Symbol rules: Phase 1 (live mit Domain) ────────────────────────────
+
+# AST-Parsing-Libraries gehören in Adapter
+[[architecture.pattern]]
+name = "syn_only_in_adapters"
+forbid_path_prefix = ["syn::", "proc_macro2::", "quote::"]
+allowed_in = ["src/adapters/**", "**/tests/**"]
+reason = "AST-Parsing ist Adapter-Detail"
+
+# Glob-Imports in Domain verboten — verstecken Layer-Tunneling
+[[architecture.pattern]]
+name = "no_glob_imports_in_domain"
+forbid_glob_import = true
+forbidden_in = ["src/domain/**"]
+reason = "Glob-Imports (use foo::*) verstecken Layer-Tunneling durch Re-Exports"
+
+# Filesystem-Zugriff ist Adapter-Concern
+[[architecture.pattern]]
+name = "filesystem_only_in_adapters"
+forbid_path_prefix = ["walkdir::", "notify::"]
+allowed_in = ["src/adapters/**"]
+reason = "Filesystem-Zugriff läuft über Adapter-Ports"
+
+# Serialisierungs-Libraries leben in Adaptern
+[[architecture.pattern]]
+name = "serialization_only_in_adapters"
+forbid_path_prefix = ["toml::", "serde_json::", "toon_encode::"]
+allowed_in = ["src/adapters/**", "**/tests/**"]
+reason = "Serde-derives überall erlaubt, aber Serialisierungs-I/O nur in Adaptern"
+
+# Parallelisierung ist Implementierungs-Detail
+[[architecture.pattern]]
+name = "rayon_only_in_adapters"
+forbid_path_prefix = ["rayon::"]
+allowed_in = ["src/adapters/**"]
+reason = "Parallelisierung ist Adapter-Implementierung, nicht Domain-/App-Concern"
+
+# Pattern-Matching-Libraries sind Adapter-Detail
+[[architecture.pattern]]
+name = "globset_only_in_adapters"
+forbid_path_prefix = ["globset::", "regex::"]
+allowed_in = ["src/adapters/**", "**/tests/**"]
+reason = "Glob- und Regex-Matching leben in Adaptern"
+
+
+# ── Symbol rules: Phase 2 (live mit Ports) ─────────────────────────────
+
+# Keine Panic-Helper (.unwrap/.expect) in Production
+[[architecture.pattern]]
+name = "no_panic_helpers_in_production"
+forbid_method_call = ["unwrap", "expect"]
+forbidden_in = ["src/**"]
+except = ["**/tests/**"]
+reason = "Production propagiert Fehler typisiert statt zu panicken"
+
+# Kein println/eprintln/dbg in Library-Code
+[[architecture.pattern]]
+name = "no_stdout_in_library_code"
+forbid_macro_call = ["println", "eprintln", "dbg"]
+forbidden_in = ["src/**"]
+except = ["src/main.rs", "src/bin/**", "**/tests/**"]
+reason = "Reporter nehmen Writer-Argumente; stdout-Dispatch nur im CLI"
+
+# Keine Panic-Makros in Production
+[[architecture.pattern]]
+name = "no_panic_macros_in_production"
+forbid_macro_call = ["panic", "todo", "unimplemented", "unreachable"]
+forbidden_in = ["src/**"]
+except = ["**/tests/**"]
+reason = "Production-Code hat typisierte Errors, keine Panics"
+
+
+# ── Symbol rules: Phase 5 (live mit Application) ───────────────────────
+
+# CLI-Parsing nur im Composition Root
+[[architecture.pattern]]
+name = "clap_only_in_composition_root"
+forbid_path_prefix = ["clap::", "clap_complete::"]
+allowed_in = ["src/main.rs", "src/bin/**", "src/cli/**"]
+reason = "CLI-Parsing ist Verdrahtungs-Concern im Composition Root"
+
+# anyhow nur an der Boundary
+[[architecture.pattern]]
+name = "anyhow_only_at_boundary"
+forbid_path_prefix = ["anyhow::"]
+allowed_in = ["src/main.rs", "src/bin/**", "**/tests/**"]
+reason = "Typisierte Errors in Domain/App/Ports/Adapter; anyhow nur am Rand"
+
+# Kein Box<dyn Error> im Code
+[[architecture.pattern]]
+name = "no_boxed_error"
+forbid_path_prefix = ["Box<dyn std::error::Error", "Box<dyn Error"]
+forbidden_in = ["src/**"]
+except = ["**/tests/**"]
+reason = "Typisierte Errors; kein Zerfall zu dyn Error"
+
+
+# ── Symbol rules: Phase 6 (live nach Composition-Root-Cleanup) ─────────
+
+# Kein unsafe in rustqual
+[[architecture.pattern]]
+name = "no_unsafe"
+forbid_item_kind = ["unsafe_fn", "unsafe_impl", "extern_c_block"]
+forbidden_in = ["src/**"]
+reason = "Rustqual ist reiner Analyser, kein FFI, kein unsafe"
+
+
+# ── Symbol rules: Phase 7 (live nach Test-Auslagerung) ─────────────────
+
+# Keine inline #[cfg(test)] mod tests { … }-Blöcke
+# Erlaubt: #[cfg(test)] mod tests; (Deklaration ohne Body)
+[[architecture.pattern]]
+name = "no_inline_cfg_test_module"
+forbid_item_kind = ["inline_cfg_test_module"]
+forbidden_in = ["src/**"]
+reason = "Tests in tests/-Schwester-Bäumen, nicht inline — ehrliche Modul-Längen-Metrik"
+
+# Keine losen Top-Level-#[cfg(test)] fn/impl/const
+[[architecture.pattern]]
+name = "no_top_level_cfg_test_item"
+forbid_item_kind = ["top_level_cfg_test_item"]
+forbidden_in = ["src/**"]
+reason = "Test-Helpers in Companion-Files oder mod tests, nicht lose zwischen Production-Code"
+
+
+# ── Trait-signature rules: Phase 8 (live mit Trait-Contract) ──────────
+
+[[architecture.trait_contract]]
+name = "port_traits"
+scope = "src/ports/**"
+
+receiver_may_be = ["shared_ref"]
+
+forbidden_return_type_contains = [
+    "anyhow::",
+    "Box<dyn",
+]
+
+forbidden_error_variant_contains = [
+    "syn::",
+    "toml::",
+    "serde_json::",
+    "walkdir::",
+    "notify::",
+    "rayon::",
+    "globset::",
+    "regex::",
+]
+
+must_be_object_safe = true
+
+required_supertraits_contain = ["Send", "Sync"]
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Report aggregation (rustqual-wide, workspace mode)
+# ══════════════════════════════════════════════════════════════════════
+
+[report]
+aggregation = "loc_weighted"

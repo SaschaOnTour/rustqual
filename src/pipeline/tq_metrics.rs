@@ -12,7 +12,7 @@ pub(super) fn compute_tq(
     all_results: &[FunctionAnalysis],
     dead_code: &[crate::dry::dead_code::DeadCodeWarning],
 ) -> Option<crate::tq::TqAnalysis> {
-    if !config.test.enabled {
+    if !config.test_quality.enabled {
         return None;
     }
     let mut declared_fns = crate::dry::collect_declared_functions(parsed);
@@ -21,7 +21,11 @@ pub(super) fn compute_tq(
     let cfg_test_files = crate::dry::dead_code::collect_cfg_test_file_paths(parsed);
     let (prod_calls, test_calls) =
         crate::dry::dead_code::collect_all_calls(parsed, &cfg_test_files);
-    let coverage_path = config.test.coverage_file.as_ref().map(std::path::Path::new);
+    let coverage_path = config
+        .test_quality
+        .coverage_file
+        .as_ref()
+        .map(std::path::Path::new);
     let ctx = crate::tq::TqContext {
         parsed,
         scope,

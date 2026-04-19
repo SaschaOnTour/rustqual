@@ -151,7 +151,7 @@ check_sdp = true
 
 # ── Test Quality Analysis ──────────────────────────────────────────────
 
-[test]
+[test_quality]
 enabled = true
 # Optional: path to LCOV coverage file for TQ-004/TQ-005 checks.
 # coverage_file = "lcov.info"
@@ -161,12 +161,13 @@ enabled = true
 # Must sum to approximately 1.0.
 
 [weights]
-iosp = 0.25
-complexity = 0.20
-dry = 0.15
-srp = 0.20
-coupling = 0.10
-test = 0.10
+iosp         = 0.22
+complexity   = 0.18
+dry          = 0.13
+srp          = 0.18
+coupling     = 0.09
+test_quality = 0.10
+architecture = 0.10
 "#
 }
 
@@ -270,7 +271,7 @@ check_sdp = true
 
 # ── Test Quality Analysis ──────────────────────────────────────────────
 
-[test]
+[test_quality]
 enabled = true
 # coverage_file = "lcov.info"
 
@@ -278,12 +279,13 @@ enabled = true
 # Must sum to approximately 1.0.
 
 [weights]
-iosp = 0.25
-complexity = 0.20
-dry = 0.15
-srp = 0.20
-coupling = 0.10
-test = 0.10
+iosp         = 0.22
+complexity   = 0.18
+dry          = 0.13
+srp          = 0.18
+coupling     = 0.09
+test_quality = 0.10
+architecture = 0.10
 "#,
         file_count = m.file_count,
         function_count = m.function_count,
@@ -332,8 +334,9 @@ mod tests {
         assert!(content.contains("max_suppression_ratio"));
         assert!(content.contains("fail_on_warnings"));
         assert!(content.contains("[weights]"));
-        assert!(content.contains("iosp = 0.25"));
-        assert!(content.contains("coupling = 0.10"));
+        assert!(content.contains("iosp         = 0.22"));
+        assert!(content.contains("architecture = 0.10"));
+        assert!(content.contains("test_quality = 0.10"));
     }
 
     #[test]

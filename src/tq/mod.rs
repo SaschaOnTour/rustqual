@@ -188,7 +188,7 @@ pub(crate) fn analyze_test_quality(ctx: &TqContext<'_>) -> TqAnalysis {
 
     let assertion_free = assertions::detect_assertion_free_tests(
         ctx.parsed,
-        &ctx.config.test.extra_assertion_macros,
+        &ctx.config.test_quality.extra_assertion_macros,
     );
     warnings.extend(assertion_free);
 

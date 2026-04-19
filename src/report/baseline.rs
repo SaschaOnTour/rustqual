@@ -443,7 +443,10 @@ mod tests {
         let json = create_baseline(&results, &summary);
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
         let q = parsed["quality_score"].as_f64().unwrap();
-        assert!((q - 1.0).abs() < f64::EPSILON);
+        assert!(
+            (q - 1.0).abs() < 1e-10,
+            "quality_score near 1.0 (float tolerance): got {q}"
+        );
     }
 
     #[test]
