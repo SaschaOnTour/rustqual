@@ -4,12 +4,10 @@ use crate::domain::{Dimension, SourceUnit, Suppression};
 use crate::ports::{SuppressionParseError, SuppressionParser};
 use std::path::PathBuf;
 
-#[cfg(test)]
 struct FakeParser {
     returns: Vec<Suppression>,
 }
 
-#[cfg(test)]
 impl SuppressionParser for FakeParser {
     fn parse(&self, _unit: &SourceUnit) -> Result<Vec<Suppression>, SuppressionParseError> {
         Ok(self.returns.clone())

@@ -3,12 +3,10 @@
 use crate::ports::{ReportError, ReportPayload, Reporter};
 use std::sync::Mutex;
 
-#[cfg(test)]
 struct RecordingReporter {
     calls: Mutex<Vec<String>>,
 }
 
-#[cfg(test)]
 impl Reporter for RecordingReporter {
     fn emit(&self, payload: &ReportPayload) -> Result<(), ReportError> {
         self.calls.lock().unwrap().push(payload.placeholder.clone());

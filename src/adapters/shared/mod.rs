@@ -5,3 +5,6 @@
 //! outside the Domain) live here. Nothing in this module is allowed to
 //! depend on a specific analyzer.
 pub mod normalize;
+
+#[cfg(test)]
+mod tests;

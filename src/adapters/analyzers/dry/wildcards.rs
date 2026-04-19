@@ -63,6 +63,12 @@ impl<'ast> Visit<'ast> for WildcardCollector {
                     if self.in_test && prefix.first().is_some_and(|p| p == "super") {
                         continue;
                     }
+                    // Skip wildcard imports in files that live under a
+                    // `tests/` directory — those are companion test files
+                    // loaded via `#[cfg(test)] mod tests;` from a parent.
+                    if self.file.contains("/tests/") {
+                        continue;
+                    }
                     // Skip `prelude::*` paths
                     if prefix.last().is_some_and(|p| p == "prelude") {
                         continue;

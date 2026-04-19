@@ -9,3 +9,6 @@
 
 pub mod filesystem;
 pub mod watch;
+
+#[cfg(test)]
+mod tests;

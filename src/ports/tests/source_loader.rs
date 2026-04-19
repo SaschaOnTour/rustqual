@@ -9,12 +9,10 @@ use crate::ports::{LoadError, SourceLoader};
 use std::path::{Path, PathBuf};
 
 /// Trivial fake loader: returns what it was constructed with.
-#[cfg(test)]
 struct FakeLoader {
     units: Vec<SourceUnit>,
 }
 
-#[cfg(test)]
 impl SourceLoader for FakeLoader {
     fn load(&self, _root: &Path) -> Result<Vec<SourceUnit>, LoadError> {
         Ok(self.units.clone())
