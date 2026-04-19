@@ -8,6 +8,7 @@ mod dry;
 mod findings;
 mod normalize;
 mod pipeline;
+mod ports;
 mod report;
 mod scope;
 mod srp;

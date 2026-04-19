@@ -10,10 +10,12 @@
 
 pub mod dimension;
 pub mod severity;
+pub mod source_unit;
 pub mod suppression;
 
 pub use dimension::Dimension;
 pub use severity::Severity;
+pub use source_unit::SourceUnit;
 pub use suppression::Suppression;
 
 #[cfg(test)]
