@@ -1,5 +1,7 @@
 mod adapters;
+mod app;
 mod cli;
+mod cli_handlers;
 mod domain;
 mod pipeline;
 mod ports;
@@ -7,10 +9,11 @@ mod report;
 use adapters::config;
 use adapters::source::watch;
 use adapters::suppression::qual_allow as findings;
+use cli_handlers::{handle_compare, handle_completions, handle_init, handle_save_baseline};
 
 use std::path::Path;
 
-use clap::{CommandFactory, Parser};
+use clap::Parser;
 
 use cli::{Cli, OutputFormat};
 use config::Config;
@@ -25,37 +28,6 @@ fn determine_output_format(cli: &Cli) -> OutputFormat {
     } else {
         OutputFormat::Text
     }
-}
-
-/// Handle the --init command: write a rustqual.toml config file.
-/// Operation: logic to check file existence and write.
-fn handle_init(content: &str) -> Result<(), i32> {
-    let path = Path::new("rustqual.toml");
-    if path.exists() {
-        eprintln!("Error: rustqual.toml already exists in the current directory.");
-        return Err(1);
-    }
-    match std::fs::write(path, content) {
-        Ok(()) => {
-            eprintln!("Created rustqual.toml with tailored configuration.");
-            Ok(())
-        }
-        Err(e) => {
-            eprintln!("Error writing rustqual.toml: {e}");
-            Err(1)
-        }
-    }
-}
-
-/// Handle the --completions command: generate shell completions.
-/// Integration: orchestrates clap_complete::generate with Cli::command.
-fn handle_completions(shell: clap_complete::Shell) {
-    clap_complete::generate(
-        shell,
-        &mut Cli::command(),
-        "rustqual",
-        &mut std::io::stdout(),
-    );
 }
 
 /// Load config from an explicit config file path.
@@ -134,44 +106,6 @@ fn apply_cli_overrides(config: &mut Config, cli: &Cli) {
     if let Some(ref coverage) = cli.coverage {
         config.test_quality.coverage_file = Some(coverage.display().to_string());
     }
-}
-
-/// Handle --save-baseline: write results to a JSON file.
-/// Operation: serialization + file write logic.
-fn handle_save_baseline(
-    path: &Path,
-    all_results: &[crate::adapters::analyzers::iosp::FunctionAnalysis],
-    summary: &report::Summary,
-) -> Result<(), i32> {
-    let baseline = report::create_baseline(all_results, summary);
-    match std::fs::write(path, baseline) {
-        Ok(()) => {
-            eprintln!("Baseline saved to {}", path.display());
-            Ok(())
-        }
-        Err(e) => {
-            eprintln!("Error saving baseline: {e}");
-            Err(1)
-        }
-    }
-}
-
-/// Handle --compare: compare current results against baseline.
-/// Operation: file read + comparison logic.
-fn handle_compare(
-    path: &Path,
-    all_results: &[crate::adapters::analyzers::iosp::FunctionAnalysis],
-    summary: &report::Summary,
-) -> Result<bool, i32> {
-    let baseline_content = std::fs::read_to_string(path).map_err(|e| {
-        eprintln!("Error reading baseline: {e}");
-        1
-    })?;
-    Ok(report::print_comparison(
-        &baseline_content,
-        all_results,
-        summary,
-    ))
 }
 
 /// Check --min-quality-score gate.

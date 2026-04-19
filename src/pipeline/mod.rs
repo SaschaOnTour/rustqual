@@ -1,9 +1,12 @@
 // qual:allow(coupling) reason: "orchestrator module — high instability is expected"
+mod architecture;
 pub(crate) mod dry_suppressions;
 mod metrics;
 mod structural_metrics;
 mod tq_metrics;
 pub(crate) mod warnings;
+
+use architecture::collect_architecture_findings;
 
 pub(crate) use crate::adapters::source::filesystem as discovery;
 pub(crate) use crate::adapters::source::filesystem::{
@@ -32,13 +35,16 @@ use warnings::{
     check_suppression_ratio, count_all_suppressions, exclude_test_violations,
 };
 
-/// Run analysis and apply suppressions, returning all analysis results.
-/// Integration: orchestrates scope building, suppression collection,
-/// IOSP analysis, complexity, and delegates to sub-integrations.
-pub(crate) fn run_analysis(
-    parsed: &[(String, String, syn::File)],
-    config: &Config,
-) -> AnalysisResult {
+/// Bundle returned by the primary IOSP + complexity pass.
+struct PrimaryResults {
+    all_results: Vec<FunctionAnalysis>,
+    summary: Summary,
+    suppression_lines: std::collections::HashMap<String, Vec<crate::findings::Suppression>>,
+}
+
+/// Run the primary (IOSP + complexity) analysis pass.
+/// Integration: delegates scope build, per-file analyze, reclassification, warnings.
+fn run_primary_analysis(parsed: &[(String, String, syn::File)], config: &Config) -> PrimaryResults {
     let scope_refs: Vec<(&str, &syn::File)> = parsed
         .iter()
         .map(|(path, _, file)| (path.as_str(), file))
@@ -46,7 +52,6 @@ pub(crate) fn run_analysis(
     let scope = ProjectScope::from_files(&scope_refs);
     let suppression_lines = collect_suppression_lines(parsed);
     let analyzer = Analyzer::new(config, &scope);
-
     let mut all_results: Vec<_> = parsed
         .iter()
         .flat_map(|(path, _, syntax)| {
@@ -62,7 +67,6 @@ pub(crate) fn run_analysis(
                 })
         })
         .collect();
-
     exclude_test_violations(&mut all_results);
     let recursive_lines = discovery::collect_recursive_lines(parsed);
     warnings::apply_recursive_annotations(&mut all_results, &recursive_lines);
@@ -71,7 +75,24 @@ pub(crate) fn run_analysis(
     apply_complexity_warnings(&mut all_results, config, &mut summary);
     let unsafe_allow_lines = discovery::collect_unsafe_allow_lines(parsed);
     apply_extended_warnings(&mut all_results, config, &mut summary, &unsafe_allow_lines);
+    PrimaryResults {
+        all_results,
+        summary,
+        suppression_lines,
+    }
+}
 
+/// Run analysis and apply suppressions, returning all analysis results.
+/// Integration: orchestrates primary + secondary + architecture passes.
+pub(crate) fn run_analysis(
+    parsed: &[(String, String, syn::File)],
+    config: &Config,
+) -> AnalysisResult {
+    let PrimaryResults {
+        mut all_results,
+        mut summary,
+        suppression_lines,
+    } = run_primary_analysis(parsed, config);
     let secondary = run_secondary_analysis(
         parsed,
         config,
@@ -79,11 +100,23 @@ pub(crate) fn run_analysis(
         &suppression_lines,
         &mut summary,
     );
-
+    let architecture_findings =
+        collect_architecture_findings(parsed, config, &suppression_lines, &mut summary);
     finalize_summary(&mut summary, config, &suppression_lines, parsed);
+    build_result(&mut all_results, summary, secondary, architecture_findings)
+}
 
+/// Assemble the final AnalysisResult. The `_results` parameter is &mut to
+/// allow callers to mutate before the move; the body moves it in.
+/// Operation: struct construction, no own calls.
+fn build_result(
+    all_results: &mut Vec<FunctionAnalysis>,
+    summary: Summary,
+    secondary: SecondaryResults,
+    architecture_findings: Vec<crate::domain::Finding>,
+) -> AnalysisResult {
     AnalysisResult {
-        results: all_results,
+        results: std::mem::take(all_results),
         summary,
         coupling: secondary.coupling,
         duplicates: secondary.duplicates,
@@ -95,6 +128,7 @@ pub(crate) fn run_analysis(
         srp: secondary.srp,
         tq: secondary.tq,
         structural: secondary.structural,
+        architecture_findings,
     }
 }
 
@@ -521,6 +555,7 @@ mod tests {
             srp: None,
             tq: None,
             structural: None,
+            architecture_findings: vec![],
         };
         output_results(
             &analysis,

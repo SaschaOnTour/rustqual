@@ -298,6 +298,7 @@ mod tests {
             srp: None,
             tq: None,
             structural: None,
+            architecture_findings: vec![],
         }
     }
 

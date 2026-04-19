@@ -1,3 +1,4 @@
+// qual:allow(srp) reason: "aggregates all per-dimension collectors in one file; split scheduled for Phase 9"
 use crate::adapters::analyzers::iosp::{Classification, FunctionAnalysis};
 use crate::report::AnalysisResult;
 
@@ -39,8 +40,29 @@ pub fn collect_all_findings(analysis: &AnalysisResult) -> Vec<FindingEntry> {
     collect_coupling_findings(analysis, &mut entries);
     collect_tq_findings(analysis, &mut entries);
     collect_structural_findings(analysis, &mut entries);
+    collect_architecture_findings(analysis, &mut entries);
     entries.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
     entries
+}
+
+/// Collect Architecture-dimension findings from the port-based analyzers.
+/// Operation: iterator-chain projection of Finding into FindingEntry.
+fn collect_architecture_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntry>) {
+    entries.extend(
+        analysis
+            .architecture_findings
+            .iter()
+            .filter(|f| !f.suppressed)
+            .map(|f| {
+                FindingEntry::new(
+                    &f.file,
+                    f.line,
+                    "ARCHITECTURE",
+                    f.message.clone(),
+                    String::new(),
+                )
+            }),
+    );
 }
 
 /// Print findings in one-line-per-finding format with heading.
@@ -375,6 +397,7 @@ mod tests {
             srp: None,
             tq: None,
             structural: None,
+            architecture_findings: vec![],
         }
     }
 

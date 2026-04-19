@@ -58,6 +58,8 @@ pub struct AnalysisResult {
     pub srp: Option<crate::adapters::analyzers::srp::SrpAnalysis>,
     pub tq: Option<crate::adapters::analyzers::tq::TqAnalysis>,
     pub structural: Option<crate::adapters::analyzers::structural::StructuralAnalysis>,
+    /// Findings from the Architecture dimension (port-based analyzers).
+    pub architecture_findings: Vec<crate::domain::Finding>,
 }
 
 /// Summary statistics for a full analysis run.

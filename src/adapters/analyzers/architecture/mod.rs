@@ -16,6 +16,7 @@
 // items are verified through unit tests.
 #![allow(dead_code, unused_imports)]
 
+pub mod analyzer;
 pub mod cli;
 pub mod compiled;
 pub mod explain;
@@ -24,6 +25,8 @@ pub mod layer_rule;
 pub mod matcher;
 pub(crate) mod use_tree;
 pub mod violation;
+
+pub use analyzer::ArchitectureAnalyzer;
 
 pub use violation::{MatchLocation, ViolationKind};
 
