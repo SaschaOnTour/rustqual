@@ -1,0 +1,26 @@
+# Minimal rustqual.toml for the Layer Rule golden example.
+#
+# Two layers: domain (inner, rank 0) and adapter (outer, rank 1).
+# The intended violation is a domain file importing `crate::adapters`.
+
+[weights]
+iosp         = 0.22
+complexity   = 0.18
+dry          = 0.13
+srp          = 0.18
+coupling     = 0.09
+test_quality = 0.10
+architecture = 0.10
+
+[architecture]
+enabled = true
+
+[architecture.layers]
+order = ["domain", "adapter"]
+unmatched_behavior = "composition_root"
+
+[architecture.layers.domain]
+paths = ["src/domain/**"]
+
+[architecture.layers.adapter]
+paths = ["src/adapters/**"]

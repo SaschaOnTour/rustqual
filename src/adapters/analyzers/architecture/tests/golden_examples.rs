@@ -6,10 +6,18 @@
 //! - the matcher regressed (a previously caught violation is now missed), or
 //! - the rule semantics silently changed (drift without docs update).
 
+use crate::adapters::analyzers::architecture::forbidden_rule::{
+    check_forbidden_rules, CompiledForbiddenRule,
+};
+use crate::adapters::analyzers::architecture::layer_rule::{
+    check_layer_rule, LayerDefinitions, LayerRuleInput, UnmatchedBehavior,
+};
 use crate::adapters::analyzers::architecture::matcher::{
     find_glob_imports, find_macro_calls, find_method_call_matches, find_path_prefix_matches,
 };
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
+use globset::{Glob, GlobSet, GlobSetBuilder};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
@@ -151,4 +159,125 @@ fn forbid_macro_call_example_ignores_unrelated_macros() {
     let (file, ast) = load_fixture("forbid_macro_call", "src/domain/bad.rs");
     let hits = find_macro_calls(&file, &ast, &["panic".to_string()]);
     assert!(hits.is_empty(), "no panic!() in fixture: {hits:?}");
+}
+
+// ── Layer Rule example ────────────────────────────────────────────────
+
+fn example_dir(example: &str) -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("architecture")
+        .join(example)
+}
+
+fn load_workspace(example: &str) -> Vec<(String, syn::File)> {
+    let root = example_dir(example);
+    walkdir::WalkDir::new(root.join("src"))
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file())
+        .filter(|e| e.path().extension().is_some_and(|x| x == "rs"))
+        .map(|entry| load_one(&root, entry.path()))
+        .collect()
+}
+
+fn load_one(root: &Path, path: &Path) -> (String, syn::File) {
+    let source = fs::read_to_string(path).expect("read fixture");
+    let ast: syn::File = syn::parse_str(&source).expect("parse fixture");
+    let rel = path
+        .strip_prefix(root)
+        .expect("strip prefix")
+        .to_string_lossy()
+        .replace('\\', "/");
+    (rel, ast)
+}
+
+fn glob_set(patterns: &[&str]) -> GlobSet {
+    let mut b = GlobSetBuilder::new();
+    for p in patterns {
+        b.add(Glob::new(p).expect("valid glob"));
+    }
+    b.build().expect("valid glob set")
+}
+
+#[test]
+fn layer_example_produces_exactly_one_violation() {
+    let workspace = load_workspace("layer");
+    let refs: Vec<(String, &syn::File)> = workspace.iter().map(|(p, f)| (p.clone(), f)).collect();
+    let layers = LayerDefinitions::new(
+        vec!["domain".to_string(), "adapter".to_string()],
+        vec![
+            ("domain".to_string(), glob_set(&["src/domain/**"])),
+            ("adapter".to_string(), glob_set(&["src/adapters/**"])),
+        ],
+    );
+    let hits = check_layer_rule(
+        &refs,
+        &LayerRuleInput {
+            layers: &layers,
+            reexport_points: &glob_set(&[]),
+            unmatched_behavior: UnmatchedBehavior::CompositionRoot,
+            external_exact: &HashMap::new(),
+            external_glob: &[],
+        },
+    );
+    assert_eq!(hits.len(), 1, "expected exactly one layer hit: {hits:?}");
+    match &hits[0].kind {
+        ViolationKind::LayerViolation {
+            from_layer,
+            to_layer,
+            ..
+        } => {
+            assert_eq!(from_layer, "domain");
+            assert_eq!(to_layer, "adapter");
+        }
+        other => panic!("unexpected kind: {other:?}"),
+    }
+    assert!(
+        hits[0].file.ends_with("src/domain/bad.rs"),
+        "file = {}",
+        hits[0].file
+    );
+}
+
+// ── Forbidden Rule example ────────────────────────────────────────────
+
+#[test]
+fn forbidden_example_produces_exactly_one_violation() {
+    let workspace = load_workspace("forbidden");
+    let refs: Vec<(String, &syn::File)> = workspace.iter().map(|(p, f)| (p.clone(), f)).collect();
+    let rule = CompiledForbiddenRule {
+        from: Glob::new("src/adapters/analyzers/iosp/**")
+            .unwrap()
+            .compile_matcher(),
+        to: Glob::new("src/adapters/analyzers/**")
+            .unwrap()
+            .compile_matcher(),
+        except: glob_set(&["src/adapters/analyzers/iosp/**"]),
+        reason: "peer analyzers are isolated".to_string(),
+    };
+    let hits = check_forbidden_rules(&refs, std::slice::from_ref(&rule));
+    assert_eq!(
+        hits.len(),
+        1,
+        "expected exactly one forbidden hit: {hits:?}"
+    );
+    match &hits[0].kind {
+        ViolationKind::ForbiddenEdge {
+            reason,
+            imported_path,
+        } => {
+            assert_eq!(reason, "peer analyzers are isolated");
+            assert!(
+                imported_path.starts_with("crate::adapters::analyzers::srp"),
+                "imported_path = {imported_path:?}"
+            );
+        }
+        other => panic!("unexpected kind: {other:?}"),
+    }
+    assert!(
+        hits[0].file.ends_with("iosp/bad.rs"),
+        "file = {}",
+        hits[0].file
+    );
 }

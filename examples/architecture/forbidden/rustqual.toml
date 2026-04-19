@@ -1,0 +1,29 @@
+# Minimal rustqual.toml for the Forbidden Rule golden example.
+#
+# Each analyzer directory under src/adapters/analyzers/ is isolated
+# from its peers; imports within the same tree are allowed via `except`.
+
+[weights]
+iosp         = 0.22
+complexity   = 0.18
+dry          = 0.13
+srp          = 0.18
+coupling     = 0.09
+test_quality = 0.10
+architecture = 0.10
+
+[architecture]
+enabled = true
+
+[architecture.layers]
+order = ["adapter"]
+unmatched_behavior = "composition_root"
+
+[architecture.layers.adapter]
+paths = ["src/adapters/**"]
+
+[[architecture.forbidden]]
+from = "src/adapters/analyzers/iosp/**"
+to = "src/adapters/analyzers/**"
+except = ["src/adapters/analyzers/iosp/**"]
+reason = "peer analyzers are isolated"
