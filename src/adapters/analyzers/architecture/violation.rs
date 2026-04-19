@@ -34,6 +34,11 @@ pub enum ViolationKind {
         /// The invoked macro's final path-segment name.
         name: String,
     },
+    /// Matched by `forbid_function_call`: a call to a banned fully-qualified path.
+    FunctionCall {
+        /// The full rendered path of the call target (e.g. `Box::new`).
+        rendered_path: String,
+    },
     /// Layer rule: a file in `from_layer` imports from `to_layer` whose rank
     /// is strictly greater (importing "outward" in the layer order is forbidden).
     LayerViolation {

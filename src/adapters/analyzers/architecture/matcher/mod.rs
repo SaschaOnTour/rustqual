@@ -7,11 +7,13 @@
 //! Matchers are pure (no I/O, no global state) so they can be unit-tested
 //! in isolation with fixture source strings.
 
+pub mod function_call;
 pub mod glob_import;
 pub mod macro_call;
 pub mod method_call;
 pub mod path_prefix;
 
+pub use function_call::find_function_call_matches;
 pub use glob_import::find_glob_imports;
 pub use macro_call::find_macro_calls;
 pub use method_call::find_method_call_matches;

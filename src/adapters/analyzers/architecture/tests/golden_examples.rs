@@ -13,7 +13,8 @@ use crate::adapters::analyzers::architecture::layer_rule::{
     check_layer_rule, LayerDefinitions, LayerRuleInput, UnmatchedBehavior,
 };
 use crate::adapters::analyzers::architecture::matcher::{
-    find_glob_imports, find_macro_calls, find_method_call_matches, find_path_prefix_matches,
+    find_function_call_matches, find_glob_imports, find_macro_calls, find_method_call_matches,
+    find_path_prefix_matches,
 };
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use globset::{Glob, GlobSet, GlobSetBuilder};
@@ -159,6 +160,30 @@ fn forbid_macro_call_example_ignores_unrelated_macros() {
     let (file, ast) = load_fixture("forbid_macro_call", "src/domain/bad.rs");
     let hits = find_macro_calls(&file, &ast, &["panic".to_string()]);
     assert!(hits.is_empty(), "no panic!() in fixture: {hits:?}");
+}
+
+#[test]
+fn forbid_function_call_example_matches_exactly_once() {
+    let (file, ast) = load_fixture("forbid_function_call", "src/domain/bad.rs");
+    let hits = find_function_call_matches(&file, &ast, &["Box::new".to_string()]);
+    let hit = only_hit(hits);
+    match &hit.kind {
+        ViolationKind::FunctionCall { rendered_path } => {
+            assert_eq!(rendered_path, "Box::new");
+        }
+        other => panic!("unexpected kind: {other:?}"),
+    }
+    assert_eq!(
+        hit.line, 4,
+        "Box::new is on line 4 of bad.rs (after header comments)"
+    );
+}
+
+#[test]
+fn forbid_function_call_example_ignores_unrelated_paths() {
+    let (file, ast) = load_fixture("forbid_function_call", "src/domain/bad.rs");
+    let hits = find_function_call_matches(&file, &ast, &["Vec::new".to_string()]);
+    assert!(hits.is_empty(), "no Vec::new in fixture: {hits:?}");
 }
 
 // ── Layer Rule example ────────────────────────────────────────────────

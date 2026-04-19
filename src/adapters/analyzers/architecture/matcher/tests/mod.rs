@@ -1,3 +1,4 @@
+mod function_call;
 mod glob_import;
 mod macro_call;
 mod method_call;
