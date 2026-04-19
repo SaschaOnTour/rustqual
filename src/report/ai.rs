@@ -39,12 +39,22 @@ fn build_ai_value(analysis: &AnalysisResult, config: &crate::config::Config) -> 
 
 /// Pre-built indexes for O(1) enrichment lookups.
 struct EnrichIndex<'a> {
-    results: std::collections::HashMap<(&'a str, usize), &'a crate::analyzer::FunctionAnalysis>,
-    duplicates:
-        std::collections::HashMap<(&'a str, usize), &'a crate::dry::functions::DuplicateGroup>,
-    fragments:
-        std::collections::HashMap<(&'a str, usize), &'a crate::dry::fragments::FragmentGroup>,
-    srp_structs: std::collections::HashMap<(&'a str, usize), &'a crate::srp::SrpWarning>,
+    results: std::collections::HashMap<
+        (&'a str, usize),
+        &'a crate::adapters::analyzers::iosp::FunctionAnalysis,
+    >,
+    duplicates: std::collections::HashMap<
+        (&'a str, usize),
+        &'a crate::adapters::analyzers::dry::functions::DuplicateGroup,
+    >,
+    fragments: std::collections::HashMap<
+        (&'a str, usize),
+        &'a crate::adapters::analyzers::dry::fragments::FragmentGroup,
+    >,
+    srp_structs: std::collections::HashMap<
+        (&'a str, usize),
+        &'a crate::adapters::analyzers::srp::SrpWarning,
+    >,
 }
 
 /// Build enrichment indexes from analysis data for O(1) lookups.
@@ -180,7 +190,7 @@ fn enrich_detail(
 /// Operation: format logic, no own calls.
 fn enrich_srp_struct(
     entry: &crate::report::findings_list::FindingEntry,
-    warning: Option<&crate::srp::SrpWarning>,
+    warning: Option<&crate::adapters::analyzers::srp::SrpWarning>,
 ) -> String {
     let Some(w) = warning else {
         return entry.detail.clone();
@@ -195,12 +205,12 @@ fn enrich_srp_struct(
 /// Operation: format logic, no own calls.
 fn enrich_violation(
     entry: &crate::report::findings_list::FindingEntry,
-    fa: Option<&crate::analyzer::FunctionAnalysis>,
+    fa: Option<&crate::adapters::analyzers::iosp::FunctionAnalysis>,
 ) -> String {
     let Some(fa) = fa else {
         return entry.detail.clone();
     };
-    if let crate::analyzer::Classification::Violation {
+    if let crate::adapters::analyzers::iosp::Classification::Violation {
         logic_locations,
         call_locations,
         ..
@@ -404,7 +414,9 @@ mod tests {
 
     #[test]
     fn test_enrich_violation_detail() {
-        use crate::analyzer::{CallOccurrence, Classification, FunctionAnalysis, LogicOccurrence};
+        use crate::adapters::analyzers::iosp::{
+            CallOccurrence, Classification, FunctionAnalysis, LogicOccurrence,
+        };
         use crate::report::findings_list::FindingEntry;
 
         let mut analysis = empty_analysis();
@@ -473,7 +485,9 @@ mod tests {
 
     #[test]
     fn test_enrich_duplicate_detail() {
-        use crate::dry::functions::{DuplicateEntry, DuplicateGroup, DuplicateKind};
+        use crate::adapters::analyzers::dry::functions::{
+            DuplicateEntry, DuplicateGroup, DuplicateKind,
+        };
         use crate::report::findings_list::FindingEntry;
 
         let mut analysis = empty_analysis();
@@ -533,7 +547,7 @@ mod tests {
 
     #[test]
     fn test_enrich_fragment_detail() {
-        use crate::dry::fragments::{FragmentEntry, FragmentGroup};
+        use crate::adapters::analyzers::dry::fragments::{FragmentEntry, FragmentGroup};
         use crate::report::findings_list::FindingEntry;
 
         let mut analysis = empty_analysis();
@@ -690,8 +704,8 @@ mod tests {
 
     #[test]
     fn test_enrich_srp_struct_detail() {
+        use crate::adapters::analyzers::srp::{SrpAnalysis, SrpWarning};
         use crate::report::findings_list::FindingEntry;
-        use crate::srp::{SrpAnalysis, SrpWarning};
         let mut analysis = empty_analysis();
         analysis.srp = Some(SrpAnalysis {
             struct_warnings: vec![SrpWarning {
@@ -791,7 +805,7 @@ mod tests {
 
     #[test]
     fn test_build_ai_value_with_findings() {
-        use crate::analyzer::{
+        use crate::adapters::analyzers::iosp::{
             Classification, ComplexityMetrics, FunctionAnalysis, MagicNumberOccurrence,
         };
 
@@ -869,7 +883,7 @@ mod tests {
 
     #[test]
     fn test_toon_output_with_findings_has_tabular_format() {
-        use crate::analyzer::{
+        use crate::adapters::analyzers::iosp::{
             Classification, ComplexityMetrics, FunctionAnalysis, MagicNumberOccurrence,
         };
 

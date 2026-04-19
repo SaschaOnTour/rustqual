@@ -4,7 +4,7 @@ use super::json_types::{
 
 /// Build the JSON SRP section from an SRP analysis.
 /// Operation: iteration + filtering + mapping logic, no own calls.
-pub(super) fn build_json_srp(srp: &crate::srp::SrpAnalysis) -> JsonSrp {
+pub(super) fn build_json_srp(srp: &crate::adapters::analyzers::srp::SrpAnalysis) -> JsonSrp {
     JsonSrp {
         struct_warnings: srp
             .struct_warnings

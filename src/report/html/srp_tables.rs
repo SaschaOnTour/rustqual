@@ -1,7 +1,9 @@
 use super::html_escape;
 
 /// Build the SRP analysis section — Integration: delegates to header builder + generic table builder.
-pub(super) fn html_srp_section(srp: Option<&crate::srp::SrpAnalysis>) -> String {
+pub(super) fn html_srp_section(
+    srp: Option<&crate::adapters::analyzers::srp::SrpAnalysis>,
+) -> String {
     let esc = |s: &str| html_escape(s);
     let mut html = html_srp_header(srp);
     html.push_str(&html_srp_table(
@@ -9,8 +11,8 @@ pub(super) fn html_srp_section(srp: Option<&crate::srp::SrpAnalysis>) -> String 
         "<th>Struct</th><th>File</th><th>Line</th>\
          <th>LCOM4</th><th>Fields</th><th>Methods</th><th>Fan-out</th><th>Score</th>",
         srp.map(|s| s.struct_warnings.as_slice()).unwrap_or(&[]),
-        |w: &crate::srp::SrpWarning| w.suppressed,
-        |w: &crate::srp::SrpWarning| {
+        |w: &crate::adapters::analyzers::srp::SrpWarning| w.suppressed,
+        |w: &crate::adapters::analyzers::srp::SrpWarning| {
             format!(
                 "<tr><td>{}</td><td>{}</td><td>{}</td>\
                  <td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{:.2}</td></tr>\n",
@@ -29,8 +31,8 @@ pub(super) fn html_srp_section(srp: Option<&crate::srp::SrpAnalysis>) -> String 
         "Module Warnings",
         "<th>Module</th><th>File</th><th>Production Lines</th><th>Length Score</th><th>Clusters</th>",
         srp.map(|s| s.module_warnings.as_slice()).unwrap_or(&[]),
-        |w: &crate::srp::ModuleSrpWarning| w.suppressed,
-        |w: &crate::srp::ModuleSrpWarning| {
+        |w: &crate::adapters::analyzers::srp::ModuleSrpWarning| w.suppressed,
+        |w: &crate::adapters::analyzers::srp::ModuleSrpWarning| {
             let cluster_info = if w.independent_clusters > 0 {
                 format!("{} clusters", w.independent_clusters)
             } else { String::from("\u{2014}") };
@@ -44,8 +46,8 @@ pub(super) fn html_srp_section(srp: Option<&crate::srp::SrpAnalysis>) -> String 
         "Too-Many-Arguments Warnings",
         "<th>Function</th><th>File</th><th>Line</th><th>Params</th>",
         srp.map(|s| s.param_warnings.as_slice()).unwrap_or(&[]),
-        |w: &crate::srp::ParamSrpWarning| w.suppressed,
-        |w: &crate::srp::ParamSrpWarning| {
+        |w: &crate::adapters::analyzers::srp::ParamSrpWarning| w.suppressed,
+        |w: &crate::adapters::analyzers::srp::ParamSrpWarning| {
             format!(
                 "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n",
                 esc(&w.function_name),
@@ -61,7 +63,7 @@ pub(super) fn html_srp_section(srp: Option<&crate::srp::SrpAnalysis>) -> String 
 
 /// Build the SRP section header with summary and details wrapper.
 /// Operation: formatting logic, no own calls.
-fn html_srp_header(srp: Option<&crate::srp::SrpAnalysis>) -> String {
+fn html_srp_header(srp: Option<&crate::adapters::analyzers::srp::SrpAnalysis>) -> String {
     let (struct_count, module_count, param_count) = srp
         .map(|s| {
             (

@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::analyzer::Severity;
+use crate::adapters::analyzers::iosp::Severity;
 
 #[derive(serde::Serialize)]
 pub(crate) struct JsonOutput {

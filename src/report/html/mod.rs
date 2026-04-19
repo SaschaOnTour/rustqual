@@ -9,7 +9,7 @@ use structural_table::html_structural_section;
 use tables::{html_dry_section, html_srp_section, html_tq_section};
 
 use super::{AnalysisResult, Summary};
-use crate::analyzer::PERCENTAGE_MULTIPLIER;
+use crate::adapters::analyzers::iosp::PERCENTAGE_MULTIPLIER;
 
 /// Escape HTML-special characters in user content.
 /// Operation: string replacement logic.
@@ -216,7 +216,7 @@ fn html_footer() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analyzer::{
+    use crate::adapters::analyzers::iosp::{
         compute_severity, CallOccurrence, Classification, ComplexityMetrics, FunctionAnalysis,
         LogicOccurrence, MagicNumberOccurrence,
     };

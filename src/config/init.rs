@@ -17,7 +17,7 @@ pub struct ProjectMetrics {
 /// Operation: iterates results and computes max complexity values.
 pub fn extract_init_metrics(
     file_count: usize,
-    results: &[crate::analyzer::FunctionAnalysis],
+    results: &[crate::adapters::analyzers::iosp::FunctionAnalysis],
 ) -> ProjectMetrics {
     let mut max_cognitive = 0usize;
     let mut max_cyclomatic = 0usize;

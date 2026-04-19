@@ -13,10 +13,10 @@ pub(crate) use discovery::{
 
 use std::path::Path;
 
-use crate::analyzer::Analyzer;
+use crate::adapters::analyzers::iosp::scope::ProjectScope;
+use crate::adapters::analyzers::iosp::{Analyzer, FunctionAnalysis};
 use crate::config::Config;
 use crate::report::{AnalysisResult, Summary};
-use crate::scope::ProjectScope;
 
 use metrics::{
     apply_parameter_warnings, build_file_call_graph, compute_coupling, compute_srp,
@@ -117,16 +117,16 @@ fn finalize_summary(
 
 /// Results from coupling, DRY, SRP, and TQ analysis passes.
 struct SecondaryResults {
-    coupling: Option<crate::coupling::CouplingAnalysis>,
-    duplicates: Vec<crate::dry::functions::DuplicateGroup>,
-    dead_code: Vec<crate::dry::dead_code::DeadCodeWarning>,
-    fragments: Vec<crate::dry::fragments::FragmentGroup>,
-    boilerplate: Vec<crate::dry::boilerplate::BoilerplateFind>,
-    wildcard_warnings: Vec<crate::dry::wildcards::WildcardImportWarning>,
-    repeated_matches: Vec<crate::dry::match_patterns::RepeatedMatchGroup>,
-    srp: Option<crate::srp::SrpAnalysis>,
-    tq: Option<crate::tq::TqAnalysis>,
-    structural: Option<crate::structural::StructuralAnalysis>,
+    coupling: Option<crate::adapters::analyzers::coupling::CouplingAnalysis>,
+    duplicates: Vec<crate::adapters::analyzers::dry::functions::DuplicateGroup>,
+    dead_code: Vec<crate::adapters::analyzers::dry::dead_code::DeadCodeWarning>,
+    fragments: Vec<crate::adapters::analyzers::dry::fragments::FragmentGroup>,
+    boilerplate: Vec<crate::adapters::analyzers::dry::boilerplate::BoilerplateFind>,
+    wildcard_warnings: Vec<crate::adapters::analyzers::dry::wildcards::WildcardImportWarning>,
+    repeated_matches: Vec<crate::adapters::analyzers::dry::match_patterns::RepeatedMatchGroup>,
+    srp: Option<crate::adapters::analyzers::srp::SrpAnalysis>,
+    tq: Option<crate::adapters::analyzers::tq::TqAnalysis>,
+    structural: Option<crate::adapters::analyzers::structural::StructuralAnalysis>,
 }
 
 /// Run coupling, DRY, SRP, and TQ analysis passes, updating summary counts.
@@ -134,7 +134,7 @@ struct SecondaryResults {
 fn run_secondary_analysis(
     parsed: &[(String, String, syn::File)],
     config: &Config,
-    all_results: &[crate::analyzer::FunctionAnalysis],
+    all_results: &[FunctionAnalysis],
     suppression_lines: &std::collections::HashMap<String, Vec<crate::findings::Suppression>>,
     summary: &mut Summary,
 ) -> SecondaryResults {
@@ -151,9 +151,10 @@ fn run_secondary_analysis(
     dry_suppressions::mark_inverse_suppressions(&mut dry.duplicates, &inverse_lines);
     dry_suppressions::mark_dry_suppressions(&mut dry.fragments, suppression_lines);
     dry_suppressions::mark_dry_suppressions(&mut dry.boilerplate, suppression_lines);
+    use crate::adapters::analyzers::dry::match_patterns::detect_repeated_matches;
     let mut repeated_matches = run_guarded_detection(
         config.duplicates.detect_repeated_matches,
-        |p, c| crate::dry::match_patterns::detect_repeated_matches(p, &c.duplicates),
+        |p, c| detect_repeated_matches(p, &c.duplicates),
         parsed,
         config,
     );
@@ -274,7 +275,7 @@ pub(crate) fn output_results(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analyzer::Classification;
+    use crate::adapters::analyzers::iosp::Classification;
     use crate::config::Config;
     use crate::findings::Suppression;
     use std::fs;
@@ -532,10 +533,10 @@ mod tests {
 
     // ── Coupling suppression tests ──────────────────────────────
 
-    fn make_coupling_analysis() -> crate::coupling::CouplingAnalysis {
-        crate::coupling::CouplingAnalysis {
+    fn make_coupling_analysis() -> crate::adapters::analyzers::coupling::CouplingAnalysis {
+        crate::adapters::analyzers::coupling::CouplingAnalysis {
             metrics: vec![
-                crate::coupling::CouplingMetrics {
+                crate::adapters::analyzers::coupling::CouplingMetrics {
                     module_name: "pipeline".to_string(),
                     afferent: 1,
                     efferent: 5,
@@ -551,7 +552,7 @@ mod tests {
                     suppressed: false,
                     warning: false,
                 },
-                crate::coupling::CouplingMetrics {
+                crate::adapters::analyzers::coupling::CouplingMetrics {
                     module_name: "config".to_string(),
                     afferent: 3,
                     efferent: 0,
@@ -622,8 +623,8 @@ mod tests {
 
     #[test]
     fn test_mark_coupling_suppressions_submodule_file() {
-        let mut analysis = crate::coupling::CouplingAnalysis {
-            metrics: vec![crate::coupling::CouplingMetrics {
+        let mut analysis = crate::adapters::analyzers::coupling::CouplingAnalysis {
+            metrics: vec![crate::adapters::analyzers::coupling::CouplingMetrics {
                 module_name: "analyzer".to_string(),
                 afferent: 3,
                 efferent: 2,
@@ -684,8 +685,8 @@ mod tests {
 
     #[test]
     fn test_count_coupling_warnings_leaf_module_excluded() {
-        let mut analysis = crate::coupling::CouplingAnalysis {
-            metrics: vec![crate::coupling::CouplingMetrics {
+        let mut analysis = crate::adapters::analyzers::coupling::CouplingAnalysis {
+            metrics: vec![crate::adapters::analyzers::coupling::CouplingMetrics {
                 module_name: "watch".to_string(),
                 afferent: 0, // leaf module
                 efferent: 2,

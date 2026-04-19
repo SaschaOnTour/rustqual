@@ -1,4 +1,4 @@
-use crate::structural::StructuralAnalysis;
+use crate::adapters::analyzers::structural::StructuralAnalysis;
 
 /// Collect SARIF result entries for structural check findings (BTC/SLM/NMS/OI/SIT/DEH/IET).
 /// Operation: iteration + method calls via closure + JSON construction, no own calls.

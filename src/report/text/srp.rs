@@ -1,7 +1,7 @@
 use colored::Colorize;
 
 /// Print SRP analysis section — Integration: delegates to header + per-category printers.
-pub fn print_srp_section(srp: &crate::srp::SrpAnalysis) {
+pub fn print_srp_section(srp: &crate::adapters::analyzers::srp::SrpAnalysis) {
     print_srp_header(srp);
     print_srp_struct_warnings(&srp.struct_warnings);
     print_srp_module_warnings(&srp.module_warnings);
@@ -10,7 +10,7 @@ pub fn print_srp_section(srp: &crate::srp::SrpAnalysis) {
 
 /// Print the SRP section header if there are any unsuppressed warnings.
 /// Operation: conditional formatting logic, no own calls.
-fn print_srp_header(srp: &crate::srp::SrpAnalysis) {
+fn print_srp_header(srp: &crate::adapters::analyzers::srp::SrpAnalysis) {
     let has_any = srp.struct_warnings.iter().any(|w| !w.suppressed)
         || srp.module_warnings.iter().any(|w| !w.suppressed)
         || srp.param_warnings.iter().any(|w| !w.suppressed);
@@ -21,7 +21,7 @@ fn print_srp_header(srp: &crate::srp::SrpAnalysis) {
 
 /// Print SRP struct cohesion warnings.
 /// Operation: conditional formatting logic, no own calls.
-fn print_srp_struct_warnings(warnings: &[crate::srp::SrpWarning]) {
+fn print_srp_struct_warnings(warnings: &[crate::adapters::analyzers::srp::SrpWarning]) {
     for w in warnings {
         if w.suppressed {
             continue;
@@ -51,7 +51,7 @@ fn print_srp_struct_warnings(warnings: &[crate::srp::SrpWarning]) {
 
 /// Print SRP module length warnings.
 /// Operation: conditional formatting logic, no own calls.
-fn print_srp_module_warnings(warnings: &[crate::srp::ModuleSrpWarning]) {
+fn print_srp_module_warnings(warnings: &[crate::adapters::analyzers::srp::ModuleSrpWarning]) {
     for w in warnings {
         if w.suppressed {
             continue;
@@ -81,7 +81,7 @@ fn print_srp_module_warnings(warnings: &[crate::srp::ModuleSrpWarning]) {
 
 /// Print SRP too-many-arguments warnings.
 /// Operation: conditional formatting logic, no own calls.
-fn print_srp_param_warnings(warnings: &[crate::srp::ParamSrpWarning]) {
+fn print_srp_param_warnings(warnings: &[crate::adapters::analyzers::srp::ParamSrpWarning]) {
     for w in warnings {
         if w.suppressed {
             continue;

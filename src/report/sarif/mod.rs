@@ -81,7 +81,9 @@ fn print_sarif_envelope(sarif_results: Vec<serde_json::Value>) {
 
 /// Collect SARIF result entries for SDP violations, skipping suppressed ones.
 /// Operation: iteration + JSON construction.
-fn collect_sdp_findings(analysis: &crate::coupling::CouplingAnalysis) -> Vec<serde_json::Value> {
+fn collect_sdp_findings(
+    analysis: &crate::adapters::analyzers::coupling::CouplingAnalysis,
+) -> Vec<serde_json::Value> {
     analysis
         .sdp_violations
         .iter()
@@ -106,8 +108,8 @@ fn collect_sdp_findings(analysis: &crate::coupling::CouplingAnalysis) -> Vec<ser
 /// Build SARIF entries for a single function's extended complexity warnings.
 /// Operation: data-driven array + JSON construction, no own calls.
 fn build_extended_entries(
-    func: &crate::analyzer::FunctionAnalysis,
-    m: &crate::analyzer::ComplexityMetrics,
+    func: &crate::adapters::analyzers::iosp::FunctionAnalysis,
+    m: &crate::adapters::analyzers::iosp::ComplexityMetrics,
 ) -> Vec<serde_json::Value> {
     let finding = |rule: &str, level: &str, msg: String| -> serde_json::Value {
         serde_json::json!({
@@ -178,10 +180,10 @@ fn build_extended_entries(
 /// Collect SARIF result entries for extended complexity warnings (CX-004/005/006/A20).
 /// Operation: iteration + helper call via closure, no direct own calls.
 fn collect_extended_complexity_findings(
-    results: &[crate::analyzer::FunctionAnalysis],
+    results: &[crate::adapters::analyzers::iosp::FunctionAnalysis],
 ) -> Vec<serde_json::Value> {
-    let build = |func: &crate::analyzer::FunctionAnalysis,
-                 m: &crate::analyzer::ComplexityMetrics| {
+    let build = |func: &crate::adapters::analyzers::iosp::FunctionAnalysis,
+                 m: &crate::adapters::analyzers::iosp::ComplexityMetrics| {
         build_extended_entries(func, m)
     };
     let mut findings = Vec::new();
@@ -199,7 +201,7 @@ fn collect_extended_complexity_findings(
 /// Collect SARIF result entries for repeated match pattern findings (DRY-005).
 /// Operation: iteration + JSON construction.
 fn collect_repeated_match_findings(
-    groups: &[crate::dry::match_patterns::RepeatedMatchGroup],
+    groups: &[crate::adapters::analyzers::dry::match_patterns::RepeatedMatchGroup],
 ) -> Vec<serde_json::Value> {
     groups
         .iter()
@@ -249,7 +251,7 @@ fn collect_suppression_ratio_finding(summary: &crate::report::Summary) -> Vec<se
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analyzer::{
+    use crate::adapters::analyzers::iosp::{
         compute_severity, CallOccurrence, Classification, FunctionAnalysis, LogicOccurrence,
     };
     use crate::report::Summary;

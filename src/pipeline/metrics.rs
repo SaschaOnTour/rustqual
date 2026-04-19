@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::analyzer::FunctionAnalysis;
+use crate::adapters::analyzers::iosp::FunctionAnalysis;
 use crate::config::Config;
 use crate::findings::Suppression;
 use crate::report::Summary;
@@ -10,18 +10,20 @@ use crate::report::Summary;
 pub(super) fn compute_coupling(
     parsed: &[(String, String, syn::File)],
     config: &Config,
-) -> Option<crate::coupling::CouplingAnalysis> {
+) -> Option<crate::adapters::analyzers::coupling::CouplingAnalysis> {
     if !config.coupling.enabled {
         return None;
     }
-    Some(crate::coupling::analyze_coupling(parsed))
+    Some(crate::adapters::analyzers::coupling::analyze_coupling(
+        parsed,
+    ))
 }
 
 /// Mark coupling metrics as suppressed based on `// qual:allow(coupling)` comments.
 /// Operation: iteration + suppression check logic, no own calls.
 /// A module is suppressed if ANY of its files contains a coupling suppression.
 pub(super) fn mark_coupling_suppressions(
-    analysis: Option<&mut crate::coupling::CouplingAnalysis>,
+    analysis: Option<&mut crate::adapters::analyzers::coupling::CouplingAnalysis>,
     suppression_lines: &std::collections::HashMap<String, Vec<Suppression>>,
 ) {
     let Some(analysis) = analysis else { return };
@@ -33,7 +35,7 @@ pub(super) fn mark_coupling_suppressions(
             sups.iter()
                 .any(|s| s.covers(crate::findings::Dimension::Coupling))
         })
-        .map(|(path, _)| crate::coupling::file_to_module(path))
+        .map(|(path, _)| crate::adapters::analyzers::coupling::file_to_module(path))
         .collect();
 
     for m in &mut analysis.metrics {
@@ -49,7 +51,7 @@ pub(super) fn mark_coupling_suppressions(
 /// because I=1.0 is the natural, harmless state for leaf modules.
 /// Suppressed modules are excluded from all coupling warnings.
 pub(super) fn count_coupling_warnings(
-    analysis: Option<&mut crate::coupling::CouplingAnalysis>,
+    analysis: Option<&mut crate::adapters::analyzers::coupling::CouplingAnalysis>,
     config: &crate::config::sections::CouplingConfig,
     summary: &mut Summary,
 ) {
@@ -85,11 +87,12 @@ pub(super) fn run_guarded_detection<T>(
 
 /// Results from all DRY detection passes.
 pub(super) struct DryResults {
-    pub(super) duplicates: Vec<crate::dry::functions::DuplicateGroup>,
-    pub(super) dead_code: Vec<crate::dry::dead_code::DeadCodeWarning>,
-    pub(super) fragments: Vec<crate::dry::fragments::FragmentGroup>,
-    pub(super) boilerplate: Vec<crate::dry::boilerplate::BoilerplateFind>,
-    pub(super) wildcard_warnings: Vec<crate::dry::wildcards::WildcardImportWarning>,
+    pub(super) duplicates: Vec<crate::adapters::analyzers::dry::functions::DuplicateGroup>,
+    pub(super) dead_code: Vec<crate::adapters::analyzers::dry::dead_code::DeadCodeWarning>,
+    pub(super) fragments: Vec<crate::adapters::analyzers::dry::fragments::FragmentGroup>,
+    pub(super) boilerplate: Vec<crate::adapters::analyzers::dry::boilerplate::BoilerplateFind>,
+    pub(super) wildcard_warnings:
+        Vec<crate::adapters::analyzers::dry::wildcards::WildcardImportWarning>,
 }
 
 /// Run all DRY detection passes (duplicates, dead code, fragments, boilerplate, wildcards).
@@ -103,7 +106,7 @@ pub(super) fn run_dry_detection(
 ) -> DryResults {
     let duplicates = run_guarded_detection(
         config.duplicates.enabled,
-        |p, c| crate::dry::functions::detect_duplicates(p, &c.duplicates),
+        |p, c| crate::adapters::analyzers::dry::functions::detect_duplicates(p, &c.duplicates),
         parsed,
         config,
     );
@@ -113,7 +116,7 @@ pub(super) fn run_dry_detection(
             if !c.duplicates.detect_dead_code {
                 return vec![];
             }
-            crate::dry::dead_code::detect_dead_code(p, c, api_lines)
+            crate::adapters::analyzers::dry::dead_code::detect_dead_code(p, c, api_lines)
         },
         parsed,
         config,
@@ -122,13 +125,13 @@ pub(super) fn run_dry_detection(
 
     let fragments = run_guarded_detection(
         config.duplicates.enabled,
-        |p, c| crate::dry::fragments::detect_fragments(p, &c.duplicates),
+        |p, c| crate::adapters::analyzers::dry::fragments::detect_fragments(p, &c.duplicates),
         parsed,
         config,
     );
     let boilerplate = run_guarded_detection(
         config.boilerplate.enabled,
-        |p, c| crate::dry::boilerplate::detect_boilerplate(p, &c.boilerplate),
+        |p, c| crate::adapters::analyzers::dry::boilerplate::detect_boilerplate(p, &c.boilerplate),
         parsed,
         config,
     );
@@ -138,7 +141,7 @@ pub(super) fn run_dry_detection(
             if !c.duplicates.enabled {
                 return vec![];
             }
-            crate::dry::wildcards::detect_wildcard_imports(p)
+            crate::adapters::analyzers::dry::wildcards::detect_wildcard_imports(p)
         },
         parsed,
         config,
@@ -159,7 +162,7 @@ pub(super) fn run_dry_detection(
 /// Operation: iteration + filtering + summation on DRY result vectors (no own calls).
 pub(super) fn count_dry_findings(
     dry: &DryResults,
-    repeated_matches: &[crate::dry::match_patterns::RepeatedMatchGroup],
+    repeated_matches: &[crate::adapters::analyzers::dry::match_patterns::RepeatedMatchGroup],
     summary: &mut Summary,
 ) {
     summary.duplicate_groups = dry
@@ -185,7 +188,7 @@ pub(super) fn count_dry_findings(
 /// Mark SRP warnings as suppressed based on `// qual:allow(srp)` comments.
 /// Operation: iteration + suppression matching via closures (no own calls).
 pub(super) fn mark_srp_suppressions(
-    srp: Option<&mut crate::srp::SrpAnalysis>,
+    srp: Option<&mut crate::adapters::analyzers::srp::SrpAnalysis>,
     suppression_lines: &std::collections::HashMap<String, Vec<Suppression>>,
 ) {
     let Some(srp) = srp else { return };
@@ -225,7 +228,7 @@ pub(super) fn mark_srp_suppressions(
 /// Mark wildcard import warnings as suppressed based on `// qual:allow(dry)` comments.
 /// Operation: iteration + suppression check, no own calls.
 pub(super) fn mark_wildcard_suppressions(
-    warnings: &mut [crate::dry::wildcards::WildcardImportWarning],
+    warnings: &mut [crate::adapters::analyzers::dry::wildcards::WildcardImportWarning],
     suppression_lines: &std::collections::HashMap<String, Vec<Suppression>>,
 ) {
     let dry_dim = crate::findings::Dimension::Dry;
@@ -241,7 +244,9 @@ pub(super) fn mark_wildcard_suppressions(
 
 /// Mark SDP violations as suppressed when either involved module has a coupling suppression.
 /// Operation: iteration + lookup logic, no own calls.
-pub(super) fn mark_sdp_suppressions(coupling: Option<&mut crate::coupling::CouplingAnalysis>) {
+pub(super) fn mark_sdp_suppressions(
+    coupling: Option<&mut crate::adapters::analyzers::coupling::CouplingAnalysis>,
+) {
     let Some(coupling) = coupling else { return };
     let suppressed_modules: std::collections::HashSet<&str> = coupling
         .metrics
@@ -261,7 +266,7 @@ pub(super) fn mark_sdp_suppressions(coupling: Option<&mut crate::coupling::Coupl
 /// Count SDP violations and update summary, excluding suppressed entries.
 /// Operation: iteration + conditional counting, no own calls.
 pub(super) fn count_sdp_violations(
-    coupling: Option<&crate::coupling::CouplingAnalysis>,
+    coupling: Option<&crate::adapters::analyzers::coupling::CouplingAnalysis>,
     config: &crate::config::sections::CouplingConfig,
     summary: &mut Summary,
 ) {
@@ -296,11 +301,11 @@ pub(super) fn compute_srp(
     parsed: &[(String, String, syn::File)],
     config: &Config,
     file_call_graph: &HashMap<String, Vec<(String, Vec<String>)>>,
-) -> Option<crate::srp::SrpAnalysis> {
+) -> Option<crate::adapters::analyzers::srp::SrpAnalysis> {
     if !config.srp.enabled {
         return None;
     }
-    Some(crate::srp::analyze_srp(
+    Some(crate::adapters::analyzers::srp::analyze_srp(
         parsed,
         &config.srp,
         file_call_graph,
@@ -309,7 +314,10 @@ pub(super) fn compute_srp(
 
 /// Count SRP warnings and update summary, excluding suppressed entries.
 /// Operation: iteration + conditional counting, no own calls.
-pub(super) fn count_srp_warnings(srp: Option<&crate::srp::SrpAnalysis>, summary: &mut Summary) {
+pub(super) fn count_srp_warnings(
+    srp: Option<&crate::adapters::analyzers::srp::SrpAnalysis>,
+    summary: &mut Summary,
+) {
     let Some(srp) = srp else { return };
     summary.srp_struct_warnings = srp.struct_warnings.iter().filter(|w| !w.suppressed).count();
     summary.srp_module_warnings = srp.module_warnings.iter().filter(|w| !w.suppressed).count();
@@ -319,8 +327,8 @@ pub(super) fn count_srp_warnings(srp: Option<&crate::srp::SrpAnalysis>, summary:
 /// Populate SRP parameter count warnings from analysis results.
 /// Operation: iteration + threshold comparison, no own calls.
 pub(super) fn apply_parameter_warnings(
-    results: &[crate::analyzer::FunctionAnalysis],
-    srp: Option<&mut crate::srp::SrpAnalysis>,
+    results: &[crate::adapters::analyzers::iosp::FunctionAnalysis],
+    srp: Option<&mut crate::adapters::analyzers::srp::SrpAnalysis>,
     config: &crate::config::sections::SrpConfig,
 ) {
     let Some(srp) = srp else { return };
@@ -328,7 +336,7 @@ pub(super) fn apply_parameter_warnings(
     srp.param_warnings = results
         .iter()
         .filter(|fa| !fa.suppressed && !fa.is_trait_impl && fa.parameter_count > max)
-        .map(|fa| crate::srp::ParamSrpWarning {
+        .map(|fa| crate::adapters::analyzers::srp::ParamSrpWarning {
             function_name: fa.qualified_name.clone(),
             file: fa.file.clone(),
             line: fa.line,
@@ -341,7 +349,7 @@ pub(super) fn apply_parameter_warnings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analyzer::{compute_severity, Classification};
+    use crate::adapters::analyzers::iosp::{compute_severity, Classification};
     use crate::config::sections::SrpConfig;
     use crate::pipeline::dry_suppressions::{mark_dry_suppressions, mark_inverse_suppressions};
 
@@ -372,8 +380,8 @@ mod tests {
         }
     }
 
-    fn make_srp() -> crate::srp::SrpAnalysis {
-        crate::srp::SrpAnalysis {
+    fn make_srp() -> crate::adapters::analyzers::srp::SrpAnalysis {
+        crate::adapters::analyzers::srp::SrpAnalysis {
             struct_warnings: vec![],
             module_warnings: vec![],
             param_warnings: vec![],
@@ -447,8 +455,11 @@ mod tests {
 
     // ── SDP suppression tests ──────────────────────────────
 
-    fn make_sdp_violation(from: &str, to: &str) -> crate::coupling::sdp::SdpViolation {
-        crate::coupling::sdp::SdpViolation {
+    fn make_sdp_violation(
+        from: &str,
+        to: &str,
+    ) -> crate::adapters::analyzers::coupling::sdp::SdpViolation {
+        crate::adapters::analyzers::coupling::sdp::SdpViolation {
             from_module: from.to_string(),
             to_module: to.to_string(),
             from_instability: 0.2,
@@ -457,8 +468,11 @@ mod tests {
         }
     }
 
-    fn make_coupling_metric(name: &str, suppressed: bool) -> crate::coupling::CouplingMetrics {
-        crate::coupling::CouplingMetrics {
+    fn make_coupling_metric(
+        name: &str,
+        suppressed: bool,
+    ) -> crate::adapters::analyzers::coupling::CouplingMetrics {
+        crate::adapters::analyzers::coupling::CouplingMetrics {
             module_name: name.to_string(),
             afferent: 1,
             efferent: 1,
@@ -472,7 +486,7 @@ mod tests {
 
     #[test]
     fn test_mark_sdp_suppressions_from_module_suppressed() {
-        let mut analysis = crate::coupling::CouplingAnalysis {
+        let mut analysis = crate::adapters::analyzers::coupling::CouplingAnalysis {
             metrics: vec![
                 make_coupling_metric("a", true),
                 make_coupling_metric("b", false),
@@ -489,7 +503,7 @@ mod tests {
 
     #[test]
     fn test_mark_sdp_suppressions_to_module_suppressed() {
-        let mut analysis = crate::coupling::CouplingAnalysis {
+        let mut analysis = crate::adapters::analyzers::coupling::CouplingAnalysis {
             metrics: vec![
                 make_coupling_metric("a", false),
                 make_coupling_metric("b", true),
@@ -506,7 +520,7 @@ mod tests {
 
     #[test]
     fn test_mark_sdp_suppressions_neither_suppressed() {
-        let mut analysis = crate::coupling::CouplingAnalysis {
+        let mut analysis = crate::adapters::analyzers::coupling::CouplingAnalysis {
             metrics: vec![
                 make_coupling_metric("a", false),
                 make_coupling_metric("b", false),
@@ -529,18 +543,18 @@ mod tests {
 
     #[test]
     fn test_count_sdp_violations_excludes_suppressed() {
-        let analysis = crate::coupling::CouplingAnalysis {
+        let analysis = crate::adapters::analyzers::coupling::CouplingAnalysis {
             metrics: vec![],
             cycles: vec![],
             sdp_violations: vec![
-                crate::coupling::sdp::SdpViolation {
+                crate::adapters::analyzers::coupling::sdp::SdpViolation {
                     from_module: "a".into(),
                     to_module: "b".into(),
                     from_instability: 0.2,
                     to_instability: 0.8,
                     suppressed: true,
                 },
-                crate::coupling::sdp::SdpViolation {
+                crate::adapters::analyzers::coupling::sdp::SdpViolation {
                     from_module: "c".into(),
                     to_module: "d".into(),
                     from_instability: 0.3,
@@ -560,7 +574,9 @@ mod tests {
 
     #[test]
     fn test_mark_dry_suppressions() {
-        use crate::dry::functions::{DuplicateEntry, DuplicateGroup, DuplicateKind};
+        use crate::adapters::analyzers::dry::functions::{
+            DuplicateEntry, DuplicateGroup, DuplicateKind,
+        };
 
         let mut groups = vec![DuplicateGroup {
             entries: vec![
@@ -599,7 +615,9 @@ mod tests {
 
     #[test]
     fn test_duplicate_without_suppression_not_marked() {
-        use crate::dry::functions::{DuplicateEntry, DuplicateGroup, DuplicateKind};
+        use crate::adapters::analyzers::dry::functions::{
+            DuplicateEntry, DuplicateGroup, DuplicateKind,
+        };
 
         let mut groups = vec![DuplicateGroup {
             entries: vec![
@@ -632,7 +650,9 @@ mod tests {
 
     #[test]
     fn test_inverse_annotation_suppresses_duplicate() {
-        use crate::dry::functions::{DuplicateEntry, DuplicateGroup, DuplicateKind};
+        use crate::adapters::analyzers::dry::functions::{
+            DuplicateEntry, DuplicateGroup, DuplicateKind,
+        };
 
         let mut groups = vec![DuplicateGroup {
             entries: vec![
@@ -666,7 +686,9 @@ mod tests {
 
     #[test]
     fn test_inverse_annotation_must_target_group_member() {
-        use crate::dry::functions::{DuplicateEntry, DuplicateGroup, DuplicateKind};
+        use crate::adapters::analyzers::dry::functions::{
+            DuplicateEntry, DuplicateGroup, DuplicateKind,
+        };
 
         let mut groups = vec![DuplicateGroup {
             entries: vec![
@@ -700,7 +722,9 @@ mod tests {
 
     #[test]
     fn test_repeated_match_suppression() {
-        use crate::dry::match_patterns::{RepeatedMatchEntry, RepeatedMatchGroup};
+        use crate::adapters::analyzers::dry::match_patterns::{
+            RepeatedMatchEntry, RepeatedMatchGroup,
+        };
 
         let mut groups = vec![RepeatedMatchGroup {
             enum_name: "MyEnum".to_string(),
@@ -730,7 +754,7 @@ mod tests {
 
     #[test]
     fn test_fragment_suppression() {
-        use crate::dry::fragments::{FragmentEntry, FragmentGroup};
+        use crate::adapters::analyzers::dry::fragments::{FragmentEntry, FragmentGroup};
 
         let mut groups = vec![FragmentGroup {
             entries: vec![FragmentEntry {
@@ -761,7 +785,7 @@ mod tests {
 
     #[test]
     fn test_boilerplate_suppression() {
-        use crate::dry::boilerplate::BoilerplateFind;
+        use crate::adapters::analyzers::dry::boilerplate::BoilerplateFind;
 
         let mut findings = vec![BoilerplateFind {
             pattern_id: "BP-003".to_string(),

@@ -1,5 +1,7 @@
 use super::html_escape;
-use crate::analyzer::{Classification, FunctionAnalysis, Severity, PERCENTAGE_MULTIPLIER};
+use crate::adapters::analyzers::iosp::{
+    Classification, FunctionAnalysis, Severity, PERCENTAGE_MULTIPLIER,
+};
 use crate::report::Summary;
 
 /// Build an HTML table row for a single IOSP violation.
@@ -76,7 +78,7 @@ pub(super) fn html_iosp_section(results: &[FunctionAnalysis], summary: &Summary)
 /// Operation: formatting logic, no own calls (html_escape via closure parameter).
 fn html_complexity_row(
     f: &FunctionAnalysis,
-    m: &crate::analyzer::ComplexityMetrics,
+    m: &crate::adapters::analyzers::iosp::ComplexityMetrics,
     esc: &dyn Fn(&str) -> String,
 ) -> String {
     let magic_issue = (!m.magic_numbers.is_empty()).then(|| {
@@ -122,7 +124,7 @@ fn html_complexity_row(
 /// Operation: iteration, filtering, and HTML formatting logic.
 pub(super) fn html_complexity_section(results: &[FunctionAnalysis]) -> String {
     let esc = |s: &str| html_escape(s);
-    let row = |f: &FunctionAnalysis, m: &crate::analyzer::ComplexityMetrics| {
+    let row = |f: &FunctionAnalysis, m: &crate::adapters::analyzers::iosp::ComplexityMetrics| {
         html_complexity_row(f, m, &esc)
     };
     let has_warn = |f: &FunctionAnalysis| {
@@ -172,7 +174,7 @@ pub(super) fn html_complexity_section(results: &[FunctionAnalysis]) -> String {
 /// Format a single module metrics row.
 /// Operation: conditional formatting logic, no own calls.
 fn html_module_metric_row(
-    m: &crate::coupling::CouplingMetrics,
+    m: &crate::adapters::analyzers::coupling::CouplingMetrics,
     esc: &dyn Fn(&str) -> String,
 ) -> String {
     let st = if m.suppressed {
@@ -193,11 +195,12 @@ fn html_module_metric_row(
 /// Build coupling sub-sections: cycles, SDP violations, and metrics table.
 /// Operation: conditional iteration and HTML formatting logic; helper call in closure.
 fn html_coupling_subsections(
-    coupling: Option<&crate::coupling::CouplingAnalysis>,
+    coupling: Option<&crate::adapters::analyzers::coupling::CouplingAnalysis>,
     cc: usize,
     esc: &dyn Fn(&str) -> String,
 ) -> String {
-    let metric_row = |m: &crate::coupling::CouplingMetrics| html_module_metric_row(m, esc);
+    let metric_row =
+        |m: &crate::adapters::analyzers::coupling::CouplingMetrics| html_module_metric_row(m, esc);
     let mut html = String::new();
     if cc > 0 {
         html.push_str("<h3>Circular Dependencies</h3>\n<ul>\n");
@@ -251,7 +254,7 @@ fn html_coupling_subsections(
 /// Build the coupling analysis section.
 /// Operation: conditional formatting logic, calls helper via closure.
 pub(super) fn html_coupling_section(
-    coupling: Option<&crate::coupling::CouplingAnalysis>,
+    coupling: Option<&crate::adapters::analyzers::coupling::CouplingAnalysis>,
 ) -> String {
     let esc = |s: &str| html_escape(s);
     let subsections = |c, cc| html_coupling_subsections(c, cc, &esc);

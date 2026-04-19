@@ -1,6 +1,6 @@
 use colored::Colorize;
 
-use crate::structural::StructuralAnalysis;
+use crate::adapters::analyzers::structural::StructuralAnalysis;
 
 /// Print structural warnings grouped by rule code.
 /// Operation: formatting logic with iteration, no own calls.

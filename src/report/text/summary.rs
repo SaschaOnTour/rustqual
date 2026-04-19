@@ -1,6 +1,6 @@
 use colored::Colorize;
 
-use crate::analyzer::PERCENTAGE_MULTIPLIER;
+use crate::adapters::analyzers::iosp::PERCENTAGE_MULTIPLIER;
 use crate::report::findings_list::FindingEntry;
 use crate::report::Summary;
 

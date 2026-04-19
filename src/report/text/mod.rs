@@ -13,7 +13,7 @@ pub(crate) use tq::print_tq_section;
 
 use colored::Colorize;
 
-use crate::analyzer::{Classification, FunctionAnalysis, Severity};
+use crate::adapters::analyzers::iosp::{Classification, FunctionAnalysis, Severity};
 
 use super::Summary;
 
@@ -145,7 +145,7 @@ fn print_violation_detail(func: &FunctionAnalysis) {
 /// Operation: conditional formatting logic, no own calls.
 fn format_warning_messages(
     func: &FunctionAnalysis,
-    m: &crate::analyzer::ComplexityMetrics,
+    m: &crate::adapters::analyzers::iosp::ComplexityMetrics,
 ) -> [Option<String>; 3] {
     let magic_msg = (!m.magic_numbers.is_empty()).then(|| {
         let nums: Vec<String> = m.magic_numbers.iter().map(|n| n.to_string()).collect();
@@ -176,7 +176,8 @@ fn format_warning_messages(
 fn print_complexity_details(func: &FunctionAnalysis) {
     let Some(ref m) = func.complexity else { return };
     let warn = "⚠".yellow();
-    let msgs = |f: &FunctionAnalysis, metrics: &crate::analyzer::ComplexityMetrics| {
+    let msgs = |f: &FunctionAnalysis,
+                metrics: &crate::adapters::analyzers::iosp::ComplexityMetrics| {
         format_warning_messages(f, metrics)
     };
 
@@ -225,7 +226,7 @@ fn print_complexity_details(func: &FunctionAnalysis) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analyzer::{
+    use crate::adapters::analyzers::iosp::{
         compute_severity, CallOccurrence, Classification, ComplexityMetrics, FunctionAnalysis,
         LogicOccurrence,
     };

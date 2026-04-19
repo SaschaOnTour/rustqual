@@ -1,4 +1,4 @@
-use crate::analyzer::{Classification, FunctionAnalysis, Severity};
+use crate::adapters::analyzers::iosp::{Classification, FunctionAnalysis, Severity};
 
 /// Collect SARIF result entries for IOSP violations.
 /// Operation: iteration + classification matching + JSON construction.
@@ -110,7 +110,7 @@ pub(super) fn collect_complexity_findings(results: &[FunctionAnalysis]) -> Vec<s
 /// Collect SARIF result entries for coupling issues.
 /// Operation: iteration + JSON construction.
 pub(super) fn collect_coupling_findings(
-    analysis: &crate::coupling::CouplingAnalysis,
+    analysis: &crate::adapters::analyzers::coupling::CouplingAnalysis,
 ) -> Vec<serde_json::Value> {
     let mut findings = Vec::new();
     for cycle in &analysis.cycles {
@@ -132,10 +132,10 @@ pub(super) fn collect_coupling_findings(
 /// Collect SARIF result entries for DRY findings (duplicates, dead code, fragments, boilerplate).
 /// Operation: iteration + JSON construction.
 pub(super) fn collect_dry_findings(
-    duplicates: &[crate::dry::DuplicateGroup],
-    dead_code: &[crate::dry::DeadCodeWarning],
-    fragments: &[crate::dry::FragmentGroup],
-    boilerplate: &[crate::dry::BoilerplateFind],
+    duplicates: &[crate::adapters::analyzers::dry::DuplicateGroup],
+    dead_code: &[crate::adapters::analyzers::dry::DeadCodeWarning],
+    fragments: &[crate::adapters::analyzers::dry::FragmentGroup],
+    boilerplate: &[crate::adapters::analyzers::dry::BoilerplateFind],
 ) -> Vec<serde_json::Value> {
     let mut findings = Vec::new();
     let finding = |rule: &str, level: &str, msg: String, file: &str, line: usize| {
@@ -196,7 +196,9 @@ pub(super) fn collect_dry_findings(
 
 /// Collect SARIF result entries for SRP findings.
 /// Operation: iteration + JSON construction.
-pub(super) fn collect_srp_findings(srp: &crate::srp::SrpAnalysis) -> Vec<serde_json::Value> {
+pub(super) fn collect_srp_findings(
+    srp: &crate::adapters::analyzers::srp::SrpAnalysis,
+) -> Vec<serde_json::Value> {
     let mut findings = Vec::new();
     for w in &srp.struct_warnings {
         if w.suppressed {
@@ -254,7 +256,9 @@ pub(super) fn collect_srp_findings(srp: &crate::srp::SrpAnalysis) -> Vec<serde_j
 
 /// Collect SARIF result entries for too-many-arguments SRP findings.
 /// Operation: iteration + JSON construction.
-pub(super) fn collect_param_srp_findings(srp: &crate::srp::SrpAnalysis) -> Vec<serde_json::Value> {
+pub(super) fn collect_param_srp_findings(
+    srp: &crate::adapters::analyzers::srp::SrpAnalysis,
+) -> Vec<serde_json::Value> {
     srp.param_warnings
         .iter()
         .filter(|w| !w.suppressed)
@@ -283,7 +287,7 @@ pub(super) fn collect_param_srp_findings(srp: &crate::srp::SrpAnalysis) -> Vec<s
 /// Collect SARIF result entries for wildcard import warnings.
 /// Operation: iteration + JSON construction.
 pub(super) fn collect_wildcard_findings(
-    warnings: &[crate::dry::wildcards::WildcardImportWarning],
+    warnings: &[crate::adapters::analyzers::dry::wildcards::WildcardImportWarning],
 ) -> Vec<serde_json::Value> {
     warnings
         .iter()

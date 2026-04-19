@@ -56,7 +56,7 @@ pub fn print_dry_annotations(analysis: &super::AnalysisResult) {
 /// Operation: iteration + formatting logic, no own calls.
 /// Leaf modules (afferent=0) are excluded from instability warnings.
 pub fn print_coupling_annotations(
-    analysis: &crate::coupling::CouplingAnalysis,
+    analysis: &crate::adapters::analyzers::coupling::CouplingAnalysis,
     config: &crate::config::sections::CouplingConfig,
 ) {
     for cycle in &analysis.cycles {
@@ -89,23 +89,25 @@ pub fn print_coupling_annotations(
 
 /// Print `::warning` annotations for TQ findings.
 /// Operation: iteration + formatting logic, no own calls.
-pub fn print_tq_annotations(tq: &crate::tq::TqAnalysis) {
+pub fn print_tq_annotations(tq: &crate::adapters::analyzers::tq::TqAnalysis) {
     for w in &tq.warnings {
         if w.suppressed {
             continue;
         }
         let kind_label = match &w.kind {
-            crate::tq::TqWarningKind::NoAssertion => "TQ-001: test has no assertions".to_string(),
-            crate::tq::TqWarningKind::NoSut => {
+            crate::adapters::analyzers::tq::TqWarningKind::NoAssertion => {
+                "TQ-001: test has no assertions".to_string()
+            }
+            crate::adapters::analyzers::tq::TqWarningKind::NoSut => {
                 "TQ-002: test does not call production code".to_string()
             }
-            crate::tq::TqWarningKind::Untested => {
+            crate::adapters::analyzers::tq::TqWarningKind::Untested => {
                 "TQ-003: production function is untested".to_string()
             }
-            crate::tq::TqWarningKind::Uncovered => {
+            crate::adapters::analyzers::tq::TqWarningKind::Uncovered => {
                 "TQ-004: production function has no coverage".to_string()
             }
-            crate::tq::TqWarningKind::UntestedLogic { uncovered_lines } => {
+            crate::adapters::analyzers::tq::TqWarningKind::UntestedLogic { uncovered_lines } => {
                 let lines: Vec<String> = uncovered_lines
                     .iter()
                     .map(|(f, l)| format!("{f}:{l}"))
@@ -122,7 +124,9 @@ pub fn print_tq_annotations(tq: &crate::tq::TqAnalysis) {
 
 /// Print `::warning` annotations for structural findings.
 /// Trivial: iteration with method calls hidden in closure (lenient mode).
-pub fn print_structural_annotations(structural: &crate::structural::StructuralAnalysis) {
+pub fn print_structural_annotations(
+    structural: &crate::adapters::analyzers::structural::StructuralAnalysis,
+) {
     structural
         .warnings
         .iter()
@@ -138,7 +142,7 @@ pub fn print_structural_annotations(structural: &crate::structural::StructuralAn
 
 /// Print `::warning` annotations for SRP findings.
 /// Operation: iteration + formatting logic, no own calls.
-pub fn print_srp_annotations(srp: &crate::srp::SrpAnalysis) {
+pub fn print_srp_annotations(srp: &crate::adapters::analyzers::srp::SrpAnalysis) {
     for w in &srp.struct_warnings {
         if w.suppressed {
             continue;

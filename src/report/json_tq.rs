@@ -12,11 +12,15 @@ pub(super) fn build_tq_warnings(analysis: &AnalysisResult) -> Vec<JsonTqWarning>
                 .iter()
                 .map(|w| {
                     let kind = match &w.kind {
-                        crate::tq::TqWarningKind::NoAssertion => "no_assertion",
-                        crate::tq::TqWarningKind::NoSut => "no_sut",
-                        crate::tq::TqWarningKind::Untested => "untested",
-                        crate::tq::TqWarningKind::Uncovered => "uncovered",
-                        crate::tq::TqWarningKind::UntestedLogic { .. } => "untested_logic",
+                        crate::adapters::analyzers::tq::TqWarningKind::NoAssertion => {
+                            "no_assertion"
+                        }
+                        crate::adapters::analyzers::tq::TqWarningKind::NoSut => "no_sut",
+                        crate::adapters::analyzers::tq::TqWarningKind::Untested => "untested",
+                        crate::adapters::analyzers::tq::TqWarningKind::Uncovered => "uncovered",
+                        crate::adapters::analyzers::tq::TqWarningKind::UntestedLogic { .. } => {
+                            "untested_logic"
+                        }
                     };
                     JsonTqWarning {
                         file: w.file.clone(),

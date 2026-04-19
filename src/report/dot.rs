@@ -1,4 +1,4 @@
-use crate::analyzer::{Classification, FunctionAnalysis};
+use crate::adapters::analyzers::iosp::{Classification, FunctionAnalysis};
 
 /// Print results as Graphviz DOT format for call-graph visualization.
 /// Operation: string formatting logic with no own function calls.
@@ -48,7 +48,7 @@ pub fn print_dot(results: &[FunctionAnalysis]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analyzer::{compute_severity, CallOccurrence, LogicOccurrence};
+    use crate::adapters::analyzers::iosp::{compute_severity, CallOccurrence, LogicOccurrence};
 
     fn make_result(name: &str, classification: Classification) -> FunctionAnalysis {
         let severity = compute_severity(&classification);

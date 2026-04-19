@@ -2,7 +2,7 @@ pub(super) use super::srp_tables::html_srp_section;
 pub(super) use super::tq_table::html_tq_section;
 
 use super::html_escape;
-use crate::analyzer::PERCENTAGE_MULTIPLIER;
+use crate::adapters::analyzers::iosp::PERCENTAGE_MULTIPLIER;
 
 /// Build the DRY findings section: duplicates, fragments, dead code, boilerplate, wildcards, repeated matches.
 /// Integration: assembles per-category HTML builders.
@@ -47,7 +47,9 @@ fn html_dry_header(analysis: &crate::report::AnalysisResult) -> String {
 
 /// Build HTML for duplicate function groups.
 /// Operation: iteration and formatting logic, no own calls (html_escape via closure).
-fn html_duplicates_category(duplicates: &[crate::dry::functions::DuplicateGroup]) -> String {
+fn html_duplicates_category(
+    duplicates: &[crate::adapters::analyzers::dry::functions::DuplicateGroup],
+) -> String {
     if duplicates.iter().all(|g| g.suppressed) {
         return String::new();
     }
@@ -59,8 +61,12 @@ fn html_duplicates_category(duplicates: &[crate::dry::functions::DuplicateGroup]
         .enumerate()
         .for_each(|(i, g)| {
             let kind_label = match &g.kind {
-                crate::dry::functions::DuplicateKind::Exact => "Exact".to_string(),
-                crate::dry::functions::DuplicateKind::NearDuplicate { similarity } => {
+                crate::adapters::analyzers::dry::functions::DuplicateKind::Exact => {
+                    "Exact".to_string()
+                }
+                crate::adapters::analyzers::dry::functions::DuplicateKind::NearDuplicate {
+                    similarity,
+                } => {
                     format!("{:.0}% similar", similarity * PERCENTAGE_MULTIPLIER)
                 }
             };
@@ -85,7 +91,9 @@ fn html_duplicates_category(duplicates: &[crate::dry::functions::DuplicateGroup]
 
 /// Build HTML for duplicate fragment groups.
 /// Operation: iteration and formatting logic, no own calls (html_escape via closure).
-fn html_fragments_category(fragments: &[crate::dry::fragments::FragmentGroup]) -> String {
+fn html_fragments_category(
+    fragments: &[crate::adapters::analyzers::dry::fragments::FragmentGroup],
+) -> String {
     if fragments.is_empty() {
         return String::new();
     }
@@ -117,7 +125,9 @@ fn html_fragments_category(fragments: &[crate::dry::fragments::FragmentGroup]) -
 
 /// Build HTML table for dead code warnings.
 /// Operation: iteration and formatting logic, no own calls (html_escape via closure).
-fn html_dead_code_table(dead_code: &[crate::dry::dead_code::DeadCodeWarning]) -> String {
+fn html_dead_code_table(
+    dead_code: &[crate::adapters::analyzers::dry::dead_code::DeadCodeWarning],
+) -> String {
     if dead_code.is_empty() {
         return String::new();
     }
@@ -130,8 +140,8 @@ fn html_dead_code_table(dead_code: &[crate::dry::dead_code::DeadCodeWarning]) ->
     );
     dead_code.iter().for_each(|w| {
         let kind_tag = match w.kind {
-            crate::dry::dead_code::DeadCodeKind::Uncalled => "uncalled",
-            crate::dry::dead_code::DeadCodeKind::TestOnly => "test-only",
+            crate::adapters::analyzers::dry::dead_code::DeadCodeKind::Uncalled => "uncalled",
+            crate::adapters::analyzers::dry::dead_code::DeadCodeKind::TestOnly => "test-only",
         };
         html.push_str(&format!(
             "<tr><td>{}</td><td>{}</td><td>{}</td>\
@@ -149,7 +159,9 @@ fn html_dead_code_table(dead_code: &[crate::dry::dead_code::DeadCodeWarning]) ->
 
 /// Build HTML table for boilerplate pattern findings.
 /// Operation: iteration and formatting logic, no own calls (html_escape via closure).
-fn html_boilerplate_table(boilerplate: &[crate::dry::boilerplate::BoilerplateFind]) -> String {
+fn html_boilerplate_table(
+    boilerplate: &[crate::adapters::analyzers::dry::boilerplate::BoilerplateFind],
+) -> String {
     if boilerplate.iter().all(|b| b.suppressed) {
         return String::new();
     }
@@ -180,7 +192,7 @@ fn html_boilerplate_table(boilerplate: &[crate::dry::boilerplate::BoilerplateFin
 /// Build HTML table for wildcard import warnings.
 /// Operation: iteration and formatting logic, no own calls (html_escape via closure).
 fn html_wildcard_table(
-    wildcard_warnings: &[crate::dry::wildcards::WildcardImportWarning],
+    wildcard_warnings: &[crate::adapters::analyzers::dry::wildcards::WildcardImportWarning],
 ) -> String {
     let active: Vec<_> = wildcard_warnings.iter().filter(|w| !w.suppressed).collect();
     if active.is_empty() {
@@ -207,7 +219,7 @@ fn html_wildcard_table(
 /// Build HTML table for repeated match pattern findings.
 /// Operation: iteration and formatting logic, no own calls (html_escape via closure).
 fn html_repeated_matches_table(
-    repeated_matches: &[crate::dry::match_patterns::RepeatedMatchGroup],
+    repeated_matches: &[crate::adapters::analyzers::dry::match_patterns::RepeatedMatchGroup],
 ) -> String {
     if repeated_matches.is_empty() {
         return String::new();

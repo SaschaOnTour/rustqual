@@ -1,6 +1,6 @@
 use colored::Colorize;
 
-use crate::analyzer::{Classification, FunctionAnalysis};
+use crate::adapters::analyzers::iosp::{Classification, FunctionAnalysis};
 
 /// Print refactoring suggestions for violation functions.
 /// Integration: filters violations and delegates per-function suggestions.
@@ -73,7 +73,7 @@ fn print_function_suggestion(func: &FunctionAnalysis) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analyzer::{compute_severity, CallOccurrence, LogicOccurrence};
+    use crate::adapters::analyzers::iosp::{compute_severity, CallOccurrence, LogicOccurrence};
 
     fn make_result(name: &str, classification: Classification) -> FunctionAnalysis {
         let severity = compute_severity(&classification);

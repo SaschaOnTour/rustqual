@@ -37,27 +37,27 @@ pub(crate) use text::print_structural_section;
 pub use text::print_summary_only;
 pub(crate) use text::print_tq_section;
 
-use crate::analyzer::{Classification, FunctionAnalysis};
-use crate::dry::boilerplate::BoilerplateFind;
-use crate::dry::dead_code::DeadCodeWarning;
-use crate::dry::fragments::FragmentGroup;
-use crate::dry::functions::DuplicateGroup;
-use crate::dry::wildcards::WildcardImportWarning;
+use crate::adapters::analyzers::dry::boilerplate::BoilerplateFind;
+use crate::adapters::analyzers::dry::dead_code::DeadCodeWarning;
+use crate::adapters::analyzers::dry::fragments::FragmentGroup;
+use crate::adapters::analyzers::dry::functions::DuplicateGroup;
+use crate::adapters::analyzers::dry::wildcards::WildcardImportWarning;
+use crate::adapters::analyzers::iosp::{Classification, FunctionAnalysis};
 
 /// All outputs from a full analysis run.
 pub struct AnalysisResult {
     pub results: Vec<FunctionAnalysis>,
     pub summary: Summary,
-    pub coupling: Option<crate::coupling::CouplingAnalysis>,
+    pub coupling: Option<crate::adapters::analyzers::coupling::CouplingAnalysis>,
     pub duplicates: Vec<DuplicateGroup>,
     pub dead_code: Vec<DeadCodeWarning>,
     pub fragments: Vec<FragmentGroup>,
     pub boilerplate: Vec<BoilerplateFind>,
     pub wildcard_warnings: Vec<WildcardImportWarning>,
-    pub repeated_matches: Vec<crate::dry::match_patterns::RepeatedMatchGroup>,
-    pub srp: Option<crate::srp::SrpAnalysis>,
-    pub tq: Option<crate::tq::TqAnalysis>,
-    pub structural: Option<crate::structural::StructuralAnalysis>,
+    pub repeated_matches: Vec<crate::adapters::analyzers::dry::match_patterns::RepeatedMatchGroup>,
+    pub srp: Option<crate::adapters::analyzers::srp::SrpAnalysis>,
+    pub tq: Option<crate::adapters::analyzers::tq::TqAnalysis>,
+    pub structural: Option<crate::adapters::analyzers::structural::StructuralAnalysis>,
 }
 
 /// Summary statistics for a full analysis run.
@@ -253,7 +253,7 @@ impl Summary {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analyzer::{
+    use crate::adapters::analyzers::iosp::{
         compute_severity, CallOccurrence, Classification, ComplexityMetrics, FunctionAnalysis,
         LogicOccurrence,
     };

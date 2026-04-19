@@ -7,11 +7,11 @@ use crate::report::Summary;
 pub(super) fn compute_structural(
     parsed: &[(String, String, syn::File)],
     config: &Config,
-) -> Option<crate::structural::StructuralAnalysis> {
+) -> Option<crate::adapters::analyzers::structural::StructuralAnalysis> {
     if !config.structural.enabled {
         return None;
     }
-    Some(crate::structural::analyze_structural(
+    Some(crate::adapters::analyzers::structural::analyze_structural(
         parsed,
         &config.structural,
     ))
@@ -21,7 +21,7 @@ pub(super) fn compute_structural(
 /// Operation: iteration + suppression matching, no own calls.
 /// Uses the warning's dimension (SRP or Coupling) to match suppressions.
 pub(super) fn mark_structural_suppressions(
-    structural: Option<&mut crate::structural::StructuralAnalysis>,
+    structural: Option<&mut crate::adapters::analyzers::structural::StructuralAnalysis>,
     suppression_lines: &std::collections::HashMap<String, Vec<Suppression>>,
 ) {
     let Some(structural) = structural else { return };
@@ -38,7 +38,7 @@ pub(super) fn mark_structural_suppressions(
 /// Count structural warnings and update summary, excluding suppressed entries.
 /// Operation: iteration + conditional counting by dimension, no own calls.
 pub(super) fn count_structural_warnings(
-    structural: Option<&crate::structural::StructuralAnalysis>,
+    structural: Option<&crate::adapters::analyzers::structural::StructuralAnalysis>,
     summary: &mut Summary,
 ) {
     let Some(structural) = structural else { return };

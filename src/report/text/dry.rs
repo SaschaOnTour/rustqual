@@ -37,7 +37,7 @@ fn print_dry_header(analysis: &AnalysisResult) {
 /// Print repeated match pattern entries.
 /// Operation: iteration and formatting logic, no own calls.
 fn print_repeated_match_entries(
-    repeated_matches: &[crate::dry::match_patterns::RepeatedMatchGroup],
+    repeated_matches: &[crate::adapters::analyzers::dry::match_patterns::RepeatedMatchGroup],
 ) {
     for (i, group) in repeated_matches
         .iter()
@@ -63,11 +63,17 @@ fn print_repeated_match_entries(
 
 /// Print duplicate function group entries.
 /// Operation: iteration and formatting logic, no own calls.
-fn print_duplicate_entries(duplicates: &[crate::dry::functions::DuplicateGroup]) {
+fn print_duplicate_entries(
+    duplicates: &[crate::adapters::analyzers::dry::functions::DuplicateGroup],
+) {
     for (i, group) in duplicates.iter().filter(|g| !g.suppressed).enumerate() {
         let kind_label = match &group.kind {
-            crate::dry::functions::DuplicateKind::Exact => "Exact duplicate".to_string(),
-            crate::dry::functions::DuplicateKind::NearDuplicate { similarity } => {
+            crate::adapters::analyzers::dry::functions::DuplicateKind::Exact => {
+                "Exact duplicate".to_string()
+            }
+            crate::adapters::analyzers::dry::functions::DuplicateKind::NearDuplicate {
+                similarity,
+            } => {
                 format!("Near-duplicate ({:.0}% similar)", similarity * 100.0)
             }
         };
@@ -89,7 +95,7 @@ fn print_duplicate_entries(duplicates: &[crate::dry::functions::DuplicateGroup])
 
 /// Print duplicate fragment group entries.
 /// Operation: iteration and formatting logic, no own calls.
-fn print_fragment_entries(fragments: &[crate::dry::fragments::FragmentGroup]) {
+fn print_fragment_entries(fragments: &[crate::adapters::analyzers::dry::fragments::FragmentGroup]) {
     for (i, group) in fragments.iter().filter(|g| !g.suppressed).enumerate() {
         println!(
             "  {} Fragment {}: {} matching statements",
@@ -108,11 +114,13 @@ fn print_fragment_entries(fragments: &[crate::dry::fragments::FragmentGroup]) {
 
 /// Print dead code warning entries.
 /// Operation: iteration and formatting logic, no own calls.
-fn print_dead_code_entries(dead_code: &[crate::dry::dead_code::DeadCodeWarning]) {
+fn print_dead_code_entries(
+    dead_code: &[crate::adapters::analyzers::dry::dead_code::DeadCodeWarning],
+) {
     for w in dead_code {
         let kind_tag = match w.kind {
-            crate::dry::dead_code::DeadCodeKind::Uncalled => "uncalled",
-            crate::dry::dead_code::DeadCodeKind::TestOnly => "test-only",
+            crate::adapters::analyzers::dry::dead_code::DeadCodeKind::Uncalled => "uncalled",
+            crate::adapters::analyzers::dry::dead_code::DeadCodeKind::TestOnly => "test-only",
         };
         println!(
             "  {} {} [{}] ({}:{}) — {}",
@@ -128,7 +136,9 @@ fn print_dead_code_entries(dead_code: &[crate::dry::dead_code::DeadCodeWarning])
 
 /// Print boilerplate pattern entries.
 /// Operation: iteration and formatting logic, no own calls.
-fn print_boilerplate_entries(boilerplate: &[crate::dry::boilerplate::BoilerplateFind]) {
+fn print_boilerplate_entries(
+    boilerplate: &[crate::adapters::analyzers::dry::boilerplate::BoilerplateFind],
+) {
     for bp in boilerplate.iter().filter(|b| !b.suppressed) {
         let name = bp.struct_name.as_deref().unwrap_or("(anonymous)");
         println!(
@@ -146,7 +156,9 @@ fn print_boilerplate_entries(boilerplate: &[crate::dry::boilerplate::Boilerplate
 
 /// Print wildcard import warning entries.
 /// Operation: iteration and formatting logic, no own calls.
-fn print_wildcard_entries(wildcard_warnings: &[crate::dry::wildcards::WildcardImportWarning]) {
+fn print_wildcard_entries(
+    wildcard_warnings: &[crate::adapters::analyzers::dry::wildcards::WildcardImportWarning],
+) {
     for w in wildcard_warnings {
         if w.suppressed {
             continue;

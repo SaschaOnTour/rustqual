@@ -1,6 +1,6 @@
 use colored::Colorize;
 
-use crate::analyzer::{Classification, FunctionAnalysis, PERCENTAGE_MULTIPLIER};
+use crate::adapters::analyzers::iosp::{Classification, FunctionAnalysis, PERCENTAGE_MULTIPLIER};
 
 use super::Summary;
 
@@ -213,7 +213,7 @@ fn print_score_delta(label: &str, old_pct: f64, new_pct: f64) {
 #[cfg(test)]
 mod tests {
     use super::{create_baseline, print_comparison};
-    use crate::analyzer::{
+    use crate::adapters::analyzers::iosp::{
         compute_severity, CallOccurrence, Classification, FunctionAnalysis, LogicOccurrence,
     };
     use crate::report::Summary;

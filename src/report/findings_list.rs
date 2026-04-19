@@ -1,4 +1,4 @@
-use crate::analyzer::{Classification, FunctionAnalysis};
+use crate::adapters::analyzers::iosp::{Classification, FunctionAnalysis};
 use crate::report::AnalysisResult;
 
 /// A single finding with its location, category, and detail.
@@ -126,8 +126,8 @@ fn collect_dry_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntr
         .filter(|g| !g.suppressed)
         .for_each(|group| {
             let kind = match &group.kind {
-                crate::dry::DuplicateKind::Exact => "exact".to_string(),
-                crate::dry::DuplicateKind::NearDuplicate { similarity } => {
+                crate::adapters::analyzers::dry::DuplicateKind::Exact => "exact".to_string(),
+                crate::adapters::analyzers::dry::DuplicateKind::NearDuplicate { similarity } => {
                     format!("{:.0}% similar", similarity * 100.0)
                 }
             };
@@ -292,11 +292,13 @@ fn collect_tq_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntry
     let Some(tq) = &analysis.tq else { return };
     tq.warnings.iter().filter(|w| !w.suppressed).for_each(|w| {
         let cat = match &w.kind {
-            crate::tq::TqWarningKind::NoAssertion => "TQ_NO_ASSERT",
-            crate::tq::TqWarningKind::NoSut => "TQ_NO_SUT",
-            crate::tq::TqWarningKind::Untested => "TQ_UNTESTED",
-            crate::tq::TqWarningKind::Uncovered => "TQ_UNCOVERED",
-            crate::tq::TqWarningKind::UntestedLogic { .. } => "TQ_UNTESTED_LOGIC",
+            crate::adapters::analyzers::tq::TqWarningKind::NoAssertion => "TQ_NO_ASSERT",
+            crate::adapters::analyzers::tq::TqWarningKind::NoSut => "TQ_NO_SUT",
+            crate::adapters::analyzers::tq::TqWarningKind::Untested => "TQ_UNTESTED",
+            crate::adapters::analyzers::tq::TqWarningKind::Uncovered => "TQ_UNCOVERED",
+            crate::adapters::analyzers::tq::TqWarningKind::UntestedLogic { .. } => {
+                "TQ_UNTESTED_LOGIC"
+            }
         };
         entries.push(FindingEntry::new(
             &w.file,
@@ -328,7 +330,7 @@ fn collect_structural_findings(analysis: &AnalysisResult, entries: &mut Vec<Find
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analyzer::{
+    use crate::adapters::analyzers::iosp::{
         Classification, ComplexityMetrics, FunctionAnalysis, MagicNumberOccurrence,
     };
     use crate::report::{AnalysisResult, Summary};
@@ -489,7 +491,9 @@ mod tests {
 
     #[test]
     fn test_total_findings_consistent_duplicates() {
-        use crate::dry::functions::{DuplicateEntry, DuplicateGroup, DuplicateKind};
+        use crate::adapters::analyzers::dry::functions::{
+            DuplicateEntry, DuplicateGroup, DuplicateKind,
+        };
         let mut analysis = empty_analysis();
         analysis.duplicates = vec![DuplicateGroup {
             entries: vec![
@@ -521,7 +525,7 @@ mod tests {
 
     #[test]
     fn test_total_findings_consistent_fragments() {
-        use crate::dry::fragments::{FragmentEntry, FragmentGroup};
+        use crate::adapters::analyzers::dry::fragments::{FragmentEntry, FragmentGroup};
         let mut analysis = empty_analysis();
         analysis.fragments = vec![FragmentGroup {
             entries: vec![
@@ -562,7 +566,9 @@ mod tests {
 
     #[test]
     fn test_total_findings_consistent_mixed() {
-        use crate::dry::functions::{DuplicateEntry, DuplicateGroup, DuplicateKind};
+        use crate::adapters::analyzers::dry::functions::{
+            DuplicateEntry, DuplicateGroup, DuplicateKind,
+        };
         let mut analysis = empty_analysis();
         // 1 function with 2 magic numbers
         let mut fa = make_fa("fn1", "src/lib.rs", 10);
@@ -614,8 +620,8 @@ mod tests {
     #[test]
     fn test_total_findings_consistent_coupling() {
         let mut analysis = empty_analysis();
-        analysis.coupling = Some(crate::coupling::CouplingAnalysis {
-            metrics: vec![crate::coupling::CouplingMetrics {
+        analysis.coupling = Some(crate::adapters::analyzers::coupling::CouplingAnalysis {
+            metrics: vec![crate::adapters::analyzers::coupling::CouplingMetrics {
                 module_name: "db".to_string(),
                 afferent: 2,
                 efferent: 5,
@@ -625,7 +631,7 @@ mod tests {
                 suppressed: false,
                 warning: true,
             }],
-            cycles: vec![crate::coupling::CycleReport {
+            cycles: vec![crate::adapters::analyzers::coupling::CycleReport {
                 modules: vec!["a".to_string(), "b".to_string()],
             }],
             sdp_violations: vec![],

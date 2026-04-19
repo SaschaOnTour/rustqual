@@ -1,19 +1,11 @@
-mod analyzer;
-mod architecture;
+mod adapters;
 mod cli;
 mod config;
-mod coupling;
 mod domain;
-mod dry;
 mod findings;
-mod normalize;
 mod pipeline;
 mod ports;
 mod report;
-mod scope;
-mod srp;
-mod structural;
-mod tq;
 mod watch;
 
 use std::path::Path;
@@ -148,7 +140,7 @@ fn apply_cli_overrides(config: &mut Config, cli: &Cli) {
 /// Operation: serialization + file write logic.
 fn handle_save_baseline(
     path: &Path,
-    all_results: &[analyzer::FunctionAnalysis],
+    all_results: &[crate::adapters::analyzers::iosp::FunctionAnalysis],
     summary: &report::Summary,
 ) -> Result<(), i32> {
     let baseline = report::create_baseline(all_results, summary);
@@ -168,7 +160,7 @@ fn handle_save_baseline(
 /// Operation: file read + comparison logic.
 fn handle_compare(
     path: &Path,
-    all_results: &[analyzer::FunctionAnalysis],
+    all_results: &[crate::adapters::analyzers::iosp::FunctionAnalysis],
     summary: &report::Summary,
 ) -> Result<bool, i32> {
     let baseline_content = std::fs::read_to_string(path).map_err(|e| {
@@ -185,7 +177,7 @@ fn handle_compare(
 /// Check --min-quality-score gate.
 /// Operation: conditional check.
 fn check_min_quality_score(min_score: f64, summary: &report::Summary) -> Result<(), i32> {
-    let actual = summary.quality_score * analyzer::PERCENTAGE_MULTIPLIER;
+    let actual = summary.quality_score * crate::adapters::analyzers::iosp::PERCENTAGE_MULTIPLIER;
     if actual < min_score {
         eprintln!(
             "Quality score {:.1}% is below minimum {:.1}%",
@@ -205,8 +197,9 @@ fn warn_suppression_ratio(summary: &report::Summary, max_ratio: f64) {
     eprintln!(
         "Warning: {} suppression(s) found ({:.1}% of functions, max: {:.1}%)",
         summary.all_suppressions,
-        summary.all_suppressions as f64 / summary.total as f64 * analyzer::PERCENTAGE_MULTIPLIER,
-        max_ratio * analyzer::PERCENTAGE_MULTIPLIER,
+        summary.all_suppressions as f64 / summary.total as f64
+            * crate::adapters::analyzers::iosp::PERCENTAGE_MULTIPLIER,
+        max_ratio * crate::adapters::analyzers::iosp::PERCENTAGE_MULTIPLIER,
     );
 }
 
@@ -248,7 +241,7 @@ fn apply_exit_gates(cli: &Cli, config: &Config, summary: &report::Summary) -> Re
 
 /// Sort results so violations come first, ordered by effort score (highest first).
 /// Operation: sorting logic.
-fn sort_by_effort(results: &mut [analyzer::FunctionAnalysis]) {
+fn sort_by_effort(results: &mut [crate::adapters::analyzers::iosp::FunctionAnalysis]) {
     results.sort_by(|a, b| {
         b.effort_score
             .unwrap_or(0.0)
@@ -278,8 +271,10 @@ pub fn run() -> Result<(), i32> {
             let default_config = Config::default();
             let scope_refs: Vec<(&str, &syn::File)> =
                 parsed.iter().map(|(p, _, f)| (p.as_str(), f)).collect();
-            let scope = scope::ProjectScope::from_files(&scope_refs);
-            let analyzer_obj = analyzer::Analyzer::new(&default_config, &scope);
+            let scope =
+                crate::adapters::analyzers::iosp::scope::ProjectScope::from_files(&scope_refs);
+            let analyzer_obj =
+                crate::adapters::analyzers::iosp::Analyzer::new(&default_config, &scope);
             let all_results: Vec<_> = parsed
                 .iter()
                 .flat_map(|(path, _, syntax)| analyzer_obj.analyze_file(syntax, path))
@@ -654,14 +649,14 @@ mod tests {
 
     #[test]
     fn test_extract_init_metrics_with_complexity() {
-        let fa = crate::analyzer::FunctionAnalysis {
+        let fa = crate::adapters::analyzers::iosp::FunctionAnalysis {
             name: "f".into(),
             file: "test.rs".into(),
             line: 1,
-            classification: crate::analyzer::Classification::Operation,
+            classification: crate::adapters::analyzers::iosp::Classification::Operation,
             parent_type: None,
             suppressed: false,
-            complexity: Some(crate::analyzer::ComplexityMetrics {
+            complexity: Some(crate::adapters::analyzers::iosp::ComplexityMetrics {
                 cognitive_complexity: 12,
                 cyclomatic_complexity: 8,
                 max_nesting: 3,

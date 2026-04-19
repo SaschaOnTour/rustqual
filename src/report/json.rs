@@ -5,7 +5,7 @@ use super::json_types::{
     JsonSdpViolation, JsonSummary, JsonWildcardWarning,
 };
 use super::{json_srp, json_structural, json_tq, AnalysisResult};
-use crate::analyzer::Classification;
+use crate::adapters::analyzers::iosp::Classification;
 
 /// Print results in a machine-readable format (for CI integration).
 /// Integration: delegates to build_json_string and prints.
@@ -138,8 +138,10 @@ fn build_json_string(analysis: &AnalysisResult) -> String {
         .filter(|g| !g.suppressed)
         .map(|g| {
             let (kind, similarity) = match &g.kind {
-                crate::dry::DuplicateKind::Exact => ("exact".to_string(), None),
-                crate::dry::DuplicateKind::NearDuplicate { similarity } => {
+                crate::adapters::analyzers::dry::DuplicateKind::Exact => {
+                    ("exact".to_string(), None)
+                }
+                crate::adapters::analyzers::dry::DuplicateKind::NearDuplicate { similarity } => {
                     ("near_duplicate".to_string(), Some(*similarity))
                 }
             };
@@ -164,8 +166,8 @@ fn build_json_string(analysis: &AnalysisResult) -> String {
         .iter()
         .map(|w| {
             let kind = match &w.kind {
-                crate::dry::DeadCodeKind::Uncalled => "uncalled",
-                crate::dry::DeadCodeKind::TestOnly => "test_only",
+                crate::adapters::analyzers::dry::DeadCodeKind::Uncalled => "uncalled",
+                crate::adapters::analyzers::dry::DeadCodeKind::TestOnly => "test_only",
             };
             JsonDeadCodeWarning {
                 function_name: w.function_name.clone(),
@@ -292,7 +294,7 @@ fn build_json_string(analysis: &AnalysisResult) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analyzer::{
+    use crate::adapters::analyzers::iosp::{
         compute_severity, CallOccurrence, Classification, ComplexityMetrics, FunctionAnalysis,
         LogicOccurrence,
     };

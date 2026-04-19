@@ -2,7 +2,7 @@ use crate::report::html::html_escape;
 
 /// Build the Test Quality analysis section.
 /// Trivial: single delegation to html_section_wrapper.
-pub(super) fn html_tq_section(tq: Option<&crate::tq::TqAnalysis>) -> String {
+pub(super) fn html_tq_section(tq: Option<&crate::adapters::analyzers::tq::TqAnalysis>) -> String {
     let count = tq
         .map(|t| t.warnings.iter().filter(|w| !w.suppressed).count())
         .unwrap_or(0);
@@ -13,7 +13,7 @@ pub(super) fn html_tq_section(tq: Option<&crate::tq::TqAnalysis>) -> String {
 
 /// Build HTML table rows for TQ warnings.
 /// Operation: iteration and formatting logic, no own calls (html_escape via closure).
-fn html_tq_table(tq: Option<&crate::tq::TqAnalysis>) -> String {
+fn html_tq_table(tq: Option<&crate::adapters::analyzers::tq::TqAnalysis>) -> String {
     let warnings: Vec<_> = tq
         .map(|t| t.warnings.iter().filter(|w| !w.suppressed).collect())
         .unwrap_or_default();
@@ -21,13 +21,15 @@ fn html_tq_table(tq: Option<&crate::tq::TqAnalysis>) -> String {
         return String::new();
     }
     let esc = |s: &str| html_escape(s);
-    let kind_label = |kind: &crate::tq::TqWarningKind| -> &str {
+    let kind_label = |kind: &crate::adapters::analyzers::tq::TqWarningKind| -> &str {
         match kind {
-            crate::tq::TqWarningKind::NoAssertion => "TQ-001 No assertion",
-            crate::tq::TqWarningKind::NoSut => "TQ-002 No SUT call",
-            crate::tq::TqWarningKind::Untested => "TQ-003 Untested",
-            crate::tq::TqWarningKind::Uncovered => "TQ-004 Uncovered",
-            crate::tq::TqWarningKind::UntestedLogic { .. } => "TQ-005 Untested logic",
+            crate::adapters::analyzers::tq::TqWarningKind::NoAssertion => "TQ-001 No assertion",
+            crate::adapters::analyzers::tq::TqWarningKind::NoSut => "TQ-002 No SUT call",
+            crate::adapters::analyzers::tq::TqWarningKind::Untested => "TQ-003 Untested",
+            crate::adapters::analyzers::tq::TqWarningKind::Uncovered => "TQ-004 Uncovered",
+            crate::adapters::analyzers::tq::TqWarningKind::UntestedLogic { .. } => {
+                "TQ-005 Untested logic"
+            }
         }
     };
     let mut html = String::from(
@@ -38,7 +40,7 @@ fn html_tq_table(tq: Option<&crate::tq::TqAnalysis>) -> String {
     );
     warnings.iter().for_each(|w| {
         let detail = match &w.kind {
-            crate::tq::TqWarningKind::UntestedLogic { uncovered_lines } => {
+            crate::adapters::analyzers::tq::TqWarningKind::UntestedLogic { uncovered_lines } => {
                 let lines: Vec<String> = uncovered_lines
                     .iter()
                     .map(|(kind, line)| format!("{} at line {line}", esc(kind)))

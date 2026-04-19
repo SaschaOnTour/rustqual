@@ -1,6 +1,6 @@
 use colored::Colorize;
 
-use crate::tq::{TqAnalysis, TqWarningKind};
+use crate::adapters::analyzers::tq::{TqAnalysis, TqWarningKind};
 
 /// Print test quality warnings grouped by kind.
 /// Operation: formatting logic with iteration, no own calls.

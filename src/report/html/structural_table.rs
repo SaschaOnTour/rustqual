@@ -1,5 +1,5 @@
+use crate::adapters::analyzers::structural::StructuralAnalysis;
 use crate::report::html::html_escape;
-use crate::structural::StructuralAnalysis;
 
 /// Build the Structural Checks HTML section.
 /// Trivial: single delegation to html_section_wrapper.

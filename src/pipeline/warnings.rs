@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::analyzer::{Classification, FunctionAnalysis};
+use crate::adapters::analyzers::iosp::{Classification, FunctionAnalysis};
 use crate::config::Config;
 use crate::findings::Suppression;
 use crate::report::Summary;
@@ -123,7 +123,7 @@ pub(super) fn apply_complexity_warnings(
 /// Operation: arithmetic comparison logic.
 fn has_error_handling_issue(
     fa: &FunctionAnalysis,
-    m: &crate::analyzer::ComplexityMetrics,
+    m: &crate::adapters::analyzers::iosp::ComplexityMetrics,
     check_errors: bool,
     expect_threshold: usize,
 ) -> bool {
@@ -162,11 +162,13 @@ pub(super) fn apply_extended_warnings(
 
     let is_active = |fa: &FunctionAnalysis| !fa.suppressed && !fa.complexity_suppressed;
 
-    let has_unsafe_issue = |fa: &FunctionAnalysis, m: &crate::analyzer::ComplexityMetrics| {
-        check_unsafe && m.unsafe_blocks > 0 && !is_unsafe_allowed(fa, unsafe_allow_lines)
-    };
+    let has_unsafe_issue =
+        |fa: &FunctionAnalysis, m: &crate::adapters::analyzers::iosp::ComplexityMetrics| {
+            check_unsafe && m.unsafe_blocks > 0 && !is_unsafe_allowed(fa, unsafe_allow_lines)
+        };
 
-    let check_err = |fa: &FunctionAnalysis, m: &crate::analyzer::ComplexityMetrics| {
+    let check_err = |fa: &FunctionAnalysis,
+                     m: &crate::adapters::analyzers::iosp::ComplexityMetrics| {
         has_error_handling_issue(fa, m, check_errors, expect_threshold)
     };
 
@@ -300,7 +302,9 @@ mod tests {
 
     // ── apply_extended_warnings ───────────────────────────────────
 
-    use crate::analyzer::{compute_severity, Classification, ComplexityMetrics, FunctionAnalysis};
+    use crate::adapters::analyzers::iosp::{
+        compute_severity, Classification, ComplexityMetrics, FunctionAnalysis,
+    };
     use crate::report::Summary;
 
     fn make_func_with_metrics(metrics: ComplexityMetrics) -> FunctionAnalysis {
@@ -489,7 +493,7 @@ mod tests {
             logic_locations: vec![],
             call_locations: vec![],
         };
-        fa.severity = Some(crate::analyzer::Severity::Low);
+        fa.severity = Some(crate::adapters::analyzers::iosp::Severity::Low);
         fa.effort_score = Some(3.0);
         let mut results = vec![fa];
         exclude_test_violations(&mut results);

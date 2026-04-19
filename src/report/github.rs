@@ -1,4 +1,4 @@
-use crate::analyzer::{Classification, FunctionAnalysis};
+use crate::adapters::analyzers::iosp::{Classification, FunctionAnalysis};
 
 use super::Summary;
 
@@ -47,7 +47,7 @@ fn print_violation_annotations(results: &[FunctionAnalysis]) {
 /// Operation: data-driven array construction, no own calls.
 fn build_annotation_pairs(
     func: &FunctionAnalysis,
-    m: &crate::analyzer::ComplexityMetrics,
+    m: &crate::adapters::analyzers::iosp::ComplexityMetrics,
 ) -> Vec<(&'static str, String)> {
     let q = &func.qualified_name;
     let magic_msg = (!m.magic_numbers.is_empty()).then(|| {
@@ -113,7 +113,8 @@ fn build_annotation_pairs(
 /// Print `::notice`/`::warning` annotations for complexity findings.
 /// Operation: iteration + helper call via closure, no direct own calls.
 fn print_complexity_annotations(results: &[FunctionAnalysis]) {
-    let build = |func: &FunctionAnalysis, m: &crate::analyzer::ComplexityMetrics| {
+    let build = |func: &FunctionAnalysis,
+                 m: &crate::adapters::analyzers::iosp::ComplexityMetrics| {
         build_annotation_pairs(func, m)
     };
     for func in results {
@@ -144,12 +145,12 @@ fn print_summary_annotation(summary: &Summary) {
         println!(
             "::error::Quality analysis: {} violation(s), {:.1}% quality score",
             summary.violations,
-            summary.quality_score * crate::analyzer::PERCENTAGE_MULTIPLIER,
+            summary.quality_score * crate::adapters::analyzers::iosp::PERCENTAGE_MULTIPLIER,
         );
     } else {
         println!(
             "::notice::Quality score: {:.1}% ({} functions analyzed)",
-            summary.quality_score * crate::analyzer::PERCENTAGE_MULTIPLIER,
+            summary.quality_score * crate::adapters::analyzers::iosp::PERCENTAGE_MULTIPLIER,
             summary.total,
         );
     }
@@ -160,7 +161,7 @@ fn print_summary_annotation(summary: &Summary) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analyzer::{compute_severity, CallOccurrence, LogicOccurrence};
+    use crate::adapters::analyzers::iosp::{compute_severity, CallOccurrence, LogicOccurrence};
     use crate::report::Summary;
 
     fn make_result(name: &str, classification: Classification) -> FunctionAnalysis {

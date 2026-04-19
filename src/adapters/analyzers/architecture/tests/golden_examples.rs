@@ -1,0 +1,154 @@
+//! Snapshot tests against the golden example fixtures in
+//! `examples/architecture/<rule>/`.
+//!
+//! For each rule, the README declares the expected match count and kind.
+//! Breaking these tests signals either:
+//! - the matcher regressed (a previously caught violation is now missed), or
+//! - the rule semantics silently changed (drift without docs update).
+
+use crate::adapters::analyzers::architecture::matcher::{
+    find_glob_imports, find_macro_calls, find_method_call_matches, find_path_prefix_matches,
+};
+use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
+use std::fs;
+use std::path::Path;
+
+/// Load and parse a Rust source file from a golden example directory.
+fn load_fixture(example: &str, rel: &str) -> (String, syn::File) {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join("architecture")
+        .join(example)
+        .join(rel);
+    let source = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
+    let ast: syn::File = syn::parse_str(&source)
+        .unwrap_or_else(|e| panic!("failed to parse {}: {e}", path.display()));
+    (path.display().to_string(), ast)
+}
+
+fn only_hit(hits: Vec<MatchLocation>) -> MatchLocation {
+    assert_eq!(
+        hits.len(),
+        1,
+        "exactly one violation expected from the golden fixture: {hits:?}"
+    );
+    hits.into_iter().next().unwrap()
+}
+
+#[test]
+fn forbid_path_prefix_example_matches_exactly_once() {
+    let (file, ast) = load_fixture("forbid_path_prefix", "src/domain/bad.rs");
+    let hits = find_path_prefix_matches(&file, &ast, &["tokio::".to_string()]);
+    let hit = only_hit(hits);
+    match &hit.kind {
+        ViolationKind::PathPrefix {
+            prefix,
+            rendered_path,
+        } => {
+            assert_eq!(prefix, "tokio::");
+            assert_eq!(rendered_path, "tokio::spawn");
+        }
+        other => panic!("unexpected violation kind: {other:?}"),
+    }
+    assert_eq!(
+        hit.line, 4,
+        "use statement is on line 4 of bad.rs (after header comments)"
+    );
+}
+
+#[test]
+fn forbid_glob_import_example_matches_exactly_once() {
+    let (file, ast) = load_fixture("forbid_glob_import", "src/domain/bad.rs");
+    let hits = find_glob_imports(&file, &ast);
+    let hit = only_hit(hits);
+    match &hit.kind {
+        ViolationKind::GlobImport { base_path } => {
+            assert_eq!(base_path, "some_crate");
+        }
+        other => panic!("unexpected violation kind: {other:?}"),
+    }
+    assert_eq!(
+        hit.line, 4,
+        "glob import is on line 4 of bad.rs (after header comments)"
+    );
+}
+
+#[test]
+fn forbid_path_prefix_example_has_no_hits_for_unrelated_prefix() {
+    let (file, ast) = load_fixture("forbid_path_prefix", "src/domain/bad.rs");
+    let hits = find_path_prefix_matches(&file, &ast, &["anyhow::".to_string()]);
+    assert!(
+        hits.is_empty(),
+        "unrelated prefix must not produce hits: {hits:?}"
+    );
+}
+
+#[test]
+fn forbid_glob_import_example_counted_as_path_prefix_on_base() {
+    // The glob `use some_crate::*;` renders its tail as `some_crate::*`
+    // and matches a prefix `some_crate::`. Useful to cross-check that the
+    // two matchers cooperate without double-reporting the same line.
+    let (file, ast) = load_fixture("forbid_glob_import", "src/domain/bad.rs");
+    let hits = find_path_prefix_matches(&file, &ast, &["some_crate::".to_string()]);
+    assert_eq!(
+        hits.len(),
+        1,
+        "the glob target renders and matches the prefix exactly once: {hits:?}"
+    );
+}
+
+#[test]
+fn forbid_method_call_example_matches_direct_and_ufcs() {
+    let (file, ast) = load_fixture("forbid_method_call", "src/domain/bad.rs");
+    let hits = find_method_call_matches(&file, &ast, &["unwrap".to_string()]);
+    assert_eq!(
+        hits.len(),
+        2,
+        "both direct and UFCS forms expected: {hits:?}"
+    );
+    let syntaxes: Vec<&'static str> = hits
+        .iter()
+        .filter_map(|h| match &h.kind {
+            ViolationKind::MethodCall { syntax, .. } => Some(*syntax),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        syntaxes.contains(&"direct"),
+        "direct form not reported: {syntaxes:?}"
+    );
+    assert!(
+        syntaxes.contains(&"ufcs"),
+        "ufcs form not reported: {syntaxes:?}"
+    );
+}
+
+#[test]
+fn forbid_method_call_example_ignores_unrelated_name() {
+    let (file, ast) = load_fixture("forbid_method_call", "src/domain/bad.rs");
+    let hits = find_method_call_matches(&file, &ast, &["clone".to_string()]);
+    assert!(hits.is_empty(), "no clone calls in fixture: {hits:?}");
+}
+
+#[test]
+fn forbid_macro_call_example_matches_exactly_once() {
+    let (file, ast) = load_fixture("forbid_macro_call", "src/domain/bad.rs");
+    let hits = find_macro_calls(&file, &ast, &["println".to_string()]);
+    let hit = only_hit(hits);
+    match &hit.kind {
+        ViolationKind::MacroCall { name } => assert_eq!(name, "println"),
+        other => panic!("unexpected violation kind: {other:?}"),
+    }
+    assert_eq!(
+        hit.line, 5,
+        "println! on line 5 of bad.rs (after header comments)"
+    );
+}
+
+#[test]
+fn forbid_macro_call_example_ignores_unrelated_macros() {
+    let (file, ast) = load_fixture("forbid_macro_call", "src/domain/bad.rs");
+    let hits = find_macro_calls(&file, &ast, &["panic".to_string()]);
+    assert!(hits.is_empty(), "no panic!() in fixture: {hits:?}");
+}

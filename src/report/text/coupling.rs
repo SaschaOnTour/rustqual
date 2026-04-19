@@ -3,7 +3,7 @@ use colored::Colorize;
 /// Print coupling analysis section with module metrics.
 /// Integration: orchestrates coupling sub-sections.
 pub fn print_coupling_section(
-    analysis: &crate::coupling::CouplingAnalysis,
+    analysis: &crate::adapters::analyzers::coupling::CouplingAnalysis,
     config: &crate::config::sections::CouplingConfig,
     verbose: bool,
 ) {
@@ -15,7 +15,10 @@ pub fn print_coupling_section(
 
 /// Print coupling section header with module count.
 /// Operation: formatting logic, no own calls.
-fn print_coupling_header(analysis: &crate::coupling::CouplingAnalysis, verbose: bool) {
+fn print_coupling_header(
+    analysis: &crate::adapters::analyzers::coupling::CouplingAnalysis,
+    verbose: bool,
+) {
     println!("\n{}", "═══ Coupling ═══".bold());
     if verbose {
         println!("  Modules analyzed: {}", analysis.metrics.len());
@@ -24,7 +27,7 @@ fn print_coupling_header(analysis: &crate::coupling::CouplingAnalysis, verbose: 
 
 /// Print circular dependency cycles.
 /// Operation: iteration and formatting logic, no own calls.
-fn print_coupling_cycles(analysis: &crate::coupling::CouplingAnalysis) {
+fn print_coupling_cycles(analysis: &crate::adapters::analyzers::coupling::CouplingAnalysis) {
     if !analysis.cycles.is_empty() {
         for cycle in &analysis.cycles {
             println!(
@@ -38,7 +41,9 @@ fn print_coupling_cycles(analysis: &crate::coupling::CouplingAnalysis) {
 
 /// Print SDP violations, skipping suppressed ones.
 /// Operation: iteration and formatting logic, no own calls.
-fn print_coupling_sdp_violations(analysis: &crate::coupling::CouplingAnalysis) {
+fn print_coupling_sdp_violations(
+    analysis: &crate::adapters::analyzers::coupling::CouplingAnalysis,
+) {
     if analysis.sdp_violations.is_empty() {
         return;
     }
@@ -61,7 +66,7 @@ fn print_coupling_sdp_violations(analysis: &crate::coupling::CouplingAnalysis) {
 /// Print module coupling metrics table.
 /// Integration: orchestrates legend, table rows, and cycle status.
 fn print_coupling_table(
-    analysis: &crate::coupling::CouplingAnalysis,
+    analysis: &crate::adapters::analyzers::coupling::CouplingAnalysis,
     config: &crate::config::sections::CouplingConfig,
     verbose: bool,
 ) {
@@ -76,7 +81,7 @@ fn print_coupling_table(
 
 /// Print coupling table legend and column headers.
 /// Operation: formatting logic, no own calls.
-fn print_coupling_legend(metrics: &[crate::coupling::CouplingMetrics]) {
+fn print_coupling_legend(metrics: &[crate::adapters::analyzers::coupling::CouplingMetrics]) {
     if !metrics.is_empty() {
         println!(
             "\n  {} {}\n  {} {}\n  {} {}",
@@ -95,11 +100,11 @@ fn print_coupling_legend(metrics: &[crate::coupling::CouplingMetrics]) {
 /// Operation: iteration and formatting logic, no own calls.
 /// Threshold check logic is in a closure (lenient mode).
 fn print_coupling_rows(
-    metrics: &[crate::coupling::CouplingMetrics],
+    metrics: &[crate::adapters::analyzers::coupling::CouplingMetrics],
     config: &crate::config::sections::CouplingConfig,
     verbose: bool,
 ) {
-    let module_tag = |m: &crate::coupling::CouplingMetrics| -> String {
+    let module_tag = |m: &crate::adapters::analyzers::coupling::CouplingMetrics| -> String {
         if m.suppressed {
             return format!("  {}", "~ suppressed".yellow());
         }
@@ -138,7 +143,7 @@ fn print_coupling_rows(
 
 /// Print no-cycles confirmation.
 /// Operation: conditional formatting, no own calls.
-fn print_coupling_cycle_status(cycles: &[crate::coupling::CycleReport]) {
+fn print_coupling_cycle_status(cycles: &[crate::adapters::analyzers::coupling::CycleReport]) {
     if cycles.is_empty() {
         println!("\n  {} No circular dependencies.", "✓".green());
     }
