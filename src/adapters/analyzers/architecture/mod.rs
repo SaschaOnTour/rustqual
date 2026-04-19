@@ -16,8 +16,10 @@
 // items are verified through unit tests.
 #![allow(dead_code, unused_imports)]
 
+pub mod forbidden_rule;
 pub mod layer_rule;
 pub mod matcher;
+pub(crate) mod use_tree;
 pub mod violation;
 
 pub use violation::{MatchLocation, ViolationKind};

@@ -51,6 +51,15 @@ pub enum ViolationKind {
         /// File-relative path reported as-is (the key used for glob matching).
         file: String,
     },
+    /// `[[architecture.forbidden]]` rule: a file whose path matches `from`
+    /// imports something resolving to a file matching `to` without an
+    /// `except` escape hatch.
+    ForbiddenEdge {
+        /// Reason string from the rule definition.
+        reason: String,
+        /// Rendered form of the offending import path for reporting.
+        imported_path: String,
+    },
 }
 
 /// One concrete occurrence of a matcher hit.

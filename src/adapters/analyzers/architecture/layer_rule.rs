@@ -25,11 +25,11 @@
 
 #![allow(dead_code)]
 
+use crate::adapters::analyzers::architecture::use_tree::gather_imports;
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use globset::{GlobMatcher, GlobSet};
 use std::collections::HashMap;
 use syn::spanned::Spanned;
-use syn::UseTree;
 
 /// Behaviour when a file matches no layer glob.
 #[derive(Debug, Clone, Copy)]
@@ -202,20 +202,6 @@ fn collect_file_violations(
     );
 }
 
-/// Flatten every `use` item in `ast` into its leaf paths.
-/// Operation: iterator-chain collection (no own-call recording in lenient mode).
-fn gather_imports(ast: &syn::File) -> Vec<(Vec<String>, proc_macro2::Span)> {
-    let mut out = Vec::new();
-    ast.items
-        .iter()
-        .filter_map(|item| match item {
-            syn::Item::Use(u) => Some(u),
-            _ => None,
-        })
-        .for_each(|u| collect_use_paths(&[], &u.tree, &mut out));
-    out
-}
-
 /// Resolve one import and return a violation hit if its target layer is outer.
 /// Operation: resolution + rank comparison, no own calls.
 fn evaluate_import(
@@ -246,42 +232,6 @@ fn evaluate_import(
             imported_path: display_path,
         },
     })
-}
-
-/// Collect all leaf import paths from a `use` tree, each as a list of
-/// segment strings plus the leaf span.
-/// Operation: recursive tree walk (self-call is recursion, not concern-mixing).
-// qual:recursive
-fn collect_use_paths(
-    prefix: &[String],
-    tree: &UseTree,
-    out: &mut Vec<(Vec<String>, proc_macro2::Span)>,
-) {
-    match tree {
-        UseTree::Path(p) => {
-            let mut next = prefix.to_vec();
-            next.push(p.ident.to_string());
-            collect_use_paths(&next, &p.tree, out);
-        }
-        UseTree::Name(n) => {
-            let mut full = prefix.to_vec();
-            full.push(n.ident.to_string());
-            out.push((full, n.ident.span()));
-        }
-        UseTree::Rename(r) => {
-            let mut full = prefix.to_vec();
-            full.push(r.ident.to_string());
-            out.push((full, r.ident.span()));
-        }
-        UseTree::Glob(g) => {
-            out.push((prefix.to_vec(), g.span()));
-        }
-        UseTree::Group(g) => {
-            for sub in &g.items {
-                collect_use_paths(prefix, sub, out);
-            }
-        }
-    }
 }
 
 /// Decide which layer (if any) an import resolves to.
