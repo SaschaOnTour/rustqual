@@ -16,6 +16,7 @@
 // items are verified through unit tests.
 #![allow(dead_code, unused_imports)]
 
+pub mod layer_rule;
 pub mod matcher;
 pub mod violation;
 

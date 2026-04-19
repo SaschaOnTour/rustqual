@@ -34,6 +34,23 @@ pub enum ViolationKind {
         /// The invoked macro's final path-segment name.
         name: String,
     },
+    /// Layer rule: a file in `from_layer` imports from `to_layer` whose rank
+    /// is strictly greater (importing "outward" in the layer order is forbidden).
+    LayerViolation {
+        /// Layer of the importing file.
+        from_layer: String,
+        /// Layer of the imported module.
+        to_layer: String,
+        /// Rendered form of the offending import path (`crate::...` or external
+        /// crate prefix), for reporting.
+        imported_path: String,
+    },
+    /// Layer rule with `unmatched_behavior = "strict_error"`: a file matches
+    /// no layer glob and is not a declared re-export point.
+    UnmatchedLayer {
+        /// File-relative path reported as-is (the key used for glob matching).
+        file: String,
+    },
 }
 
 /// One concrete occurrence of a matcher hit.

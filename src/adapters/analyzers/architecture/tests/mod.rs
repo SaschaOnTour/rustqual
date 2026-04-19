@@ -2,3 +2,4 @@
 // Matcher-specific unit tests live in matcher/tests/.
 
 mod golden_examples;
+mod layer_rule;
