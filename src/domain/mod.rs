@@ -9,11 +9,13 @@
 //! Phase 1 introduces `Dimension`, `Severity`, `Suppression`.
 
 pub mod dimension;
+pub mod finding;
 pub mod severity;
 pub mod source_unit;
 pub mod suppression;
 
 pub use dimension::Dimension;
+pub use finding::Finding;
 pub use severity::Severity;
 pub use source_unit::SourceUnit;
 pub use suppression::Suppression;
