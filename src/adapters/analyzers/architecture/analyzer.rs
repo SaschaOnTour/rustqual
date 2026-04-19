@@ -20,8 +20,8 @@ use crate::adapters::analyzers::architecture::forbidden_rule::{
 };
 use crate::adapters::analyzers::architecture::layer_rule::{check_layer_rule, LayerRuleInput};
 use crate::adapters::analyzers::architecture::matcher::{
-    find_function_call_matches, find_glob_imports, find_macro_calls, find_method_call_matches,
-    find_path_prefix_matches,
+    find_function_call_matches, find_glob_imports, find_item_kind_matches, find_macro_calls,
+    find_method_call_matches, find_path_prefix_matches,
 };
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use crate::config::architecture::SymbolPattern;
@@ -195,6 +195,13 @@ fn run_pattern_matchers(file: &crate::ports::ParsedFile, pattern: &SymbolPattern
                 .map(|h| match_to_finding(h, &rule_id, pattern)),
         );
     }
+    if let Some(kinds) = &pattern.forbid_item_kind {
+        let hits = find_item_kind_matches(&file.path, &file.ast, kinds);
+        out.extend(
+            hits.into_iter()
+                .map(|h| match_to_finding(h, &rule_id, pattern)),
+        );
+    }
     out
 }
 
@@ -230,6 +237,13 @@ fn format_match_message(kind: &ViolationKind, reason: &str) -> String {
         ViolationKind::UnmatchedLayer { file } => format!("unmatched file {file}"),
         ViolationKind::ForbiddenEdge { imported_path, .. } => {
             format!("forbidden import {imported_path}")
+        }
+        ViolationKind::ItemKind { kind, name } => {
+            if name.is_empty() {
+                (*kind).to_string()
+            } else {
+                format!("{kind} {name}")
+            }
         }
     };
     format!("{head}: {reason}")

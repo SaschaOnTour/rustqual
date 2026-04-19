@@ -13,5 +13,9 @@
 //! dimension onto the same port.
 
 pub mod analyze_codebase;
+pub(crate) mod exit_gates;
+pub(crate) mod setup;
 
 pub use analyze_codebase::analyze_codebase;
+pub(crate) use exit_gates::apply_exit_gates;
+pub(crate) use setup::setup_config;

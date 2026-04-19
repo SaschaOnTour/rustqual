@@ -13,8 +13,8 @@ use crate::adapters::analyzers::architecture::layer_rule::{
     check_layer_rule, LayerDefinitions, LayerRuleInput, UnmatchedBehavior,
 };
 use crate::adapters::analyzers::architecture::matcher::{
-    find_function_call_matches, find_glob_imports, find_macro_calls, find_method_call_matches,
-    find_path_prefix_matches,
+    find_function_call_matches, find_glob_imports, find_item_kind_matches, find_macro_calls,
+    find_method_call_matches, find_path_prefix_matches,
 };
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use globset::{Glob, GlobSet, GlobSetBuilder};
@@ -184,6 +184,31 @@ fn forbid_function_call_example_ignores_unrelated_paths() {
     let (file, ast) = load_fixture("forbid_function_call", "src/domain/bad.rs");
     let hits = find_function_call_matches(&file, &ast, &["Vec::new".to_string()]);
     assert!(hits.is_empty(), "no Vec::new in fixture: {hits:?}");
+}
+
+#[test]
+fn forbid_item_kind_example_matches_exactly_once() {
+    let (file, ast) = load_fixture("forbid_item_kind", "src/domain/bad.rs");
+    let hits = find_item_kind_matches(&file, &ast, &["unsafe_fn".to_string()]);
+    let hit = only_hit(hits);
+    match &hit.kind {
+        ViolationKind::ItemKind { kind, name } => {
+            assert_eq!(*kind, "unsafe_fn");
+            assert_eq!(name, "dangerous");
+        }
+        other => panic!("unexpected kind: {other:?}"),
+    }
+    assert_eq!(
+        hit.line, 1,
+        "unsafe fn is on line 1 of bad.rs (after header comments)"
+    );
+}
+
+#[test]
+fn forbid_item_kind_example_ignores_unrequested_kinds() {
+    let (file, ast) = load_fixture("forbid_item_kind", "src/domain/bad.rs");
+    let hits = find_item_kind_matches(&file, &ast, &["async_fn".to_string()]);
+    assert!(hits.is_empty(), "no async fn in fixture: {hits:?}");
 }
 
 // ── Layer Rule example ────────────────────────────────────────────────

@@ -11,8 +11,6 @@ use adapters::source::watch;
 use adapters::suppression::qual_allow as findings;
 use cli_handlers::{handle_compare, handle_completions, handle_init, handle_save_baseline};
 
-use std::path::Path;
-
 use clap::Parser;
 
 use cli::{Cli, OutputFormat};
@@ -30,148 +28,7 @@ fn determine_output_format(cli: &Cli) -> OutputFormat {
     }
 }
 
-/// Load config from an explicit config file path.
-/// Operation: error handling logic.
-fn load_explicit_config(config_path: &Path) -> Result<Config, i32> {
-    match std::fs::read_to_string(config_path) {
-        Ok(content) => match toml::from_str(&content) {
-            Ok(c) => Ok(c),
-            Err(e) => {
-                eprintln!("Error parsing config: {e}");
-                Err(2)
-            }
-        },
-        Err(e) => {
-            eprintln!("Error reading config: {e}");
-            Err(2)
-        }
-    }
-}
-
-/// Load config via auto-discovery from the project path.
-/// Operation: error mapping logic.
-fn load_auto_config(path: &Path) -> Result<Config, i32> {
-    Config::load(path).map_err(|e| {
-        eprintln!("Error: {e}");
-        2
-    })
-}
-
-/// Load configuration from CLI args or auto-discovery.
-/// Integration: delegates to load_explicit_config or load_auto_config.
-fn load_config(cli: &Cli) -> Result<Config, i32> {
-    cli.config
-        .as_ref()
-        .map(|p| load_explicit_config(p))
-        .unwrap_or_else(|| load_auto_config(&cli.path))
-}
-
-/// Load, compile, and apply CLI overrides to config.
-/// Integration: orchestrates load_config, compile, apply_cli_overrides, validate_weights.
-fn setup_config(cli: &Cli) -> Result<Config, i32> {
-    let mut config = load_config(cli)?;
-    config.compile();
-    apply_cli_overrides(&mut config, cli);
-    validate_config_weights(&config)?;
-    Ok(config)
-}
-
-/// Validate config settings that require cross-field checks.
-/// Operation: error mapping logic.
-fn validate_config_weights(config: &Config) -> Result<(), i32> {
-    config::validate_weights(config).map_err(|e| {
-        eprintln!("Error: {e}");
-        2
-    })
-}
-
-/// Apply CLI flag overrides to config.
-/// Operation: conditional logic on CLI flags.
-fn apply_cli_overrides(config: &mut Config, cli: &Cli) {
-    if cli.strict_closures {
-        config.strict_closures = true;
-    }
-    if cli.strict_iterators {
-        config.strict_iterator_chains = true;
-    }
-    if cli.allow_recursion {
-        config.allow_recursion = true;
-    }
-    if cli.strict_error_propagation {
-        config.strict_error_propagation = true;
-    }
-    if cli.fail_on_warnings {
-        config.fail_on_warnings = true;
-    }
-    if let Some(ref coverage) = cli.coverage {
-        config.test_quality.coverage_file = Some(coverage.display().to_string());
-    }
-}
-
-/// Check --min-quality-score gate.
-/// Operation: conditional check.
-fn check_min_quality_score(min_score: f64, summary: &report::Summary) -> Result<(), i32> {
-    let actual = summary.quality_score * crate::adapters::analyzers::iosp::PERCENTAGE_MULTIPLIER;
-    if actual < min_score {
-        eprintln!(
-            "Quality score {:.1}% is below minimum {:.1}%",
-            actual, min_score,
-        );
-        return Err(1);
-    }
-    Ok(())
-}
-
-/// Print a stderr warning if the suppression ratio exceeds the configured maximum.
-/// Operation: conditional formatting logic.
-fn warn_suppression_ratio(summary: &report::Summary, max_ratio: f64) {
-    if !summary.suppression_ratio_exceeded || summary.total == 0 {
-        return;
-    }
-    eprintln!(
-        "Warning: {} suppression(s) found ({:.1}% of functions, max: {:.1}%)",
-        summary.all_suppressions,
-        summary.all_suppressions as f64 / summary.total as f64
-            * crate::adapters::analyzers::iosp::PERCENTAGE_MULTIPLIER,
-        max_ratio * crate::adapters::analyzers::iosp::PERCENTAGE_MULTIPLIER,
-    );
-}
-
-/// Check --fail-on-warnings gate.
-/// Operation: conditional check.
-fn check_fail_on_warnings(config: &Config, summary: &report::Summary) -> Result<(), i32> {
-    if config.fail_on_warnings && summary.suppression_ratio_exceeded {
-        eprintln!("Error: warnings present and --fail-on-warnings is set");
-        return Err(1);
-    }
-    Ok(())
-}
-
-/// Apply quality gate checks from CLI flags.
-/// Integration: dispatches to check_min_quality_score.
-fn check_quality_gates(cli: &Cli, summary: &report::Summary) -> Result<(), i32> {
-    cli.min_quality_score
-        .iter()
-        .try_for_each(|&s| check_min_quality_score(s, summary))
-}
-
-/// Check default-fail gate: exit 1 on findings unless --no-fail.
-/// Operation: conditional check.
-fn check_default_fail(no_fail: bool, total_findings: usize) -> Result<(), i32> {
-    if !no_fail && total_findings > 0 {
-        return Err(1);
-    }
-    Ok(())
-}
-
-/// Apply all exit gates: warnings, fail-on-warnings, quality gates, default-fail.
-/// Integration: dispatches to warning + gate check functions.
-fn apply_exit_gates(cli: &Cli, config: &Config, summary: &report::Summary) -> Result<(), i32> {
-    warn_suppression_ratio(summary, config.max_suppression_ratio);
-    check_fail_on_warnings(config, summary)?;
-    check_quality_gates(cli, summary)?;
-    check_default_fail(cli.no_fail, summary.total_findings())
-}
+use app::{apply_exit_gates, setup_config};
 
 /// Sort results so violations come first, ordered by effort score (highest first).
 /// Operation: sorting logic.
@@ -305,6 +162,10 @@ pub fn run() -> Result<(), i32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app::exit_gates::{
+        check_default_fail, check_fail_on_warnings, check_min_quality_score, check_quality_gates,
+    };
+    use crate::app::setup::apply_cli_overrides;
 
     // ── OutputFormat tests ──────────────────────────────────────
 

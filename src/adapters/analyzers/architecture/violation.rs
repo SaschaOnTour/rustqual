@@ -39,6 +39,13 @@ pub enum ViolationKind {
         /// The full rendered path of the call target (e.g. `Box::new`).
         rendered_path: String,
     },
+    /// Matched by `forbid_item_kind`: a top-level item of a banned language kind.
+    ///
+    /// `kind` mirrors the config string (e.g. `"async_fn"`, `"unsafe_impl"`,
+    /// `"inline_cfg_test_module"`). `name` is the item's identifier when
+    /// the kind carries one (functions, modules, statics) — empty for
+    /// anonymous items like extern blocks.
+    ItemKind { kind: &'static str, name: String },
     /// Layer rule: a file in `from_layer` imports from `to_layer` whose rank
     /// is strictly greater (importing "outward" in the layer order is forbidden).
     LayerViolation {
