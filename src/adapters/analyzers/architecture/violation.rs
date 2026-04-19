@@ -46,6 +46,13 @@ pub enum ViolationKind {
     /// the kind carries one (functions, modules, statics) — empty for
     /// anonymous items like extern blocks.
     ItemKind { kind: &'static str, name: String },
+    /// Matched by `forbid_derive`: a `#[derive(Name)]` containing a banned trait.
+    Derive {
+        /// The matched derive-trait name (e.g. `"Serialize"`).
+        trait_name: String,
+        /// The item (struct/enum/union) that carries the derive annotation.
+        item_name: String,
+    },
     /// Layer rule: a file in `from_layer` imports from `to_layer` whose rank
     /// is strictly greater (importing "outward" in the layer order is forbidden).
     LayerViolation {
@@ -71,6 +78,18 @@ pub enum ViolationKind {
         reason: String,
         /// Rendered form of the offending import path for reporting.
         imported_path: String,
+    },
+    /// `[[architecture.trait_contract]]` rule: a specific check failed for
+    /// a trait definition in scope.
+    TraitContract {
+        /// Name of the trait carrying the failed check.
+        trait_name: String,
+        /// Short identifier for which check fired (e.g. `"receiver"`,
+        /// `"async"`, `"return_type"`, `"supertrait"`, `"object_safety"`,
+        /// `"required_param"`, `"error_variant"`).
+        check: &'static str,
+        /// Human-readable detail for the report.
+        detail: String,
     },
 }
 

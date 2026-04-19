@@ -23,6 +23,7 @@ pub mod explain;
 pub mod forbidden_rule;
 pub mod layer_rule;
 pub mod matcher;
+pub mod trait_contract_rule;
 pub(crate) mod use_tree;
 pub mod violation;
 

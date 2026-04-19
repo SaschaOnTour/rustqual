@@ -1,3 +1,4 @@
+mod derive;
 mod function_call;
 mod glob_import;
 mod item_kind;

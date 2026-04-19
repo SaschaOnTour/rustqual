@@ -6,3 +6,4 @@ mod explain;
 mod forbidden_rule;
 mod golden_examples;
 mod layer_rule;
+mod trait_contract;

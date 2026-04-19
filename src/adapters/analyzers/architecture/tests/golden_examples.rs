@@ -13,8 +13,8 @@ use crate::adapters::analyzers::architecture::layer_rule::{
     check_layer_rule, LayerDefinitions, LayerRuleInput, UnmatchedBehavior,
 };
 use crate::adapters::analyzers::architecture::matcher::{
-    find_function_call_matches, find_glob_imports, find_item_kind_matches, find_macro_calls,
-    find_method_call_matches, find_path_prefix_matches,
+    find_derive_matches, find_function_call_matches, find_glob_imports, find_item_kind_matches,
+    find_macro_calls, find_method_call_matches, find_path_prefix_matches,
 };
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use globset::{Glob, GlobSet, GlobSetBuilder};
@@ -209,6 +209,30 @@ fn forbid_item_kind_example_ignores_unrequested_kinds() {
     let (file, ast) = load_fixture("forbid_item_kind", "src/domain/bad.rs");
     let hits = find_item_kind_matches(&file, &ast, &["async_fn".to_string()]);
     assert!(hits.is_empty(), "no async fn in fixture: {hits:?}");
+}
+
+#[test]
+fn forbid_derive_example_matches_exactly_once() {
+    let (file, ast) = load_fixture("forbid_derive", "src/domain/bad.rs");
+    let hits = find_derive_matches(&file, &ast, &["Serialize".to_string()]);
+    let hit = only_hit(hits);
+    match &hit.kind {
+        ViolationKind::Derive {
+            trait_name,
+            item_name,
+        } => {
+            assert_eq!(trait_name, "Serialize");
+            assert_eq!(item_name, "Foo");
+        }
+        other => panic!("unexpected kind: {other:?}"),
+    }
+}
+
+#[test]
+fn forbid_derive_example_ignores_other_traits() {
+    let (file, ast) = load_fixture("forbid_derive", "src/domain/bad.rs");
+    let hits = find_derive_matches(&file, &ast, &["Deserialize".to_string()]);
+    assert!(hits.is_empty(), "{hits:?}");
 }
 
 // ── Layer Rule example ────────────────────────────────────────────────

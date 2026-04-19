@@ -20,8 +20,8 @@ use crate::adapters::analyzers::architecture::forbidden_rule::{
 };
 use crate::adapters::analyzers::architecture::layer_rule::{check_layer_rule, LayerRuleInput};
 use crate::adapters::analyzers::architecture::matcher::{
-    find_function_call_matches, find_glob_imports, find_item_kind_matches, find_macro_calls,
-    find_method_call_matches, find_path_prefix_matches,
+    find_derive_matches, find_function_call_matches, find_glob_imports, find_item_kind_matches,
+    find_macro_calls, find_method_call_matches, find_path_prefix_matches,
 };
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use crate::config::architecture::SymbolPattern;
@@ -202,6 +202,13 @@ fn run_pattern_matchers(file: &crate::ports::ParsedFile, pattern: &SymbolPattern
                 .map(|h| match_to_finding(h, &rule_id, pattern)),
         );
     }
+    if let Some(names) = &pattern.forbid_derive {
+        let hits = find_derive_matches(&file.path, &file.ast, names);
+        out.extend(
+            hits.into_iter()
+                .map(|h| match_to_finding(h, &rule_id, pattern)),
+        );
+    }
     out
 }
 
@@ -221,9 +228,16 @@ fn match_to_finding(hit: MatchLocation, rule_id: &str, pattern: &SymbolPattern) 
 }
 
 /// Render a concise message from a `ViolationKind` plus the rule reason.
-/// Operation: pattern-match formatting.
+/// Integration: match-dispatch delegation to per-variant formatters.
 fn format_match_message(kind: &ViolationKind, reason: &str) -> String {
-    let head = match kind {
+    let head = render_violation_head(kind);
+    format!("{head}: {reason}")
+}
+
+/// Variant-specific head text for a `ViolationKind`.
+/// Integration: match-dispatch delegation per variant kind.
+fn render_violation_head(kind: &ViolationKind) -> String {
+    match kind {
         ViolationKind::PathPrefix { rendered_path, .. } => format!("path \"{rendered_path}\""),
         ViolationKind::GlobImport { base_path } => format!("glob import {base_path}::*"),
         ViolationKind::MethodCall { name, syntax } => format!("{syntax} method call {name}"),
@@ -238,15 +252,27 @@ fn format_match_message(kind: &ViolationKind, reason: &str) -> String {
         ViolationKind::ForbiddenEdge { imported_path, .. } => {
             format!("forbidden import {imported_path}")
         }
-        ViolationKind::ItemKind { kind, name } => {
-            if name.is_empty() {
-                (*kind).to_string()
-            } else {
-                format!("{kind} {name}")
-            }
-        }
-    };
-    format!("{head}: {reason}")
+        ViolationKind::ItemKind { kind, name } => render_item_kind_head(kind, name),
+        ViolationKind::Derive {
+            trait_name,
+            item_name,
+        } => format!("derive({trait_name}) on {item_name}"),
+        ViolationKind::TraitContract {
+            trait_name,
+            check,
+            detail,
+        } => format!("trait {trait_name} [{check}]: {detail}"),
+    }
+}
+
+/// Head text for an `ItemKind` violation (anonymous items omit the name).
+/// Operation: conditional formatting.
+fn render_item_kind_head(kind: &str, name: &str) -> String {
+    if name.is_empty() {
+        kind.to_string()
+    } else {
+        format!("{kind} {name}")
+    }
 }
 
 // ── layer rule ─────────────────────────────────────────────────────────
