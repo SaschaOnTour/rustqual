@@ -2,6 +2,7 @@ mod analyzer;
 mod cli;
 mod config;
 mod coupling;
+mod domain;
 mod dry;
 mod findings;
 mod normalize;

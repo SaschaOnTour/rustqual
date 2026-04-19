@@ -1,61 +1,7 @@
-/// The six analysis dimensions of rustqual.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Dimension {
-    Iosp,
-    Complexity,
-    Dry,
-    Srp,
-    Coupling,
-    Test,
-}
-
-impl Dimension {
-    /// Parse a dimension name (case-insensitive).
-    /// Operation: string matching logic.
-    pub fn from_str_opt(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "iosp" => Some(Self::Iosp),
-            "complexity" => Some(Self::Complexity),
-            "dry" => Some(Self::Dry),
-            "srp" => Some(Self::Srp),
-            "coupling" => Some(Self::Coupling),
-            "test" | "tq" => Some(Self::Test),
-            _ => None,
-        }
-    }
-}
-
-impl std::fmt::Display for Dimension {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Iosp => write!(f, "iosp"),
-            Self::Complexity => write!(f, "complexity"),
-            Self::Dry => write!(f, "dry"),
-            Self::Srp => write!(f, "srp"),
-            Self::Coupling => write!(f, "coupling"),
-            Self::Test => write!(f, "test"),
-        }
-    }
-}
-
-/// A parsed suppression comment.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Suppression {
-    /// Line number where the suppression comment appears (1-based).
-    pub line: usize,
-    /// Which dimensions to suppress. Empty means suppress all.
-    pub dimensions: Vec<Dimension>,
-    /// Optional reason for the suppression.
-    pub reason: Option<String>,
-}
-
-impl Suppression {
-    /// Check if this suppression covers a given dimension.
-    /// Operation: empty means all dimensions.
-    pub fn covers(&self, dim: Dimension) -> bool {
-        self.dimensions.is_empty() || self.dimensions.contains(&dim)
-    }
-}
+// Re-export Domain types so existing `crate::findings::{Dimension, Suppression}`
+// call sites keep working. The canonical location is `crate::domain`;
+// subsequent phases will migrate call sites to import from there directly.
+pub use crate::domain::{Dimension, Suppression};
 
 /// Maximum number of lines between an annotation comment and the function/struct it applies to.
 /// Allows stacking multiple annotations (e.g., `// qual:api` + `// qual:allow(iosp)`) and
@@ -185,52 +131,6 @@ fn extract_reason(text: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_dimension_display() {
-        assert_eq!(Dimension::Iosp.to_string(), "iosp");
-        assert_eq!(Dimension::Complexity.to_string(), "complexity");
-        assert_eq!(Dimension::Dry.to_string(), "dry");
-        assert_eq!(Dimension::Srp.to_string(), "srp");
-        assert_eq!(Dimension::Coupling.to_string(), "coupling");
-        assert_eq!(Dimension::Test.to_string(), "test");
-    }
-
-    #[test]
-    fn test_dimension_from_str() {
-        assert_eq!(Dimension::from_str_opt("iosp"), Some(Dimension::Iosp));
-        assert_eq!(
-            Dimension::from_str_opt("COMPLEXITY"),
-            Some(Dimension::Complexity)
-        );
-        assert_eq!(Dimension::from_str_opt("DRY"), Some(Dimension::Dry));
-        assert_eq!(Dimension::from_str_opt("test"), Some(Dimension::Test));
-        assert_eq!(Dimension::from_str_opt("tq"), Some(Dimension::Test));
-        assert_eq!(Dimension::from_str_opt("unknown"), None);
-    }
-
-    #[test]
-    fn test_suppression_covers_all() {
-        let s = Suppression {
-            line: 1,
-            dimensions: vec![],
-            reason: None,
-        };
-        assert!(s.covers(Dimension::Iosp));
-        assert!(s.covers(Dimension::Complexity));
-        assert!(s.covers(Dimension::Dry));
-    }
-
-    #[test]
-    fn test_suppression_covers_specific() {
-        let s = Suppression {
-            line: 1,
-            dimensions: vec![Dimension::Iosp],
-            reason: None,
-        };
-        assert!(s.covers(Dimension::Iosp));
-        assert!(!s.covers(Dimension::Complexity));
-    }
 
     #[test]
     fn test_parse_qual_allow_all() {

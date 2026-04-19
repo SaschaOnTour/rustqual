@@ -47,7 +47,7 @@ pub(super) fn mark_tq_suppressions(
     suppression_lines: &std::collections::HashMap<String, Vec<Suppression>>,
 ) {
     let Some(tq) = tq else { return };
-    let tq_dim = crate::findings::Dimension::Test;
+    let tq_dim = crate::domain::Dimension::TestQuality;
     tq.warnings.iter_mut().for_each(|w| {
         if let Some(sups) = suppression_lines.get(&w.file) {
             w.suppressed = sups.iter().any(|sup| {

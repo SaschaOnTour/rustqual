@@ -23,14 +23,7 @@ pub enum Classification {
     Trivial,
 }
 
-/// Severity of a violation based on the number of findings.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Severity {
-    Low,
-    Medium,
-    High,
-}
+pub use crate::domain::Severity;
 
 /// A location where deep nesting contributes to complexity.
 #[derive(Debug, Clone, Default, PartialEq, Eq, derive_more::Display)]
