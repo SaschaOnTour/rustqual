@@ -8,9 +8,13 @@
 //! in isolation with fixture source strings.
 
 pub mod glob_import;
+pub mod macro_call;
+pub mod method_call;
 pub mod path_prefix;
 
 pub use glob_import::find_glob_imports;
+pub use macro_call::find_macro_calls;
+pub use method_call::find_method_call_matches;
 pub use path_prefix::find_path_prefix_matches;
 
 #[cfg(test)]

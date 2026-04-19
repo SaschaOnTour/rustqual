@@ -19,6 +19,21 @@ pub enum ViolationKind {
         /// The path preceding the `*` in the import.
         base_path: String,
     },
+    /// Matched by `forbid_method_call`: a call to a banned method name.
+    ///
+    /// Covers both direct dot-notation (`x.unwrap()`) and UFCS form
+    /// (`Option::unwrap(x)`), identified by the final path segment.
+    MethodCall {
+        /// The matched method name (the banned entry from the rule list).
+        name: String,
+        /// "direct" for `x.name(...)`, "ufcs" for `Type::name(...)`.
+        syntax: &'static str,
+    },
+    /// Matched by `forbid_macro_call`: a macro invocation `name!(...)`.
+    MacroCall {
+        /// The invoked macro's final path-segment name.
+        name: String,
+    },
 }
 
 /// One concrete occurrence of a matcher hit.

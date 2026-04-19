@@ -6,13 +6,14 @@
 //! - the matcher regressed (a previously caught violation is now missed), or
 //! - the rule semantics silently changed (drift without docs update).
 
-use crate::architecture::matcher::{find_glob_imports, find_path_prefix_matches};
+use crate::architecture::matcher::{
+    find_glob_imports, find_macro_calls, find_method_call_matches, find_path_prefix_matches,
+};
 use crate::architecture::{MatchLocation, ViolationKind};
 use std::fs;
 use std::path::Path;
 
 /// Load and parse a Rust source file from a golden example directory.
-#[cfg(test)]
 fn load_fixture(example: &str, rel: &str) -> (String, syn::File) {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("examples")
@@ -26,7 +27,6 @@ fn load_fixture(example: &str, rel: &str) -> (String, syn::File) {
     (path.display().to_string(), ast)
 }
 
-#[cfg(test)]
 fn only_hit(hits: Vec<MatchLocation>) -> MatchLocation {
     assert_eq!(
         hits.len(),
@@ -96,4 +96,59 @@ fn forbid_glob_import_example_counted_as_path_prefix_on_base() {
         1,
         "the glob target renders and matches the prefix exactly once: {hits:?}"
     );
+}
+
+#[test]
+fn forbid_method_call_example_matches_direct_and_ufcs() {
+    let (file, ast) = load_fixture("forbid_method_call", "src/domain/bad.rs");
+    let hits = find_method_call_matches(&file, &ast, &["unwrap".to_string()]);
+    assert_eq!(
+        hits.len(),
+        2,
+        "both direct and UFCS forms expected: {hits:?}"
+    );
+    let syntaxes: Vec<&'static str> = hits
+        .iter()
+        .filter_map(|h| match &h.kind {
+            ViolationKind::MethodCall { syntax, .. } => Some(*syntax),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        syntaxes.contains(&"direct"),
+        "direct form not reported: {syntaxes:?}"
+    );
+    assert!(
+        syntaxes.contains(&"ufcs"),
+        "ufcs form not reported: {syntaxes:?}"
+    );
+}
+
+#[test]
+fn forbid_method_call_example_ignores_unrelated_name() {
+    let (file, ast) = load_fixture("forbid_method_call", "src/domain/bad.rs");
+    let hits = find_method_call_matches(&file, &ast, &["clone".to_string()]);
+    assert!(hits.is_empty(), "no clone calls in fixture: {hits:?}");
+}
+
+#[test]
+fn forbid_macro_call_example_matches_exactly_once() {
+    let (file, ast) = load_fixture("forbid_macro_call", "src/domain/bad.rs");
+    let hits = find_macro_calls(&file, &ast, &["println".to_string()]);
+    let hit = only_hit(hits);
+    match &hit.kind {
+        ViolationKind::MacroCall { name } => assert_eq!(name, "println"),
+        other => panic!("unexpected violation kind: {other:?}"),
+    }
+    assert_eq!(
+        hit.line, 5,
+        "println! on line 5 of bad.rs (after header comments)"
+    );
+}
+
+#[test]
+fn forbid_macro_call_example_ignores_unrelated_macros() {
+    let (file, ast) = load_fixture("forbid_macro_call", "src/domain/bad.rs");
+    let hits = find_macro_calls(&file, &ast, &["panic".to_string()]);
+    assert!(hits.is_empty(), "no panic!() in fixture: {hits:?}");
 }

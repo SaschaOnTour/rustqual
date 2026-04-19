@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::path::Path;
 
 use syn::visit::Visit;
 
@@ -191,59 +190,7 @@ fn merge_warnings(
     uncalled
 }
 
-// ── cfg(test) module file detection ─────────────────────────────
-
-/// Scan all parsed files for `#[cfg(test)] mod name;` (external module declarations)
-/// and compute which child file paths are test-only.
-/// Operation: path computation logic, no own calls. Inner helpers hidden in closures.
-pub(crate) fn collect_cfg_test_file_paths(
-    parsed: &[(String, String, syn::File)],
-) -> HashSet<String> {
-    let all_paths: HashSet<&str> = parsed.iter().map(|(p, _, _)| p.as_str()).collect();
-    let is_ext_cfg_test = |m: &syn::ItemMod| m.content.is_none() && super::has_cfg_test(&m.attrs);
-    let resolve = |parent_path: &str, mod_name: &str| -> Option<String> {
-        let parent = Path::new(parent_path);
-        let child_dir = if parent
-            .file_stem()
-            .is_some_and(|s| s == "mod" || s == "lib" || s == "main")
-        {
-            parent.parent().unwrap_or(Path::new("")).to_path_buf()
-        } else {
-            parent.with_extension("")
-        };
-        let f = child_dir
-            .join(format!("{mod_name}.rs"))
-            .to_string_lossy()
-            .into_owned();
-        let d = child_dir
-            .join(mod_name)
-            .join("mod.rs")
-            .to_string_lossy()
-            .into_owned();
-        if all_paths.contains(f.as_str()) {
-            Some(f)
-        } else if all_paths.contains(d.as_str()) {
-            Some(d)
-        } else {
-            None
-        }
-    };
-    parsed
-        .iter()
-        .flat_map(|(path, _, file)| {
-            file.items
-                .iter()
-                .filter_map(|item| match item {
-                    syn::Item::Mod(m) if is_ext_cfg_test(m) => {
-                        Some((path.as_str(), m.ident.to_string()))
-                    }
-                    _ => None,
-                })
-                .collect::<Vec<_>>()
-        })
-        .filter_map(|(parent, name)| resolve(parent, &name))
-        .collect()
-}
+pub(crate) use super::cfg_test_detection::collect_cfg_test_file_paths;
 
 /// Mark declared functions from cfg-test files as test code.
 /// Trivial: iteration + field mutation.
@@ -821,34 +768,6 @@ mod tests {
         assert!(
             !warnings.iter().any(|w| w.function_name == "helper"),
             "Functions in cfg(test) child of foo.rs → foo/test_utils.rs should be excluded"
-        );
-    }
-
-    #[test]
-    fn test_collect_cfg_test_file_paths_basic() {
-        let parent_code = r#"
-            #[cfg(test)]
-            mod helpers;
-        "#;
-        let child_code = "pub fn h() {}";
-        let parent_ast = syn::parse_file(parent_code).unwrap();
-        let child_ast = syn::parse_file(child_code).unwrap();
-        let parsed = vec![
-            (
-                "src/lib.rs".to_string(),
-                parent_code.to_string(),
-                parent_ast,
-            ),
-            (
-                "src/helpers.rs".to_string(),
-                child_code.to_string(),
-                child_ast,
-            ),
-        ];
-        let result = collect_cfg_test_file_paths(&parsed);
-        assert!(
-            result.contains("src/helpers.rs"),
-            "Should detect src/helpers.rs as cfg-test file"
         );
     }
 

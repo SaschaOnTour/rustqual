@@ -108,9 +108,11 @@ pub fn analyze_module_srp(
     parsed: &[(String, String, syn::File)],
     config: &SrpConfig,
     file_call_graph: &HashMap<String, Vec<(String, Vec<String>)>>,
+    cfg_test_files: &std::collections::HashSet<String>,
 ) -> Vec<ModuleSrpWarning> {
     parsed
         .iter()
+        .filter(|(path, _, _)| !cfg_test_files.contains(path))
         .filter_map(|(path, source, syntax)| {
             let production_lines = count_production_lines(source);
             let score = compute_file_length_score(
@@ -253,7 +255,8 @@ mod tests {
         let parsed = vec![("test.rs".to_string(), source.to_string(), syntax)];
         let config = SrpConfig::default(); // baseline=300
         let call_graph = HashMap::new();
-        let warnings = analyze_module_srp(&parsed, &config, &call_graph);
+        let cfg_test_files = std::collections::HashSet::new();
+        let warnings = analyze_module_srp(&parsed, &config, &call_graph, &cfg_test_files);
         assert!(warnings.is_empty());
     }
 
@@ -268,10 +271,62 @@ mod tests {
         let parsed = vec![("big.rs".to_string(), source.to_string(), syntax)];
         let config = SrpConfig::default();
         let call_graph = HashMap::new();
-        let warnings = analyze_module_srp(&parsed, &config, &call_graph);
+        let cfg_test_files = std::collections::HashSet::new();
+        let warnings = analyze_module_srp(&parsed, &config, &call_graph, &cfg_test_files);
         assert!(!warnings.is_empty());
         assert_eq!(warnings[0].module, "big.rs");
         assert!(warnings[0].length_score > 0.0);
+    }
+
+    #[test]
+    fn test_analyze_module_srp_skips_cfg_test_files() {
+        // A file reachable only under `#[cfg(test)]` is exempt from the
+        // module-SRP check. Without this, test-helper files with many
+        // independent #[test] fns get falsely flagged as "too many
+        // independent clusters" or "too many production lines".
+        let mut source = String::new();
+        for i in 0..10 {
+            source.push_str(&format!(
+                "#[test]\nfn test_scenario_{i}() {{ assert!(true); }}\n"
+            ));
+        }
+        let syntax = syn::parse_file(&source).unwrap();
+        let parsed = vec![(
+            "src/some/tests/helpers.rs".to_string(),
+            source.to_string(),
+            syntax,
+        )];
+        let config = SrpConfig::default();
+        let call_graph = HashMap::new();
+        let mut cfg_test_files = std::collections::HashSet::new();
+        cfg_test_files.insert("src/some/tests/helpers.rs".to_string());
+        let warnings = analyze_module_srp(&parsed, &config, &call_graph, &cfg_test_files);
+        assert!(
+            warnings.is_empty(),
+            "cfg-test file must be skipped: {warnings:?}"
+        );
+    }
+
+    #[test]
+    fn test_analyze_module_srp_still_flags_non_cfg_test_files() {
+        // Negative control: without cfg-test tag, a big production file with
+        // many isolated substantive functions is flagged as "too many clusters".
+        let mut source = String::new();
+        for i in 0..10 {
+            source.push_str(&format!(
+                "fn helper_{i}() {{ let a = 1; let b = 2; let c = 3; let d = 4; let e = 5; }}\n"
+            ));
+        }
+        let syntax = syn::parse_file(&source).unwrap();
+        let parsed = vec![("src/prod/module.rs".to_string(), source.to_string(), syntax)];
+        let config = SrpConfig::default();
+        let call_graph = HashMap::new();
+        let cfg_test_files = std::collections::HashSet::new(); // empty
+        let warnings = analyze_module_srp(&parsed, &config, &call_graph, &cfg_test_files);
+        assert!(
+            !warnings.is_empty(),
+            "production file with many unconnected substantive fns must be flagged"
+        );
     }
 
     #[test]
@@ -286,7 +341,8 @@ mod tests {
         let parsed = vec![("test.rs".to_string(), source.to_string(), syntax)];
         let config = SrpConfig::default();
         let call_graph = HashMap::new();
-        let warnings = analyze_module_srp(&parsed, &config, &call_graph);
+        let cfg_test_files = std::collections::HashSet::new();
+        let warnings = analyze_module_srp(&parsed, &config, &call_graph, &cfg_test_files);
         assert!(
             warnings.is_empty(),
             "Test code should not count towards production lines"
@@ -576,7 +632,8 @@ fn algo_hash(data: &[u8]) -> u64 {
             ..SrpConfig::default()
         };
         let call_graph = HashMap::new();
-        let warnings = analyze_module_srp(&parsed, &config, &call_graph);
+        let cfg_test_files = std::collections::HashSet::new();
+        let warnings = analyze_module_srp(&parsed, &config, &call_graph, &cfg_test_files);
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].independent_clusters, 3);
         assert!((warnings[0].length_score - 0.0).abs() < f64::EPSILON);
