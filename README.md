@@ -512,7 +512,7 @@ A blank line breaks the block — misplaced markers (marker far away from the it
 - *Misplaced*: the marker is too far from the item (outside `ANNOTATION_WINDOW=3` after block-end shift).
 - *Wrong dimension*: the marker says `qual:allow(dry)` but the real finding at that line is, say, SRP.
 
-Orphans appear in `--findings` output and count toward `--fail-on-warnings` / default-fail, so a one-shot rustqual run surfaces every stale marker for cleanup. `// qual:allow(coupling)` markers are exempt from orphan detection because coupling warnings are module-global (no file/line anchor to match).
+Orphans appear in `--findings` output and count toward `total_findings()`, so default-fail (`Err(1)` on any finding) triggers on them — a one-shot rustqual run surfaces every stale marker for cleanup. They do not currently gate `--fail-on-warnings` (which only checks `suppression_ratio_exceeded`). `// qual:allow(coupling)` markers are exempt from orphan detection because coupling warnings are module-global (no file/line anchor to match).
 
 ### API Annotation
 

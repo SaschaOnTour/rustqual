@@ -283,9 +283,11 @@ fn find_test_only(
             file: d.file.clone(),
             line: d.line,
             kind: DeadCodeKind::TestOnly,
-            suggestion: "only called from test code; move to tests/ or annotate with \
-                         // qual:api (public API) or // qual:test_helper (test-only helper)"
-                .to_string(),
+            suggestion: concat!(
+                "only called from test code; move to tests/ or annotate with ",
+                "// qual:api (public API) or // qual:test_helper (test-only helper)"
+            )
+            .to_string(),
         })
         .collect()
 }

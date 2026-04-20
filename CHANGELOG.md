@@ -35,9 +35,11 @@ coverage.lcov` reports 1913 functions, 100.0% quality score across all
   format (text, JSON, AI, SARIF, `--findings`). The AI format surfaces
   the marker's original reason string so the agent can tell whether
   it was a stale leftover or a misplaced annotation. Orphan findings
-  contribute to `total_findings()` and thus to default-fail and
-  `--fail-on-warnings` — the user experience is: run rustqual, see
-  the orphan in the list, delete or correct the marker, rerun. The
+  contribute to `total_findings()` and thus to default-fail (they do
+  not currently trigger `--fail-on-warnings`, which only gates on
+  `suppression_ratio_exceeded`) — the user experience is: run
+  rustqual, see the orphan in the list, delete or correct the marker,
+  rerun. The
   detector reads raw complexity metrics (not the `*_warning` flags
   that suppressions clear), so a `// qual:allow(complexity)` marker
   on a genuinely over-threshold function is correctly recognized as

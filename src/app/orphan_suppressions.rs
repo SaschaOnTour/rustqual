@@ -105,9 +105,12 @@ fn enumerate_finding_positions(
 /// complexity metrics against config thresholds (not the
 /// `*_warning` flags), so a suppressed `// qual:allow(complexity)`
 /// marker — which clears those flags — still registers as a matching
-/// target for the orphan checker. Same for IOSP: we check whether the
-/// function `has_logic + has_own_calls` shape would be a Violation even
-/// if it was reclassified away by suppression.
+/// target for the orphan checker. Mirrors the same config-gated
+/// predicates that `apply_extended_warnings` uses (`detect_unsafe`,
+/// `detect_error_handling`, `allow_expect`, `detect_magic_numbers`,
+/// `is_test` skip for length / error-handling / magic numbers), so a
+/// marker is only counted as non-orphan if the corresponding check is
+/// actually enabled in the active config.
 /// Operation: threshold checks pushing per-flag positions.
 fn collect_iosp_complexity_positions<F>(
     analysis: &crate::report::AnalysisResult,
@@ -122,25 +125,96 @@ fn collect_iosp_complexity_positions<F>(
             push(&f.file, f.line, Dimension::Iosp);
         }
         if let Some(c) = &f.complexity {
-            if c.cognitive_complexity > config.complexity.max_cognitive
-                || c.cyclomatic_complexity > config.complexity.max_cyclomatic
-                || c.max_nesting > config.complexity.max_nesting_depth
-                || c.function_lines > config.complexity.max_function_lines
-                || c.unsafe_blocks > 0
-                || c.unwrap_count > 0
-                || c.expect_count > 0
-                || c.panic_count > 0
-                || c.todo_count > 0
-            {
+            if would_trigger_complexity_warning(f, c, &config.complexity) {
                 push(&f.file, f.line, Dimension::Complexity);
             }
-            if !f.is_test {
-                c.magic_numbers
-                    .iter()
-                    .for_each(|m| push(&f.file, m.line, Dimension::Complexity));
-            }
+            push_magic_numbers(f, c, &config.complexity, push);
         }
     });
+}
+
+/// True if the raw complexity metrics of a function would trigger any
+/// complexity warning under the active config — mirrors the predicates
+/// in `apply_extended_warnings` so `detect_unsafe`,
+/// `detect_error_handling`, `allow_expect`, and `is_test` are all
+/// honored. Used by the orphan checker to recognize
+/// `// qual:allow(complexity)` markers as non-orphan even after the
+/// suppression clears the `*_warning` flags on the `FunctionAnalysis`.
+/// Integration: delegates to per-aspect predicates.
+fn would_trigger_complexity_warning(
+    f: &crate::adapters::analyzers::iosp::FunctionAnalysis,
+    c: &crate::adapters::analyzers::iosp::ComplexityMetrics,
+    cx: &crate::config::sections::ComplexityConfig,
+) -> bool {
+    exceeds_basic_thresholds(c, cx)
+        || exceeds_length(f, c, cx)
+        || exceeds_unsafe(c, cx)
+        || exceeds_error_handling(f, c, cx)
+}
+
+/// True if cognitive / cyclomatic / nesting exceed their thresholds.
+/// Operation: comparison logic.
+fn exceeds_basic_thresholds(
+    c: &crate::adapters::analyzers::iosp::ComplexityMetrics,
+    cx: &crate::config::sections::ComplexityConfig,
+) -> bool {
+    c.cognitive_complexity > cx.max_cognitive
+        || c.cyclomatic_complexity > cx.max_cyclomatic
+        || c.max_nesting > cx.max_nesting_depth
+}
+
+/// True if the function (production, not test) exceeds the length cap.
+/// Operation: comparison logic.
+fn exceeds_length(
+    f: &crate::adapters::analyzers::iosp::FunctionAnalysis,
+    c: &crate::adapters::analyzers::iosp::ComplexityMetrics,
+    cx: &crate::config::sections::ComplexityConfig,
+) -> bool {
+    !f.is_test && c.function_lines > cx.max_function_lines
+}
+
+/// True if unsafe detection is enabled and the function contains at
+/// least one unsafe block.
+/// Operation: comparison logic.
+fn exceeds_unsafe(
+    c: &crate::adapters::analyzers::iosp::ComplexityMetrics,
+    cx: &crate::config::sections::ComplexityConfig,
+) -> bool {
+    cx.detect_unsafe && c.unsafe_blocks > 0
+}
+
+/// True if error-handling detection is enabled and the (production)
+/// function uses any of unwrap/panic/todo/(expect unless allowed).
+/// Operation: comparison logic.
+fn exceeds_error_handling(
+    f: &crate::adapters::analyzers::iosp::FunctionAnalysis,
+    c: &crate::adapters::analyzers::iosp::ComplexityMetrics,
+    cx: &crate::config::sections::ComplexityConfig,
+) -> bool {
+    if !cx.detect_error_handling || f.is_test {
+        return false;
+    }
+    let expect_threshold = if cx.allow_expect { 0 } else { 1 };
+    c.unwrap_count + c.panic_count + c.todo_count + c.expect_count.min(expect_threshold) > 0
+}
+
+/// Push complexity positions for every magic-number occurrence on the
+/// function, honoring `detect_magic_numbers` and the test-function skip.
+/// Operation: iteration + conditional push.
+fn push_magic_numbers<F>(
+    f: &crate::adapters::analyzers::iosp::FunctionAnalysis,
+    c: &crate::adapters::analyzers::iosp::ComplexityMetrics,
+    cx: &crate::config::sections::ComplexityConfig,
+    push: &mut F,
+) where
+    F: FnMut(&str, usize, crate::findings::Dimension),
+{
+    if f.is_test || !cx.detect_magic_numbers {
+        return;
+    }
+    c.magic_numbers
+        .iter()
+        .for_each(|m| push(&f.file, m.line, crate::findings::Dimension::Complexity));
 }
 
 /// Positions for DRY findings (duplicates, dead code, fragments,
