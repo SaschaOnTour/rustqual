@@ -342,7 +342,7 @@ lcom4_threshold = 3                  # LCOM4 component threshold
 weights = [0.4, 0.25, 0.15, 0.2]     # [lcom4, fields, methods, fan_out]
 file_length_baseline = 300           # Production lines before penalty starts
 file_length_ceiling = 800            # Production lines at maximum penalty
-max_independent_clusters = 3         # Max independent function groups before warning
+max_independent_clusters = 2         # Highest allowed (warn on 3+ clusters)
 min_cluster_statements = 5           # Min statements for a function to count in clusters
 
 # ────────────────────────────────────────────────────────────────
@@ -677,7 +677,7 @@ Detects Single Responsibility Principle violations at three levels:
 
 - **Struct-level**: LCOM4 cohesion analysis using Union-Find on method→field access graph. Composite score combines normalized LCOM4, field count, method count, and fan-out with configurable weights.
 - **Module-level (length)**: Production line counting (before `#[cfg(test)]`) with linear penalty between configurable baseline and ceiling.
-- **Module-level (cohesion)**: Detects files with too many independent function clusters. Uses Union-Find on private substantive functions, leveraging IOSP own-call data. Functions that call each other or share a common caller are united into the same cluster. A file with ≥`max_independent_clusters` (default 3) independent groups indicates multiple responsibilities that should be split into separate modules.
+- **Module-level (cohesion)**: Detects files with too many independent function clusters. Uses Union-Find on private substantive functions, leveraging IOSP own-call data. Functions that call each other or share a common caller are united into the same cluster. A file with more than `max_independent_clusters` (default 2, so 3+ clusters trigger) independent groups indicates multiple responsibilities that should be split into separate modules.
 
 ### Structural Binary Checks
 

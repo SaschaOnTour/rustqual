@@ -462,8 +462,11 @@ final_val
 "#;
     let syntax = syn::parse_file(code).unwrap();
     let parsed = vec![("algos.rs".to_string(), code.to_string(), syntax)];
+    // `max_*` thresholds are exclusive ("highest value that still
+    // passes"); with 3 independent clusters in the fixture, setting
+    // the max to 2 is what triggers the warning.
     let config = SrpConfig {
-        max_independent_clusters: 3,
+        max_independent_clusters: 2,
         min_cluster_statements: 3,
         ..SrpConfig::default()
     };

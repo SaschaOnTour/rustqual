@@ -169,7 +169,7 @@ lcom4_threshold = 2
 weights = [0.4, 0.25, 0.15, 0.2]
 file_length_baseline = 300
 file_length_ceiling = 800
-max_independent_clusters = 3
+max_independent_clusters = 2
 min_cluster_statements = 5
 # Maximum number of parameters before a function triggers SRP-004.
 max_parameters = 5
@@ -291,7 +291,7 @@ lcom4_threshold = 2
 weights = [0.4, 0.25, 0.15, 0.2]
 file_length_baseline = 300
 file_length_ceiling = 800
-max_independent_clusters = 3
+max_independent_clusters = 2
 min_cluster_statements = 5
 max_parameters = 5
 

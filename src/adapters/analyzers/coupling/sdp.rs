@@ -35,10 +35,19 @@ pub(super) fn check_sdp(
     let mut violations = Vec::new();
     for (from_idx, deps) in graph.forward.iter().enumerate() {
         let from_name = &graph.modules[from_idx];
-        let from_inst = instability.get(from_name.as_str()).copied().unwrap_or(0.0);
+        // Skip edges whose modules are missing from `metrics` — defaulting
+        // to 0.0 would silently misclassify them as maximally stable and
+        // could emit bogus violations. In practice `metrics` is built from
+        // the same graph so this branch is unreachable; skipping keeps
+        // the invariant explicit if the two ever drift.
+        let Some(from_inst) = instability.get(from_name.as_str()).copied() else {
+            continue;
+        };
         for &to_idx in deps {
             let to_name = &graph.modules[to_idx];
-            let to_inst = instability.get(to_name.as_str()).copied().unwrap_or(0.0);
+            let Some(to_inst) = instability.get(to_name.as_str()).copied() else {
+                continue;
+            };
             // SDP violation: stable module depends on less stable module
             if from_inst < to_inst {
                 let suppressed = suppressed_modules.contains(from_name.as_str())

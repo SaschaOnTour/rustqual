@@ -130,7 +130,11 @@ pub fn analyze_module_srp(
                 count_independent_clusters(&free_fns, call_graph, config.min_cluster_statements);
 
             let has_length_warning = score > 0.0;
-            let has_cohesion_warning = cluster_count >= config.max_independent_clusters;
+            // Use strict `>` for consistency with the other `max_*`
+            // thresholds in this crate (max_cognitive, max_fan_in,
+            // max_function_lines etc. all treat the configured value
+            // as the highest allowed, warning only when exceeded).
+            let has_cohesion_warning = cluster_count > config.max_independent_clusters;
 
             if has_length_warning || has_cohesion_warning {
                 Some(ModuleSrpWarning {

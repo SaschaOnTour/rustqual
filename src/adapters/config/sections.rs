@@ -37,7 +37,12 @@ pub const DEFAULT_SRP_MAX_FAN_OUT: usize = 10;
 pub const DEFAULT_SRP_LCOM4_THRESHOLD: usize = 2;
 pub const DEFAULT_SRP_FILE_LENGTH_BASELINE: usize = 300;
 pub const DEFAULT_SRP_FILE_LENGTH_CEILING: usize = 800;
-pub const DEFAULT_SRP_MAX_INDEPENDENT_CLUSTERS: usize = 3;
+// Highest cluster count that still passes. A file with more than
+// this many independent function clusters is flagged as having
+// multiple responsibilities. Default `2` means 3+ clusters trigger
+// the warning — preserving the historical threshold now that the
+// comparison uses strict `>` consistent with other `max_*` fields.
+pub const DEFAULT_SRP_MAX_INDEPENDENT_CLUSTERS: usize = 2;
 pub const DEFAULT_SRP_MIN_CLUSTER_STATEMENTS: usize = 5;
 pub const DEFAULT_SRP_MAX_PARAMETERS: usize = 5;
 
