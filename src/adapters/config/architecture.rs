@@ -1,0 +1,224 @@
+//! Architecture-Dimension configuration structs.
+//!
+//! These structs deserialize the `[architecture]` section of rustqual.toml
+//! into Rust values. They are parse-only in v0.x — the Architecture-Dimension
+//! tool features are implemented progressively across phases, and the config
+//! structs exist from the start so the complete target architecture can be
+//! expressed in rustqual.toml from day one.
+//!
+//! Rule groups:
+//! - Layer rule: [architecture.layers] + [architecture.layers.<name>] + [architecture.external_crates]
+//! - Re-export policy: [architecture.reexport_points]
+//! - Forbidden edges: [[architecture.forbidden]]
+//! - Symbol rules: [[architecture.pattern]]
+//! - Trait-signature rules: [[architecture.trait_contract]]
+
+// Fields on these structs are deserialized but not yet read — the architecture
+// analyzer that consumes them is implemented progressively across Phases 1–9.
+// Tests exercise parsing (the public contract we care about in Phase 0).
+#![allow(dead_code)]
+
+use serde::Deserialize;
+use std::collections::HashMap;
+
+/// Root `[architecture]` config section.
+#[derive(Debug, Default, Deserialize, Clone)]
+#[serde(default, deny_unknown_fields)]
+pub struct ArchitectureConfig {
+    /// Master switch for the Architecture dimension. When `false`, all rules
+    /// below are ignored and the dimension contributes score 1.0 with zero
+    /// findings.
+    pub enabled: bool,
+
+    /// Layer definitions: `[architecture.layers]`.
+    pub layers: ArchitectureLayersConfig,
+
+    /// Re-export points: `[architecture.reexport_points]`.
+    pub reexport_points: ReexportPointsConfig,
+
+    /// External-crate layer mapping: `[architecture.external_crates]`.
+    /// Keys are crate names (glob patterns allowed), values are layer names.
+    pub external_crates: HashMap<String, String>,
+
+    /// Forbidden edges: `[[architecture.forbidden]]`.
+    #[serde(rename = "forbidden")]
+    pub forbidden_rules: Vec<ForbiddenRule>,
+
+    /// Symbol rules: `[[architecture.pattern]]`.
+    #[serde(rename = "pattern")]
+    pub patterns: Vec<SymbolPattern>,
+
+    /// Trait-signature rules: `[[architecture.trait_contract]]`.
+    #[serde(rename = "trait_contract")]
+    pub trait_contracts: Vec<TraitContract>,
+}
+
+/// `[architecture.layers]` — layer order + per-layer path definitions.
+///
+/// The `order` lists layer names from innermost (lowest rank, 0) to outermost
+/// (highest rank). Dynamic per-layer path maps like `[architecture.layers.domain]`
+/// are captured in `definitions` via `#[serde(flatten)]`.
+#[derive(Debug, Deserialize, Clone)]
+pub struct ArchitectureLayersConfig {
+    /// Layer names from innermost to outermost.
+    #[serde(default)]
+    pub order: Vec<String>,
+
+    /// Behavior for files not matched by any layer's `paths` glob.
+    /// Allowed values: "composition_root" | "strict_error".
+    #[serde(default = "default_unmatched_behavior")]
+    pub unmatched_behavior: String,
+
+    /// Per-layer path globs (dynamically named, e.g. `[architecture.layers.domain]`).
+    #[serde(flatten)]
+    pub definitions: HashMap<String, LayerPathsConfig>,
+}
+
+impl Default for ArchitectureLayersConfig {
+    fn default() -> Self {
+        Self {
+            order: Vec::new(),
+            unmatched_behavior: default_unmatched_behavior(),
+            definitions: HashMap::new(),
+        }
+    }
+}
+
+fn default_unmatched_behavior() -> String {
+    "composition_root".to_string()
+}
+
+/// `[architecture.layers.<name>]` — path globs assigning files to a layer.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct LayerPathsConfig {
+    /// File-path glob patterns that belong to this layer.
+    pub paths: Vec<String>,
+}
+
+/// `[architecture.reexport_points]` — files that may freely re-export across layers.
+///
+/// Default without this section: only `src/lib.rs` and `src/main.rs` are treated
+/// as re-export points. Other files must obey layer rules even for `pub use`.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(default, deny_unknown_fields)]
+pub struct ReexportPointsConfig {
+    /// File-path globs for files permitted as re-export points.
+    pub paths: Vec<String>,
+}
+
+impl Default for ReexportPointsConfig {
+    fn default() -> Self {
+        Self {
+            paths: vec!["src/lib.rs".to_string(), "src/main.rs".to_string()],
+        }
+    }
+}
+
+/// `[[architecture.forbidden]]` — paired glob prohibition.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct ForbiddenRule {
+    /// Files matching this glob must not import anything matching `to`.
+    pub from: String,
+    /// Target glob that is forbidden to be imported from `from`.
+    pub to: String,
+    /// Exceptions: imports matching these globs are allowed despite `to`.
+    #[serde(default)]
+    pub except: Vec<String>,
+    /// Human-readable reason for the rule.
+    pub reason: String,
+}
+
+/// `[[architecture.pattern]]` — symbol-level restriction.
+///
+/// Scope is XOR: exactly one of `allowed_in` or `forbidden_in` must be set.
+/// At least one matcher must be active.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct SymbolPattern {
+    /// Identifier for this rule, used in suppressions and SARIF output.
+    pub name: String,
+
+    // ── Scope (XOR) ────────────────────────────────────────────
+    /// Whitelist: symbol may only appear in these path globs.
+    #[serde(default)]
+    pub allowed_in: Option<Vec<String>>,
+    /// Blocklist: symbol must not appear in these path globs.
+    #[serde(default)]
+    pub forbidden_in: Option<Vec<String>>,
+    /// Fine-grained exceptions within the scope above.
+    #[serde(default)]
+    pub except: Vec<String>,
+
+    // ── Matchers (at least one must be active) ────────────────
+    /// Match any path reference starting with these prefixes (use/call/attribute/…).
+    #[serde(default)]
+    pub forbid_path_prefix: Option<Vec<String>>,
+    /// Match method calls (`.name(…)` and UFCS `Type::name(…)`).
+    #[serde(default)]
+    pub forbid_method_call: Option<Vec<String>>,
+    /// Match free-function and static-method calls (`name(…)` or `Path::name(…)`).
+    #[serde(default)]
+    pub forbid_function_call: Option<Vec<String>>,
+    /// Match macro invocations (`name!(…)`).
+    #[serde(default)]
+    pub forbid_macro_call: Option<Vec<String>>,
+    /// Match top-level items of specific kinds (e.g. "async_fn", "unsafe_fn",
+    /// "inline_cfg_test_module", "top_level_cfg_test_item").
+    #[serde(default)]
+    pub forbid_item_kind: Option<Vec<String>>,
+    /// Match derive annotations (`#[derive(Name)]`).
+    #[serde(default)]
+    pub forbid_derive: Option<Vec<String>>,
+    /// Match glob imports (`use foo::*`) when set to true.
+    #[serde(default)]
+    pub forbid_glob_import: Option<bool>,
+    /// Escape hatch: raw regex applied to AST-aware source (comments/strings masked).
+    #[serde(default)]
+    pub regex: Option<String>,
+
+    /// Human-readable reason for the rule.
+    pub reason: String,
+}
+
+/// `[[architecture.trait_contract]]` — structural checks on trait signatures.
+///
+/// At least one check field must be set.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct TraitContract {
+    /// Identifier for this rule, used in suppressions and SARIF output.
+    pub name: String,
+
+    /// Glob selecting files whose trait definitions are checked.
+    pub scope: String,
+
+    // ── Checks (at least one must be active) ──────────────────
+    /// Allowed receiver kinds: "shared_ref" | "mut_ref" | "owned" | "any".
+    #[serde(default)]
+    pub receiver_may_be: Option<Vec<String>>,
+    /// At least one parameter's rendered type must contain this substring.
+    #[serde(default)]
+    pub required_param_type_contains: Option<String>,
+    /// Return type must not contain any of these substrings.
+    #[serde(default)]
+    pub forbidden_return_type_contains: Option<Vec<String>>,
+    /// Error-enum variants must not contain any of these substrings.
+    #[serde(default)]
+    pub forbidden_error_variant_contains: Option<Vec<String>>,
+    /// Explicit list of types treated as "error types" (override naming default).
+    #[serde(default)]
+    pub error_types: Option<Vec<String>>,
+    /// All trait methods in scope must be `async fn`.
+    #[serde(default)]
+    pub methods_must_be_async: Option<bool>,
+    /// Traits in scope must be object-safe (conservative check).
+    #[serde(default)]
+    pub must_be_object_safe: Option<bool>,
+    /// Direct supertrait clause must contain these substrings (non-transitive).
+    #[serde(default)]
+    pub required_supertraits_contain: Option<Vec<String>>,
+}
+
+// ── Tests ──────────────────────────────────────────────────────

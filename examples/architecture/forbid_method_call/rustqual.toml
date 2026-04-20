@@ -1,0 +1,29 @@
+# Minimal rustqual.toml for the golden example.
+
+[weights]
+iosp         = 0.22
+complexity   = 0.18
+dry          = 0.13
+srp          = 0.18
+coupling     = 0.09
+test_quality = 0.10
+architecture = 0.10
+
+[architecture]
+enabled = true
+
+[architecture.layers]
+order = ["domain", "adapter"]
+unmatched_behavior = "composition_root"
+
+[architecture.layers.domain]
+paths = ["src/domain/**"]
+
+[architecture.layers.adapter]
+paths = ["src/adapters/**"]
+
+[[architecture.pattern]]
+name = "no_panic_helpers_in_production"
+forbid_method_call = ["unwrap", "expect"]
+forbidden_in = ["src/domain/**"]
+reason = "Domain propagates errors typed, never panics"

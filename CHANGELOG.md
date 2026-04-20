@@ -5,6 +5,108 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-04-20
+
+Clean-Architecture refactor and seventh quality dimension, **fully
+enforced** against rustqual's own codebase. **Breaking**: the
+`[weights]` config schema now has 7 fields instead of 6 (new `architecture`
+weight); projects with an explicit `[weights]` section must add it and
+re-balance so the weights sum to 1.0.
+
+Self-analysis: `cargo run -- . --fail-on-warnings --coverage coverage.lcov`
+reports 1805 functions, 100.0% quality score across all 7 dimensions,
+0 findings, 27 suppressions (qual:allow + `#[allow]`). 1114 tests pass.
+
+### Added
+- **Architecture dimension** — seventh quality dimension with four rule
+  types: Layer Rule (rank-based import ordering), Forbidden Rule
+  (from/to/except glob triplets), Symbol Patterns (7 matcher families:
+  `forbid_path_prefix`, `forbid_glob_import`, `forbid_method_call`,
+  `forbid_function_call`, `forbid_macro_call`, `forbid_item_kind`,
+  `forbid_derive`), and Trait-Signature Rule (7 checks:
+  `receiver_may_be`, `methods_must_be_async`, `forbidden_return_type_contains`,
+  `required_param_type_contains`, `required_supertraits_contain`,
+  `must_be_object_safe` conservative, `forbidden_error_variant_contains`).
+- **`--explain <FILE>` CLI mode** — diagnostic output per file showing
+  layer assignment, classified imports, and rule hits; makes config
+  tuning in new repos tractable.
+- **Golden example crates** at `examples/architecture/<rule>/` covering
+  every matcher and rule with fixture + minimal rustqual.toml + snapshot
+  test.
+
+### Changed — Clean-Architecture refactor
+- **Five-rank layered module structure** with explicit dependency
+  direction (`domain → port → infrastructure → analysis → application`):
+  - `src/domain/` — pure value types (`Dimension`, `Finding`,
+    `Severity`, `SourceUnit`, `Suppression`, `PERCENTAGE_MULTIPLIER`).
+    No `syn`, no I/O, no adapter-specific types.
+  - `src/ports/` — trait contracts (`DimensionAnalyzer`, `SourceLoader`,
+    `SuppressionParser`, `Reporter`). Carry `ParsedFile` DTOs.
+  - `src/adapters/config/`, `src/adapters/source/`,
+    `src/adapters/suppression/` — **infrastructure** adapters (I/O,
+    TOML parsing, filesystem, suppression parsing).
+  - `src/adapters/analyzers/` + `src/adapters/shared/` +
+    `src/adapters/report/` — **analysis** layer: the seven dimension
+    analyzers, their shared helpers (cfg-test detection, AST
+    normalization, use-tree walker), and the eight report renderers.
+    Reports sit at the same rank as analyzers so they may read rich
+    analyzer DTOs (FunctionAnalysis, DeadCodeWarning) without
+    ceremonial Finding-only projections.
+  - `src/app/` — **application** use-cases: `pipeline` (full-pipeline
+    orchestrator), `secondary` (per-dimension passes bundled through
+    `SecondaryContext`), `metrics`/`tq_metrics`/`structural_metrics`
+    (per-category helpers), `warnings` (complexity, leaf reclass,
+    suppression ratio), `exit_gates`, `setup`, `analyze_codebase`
+    (port-based).
+  - `src/cli/` (`mod`, `handlers`, `explain`) + `src/main.rs` +
+    `src/bin/cargo-qual/` + `src/lib.rs` + `tests/**` —
+    composition root / re-export points.
+- **Pipeline module dissolved** — the 1223-line `src/pipeline/` tree
+  from the Phase-1–4 era is now fully absorbed into `src/app/`; the
+  orchestrator is split between `pipeline.rs` (221 lines) and
+  `secondary.rs` (179 lines, one helper per dimension pass).
+- **Strict architecture enforcement** — `[architecture] enabled = true`,
+  `unmatched_behavior = "strict_error"` (every production file must be
+  in a layer). The full rule set runs in CI.
+- **Workspace-root `tests/**` now analyzed** — previously excluded
+  wholesale. Cargo's integration-test binaries are detected as
+  test-only files by `adapters/shared/cfg_test_files`, so
+  `is_test`-aware checks (LONG_FN, MAGIC_NUMBER, ERROR_HANDLING) skip
+  them correctly while dead-code and structural checks still apply.
+- **Test co-location** — every `#[cfg(test)] mod tests { … }` extracted
+  into `<dir>/tests/<name>.rs` companions. Production files report
+  honest length metrics (all < 500 lines, most < 300).
+- **Architecture analyzer wired through the port** — first dimension to
+  implement `DimensionAnalyzer`; `analyze_codebase` iterates
+  `&[Box<dyn DimensionAnalyzer>]`.
+- **7-dimension weights** (`[f64; 7]`): default
+  `iosp=0.22, complexity=0.18, dry=0.13, srp=0.18, coupling=0.09,
+  test_quality=0.10, architecture=0.10`.
+- **`test` → `test_quality` rename** in `[weights]` config (old `test`
+  field rejected with a deserialize error; migrate to `test_quality`).
+- **`allow_expect = false`** by default — consistent with the
+  architecture rule `no_panic_helpers_in_production`.
+
+### Fixed
+- **Cross-analyzer helper leakage** — `has_cfg_test`, `has_test_attr`,
+  and `DeclaredFunction`-related cfg-test-file detection moved from
+  `adapters/analyzers/dry/` into `adapters/shared/` so TQ and
+  structural analyzers no longer import DRY internals.
+- **Test-aware classification gap** — helper functions inside companion
+  `tests/` subtrees weren't always flagged as `is_test=true` (only
+  `#[test]`-attributed ones were). `Analyzer::with_cfg_test_files`
+  now initialises `in_test=true` for every function in a cfg-test
+  file, eliminating a class of false positives in complexity /
+  error-handling checks.
+- **Doc-duplicate `Config::load`** — `Config::load` now delegates to
+  `Config::load_from_file` after an ancestor-search helper
+  (`find_config_file`); removed the inline read+parse duplication.
+- **Panic-helper redundancy** — 7 `.expect()` / `unwrap!` /
+  `unreachable!` call sites in production code replaced with safe
+  fallbacks (`GlobSet::empty()`, `layer_and_rank_for_file` pairing,
+  `_ => continue` for non-exhaustive syn matches, `unwrap_or_else`
+  for infallible JSON serialization).
+
 ## [0.5.6] - 2026-04-16
 
 ### Changed

@@ -1,8 +1,8 @@
 [package]
 name = "rustqual"
-version = "0.5.6"
+version = "1.0.0"
 edition = "2021"
-description = "Comprehensive Rust code quality analyzer — six dimensions: Complexity, Coupling, DRY, IOSP, SRP, Test Quality"
+description = "Comprehensive Rust code quality analyzer — seven dimensions: IOSP, Complexity, DRY, SRP, Coupling, Test Quality, Architecture"
 license = "MIT"
 repository = "https://github.com/SaschaOnTour/rustqual"
 homepage = "https://github.com/SaschaOnTour/rustqual"
@@ -30,6 +30,7 @@ clap_complete = "4"
 derive_more = { version = "1", features = ["display"] }
 notify = "6"
 toon-encode = "0.1"
+thiserror = "2"
 
 [dev-dependencies]
 tempfile = "3"

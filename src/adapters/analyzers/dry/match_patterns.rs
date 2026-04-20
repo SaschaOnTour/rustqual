@@ -1,0 +1,280 @@
+use std::collections::HashMap;
+
+use syn::visit::Visit;
+
+use crate::adapters::analyzers::dry::FileVisitor;
+use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
+
+/// Minimum number of match arms for a match to be considered.
+const MIN_MATCH_ARMS: usize = 3;
+
+/// Minimum number of instances of the same match pattern to flag as repeated.
+const MIN_INSTANCES: usize = 3;
+
+/// A group of repeated match patterns found across functions.
+pub struct RepeatedMatchGroup {
+    pub enum_name: String,
+    pub entries: Vec<RepeatedMatchEntry>,
+    pub suppressed: bool,
+}
+
+/// A single occurrence of a repeated match pattern.
+pub struct RepeatedMatchEntry {
+    pub file: String,
+    pub line: usize,
+    pub function_name: String,
+    pub arm_count: usize,
+}
+
+/// Internal entry collected during AST walking.
+pub(crate) struct CollectedMatch {
+    pub(crate) file: String,
+    pub(crate) line: usize,
+    pub(crate) function_name: String,
+    pub(crate) arm_count: usize,
+    pub(crate) hash: u64,
+    pub(crate) enum_name: String,
+}
+
+/// AST visitor that collects match expressions for repeated pattern detection.
+struct MatchPatternCollector<'a> {
+    config: &'a crate::config::sections::DuplicatesConfig,
+    file: String,
+    collected: Vec<CollectedMatch>,
+    in_test: bool,
+    /// Fully-qualified current-function name (e.g. `outer::Type::method`)
+    /// so same-named items in different modules or impls aren't merged
+    /// in grouping.
+    current_fn: String,
+    /// Enclosing `impl Type` type name while visiting its methods; empty
+    /// for free functions.
+    current_impl_type: String,
+    /// Module-path stack (innermost last) from any enclosing inline
+    /// `mod` declarations. Used to qualify free functions and impl
+    /// types with their module prefix.
+    module_stack: Vec<String>,
+}
+
+impl FileVisitor for MatchPatternCollector<'_> {
+    fn reset_for_file(&mut self, file_path: &str) {
+        // Normalise separators for deterministic findings across OSes,
+        // matching the other DRY collectors (e.g. wildcards.rs).
+        self.file = file_path.replace('\\', "/");
+        self.in_test = false;
+        self.current_fn = String::new();
+        self.current_impl_type = String::new();
+        self.module_stack.clear();
+    }
+}
+
+/// Join `stack` with `::` and append `tail`. Empty stack → `tail` as-is.
+/// Operation: string-joining logic, no own calls.
+fn qualify_with_modules(stack: &[String], tail: &str) -> String {
+    if stack.is_empty() {
+        tail.to_string()
+    } else {
+        format!("{}::{}", stack.join("::"), tail)
+    }
+}
+
+impl<'ast> Visit<'ast> for MatchPatternCollector<'_> {
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        let qualified = qualify_with_modules(&self.module_stack, &node.sig.ident.to_string());
+        let prev = std::mem::replace(&mut self.current_fn, qualified);
+        let is_test = has_test_attr(&node.attrs);
+        if self.config.ignore_tests && (self.in_test || is_test) {
+            self.current_fn = prev;
+            return;
+        }
+        syn::visit::visit_item_fn(self, node);
+        self.current_fn = prev;
+    }
+
+    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+        let method = node.sig.ident.to_string();
+        // Compose `mod1::mod2::Type::method` (or shorter if the impl /
+        // module stack is empty).
+        let type_qualified = if self.current_impl_type.is_empty() {
+            method
+        } else {
+            format!("{}::{}", self.current_impl_type, method)
+        };
+        let qualified = qualify_with_modules(&self.module_stack, &type_qualified);
+        let prev = std::mem::replace(&mut self.current_fn, qualified);
+        let is_test = has_test_attr(&node.attrs);
+        if self.config.ignore_tests && (self.in_test || is_test) {
+            self.current_fn = prev;
+            return;
+        }
+        syn::visit::visit_impl_item_fn(self, node);
+        self.current_fn = prev;
+    }
+
+    fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
+        // Track the Self-type so nested methods render as `Type::method`.
+        let type_name = match &*node.self_ty {
+            syn::Type::Path(tp) => tp
+                .path
+                .segments
+                .last()
+                .map(|s| s.ident.to_string())
+                .unwrap_or_default(),
+            _ => String::new(),
+        };
+        let prev = std::mem::replace(&mut self.current_impl_type, type_name);
+        syn::visit::visit_item_impl(self, node);
+        self.current_impl_type = prev;
+    }
+
+    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+        let prev_in_test = self.in_test;
+        if has_cfg_test(&node.attrs) {
+            self.in_test = true;
+        }
+        // Push the module name only for inline modules — a bare
+        // `mod name;` declaration has `content == None` and its body
+        // lives in a separate file the outer walk visits separately.
+        let pushed = if node.content.is_some() {
+            self.module_stack.push(node.ident.to_string());
+            true
+        } else {
+            false
+        };
+        syn::visit::visit_item_mod(self, node);
+        if pushed {
+            self.module_stack.pop();
+        }
+        self.in_test = prev_in_test;
+    }
+
+    fn visit_expr_match(&mut self, node: &'ast syn::ExprMatch) {
+        if node.arms.len() >= MIN_MATCH_ARMS && !self.current_fn.is_empty() {
+            let normalize = |match_expr: &syn::ExprMatch| {
+                let stmt = syn::Stmt::Expr(syn::Expr::Match(match_expr.clone()), None);
+                let tokens = crate::adapters::shared::normalize::normalize_stmts(&[stmt]);
+                crate::adapters::shared::normalize::structural_hash(&tokens)
+            };
+            let hash = normalize(node);
+            let enum_name = extract_enum_name(node);
+            let line = node.match_token.span.start().line;
+
+            self.collected.push(CollectedMatch {
+                file: self.file.clone(),
+                line,
+                function_name: self.current_fn.clone(),
+                arm_count: node.arms.len(),
+                hash,
+                enum_name,
+            });
+        }
+        syn::visit::visit_expr_match(self, node);
+    }
+}
+
+/// Detect repeated match patterns across parsed files.
+/// Integration: creates collector, calls visit_all_files, calls group function.
+pub fn detect_repeated_matches(
+    parsed: &[(String, String, syn::File)],
+    config: &crate::config::sections::DuplicatesConfig,
+) -> Vec<RepeatedMatchGroup> {
+    let mut collector = MatchPatternCollector {
+        config,
+        file: String::new(),
+        collected: Vec::new(),
+        in_test: false,
+        current_fn: String::new(),
+        current_impl_type: String::new(),
+        module_stack: Vec::new(),
+    };
+    crate::adapters::analyzers::dry::visit_all_files(parsed, &mut collector);
+    group_repeated_patterns(collector.collected)
+}
+
+/// Group collected match entries by hash and filter to repeated patterns.
+/// Operation: hash grouping + filtering logic, no own calls.
+pub(crate) fn group_repeated_patterns(collected: Vec<CollectedMatch>) -> Vec<RepeatedMatchGroup> {
+    let mut groups: HashMap<u64, Vec<CollectedMatch>> = HashMap::new();
+    for entry in collected {
+        groups.entry(entry.hash).or_default().push(entry);
+    }
+
+    let mut result: Vec<RepeatedMatchGroup> = groups
+        .into_iter()
+        .filter(|(_hash, entries)| {
+            if entries.len() < MIN_INSTANCES {
+                return false;
+            }
+            let mut seen = std::collections::HashSet::new();
+            entries.iter().any(|e| !seen.insert(&e.function_name)) || seen.len() >= 2
+        })
+        .map(|(_hash, entries)| {
+            let enum_name = entries
+                .first()
+                .map(|e| e.enum_name.clone())
+                .unwrap_or_default();
+            let mut projected: Vec<RepeatedMatchEntry> = entries
+                .into_iter()
+                .map(|e| RepeatedMatchEntry {
+                    file: e.file,
+                    line: e.line,
+                    function_name: e.function_name,
+                    arm_count: e.arm_count,
+                })
+                .collect();
+            // Sort entries within each group by (file, line, function) so the
+            // snapshot order is stable regardless of visit order.
+            projected.sort_by(|a, b| {
+                a.file
+                    .cmp(&b.file)
+                    .then(a.line.cmp(&b.line))
+                    .then(a.function_name.cmp(&b.function_name))
+            });
+            RepeatedMatchGroup {
+                enum_name,
+                entries: projected,
+                suppressed: false,
+            }
+        })
+        .collect();
+
+    // Group ordering: most-repeated first, ties broken by enum_name and then
+    // by the first entry's location. Without these tie-breakers, HashMap
+    // iteration order leaks into the output.
+    result.sort_by(|a, b| {
+        b.entries
+            .len()
+            .cmp(&a.entries.len())
+            .then(a.enum_name.cmp(&b.enum_name))
+            .then_with(|| match (a.entries.first(), b.entries.first()) {
+                (Some(a0), Some(b0)) => a0.file.cmp(&b0.file).then(a0.line.cmp(&b0.line)),
+                (Some(_), None) => std::cmp::Ordering::Greater,
+                (None, Some(_)) => std::cmp::Ordering::Less,
+                (None, None) => std::cmp::Ordering::Equal,
+            })
+    });
+    result
+}
+
+/// Extract the enum name from a match expression's arm patterns (best effort).
+/// Operation: pattern matching on arm patterns, no own calls.
+pub(crate) fn extract_enum_name(match_expr: &syn::ExprMatch) -> String {
+    let from_path = |path: &syn::Path| -> Option<String> {
+        if path.segments.len() >= 2 {
+            Some(path.segments[path.segments.len() - 2].ident.to_string())
+        } else {
+            None
+        }
+    };
+    for arm in &match_expr.arms {
+        let name = match &arm.pat {
+            syn::Pat::Path(p) => from_path(&p.path),
+            syn::Pat::TupleStruct(ts) => from_path(&ts.path),
+            syn::Pat::Struct(ps) => from_path(&ps.path),
+            _ => None,
+        };
+        if let Some(n) = name {
+            return n;
+        }
+    }
+    "(unknown)".to_string()
+}

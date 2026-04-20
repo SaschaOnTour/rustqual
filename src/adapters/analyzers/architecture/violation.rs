@@ -1,0 +1,107 @@
+//! Shared value types for Architecture-Dimension matchers.
+//!
+//! A matcher returns zero or more `MatchLocation`s, each identifying one
+//! occurrence of a rule violation with enough context for reporting.
+
+/// The kind of match a matcher produced — mirrors the matcher identifier
+/// so the reporting layer can render rule-appropriate details.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ViolationKind {
+    /// Matched by `forbid_path_prefix`: a path beginning with a banned prefix.
+    PathPrefix {
+        /// The prefix that matched.
+        prefix: String,
+        /// The full rendered path that triggered the match.
+        rendered_path: String,
+    },
+    /// Matched by `forbid_glob_import`: a `use foo::*` glob import.
+    GlobImport {
+        /// The path preceding the `*` in the import.
+        base_path: String,
+    },
+    /// Matched by `forbid_method_call`: a call to a banned method name.
+    ///
+    /// Covers both direct dot-notation (`x.unwrap()`) and UFCS form
+    /// (`Option::unwrap(x)`), identified by the final path segment.
+    MethodCall {
+        /// The matched method name (the banned entry from the rule list).
+        name: String,
+        /// "direct" for `x.name(...)`, "ufcs" for `Type::name(...)`.
+        syntax: &'static str,
+    },
+    /// Matched by `forbid_macro_call`: a macro invocation `name!(...)`.
+    MacroCall {
+        /// The invoked macro's final path-segment name.
+        name: String,
+    },
+    /// Matched by `forbid_function_call`: a call to a banned fully-qualified path.
+    FunctionCall {
+        /// The full rendered path of the call target (e.g. `Box::new`).
+        rendered_path: String,
+    },
+    /// Matched by `forbid_item_kind`: a top-level item of a banned language kind.
+    ///
+    /// `kind` mirrors the config string (e.g. `"async_fn"`, `"unsafe_impl"`,
+    /// `"inline_cfg_test_module"`). `name` is the item's identifier when
+    /// the kind carries one (functions, modules, statics) — empty for
+    /// anonymous items like extern blocks.
+    ItemKind { kind: &'static str, name: String },
+    /// Matched by `forbid_derive`: a `#[derive(Name)]` containing a banned trait.
+    Derive {
+        /// The matched derive-trait name (e.g. `"Serialize"`).
+        trait_name: String,
+        /// The item (struct/enum/union) that carries the derive annotation.
+        item_name: String,
+    },
+    /// Layer rule: a file in `from_layer` imports from `to_layer` whose rank
+    /// is strictly greater (importing "outward" in the layer order is forbidden).
+    LayerViolation {
+        /// Layer of the importing file.
+        from_layer: String,
+        /// Layer of the imported module.
+        to_layer: String,
+        /// Rendered form of the offending import path (`crate::...` or external
+        /// crate prefix), for reporting.
+        imported_path: String,
+    },
+    /// Layer rule with `unmatched_behavior = "strict_error"`: a file matches
+    /// no layer glob and is not a declared re-export point.
+    UnmatchedLayer {
+        /// File-relative path reported as-is (the key used for glob matching).
+        file: String,
+    },
+    /// `[[architecture.forbidden]]` rule: a file whose path matches `from`
+    /// imports something resolving to a file matching `to` without an
+    /// `except` escape hatch.
+    ForbiddenEdge {
+        /// Reason string from the rule definition.
+        reason: String,
+        /// Rendered form of the offending import path for reporting.
+        imported_path: String,
+    },
+    /// `[[architecture.trait_contract]]` rule: a specific check failed for
+    /// a trait definition in scope.
+    TraitContract {
+        /// Name of the trait carrying the failed check.
+        trait_name: String,
+        /// Short identifier for which check fired (e.g. `"receiver"`,
+        /// `"async"`, `"return_type"`, `"supertrait"`, `"object_safety"`,
+        /// `"required_param"`, `"error_variant"`).
+        check: &'static str,
+        /// Human-readable detail for the report.
+        detail: String,
+    },
+}
+
+/// One concrete occurrence of a matcher hit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MatchLocation {
+    /// Source file path (as passed to the matcher).
+    pub file: String,
+    /// 1-based line number of the offending token.
+    pub line: usize,
+    /// 0-based column of the offending token.
+    pub column: usize,
+    /// Specific match details.
+    pub kind: ViolationKind,
+}
