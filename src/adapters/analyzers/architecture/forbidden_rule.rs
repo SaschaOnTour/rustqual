@@ -13,7 +13,7 @@
 //! name are skipped — their target has no crate-relative file path, and
 //! other architecture rules cover external crates.
 
-#![allow(dead_code)]
+#![cfg_attr(test, allow(dead_code))]
 
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use crate::adapters::shared::use_tree::gather_imports;

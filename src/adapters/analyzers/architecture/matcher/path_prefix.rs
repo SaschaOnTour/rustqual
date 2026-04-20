@@ -116,9 +116,11 @@ impl<'ast> Visit<'ast> for PathPrefixVisitor<'_> {
     fn visit_item_extern_crate(&mut self, node: &'ast syn::ItemExternCrate) {
         let name = node.ident.to_string();
         for prefix in self.prefixes {
-            // `extern crate foo` matches prefix "foo" or "foo::".
+            // `extern crate foo` only exposes a single crate identifier
+            // — no `::` sub-paths are possible here, so an equality
+            // check against the normalised prefix is sufficient.
             let normalised = prefix.trim_end_matches("::");
-            if name == normalised || name.starts_with(&format!("{normalised}::")) {
+            if name == normalised {
                 let start = node.ident.span().start();
                 self.hits.push(MatchLocation {
                     file: self.file.to_string(),

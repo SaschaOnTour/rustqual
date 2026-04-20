@@ -23,7 +23,7 @@
 //! Phase-3 scope. `super::`-relative resolution and more refined
 //! `crate::<seg>::<sub>` sub-segment layering are deferred.
 
-#![allow(dead_code)]
+#![cfg_attr(test, allow(dead_code))]
 
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use crate::adapters::shared::use_tree::gather_imports;

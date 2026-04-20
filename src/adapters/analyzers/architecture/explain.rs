@@ -10,7 +10,7 @@
 //! The data shape (`ExplainReport`) is the testable contract; `render` turns
 //! it into the text the CLI prints.
 
-#![allow(dead_code)]
+#![cfg_attr(test, allow(dead_code))]
 
 use crate::adapters::analyzers::architecture::compiled::CompiledArchitecture;
 use crate::adapters::analyzers::architecture::forbidden_rule::{

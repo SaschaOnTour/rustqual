@@ -73,13 +73,16 @@ pub(crate) fn build_field_method_index<'a>(
 
     let mut field_to_methods: HashMap<&str, Vec<usize>> = HashMap::new();
     methods.iter().enumerate().for_each(|(i, m)| {
-        let mut fields_to_add: Vec<&str> = if m.is_constructor {
-            struct_fields.iter().map(|f| f.as_str()).collect()
+        // HashSet dedupes fields that show up in both the direct access
+        // set and via one-or-more self-method calls — avoids pushing
+        // the same method index multiple times for the same field.
+        let mut fields_to_add: HashSet<&str> = if m.is_constructor {
+            struct_fields.iter().map(String::as_str).collect()
         } else {
             m.field_accesses
                 .iter()
-                .filter(|f| struct_field_set.contains(f.as_str()))
-                .map(|f| f.as_str())
+                .map(String::as_str)
+                .filter(|f| struct_field_set.contains(f))
                 .collect()
         };
         // Resolve self-method calls: add callee's direct field accesses
@@ -87,8 +90,11 @@ pub(crate) fn build_field_method_index<'a>(
             if let Some(callee_fields) = direct_fields.get(callee.as_str()) {
                 callee_fields
                     .iter()
-                    .filter(|f| struct_field_set.contains(f.as_str()))
-                    .for_each(|f| fields_to_add.push(f.as_str()));
+                    .map(String::as_str)
+                    .filter(|f| struct_field_set.contains(f))
+                    .for_each(|f| {
+                        fields_to_add.insert(f);
+                    });
             }
         });
         fields_to_add.iter().for_each(|&field| {

@@ -5,7 +5,7 @@
 //! `CompiledArchitecture` that the layer rule, forbidden rule, and the
 //! `--explain` diagnostic all share.
 
-#![allow(dead_code)]
+#![cfg_attr(test, allow(dead_code))]
 
 use crate::adapters::analyzers::architecture::forbidden_rule::CompiledForbiddenRule;
 use crate::adapters::analyzers::architecture::layer_rule::{LayerDefinitions, UnmatchedBehavior};
