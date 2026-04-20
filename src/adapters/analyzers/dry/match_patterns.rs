@@ -42,13 +42,17 @@ struct MatchPatternCollector<'a> {
     file: String,
     collected: Vec<CollectedMatch>,
     in_test: bool,
-    /// For impl methods this holds the qualified form `Type::method` so
-    /// same-named methods across different `impl` blocks (e.g. two
-    /// `fn new()` bodies) aren't silently merged in grouping.
+    /// Fully-qualified current-function name (e.g. `outer::Type::method`)
+    /// so same-named items in different modules or impls aren't merged
+    /// in grouping.
     current_fn: String,
     /// Enclosing `impl Type` type name while visiting its methods; empty
     /// for free functions.
     current_impl_type: String,
+    /// Module-path stack (innermost last) from any enclosing inline
+    /// `mod` declarations. Used to qualify free functions and impl
+    /// types with their module prefix.
+    module_stack: Vec<String>,
 }
 
 impl FileVisitor for MatchPatternCollector<'_> {
@@ -59,13 +63,24 @@ impl FileVisitor for MatchPatternCollector<'_> {
         self.in_test = false;
         self.current_fn = String::new();
         self.current_impl_type = String::new();
+        self.module_stack.clear();
+    }
+}
+
+/// Join `stack` with `::` and append `tail`. Empty stack → `tail` as-is.
+/// Operation: string-joining logic, no own calls.
+fn qualify_with_modules(stack: &[String], tail: &str) -> String {
+    if stack.is_empty() {
+        tail.to_string()
+    } else {
+        format!("{}::{}", stack.join("::"), tail)
     }
 }
 
 impl<'ast> Visit<'ast> for MatchPatternCollector<'_> {
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
-        let prev = std::mem::take(&mut self.current_fn);
-        self.current_fn = node.sig.ident.to_string();
+        let qualified = qualify_with_modules(&self.module_stack, &node.sig.ident.to_string());
+        let prev = std::mem::replace(&mut self.current_fn, qualified);
         let is_test = has_test_attr(&node.attrs);
         if self.config.ignore_tests && (self.in_test || is_test) {
             self.current_fn = prev;
@@ -77,11 +92,14 @@ impl<'ast> Visit<'ast> for MatchPatternCollector<'_> {
 
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
         let method = node.sig.ident.to_string();
-        let qualified = if self.current_impl_type.is_empty() {
+        // Compose `mod1::mod2::Type::method` (or shorter if the impl /
+        // module stack is empty).
+        let type_qualified = if self.current_impl_type.is_empty() {
             method
         } else {
             format!("{}::{}", self.current_impl_type, method)
         };
+        let qualified = qualify_with_modules(&self.module_stack, &type_qualified);
         let prev = std::mem::replace(&mut self.current_fn, qualified);
         let is_test = has_test_attr(&node.attrs);
         if self.config.ignore_tests && (self.in_test || is_test) {
@@ -113,7 +131,19 @@ impl<'ast> Visit<'ast> for MatchPatternCollector<'_> {
         if has_cfg_test(&node.attrs) {
             self.in_test = true;
         }
+        // Push the module name only for inline modules — a bare
+        // `mod name;` declaration has `content == None` and its body
+        // lives in a separate file the outer walk visits separately.
+        let pushed = if node.content.is_some() {
+            self.module_stack.push(node.ident.to_string());
+            true
+        } else {
+            false
+        };
         syn::visit::visit_item_mod(self, node);
+        if pushed {
+            self.module_stack.pop();
+        }
         self.in_test = prev_in_test;
     }
 
@@ -154,6 +184,7 @@ pub fn detect_repeated_matches(
         in_test: false,
         current_fn: String::new(),
         current_impl_type: String::new(),
+        module_stack: Vec::new(),
     };
     crate::adapters::analyzers::dry::visit_all_files(parsed, &mut collector);
     group_repeated_patterns(collector.collected)
