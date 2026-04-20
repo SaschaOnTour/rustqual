@@ -106,9 +106,7 @@ fn has_matching_finding(
 fn mode_accepts(sup_line: usize, finding_line: usize, mode: MatchMode) -> bool {
     match mode {
         MatchMode::FileScope => true,
-        MatchMode::LineWindow(n) => {
-            finding_line >= sup_line && finding_line - sup_line <= n
-        }
+        MatchMode::LineWindow(n) => finding_line >= sup_line && finding_line - sup_line <= n,
     }
 }
 
@@ -131,14 +129,13 @@ fn enumerate_finding_positions(
     config: &crate::config::Config,
 ) -> HashMap<String, Vec<FindingPosition>> {
     let mut out: HashMap<String, Vec<FindingPosition>> = HashMap::new();
-    let mut push =
-        |file: &str, line: usize, dim: crate::findings::Dimension, mode: MatchMode| {
-            if !file.is_empty() {
-                out.entry(file.to_string())
-                    .or_default()
-                    .push(FindingPosition { line, dim, mode });
-            }
-        };
+    let mut push = |file: &str, line: usize, dim: crate::findings::Dimension, mode: MatchMode| {
+        if !file.is_empty() {
+            out.entry(file.to_string())
+                .or_default()
+                .push(FindingPosition { line, dim, mode });
+        }
+    };
     collect_iosp_complexity_positions(analysis, config, &mut push);
     collect_dry_positions(analysis, &mut push);
     collect_srp_positions(analysis, &mut push);
@@ -261,9 +258,14 @@ fn push_magic_numbers<F>(
         return;
     }
     let mode = MatchMode::LineWindow(WINDOW_IOSP_COMPLEXITY_DRY);
-    c.magic_numbers
-        .iter()
-        .for_each(|m| push(&f.file, m.line, crate::findings::Dimension::Complexity, mode));
+    c.magic_numbers.iter().for_each(|m| {
+        push(
+            &f.file,
+            m.line,
+            crate::findings::Dimension::Complexity,
+            mode,
+        )
+    });
 }
 
 /// Positions for DRY findings (duplicates, dead code, fragments,
@@ -368,8 +370,12 @@ where
     F: FnMut(&str, usize, crate::findings::Dimension, MatchMode),
 {
     use crate::findings::Dimension;
-    analysis
-        .architecture_findings
-        .iter()
-        .for_each(|f| push(&f.file, f.line, Dimension::Architecture, MatchMode::FileScope));
+    analysis.architecture_findings.iter().for_each(|f| {
+        push(
+            &f.file,
+            f.line,
+            Dimension::Architecture,
+            MatchMode::FileScope,
+        )
+    });
 }
