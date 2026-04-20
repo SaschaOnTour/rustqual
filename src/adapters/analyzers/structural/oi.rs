@@ -3,8 +3,13 @@ use crate::findings::Dimension;
 
 use super::{StructuralMetadata, StructuralWarning, StructuralWarningKind};
 
-/// Detect orphaned impls: inherent impl in different file than type definition.
-/// Operation: compares impl file against type definition file.
+/// Detect orphaned impls: inherent impl in a different **top-level
+/// module** than the type definition (sibling files under the same
+/// module — e.g. `analyzer/mod.rs` and `analyzer/types.rs` — are
+/// intentionally allowed). Impls in entirely different modules are
+/// flagged as "defined elsewhere".
+/// Operation: compares top-level modules derived from the impl's and
+/// type-def's file paths via `coupling::file_to_module`.
 pub(crate) fn detect_oi(
     warnings: &mut Vec<StructuralWarning>,
     meta: &StructuralMetadata,

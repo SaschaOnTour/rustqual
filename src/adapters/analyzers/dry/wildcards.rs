@@ -61,8 +61,11 @@ impl<'ast> Visit<'ast> for WildcardCollector {
                     stack.push((new_prefix, &p.tree));
                 }
                 syn::UseTree::Glob(_) => {
-                    // Skip `use super::*` in test modules
-                    if self.in_test && prefix.first().is_some_and(|p| p == "super") {
+                    // Skip the bare `use super::*` in test modules
+                    // (common pattern to pull everything from the
+                    // enclosing module into the test scope). Deeper
+                    // wildcards like `use super::foo::*` still trigger.
+                    if self.in_test && prefix.as_slice() == ["super"] {
                         continue;
                     }
                     // Skip wildcard imports in files under any `tests/`
