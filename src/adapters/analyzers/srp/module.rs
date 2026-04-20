@@ -157,21 +157,58 @@ pub fn analyze_module_srp(
 /// `#[cfg(test)]` attribute. Stops on any line that begins with
 /// `#[cfg(test)]` so both the multi-line form
 /// (`#[cfg(test)]\nmod tests { … }`) and the single-line form
-/// (`#[cfg(test)] mod tests { … }`) are handled.
-/// Operation: string scanning logic, no own calls.
+/// (`#[cfg(test)] mod tests { … }`) are handled. Blank lines, `//`
+/// line comments, and the body of `/* … */` block comments (including
+/// their opening / closing lines) do not count.
+/// Operation: per-line classification with a block-comment state flag.
 pub(crate) fn count_production_lines(source: &str) -> usize {
     let mut count = 0;
+    let mut in_block_comment = false;
     for line in source.lines() {
         let trimmed = line.trim();
-        if trimmed.starts_with("#[cfg(test)]") {
+        if !in_block_comment && trimmed.starts_with("#[cfg(test)]") {
             break;
         }
-        // Skip blank lines and pure comment lines
-        if !trimmed.is_empty() && !trimmed.starts_with("//") {
-            count += 1;
+        if is_noise_line(trimmed, &mut in_block_comment) {
+            continue;
         }
+        count += 1;
     }
     count
+}
+
+/// Classify a trimmed line as non-production (blank / comment) vs code.
+/// Tracks multi-line `/* … */` state via `in_block_comment` — lines
+/// inside a block comment are non-production, the line that opens
+/// `/*` is non-production regardless of what follows, and the line
+/// that closes `*/` is non-production too.
+/// Operation: heuristic string inspection + state update.
+fn is_noise_line(trimmed: &str, in_block_comment: &mut bool) -> bool {
+    if trimmed.is_empty() {
+        return true;
+    }
+    if *in_block_comment {
+        if trimmed.contains("*/") {
+            *in_block_comment = false;
+        }
+        return true;
+    }
+    if trimmed.starts_with("//") {
+        return true;
+    }
+    if trimmed.starts_with("/*") {
+        // Opening of a block comment — anything after `*/` on the
+        // same line we conservatively still treat as comment-only.
+        if !trimmed.contains("*/") {
+            *in_block_comment = true;
+        }
+        return true;
+    }
+    // Interior `*` lines (doc-style block-comment bodies).
+    if trimmed.starts_with('*') {
+        return true;
+    }
+    false
 }
 
 /// Compute file length penalty score.

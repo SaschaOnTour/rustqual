@@ -50,6 +50,30 @@ fn test_count_production_lines_stops_on_cfg_test_with_trailing_whitespace() {
 }
 
 #[test]
+fn test_count_production_lines_skips_block_comment() {
+    // Multi-line `/* … */` block: opening line, body lines, and
+    // closing line are all non-production.
+    let source = "\
+/*
+ * A multi-line block comment.
+ * Spans several lines.
+ */
+fn foo() {}
+";
+    assert_eq!(
+        count_production_lines(source),
+        1,
+        "only `fn foo() {{}}` is production"
+    );
+}
+
+#[test]
+fn test_count_production_lines_skips_single_line_block_comment() {
+    let source = "/* header */\nfn foo() {}\nfn bar() {}\n";
+    assert_eq!(count_production_lines(source), 2);
+}
+
+#[test]
 fn test_count_production_lines_empty() {
     assert_eq!(count_production_lines(""), 0);
 }

@@ -75,8 +75,11 @@ impl<'ast> Visit<'ast> for WildcardCollector {
                     if self.file.starts_with("tests/") || self.file.contains("/tests/") {
                         continue;
                     }
-                    // Skip `prelude::*` paths
-                    if prefix.last().is_some_and(|p| p == "prelude") {
+                    // Skip any prelude wildcard: matches the bare
+                    // `prelude::*` and versioned forms like
+                    // `std::prelude::v1::*` or `crate::prelude::rust_2024::*`
+                    // where `prelude` sits in the middle of the path.
+                    if prefix.iter().any(|p| p == "prelude") {
                         continue;
                     }
                     let path = if prefix.is_empty() {
