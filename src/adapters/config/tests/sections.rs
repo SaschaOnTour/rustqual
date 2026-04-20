@@ -138,7 +138,6 @@ fn test_weights_config_deserialize() {
     assert!((w.architecture - 0.10).abs() < f64::EPSILON);
 }
 
-// qual:allow(dry) reason: "parsing test against legacy v0.5.x field is unique"
 #[test]
 fn test_weights_config_rejects_legacy_test_field() {
     // v1.0 Breaking Change: `test` was renamed to `test_quality`.

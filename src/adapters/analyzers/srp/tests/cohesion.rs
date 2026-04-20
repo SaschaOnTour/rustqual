@@ -405,3 +405,141 @@ fn test_lcom4_self_method_call_resolves_field_access() {
         "Methods sharing field via self.conn() call should be one component"
     );
 }
+
+// ── End-to-end collector tests exercising MethodBodyVisitor ──────
+
+/// Run the full SRP method collection path and return method data for a
+/// single struct, so assertions can see exactly what `MethodBodyVisitor`
+/// produces from real source. Bug 2 root cause was that `MethodBodyVisitor`
+/// didn't descend into macro token streams, so `self.validate()` inside
+/// `debug_assert!(...)` was invisible to LCOM4.
+fn collect_methods_for(code: &str) -> Vec<MethodFieldData> {
+    let syntax = syn::parse_file(code).expect("parse test fixture");
+    let parsed = vec![("test.rs".to_string(), code.to_string(), syntax)];
+    let mut result = Vec::new();
+    let mut collector = crate::adapters::analyzers::srp::ImplMethodCollector {
+        file: String::new(),
+        methods: &mut result,
+    };
+    crate::adapters::analyzers::dry::visit_all_files(&parsed, &mut collector);
+    result
+}
+
+#[test]
+fn method_body_visitor_sees_self_calls_inside_debug_assert_macro() {
+    let code = r#"
+        struct Storage { buf: usize, active: bool }
+        impl Storage {
+            fn seq_len(&self) -> usize { self.buf }
+            fn validate(&self) -> bool { self.active && self.buf > 0 }
+            fn append(&mut self, n: usize) {
+                self.buf = n;
+                self.active = true;
+                debug_assert!(self.validate());
+            }
+        }
+    "#;
+    let methods = collect_methods_for(code);
+    let append = methods
+        .iter()
+        .find(|m| m.method_name == "append")
+        .expect("append collected");
+    assert!(
+        append.self_method_calls.contains("validate"),
+        "append should see self.validate() inside debug_assert!, got: {:?}",
+        append.self_method_calls
+    );
+}
+
+#[test]
+fn lcom4_unites_methods_linked_via_debug_assert_macro() {
+    // Bug 2 reproducer. `append` only writes `extra`, which no other
+    // method touches — so field-sharing alone cannot unite the clusters.
+    // The sole link is `debug_assert!(self.validate())`, which lives in
+    // a macro token stream. Without visit_macro on MethodBodyVisitor,
+    // LCOM4 reports 2 clusters ({readers+validate}, {append}).
+    let code = r#"
+        struct Store {
+            a: usize,
+            b: usize,
+            extra: bool,
+        }
+        impl Store {
+            fn read_a(&self) -> usize { self.a }
+            fn read_b(&self) -> usize { self.b }
+            fn validate(&self) -> bool { self.a > 0 && self.b > 0 }
+            fn append(&mut self, flag: bool) {
+                self.extra = flag;
+                debug_assert!(self.validate());
+            }
+        }
+    "#;
+    let syntax = syn::parse_file(code).expect("parse fixture");
+    let parsed = vec![("test.rs".to_string(), code.to_string(), syntax)];
+    let analysis = crate::adapters::analyzers::srp::analyze_srp(
+        &parsed,
+        &SrpConfig {
+            smell_threshold: 0.0,
+            ..SrpConfig::default()
+        },
+        &HashMap::new(),
+    );
+    let w = analysis
+        .struct_warnings
+        .iter()
+        .find(|w| w.struct_name == "Store")
+        .expect("Store warning collected (smell_threshold=0)");
+    assert_eq!(
+        w.lcom4, 1,
+        "Macro-linked methods should form one cluster, got {}",
+        w.lcom4
+    );
+}
+
+#[test]
+fn lcom4_unites_methods_via_assert_eq_macro() {
+    let code = r#"
+        struct Pair { a: i32, b: i32 }
+        impl Pair {
+            fn a(&self) -> i32 { self.a }
+            fn b(&self) -> i32 { self.b }
+            fn check(&self) {
+                assert_eq!(self.a(), self.b());
+            }
+        }
+    "#;
+    let methods = collect_methods_for(code);
+    let check = methods
+        .iter()
+        .find(|m| m.method_name == "check")
+        .expect("check collected");
+    assert!(
+        check.self_method_calls.contains("a") && check.self_method_calls.contains("b"),
+        "check should see both self.a() and self.b() inside assert_eq!, got: {:?}",
+        check.self_method_calls
+    );
+}
+
+#[test]
+fn lcom4_unites_methods_via_format_macro_call_edge() {
+    let code = r#"
+        struct View { title: String, body: String }
+        impl View {
+            fn title(&self) -> &str { &self.title }
+            fn body(&self) -> &str { &self.body }
+            fn render(&self) -> String {
+                format!("{} — {}", self.title(), self.body())
+            }
+        }
+    "#;
+    let methods = collect_methods_for(code);
+    let render = methods
+        .iter()
+        .find(|m| m.method_name == "render")
+        .expect("render collected");
+    assert!(
+        render.self_method_calls.contains("title") && render.self_method_calls.contains("body"),
+        "render should see self.title()/self.body() inside format!, got: {:?}",
+        render.self_method_calls
+    );
+}

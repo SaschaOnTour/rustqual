@@ -76,6 +76,35 @@ fn test_api_marker_not_counted_as_suppression() {
     assert!(parse_suppression(1, "// qual:api").is_none());
 }
 
+// ── Test-helper marker tests ─────────────────────────────────
+
+#[test]
+fn test_test_helper_marker_exact() {
+    assert!(is_test_helper_marker("// qual:test_helper"));
+}
+
+#[test]
+fn test_test_helper_marker_with_trailing_text() {
+    assert!(is_test_helper_marker(
+        "// qual:test_helper shared asserter"
+    ));
+}
+
+#[test]
+fn test_test_helper_marker_not_plural() {
+    assert!(!is_test_helper_marker("// qual:test_helpers"));
+}
+
+#[test]
+fn test_test_helper_marker_not_api() {
+    assert!(!is_test_helper_marker("// qual:api"));
+}
+
+#[test]
+fn test_test_helper_marker_not_counted_as_suppression() {
+    assert!(parse_suppression(1, "// qual:test_helper").is_none());
+}
+
 #[test]
 fn test_inverse_marker_parsed() {
     assert_eq!(

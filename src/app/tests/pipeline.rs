@@ -248,6 +248,7 @@ fn test_output_results_text_no_panic() {
         tq: None,
         structural: None,
         architecture_findings: vec![],
+        orphan_suppressions: vec![],
     };
     output_results(
         &analysis,

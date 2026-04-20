@@ -8,10 +8,10 @@ const MIN_REPETITIVE_MATCH_ARMS: usize = 4;
 /// Repetitive match arms in these functions map inputs to outputs by design.
 const CONVERSION_FN_NAMES: &[&str] = &["from_str", "from_str_opt", "from", "try_from", "fmt"];
 
+// qual:allow(complexity) reason: "match expression detection with closure-based body check"
 /// Detect match expressions with many arms that all follow the same
 /// pattern (enum-to-enum mapping).
 /// Operation: body inspection logic; helper calls in closures.
-// qual:allow(complexity) reason: "match expression detection with closure-based body check"
 pub(super) fn check_repetitive_match(
     parsed: &[(String, String, syn::File)],
     config: &BoilerplateConfig,

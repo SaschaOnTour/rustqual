@@ -35,6 +35,8 @@ fn warn_suppression_ratio(summary: &Summary, max_ratio: f64) {
 }
 
 /// Return Err(1) iff `--fail-on-warnings` is set and there are warnings.
+/// Orphan `qual:allow` markers are emitted as ORPHAN_SUPPRESSION
+/// findings and handled through the normal finding-count path.
 /// Operation: conditional check.
 pub(crate) fn check_fail_on_warnings(config: &Config, summary: &Summary) -> Result<(), i32> {
     if config.fail_on_warnings && summary.suppression_ratio_exceeded {

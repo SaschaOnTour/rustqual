@@ -35,7 +35,7 @@ pub(super) fn mark_coupling_suppressions(
             sups.iter()
                 .any(|s| s.covers(crate::findings::Dimension::Coupling))
         })
-        .map(|(path, _)| crate::adapters::analyzers::coupling::file_to_module(path))
+        .map(|(path, _)| crate::adapters::shared::file_to_module::file_to_module(path))
         .collect();
 
     for m in &mut analysis.metrics {
@@ -85,6 +85,14 @@ pub(super) fn run_guarded_detection<T>(
     detect(parsed, config)
 }
 
+/// Per-file line numbers of the two annotation markers that DRY/TQ care
+/// about: `// qual:api` (excludes from dead-code + untested) and
+/// `// qual:test_helper` (same exclusions, different rationale).
+pub(super) struct AnnotationLines<'a> {
+    pub(super) api: &'a std::collections::HashMap<String, std::collections::HashSet<usize>>,
+    pub(super) test_helper: &'a std::collections::HashMap<String, std::collections::HashSet<usize>>,
+}
+
 /// Results from all DRY detection passes.
 pub(super) struct DryResults {
     pub(super) duplicates: Vec<crate::adapters::analyzers::dry::functions::DuplicateGroup>,
@@ -101,7 +109,7 @@ pub(super) fn run_dry_detection(
     parsed: &[(String, String, syn::File)],
     config: &Config,
     suppression_lines: &std::collections::HashMap<String, Vec<Suppression>>,
-    api_lines: &std::collections::HashMap<String, std::collections::HashSet<usize>>,
+    annotation_lines: &AnnotationLines<'_>,
     cfg_test_files: &std::collections::HashSet<String>,
 ) -> DryResults {
     let duplicates = run_guarded_detection(
@@ -119,7 +127,8 @@ pub(super) fn run_dry_detection(
             crate::adapters::analyzers::dry::dead_code::detect_dead_code(
                 p,
                 c,
-                api_lines,
+                annotation_lines.api,
+                annotation_lines.test_helper,
                 cfg_test_files,
             )
         },
@@ -320,15 +329,20 @@ pub(super) fn apply_parameter_warnings(
 ) {
     let Some(srp) = srp else { return };
     let max = config.max_parameters;
+    // Emit warnings for every over-threshold function and mark
+    // suppressed ones explicitly; don't filter suppressed out of the
+    // collection. This way the orphan-suppression checker can see that
+    // a `// qual:allow(srp)` marker did have a target (it just
+    // preemptively silenced the finding).
     srp.param_warnings = results
         .iter()
-        .filter(|fa| !fa.suppressed && !fa.is_trait_impl && fa.parameter_count > max)
+        .filter(|fa| !fa.is_trait_impl && fa.parameter_count > max)
         .map(|fa| crate::adapters::analyzers::srp::ParamSrpWarning {
             function_name: fa.qualified_name.clone(),
             file: fa.file.clone(),
             line: fa.line,
             parameter_count: fa.parameter_count,
-            suppressed: false,
+            suppressed: fa.suppressed,
         })
         .collect();
 }

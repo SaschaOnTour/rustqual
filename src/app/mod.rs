@@ -12,6 +12,7 @@ mod architecture;
 pub(crate) mod dry_suppressions;
 pub(crate) mod exit_gates;
 pub(crate) mod metrics;
+pub(crate) mod orphan_suppressions;
 pub(crate) mod pipeline;
 pub(crate) mod secondary;
 pub(crate) mod setup;

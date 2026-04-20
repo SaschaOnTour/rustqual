@@ -98,7 +98,14 @@ pub(crate) fn run_analysis(
     let architecture_findings =
         collect_architecture_findings(parsed, config, &suppression_lines, &mut summary);
     finalize_summary(&mut summary, config, &suppression_lines, parsed);
-    build_result(&mut all_results, summary, secondary, architecture_findings)
+    let mut result = build_result(&mut all_results, summary, secondary, architecture_findings);
+    result.orphan_suppressions = crate::app::orphan_suppressions::detect_orphan_suppressions(
+        &suppression_lines,
+        &result,
+        config,
+    );
+    result.summary.orphan_suppressions = result.orphan_suppressions.len();
+    result
 }
 
 /// Assemble the final AnalysisResult. The `_results` parameter is &mut to
@@ -124,6 +131,7 @@ fn build_result(
         tq: secondary.tq,
         structural: secondary.structural,
         architecture_findings,
+        orphan_suppressions: Vec::new(),
     }
 }
 
