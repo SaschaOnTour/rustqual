@@ -161,8 +161,9 @@ pub(super) fn check_object_safety(
 }
 
 /// Flag enum variants of the trait's error return type that match forbidden substrings.
-/// Variants of each referenced error enum are rendered once per
-/// (trait, rule), not once per method.
+/// Dedupes by (error_name, forbidden_substring) so a single enum only
+/// produces one hit per forbidden match, regardless of how many methods
+/// use that error type.
 pub(super) fn check_error_variants(
     site: &TraitSite<'_>,
     rule: &CompiledTraitContract,
@@ -171,35 +172,43 @@ pub(super) fn check_error_variants(
     if rule.forbidden_error_variant_contains.is_empty() {
         return;
     }
-    let mut variant_cache: std::collections::HashMap<String, Vec<String>> =
-        std::collections::HashMap::new();
-    site.methods.iter().for_each(|m| {
-        let Some(error_name) = extract_error_name(&m.sig.output, &rule.error_types) else {
-            return;
-        };
-        let rendered_variants = variant_cache.entry(error_name.clone()).or_insert_with(|| {
-            find_enum_in_file(site.ast, &error_name)
-                .map(|e| {
-                    e.variants
-                        .iter()
-                        .flat_map(|v| v.fields.iter().map(|f| render_type(&f.ty)))
-                        .collect()
-                })
-                .unwrap_or_default()
-        });
-        rendered_variants.iter().for_each(|rendered| {
+    let distinct_errors: std::collections::HashSet<String> = site
+        .methods
+        .iter()
+        .filter_map(|m| extract_error_name(&m.sig.output, &rule.error_types))
+        .collect();
+    distinct_errors.iter().for_each(|error_name| {
+        let variants = render_enum_field_types(site.ast, error_name);
+        let mut reported: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        variants.iter().for_each(|rendered| {
             rule.forbidden_error_variant_contains
                 .iter()
                 .filter(|s| rendered.contains(s.as_str()))
                 .for_each(|s| {
-                    out.push(hit(
-                        site,
-                        "error_variant",
-                        format!("{error_name} variant contains {s:?}"),
-                    ));
+                    if reported.insert(s.as_str()) {
+                        out.push(hit(
+                            site,
+                            "error_variant",
+                            format!("{error_name} variant contains {s:?}"),
+                        ));
+                    }
                 });
         });
     });
+}
+
+/// Render every field type of every variant of `error_name` as declared
+/// in the trait's own file. Empty if the enum is not found locally.
+/// Operation: AST walk + type rendering, no own calls.
+fn render_enum_field_types(ast: &syn::File, error_name: &str) -> Vec<String> {
+    find_enum_in_file(ast, error_name)
+        .map(|e| {
+            e.variants
+                .iter()
+                .flat_map(|v| v.fields.iter().map(|f| render_type(&f.ty)))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 // ── internal helpers ─────────────────────────────────────────────────
@@ -221,6 +230,12 @@ fn extract_error_name(output: &syn::ReturnType, explicit: &[String]) -> Option<S
         return None;
     };
     let segment = tp.path.segments.last()?;
+    // Only treat a `Result<T, E>` return type as carrying an error type.
+    // Other 2-generic-arg types (e.g. `Either<L, R>`) would otherwise
+    // produce false positives.
+    if segment.ident != "Result" {
+        return None;
+    }
     let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
         return None;
     };

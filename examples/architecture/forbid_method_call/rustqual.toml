@@ -26,4 +26,4 @@ paths = ["src/adapters/**"]
 name = "no_panic_helpers_in_production"
 forbid_method_call = ["unwrap", "expect"]
 forbidden_in = ["src/domain/**"]
-reason = "Domain propagates errors typed, never panicks"
+reason = "Domain propagates errors typed, never panics"

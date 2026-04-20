@@ -174,15 +174,16 @@ pub(crate) fn compute_file_length_score(
     baseline: usize,
     ceiling: usize,
 ) -> f64 {
+    // Misconfiguration guard: if the thresholds are inverted the
+    // subtraction below would underflow (usize). Handle this first so
+    // the behaviour is consistent regardless of `production_lines`.
+    if ceiling <= baseline {
+        return 1.0;
+    }
     if production_lines <= baseline {
         return 0.0;
     }
     if production_lines >= ceiling {
-        return 1.0;
-    }
-    // Misconfiguration guard: if ceiling <= baseline the range would
-    // underflow (usize); treat as fully-penalised to be safe.
-    if ceiling <= baseline {
         return 1.0;
     }
     let range = (ceiling - baseline) as f64;

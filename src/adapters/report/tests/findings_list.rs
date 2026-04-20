@@ -305,6 +305,7 @@ fn test_total_findings_consistent_coupling() {
             modules: vec!["a".to_string(), "b".to_string()],
         }],
         sdp_violations: vec![],
+        graph: crate::adapters::analyzers::coupling::ModuleGraph::default(),
     });
     // 1 coupling warning + 1 cycle = 2
     analysis.summary.coupling_warnings = 1;

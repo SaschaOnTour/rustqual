@@ -1,8 +1,6 @@
 use crate::adapters::analyzers::structural::slm::*;
 use crate::adapters::analyzers::structural::{StructuralWarning, StructuralWarningKind};
 use crate::config::StructuralConfig;
-use crate::findings::Dimension;
-use syn::visit::Visit;
 
 fn detect_in(source: &str) -> Vec<StructuralWarning> {
     let syntax = syn::parse_file(source).expect("test source");

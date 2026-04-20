@@ -26,6 +26,12 @@ pub(super) fn check_sdp(
         .map(|m| (m.module_name.as_str(), m.instability))
         .collect();
 
+    let suppressed_modules: std::collections::HashSet<&str> = metrics
+        .iter()
+        .filter(|m| m.suppressed)
+        .map(|m| m.module_name.as_str())
+        .collect();
+
     let mut violations = Vec::new();
     for (from_idx, deps) in graph.forward.iter().enumerate() {
         let from_name = &graph.modules[from_idx];
@@ -35,12 +41,14 @@ pub(super) fn check_sdp(
             let to_inst = instability.get(to_name.as_str()).copied().unwrap_or(0.0);
             // SDP violation: stable module depends on less stable module
             if from_inst < to_inst {
+                let suppressed = suppressed_modules.contains(from_name.as_str())
+                    || suppressed_modules.contains(to_name.as_str());
                 violations.push(SdpViolation {
                     from_module: from_name.clone(),
                     to_module: to_name.clone(),
                     from_instability: from_inst,
                     to_instability: to_inst,
-                    suppressed: false,
+                    suppressed,
                 });
             }
         }

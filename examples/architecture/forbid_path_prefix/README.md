@@ -14,9 +14,9 @@ violations.
 `src/domain/bad.rs` contains a single-import violation — a domain-layer
 file importing from `tokio::`. The expected finding:
 
-- **Rule**: `architecture::pattern::syn_only_in_adapters` (configured in `rustqual.toml`)
+- **Rule**: `no_tokio_in_domain` (configured in `rustqual.toml`)
 - **Kind**: `forbid_path_prefix`
-- **Hit line**: 1 (the `use tokio::spawn;` statement)
+- **Hit line**: 4 (the `use tokio::spawn;` statement)
 - **Rendered path**: `tokio::spawn`
 
 ## Matcher-level expectations (used by snapshot tests)

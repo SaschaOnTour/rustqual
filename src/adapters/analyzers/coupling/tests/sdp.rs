@@ -182,3 +182,49 @@ fn test_sdp_violation_default_not_suppressed() {
         "SDP violations should default to not suppressed"
     );
 }
+
+#[test]
+fn test_sdp_violation_suppressed_when_from_module_suppressed() {
+    let graph = ModuleGraph {
+        modules: vec![
+            "a".into(),
+            "b".into(),
+            "x".into(),
+            "y".into(),
+            "p".into(),
+            "q".into(),
+        ],
+        forward: vec![vec![1], vec![4, 5], vec![0], vec![0], vec![], vec![]],
+    };
+    let mut metrics = compute_coupling_metrics(&graph);
+    metrics[0].suppressed = true; // "a" is the from_module
+    let violations = check_sdp(&graph, &metrics);
+    assert_eq!(violations.len(), 1);
+    assert!(
+        violations[0].suppressed,
+        "from_module suppressed → violation created suppressed"
+    );
+}
+
+#[test]
+fn test_sdp_violation_suppressed_when_to_module_suppressed() {
+    let graph = ModuleGraph {
+        modules: vec![
+            "a".into(),
+            "b".into(),
+            "x".into(),
+            "y".into(),
+            "p".into(),
+            "q".into(),
+        ],
+        forward: vec![vec![1], vec![4, 5], vec![0], vec![0], vec![], vec![]],
+    };
+    let mut metrics = compute_coupling_metrics(&graph);
+    metrics[1].suppressed = true; // "b" is the to_module
+    let violations = check_sdp(&graph, &metrics);
+    assert_eq!(violations.len(), 1);
+    assert!(
+        violations[0].suppressed,
+        "to_module suppressed → violation created suppressed"
+    );
+}

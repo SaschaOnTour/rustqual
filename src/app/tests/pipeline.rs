@@ -296,6 +296,7 @@ fn make_coupling_analysis() -> crate::adapters::analyzers::coupling::CouplingAna
         ],
         cycles: vec![],
         sdp_violations: vec![],
+        graph: crate::adapters::analyzers::coupling::ModuleGraph::default(),
     }
 }
 
@@ -363,6 +364,7 @@ fn test_mark_coupling_suppressions_submodule_file() {
         }],
         cycles: vec![],
         sdp_violations: vec![],
+        graph: crate::adapters::analyzers::coupling::ModuleGraph::default(),
     };
     let sup = Suppression {
         line: 1,
@@ -425,6 +427,7 @@ fn test_count_coupling_warnings_leaf_module_excluded() {
         }],
         cycles: vec![],
         sdp_violations: vec![],
+        graph: crate::adapters::analyzers::coupling::ModuleGraph::default(),
     };
 
     let config = crate::config::sections::CouplingConfig::default();

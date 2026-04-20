@@ -13,7 +13,7 @@ use super::dry_suppressions;
 use super::metrics::{
     self, apply_parameter_warnings, build_file_call_graph, compute_coupling, compute_srp,
     count_coupling_warnings, count_dry_findings, count_srp_warnings, mark_coupling_suppressions,
-    mark_sdp_suppressions, mark_srp_suppressions, run_dry_detection, run_guarded_detection,
+    mark_srp_suppressions, run_dry_detection, run_guarded_detection,
 };
 use super::structural_metrics::{
     compute_structural, count_structural_warnings, mark_structural_suppressions,
@@ -87,7 +87,12 @@ fn run_coupling_pass(
 ) -> Option<crate::adapters::analyzers::coupling::CouplingAnalysis> {
     let mut coupling = compute_coupling(ctx.parsed, ctx.config);
     mark_coupling_suppressions(coupling.as_mut(), ctx.suppression_lines);
-    mark_sdp_suppressions(coupling.as_mut());
+    // Populate SDP violations AFTER suppressions are marked on metrics
+    // so each violation inherits the correct `suppressed` state at
+    // creation time (no separate mark pass needed).
+    if let Some(ca) = coupling.as_mut() {
+        crate::adapters::analyzers::coupling::populate_sdp_violations(ca);
+    }
     count_coupling_warnings(coupling.as_mut(), &ctx.config.coupling, summary);
     coupling
 }

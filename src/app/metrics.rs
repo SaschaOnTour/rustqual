@@ -250,27 +250,6 @@ pub(super) fn mark_wildcard_suppressions(
     });
 }
 
-/// Mark SDP violations as suppressed when either involved module has a coupling suppression.
-/// Operation: iteration + lookup logic, no own calls.
-pub(super) fn mark_sdp_suppressions(
-    coupling: Option<&mut crate::adapters::analyzers::coupling::CouplingAnalysis>,
-) {
-    let Some(coupling) = coupling else { return };
-    let suppressed_modules: std::collections::HashSet<&str> = coupling
-        .metrics
-        .iter()
-        .filter(|m| m.suppressed)
-        .map(|m| m.module_name.as_str())
-        .collect();
-    coupling.sdp_violations.iter_mut().for_each(|v| {
-        if suppressed_modules.contains(v.from_module.as_str())
-            || suppressed_modules.contains(v.to_module.as_str())
-        {
-            v.suppressed = true;
-        }
-    });
-}
-
 /// Count SDP violations and update summary, excluding suppressed entries.
 /// Operation: iteration + conditional counting, no own calls.
 pub(super) fn count_sdp_violations(
