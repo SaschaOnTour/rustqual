@@ -173,3 +173,77 @@ fn test_collect_rust_files_dotdot_path() {
         "collect_rust_files should find files via ../sub path"
     );
 }
+
+// ── Multi-line qual:allow block tests ───────────────────────────
+
+fn parsed_single(path: &str, source: &str) -> Vec<(String, String, syn::File)> {
+    let syntax = syn::parse_file(source).expect("parse");
+    vec![(path.to_string(), source.to_string(), syntax)]
+}
+
+#[test]
+fn qual_allow_honors_marker_inside_contiguous_comment_block() {
+    // Layout:
+    //   line 1: // qual:allow(srp) — rustqual false-positive LCOM4=2
+    //   line 2: // The struct's methods form one coherent data layer.
+    //   line 3: // See docs/rustqual-bugs.md.
+    //   line 4: #[derive(Default)]
+    //   line 5: pub struct Foo { ... }
+    //
+    // Without the block-end shift, ANNOTATION_WINDOW=3 from line 1
+    // reaches only line 4 — too short to cover the struct on line 5.
+    // With the shift, the effective marker line is 3 (last // of the
+    // contiguous block) and the window 3..=6 covers the struct.
+    let source = "// qual:allow(srp) — rustqual false-positive LCOM4=2\n\
+                  // The struct's methods form one coherent data layer.\n\
+                  // See docs/rustqual-bugs.md.\n\
+                  #[derive(Default)]\n\
+                  pub struct Foo { x: i32, y: i32 }\n";
+    let parsed = parsed_single("test.rs", source);
+    let map = collect_suppression_lines(&parsed);
+    let sups = map.get("test.rs").expect("file recorded");
+    assert_eq!(sups.len(), 1, "exactly one suppression");
+    assert_eq!(
+        sups[0].line, 3,
+        "marker should be shifted to last // line of the contiguous block (line 3), got {}",
+        sups[0].line
+    );
+}
+
+#[test]
+fn qual_allow_does_not_reach_across_blank_lines() {
+    // Marker on line 1, blank line on line 2 breaks the block. Marker
+    // line stays at 1; struct on line 4 is outside the 3-line window
+    // from line 1.
+    let source = "// qual:allow(srp)\n\
+                  \n\
+                  #[derive(Default)]\n\
+                  pub struct Foo { x: i32 }\n";
+    let parsed = parsed_single("test.rs", source);
+    let map = collect_suppression_lines(&parsed);
+    let sups = map.get("test.rs").expect("file recorded");
+    assert_eq!(sups.len(), 1, "marker still parsed");
+    assert_eq!(
+        sups[0].line, 1,
+        "blank line breaks the block; marker stays at its original line"
+    );
+}
+
+#[test]
+fn qual_api_marker_also_honors_contiguous_block() {
+    // `// qual:api` is a separate annotation but uses the same window
+    // for matching — it must benefit from the same block-end shift.
+    let source = "// qual:api\n\
+                  // This is the public API entry point.\n\
+                  // Keep this function stable.\n\
+                  #[inline]\n\
+                  pub fn entry() {}\n";
+    let parsed = parsed_single("test.rs", source);
+    let lines = collect_api_lines(&parsed);
+    let file_lines = lines.get("test.rs").expect("file recorded");
+    assert!(
+        file_lines.contains(&3),
+        "api marker should be shifted to block-end line 3, got {:?}",
+        file_lines
+    );
+}

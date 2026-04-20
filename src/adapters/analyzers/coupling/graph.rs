@@ -1,13 +1,15 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::adapters::shared::file_to_module::file_to_module;
+
 use super::ModuleGraph;
 
+// qual:allow(complexity) reason: "stack-based use-tree traversal requires complex loop"
 /// Build a module dependency graph from parsed files' `use crate::` statements.
 /// Operation: iterates files and use trees (stack-based), builds adjacency lists.
 /// Calls `file_to_module` via closure for IOSP compliance.
-// qual:allow(complexity) reason: "stack-based use-tree traversal requires complex loop"
 pub(super) fn build_module_graph(parsed: &[(String, String, syn::File)]) -> ModuleGraph {
-    let to_module = |path: &str| super::file_to_module(path);
+    let to_module = |path: &str| file_to_module(path);
 
     // Collect all unique module names
     let mut module_set: HashSet<String> = HashSet::new();

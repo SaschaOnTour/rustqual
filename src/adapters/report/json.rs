@@ -1,8 +1,8 @@
 use super::json_types::{
     JsonBoilerplateFind, JsonComplexity, JsonCoupling, JsonCouplingModule, JsonDeadCodeWarning,
     JsonDuplicateEntry, JsonDuplicateGroup, JsonFragmentEntry, JsonFragmentGroup, JsonFunction,
-    JsonHotspot, JsonMagicNumber, JsonOutput, JsonRepeatedMatchEntry, JsonRepeatedMatchGroup,
-    JsonSdpViolation, JsonSummary, JsonWildcardWarning,
+    JsonHotspot, JsonMagicNumber, JsonOrphanSuppression, JsonOutput, JsonRepeatedMatchEntry,
+    JsonRepeatedMatchGroup, JsonSdpViolation, JsonSummary, JsonWildcardWarning,
 };
 use super::{json_srp, json_structural, json_tq, AnalysisResult};
 use crate::adapters::analyzers::iosp::Classification;
@@ -286,6 +286,16 @@ pub(crate) fn build_json_string(analysis: &AnalysisResult) -> String {
             })
             .collect(),
         srp: srp.map(json_srp::build_json_srp),
+        orphan_suppressions: analysis
+            .orphan_suppressions
+            .iter()
+            .map(|w| JsonOrphanSuppression {
+                file: w.file.clone(),
+                line: w.line,
+                dimensions: w.dimensions.iter().map(|d| format!("{d}")).collect(),
+                reason: w.reason.clone(),
+            })
+            .collect(),
     };
 
     serde_json::to_string_pretty(&output)

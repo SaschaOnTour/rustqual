@@ -6,9 +6,9 @@ use crate::config::sections::BoilerplateConfig;
 /// Minimum builder-style methods to flag on one struct.
 const MIN_BUILDER_METHOD_COUNT: usize = 3;
 
+// qual:allow(complexity) reason: "builder pattern detection requires nested AST inspection"
 /// Detect structs with many builder-style methods (set field + return self).
 /// Operation: per-impl counting logic; helper calls in closures.
-// qual:allow(complexity) reason: "builder pattern detection requires nested AST inspection"
 pub(super) fn check_builder_boilerplate(
     parsed: &[(String, String, syn::File)],
     config: &BoilerplateConfig,

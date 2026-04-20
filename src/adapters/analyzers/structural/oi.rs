@@ -1,4 +1,4 @@
-use crate::adapters::analyzers::coupling::file_to_module;
+use crate::adapters::shared::file_to_module::file_to_module;
 use crate::config::StructuralConfig;
 use crate::findings::Dimension;
 
@@ -10,7 +10,7 @@ use super::{StructuralMetadata, StructuralWarning, StructuralWarningKind};
 /// intentionally allowed). Impls in entirely different modules are
 /// flagged as "defined elsewhere".
 /// Operation: compares top-level modules derived from the impl's and
-/// type-def's file paths via `coupling::file_to_module`.
+/// type-def's file paths via `shared::file_to_module`.
 pub(crate) fn detect_oi(
     warnings: &mut Vec<StructuralWarning>,
     meta: &StructuralMetadata,

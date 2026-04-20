@@ -49,6 +49,7 @@ fn make_analysis(results: Vec<FunctionAnalysis>) -> AnalysisResult {
         tq: None,
         structural: None,
         architecture_findings: vec![],
+        orphan_suppressions: vec![],
     }
 }
 

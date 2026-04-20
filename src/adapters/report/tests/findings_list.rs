@@ -45,6 +45,7 @@ fn empty_analysis() -> AnalysisResult {
         tq: None,
         structural: None,
         architecture_findings: vec![],
+        orphan_suppressions: vec![],
     }
 }
 
@@ -327,5 +328,80 @@ fn test_total_findings_consistent_coupling() {
             .iter()
             .any(|f| f.category == "CYCLE" && f.detail.contains("a > b")),
         "expected a CYCLE finding describing the a > b cycle"
+    );
+}
+
+// ── Orphan-suppression findings ──────────────────────────────
+
+#[test]
+fn orphan_suppressions_are_emitted_as_findings() {
+    use crate::adapters::report::OrphanSuppressionWarning;
+    let mut analysis = empty_analysis();
+    analysis.orphan_suppressions = vec![OrphanSuppressionWarning {
+        file: "src/foo.rs".into(),
+        line: 42,
+        dimensions: vec![crate::findings::Dimension::Srp],
+        reason: Some("stale marker".into()),
+    }];
+    let findings = collect_all_findings(&analysis);
+    let orphan: Vec<&_> = findings
+        .iter()
+        .filter(|f| f.category == "ORPHAN_SUPPRESSION")
+        .collect();
+    assert_eq!(orphan.len(), 1, "one orphan finding expected");
+    assert_eq!(orphan[0].file, "src/foo.rs");
+    assert_eq!(orphan[0].line, 42);
+    assert!(
+        orphan[0].detail.contains("srp"),
+        "detail should name the suppressed dimension(s), got: {:?}",
+        orphan[0].detail
+    );
+}
+
+#[test]
+fn orphan_finding_detail_lists_all_dimensions() {
+    use crate::adapters::report::OrphanSuppressionWarning;
+    let mut analysis = empty_analysis();
+    analysis.orphan_suppressions = vec![OrphanSuppressionWarning {
+        file: "src/foo.rs".into(),
+        line: 5,
+        dimensions: vec![
+            crate::findings::Dimension::Iosp,
+            crate::findings::Dimension::Complexity,
+        ],
+        reason: None,
+    }];
+    let findings = collect_all_findings(&analysis);
+    let orphan = findings
+        .iter()
+        .find(|f| f.category == "ORPHAN_SUPPRESSION")
+        .expect("orphan finding");
+    assert!(
+        orphan.detail.contains("iosp") && orphan.detail.contains("complexity"),
+        "detail should name both dims, got: {:?}",
+        orphan.detail
+    );
+}
+
+#[test]
+fn bare_orphan_detail_says_wildcard() {
+    use crate::adapters::report::OrphanSuppressionWarning;
+    let mut analysis = empty_analysis();
+    analysis.orphan_suppressions = vec![OrphanSuppressionWarning {
+        file: "src/foo.rs".into(),
+        line: 5,
+        dimensions: vec![],
+        reason: None,
+    }];
+    let findings = collect_all_findings(&analysis);
+    let orphan = findings
+        .iter()
+        .find(|f| f.category == "ORPHAN_SUPPRESSION")
+        .expect("orphan finding");
+    assert!(
+        orphan.detail.to_lowercase().contains("all dims")
+            || orphan.detail.to_lowercase().contains("wildcard"),
+        "bare orphan detail should indicate wildcard semantics, got: {:?}",
+        orphan.detail
     );
 }

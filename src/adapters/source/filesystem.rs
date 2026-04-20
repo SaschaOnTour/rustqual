@@ -174,27 +174,113 @@ where
     result
 }
 
-/// Collect all suppression comment lines from source files.
-/// Trivial: delegates to collect_per_file with parse_suppression.
+/// Map 1-based line number → last line of its contiguous `//`-comment
+/// block. A block is a run of lines whose `trim_start()` begins with
+/// `//`; any other line (code, blank) terminates the block. Used to
+/// shift annotation markers to the block's end so multi-line rationales
+/// still match items within `ANNOTATION_WINDOW` of the *last* comment
+/// line (Bug 3). Lines outside any comment block are absent from the map.
+/// Operation: linear scan with run detection.
+pub(crate) fn compute_comment_block_ends(source: &str) -> std::collections::HashMap<usize, usize> {
+    let mut map = std::collections::HashMap::new();
+    let lines: Vec<&str> = source.lines().collect();
+    let mut i = 0;
+    while i < lines.len() {
+        if lines[i].trim_start().starts_with("//") {
+            let start = i;
+            let mut end = i;
+            while end + 1 < lines.len() && lines[end + 1].trim_start().starts_with("//") {
+                end += 1;
+            }
+            for j in start..=end {
+                map.insert(j + 1, end + 1);
+            }
+            i = end + 1;
+        } else {
+            i += 1;
+        }
+    }
+    map
+}
+
+/// Collect all suppression comment lines from source files. The
+/// effective line of each suppression is shifted to the end of the
+/// contiguous `//`-comment block containing the marker, so multi-line
+/// rationales still match items within `ANNOTATION_WINDOW` of the
+/// block's last comment (Bug 3).
+/// Operation: collects raw markers, then rewrites `.line` per file
+/// via the block-ends map.
 pub(crate) fn collect_suppression_lines(
     parsed: &[(String, String, syn::File)],
 ) -> std::collections::HashMap<String, Vec<Suppression>> {
-    collect_per_file(parsed, |line_num, trimmed| {
+    let mut raw = collect_per_file(parsed, |line_num, trimmed| {
         parse_suppression(line_num, trimmed)
-    })
+    });
+    parsed.iter().for_each(|(path, source, _)| {
+        if let Some(items) = raw.get_mut(path) {
+            let ends = compute_comment_block_ends(source);
+            items.iter_mut().for_each(|s| {
+                if let Some(&end) = ends.get(&s.line) {
+                    s.line = end;
+                }
+            });
+        }
+    });
+    raw
 }
 
-/// Collect `// qual:api` marker line numbers per file.
-/// Trivial: delegates to collect_per_file with is_api_marker.
+/// Collect `// qual:api` marker line numbers per file. Each recorded
+/// line is shifted to the end of its contiguous `//`-comment block so
+/// multi-line annotations match items within `ANNOTATION_WINDOW` of
+/// the block's last comment (Bug 3).
+/// Operation: per-file collection with block-end rewrite.
 pub(crate) fn collect_api_lines(
     parsed: &[(String, String, syn::File)],
 ) -> std::collections::HashMap<String, std::collections::HashSet<usize>> {
-    collect_per_file(parsed, |line_num, trimmed| {
-        crate::findings::is_api_marker(trimmed).then_some(line_num)
-    })
-    .into_iter()
-    .map(|(k, v)| (k, v.into_iter().collect()))
-    .collect()
+    collect_marker_lines(parsed, crate::findings::is_api_marker)
+}
+
+/// Collect `// qual:test_helper` marker line numbers per file, with
+/// the same block-end shift as `collect_api_lines`.
+/// Trivial: delegates to `collect_marker_lines`.
+pub(crate) fn collect_test_helper_lines(
+    parsed: &[(String, String, syn::File)],
+) -> std::collections::HashMap<String, std::collections::HashSet<usize>> {
+    collect_marker_lines(
+        parsed,
+        crate::adapters::suppression::qual_allow::is_test_helper_marker,
+    )
+}
+
+/// Shared implementation for marker-line collectors that produce a
+/// `HashSet<usize>` per file. Applies the contiguous `//`-block
+/// end-shift so multi-line rationales preceding a marker still match
+/// items within `ANNOTATION_WINDOW` of the block's last line.
+/// Operation: collect raw marker lines, then map each to its block-end.
+fn collect_marker_lines<F>(
+    parsed: &[(String, String, syn::File)],
+    is_marker: F,
+) -> std::collections::HashMap<String, std::collections::HashSet<usize>>
+where
+    F: Fn(&str) -> bool,
+{
+    parsed
+        .iter()
+        .filter_map(|(path, source, _)| {
+            let ends = compute_comment_block_ends(source);
+            let shift = |n: usize| ends.get(&n).copied().unwrap_or(n);
+            let lines: std::collections::HashSet<usize> = source
+                .lines()
+                .enumerate()
+                .filter_map(|(i, line)| is_marker(line.trim()).then_some(shift(i + 1)))
+                .collect();
+            if lines.is_empty() {
+                None
+            } else {
+                Some((path.clone(), lines))
+            }
+        })
+        .collect()
 }
 
 /// Collect `// qual:allow(unsafe)` marker line numbers per file.

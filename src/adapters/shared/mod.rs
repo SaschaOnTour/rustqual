@@ -6,6 +6,7 @@
 //! depend on a specific analyzer.
 pub mod cfg_test;
 pub mod cfg_test_files;
+pub mod file_to_module;
 pub mod normalize;
 pub mod use_tree;
 

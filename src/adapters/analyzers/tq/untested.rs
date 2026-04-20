@@ -45,6 +45,7 @@ pub(crate) fn detect_untested_functions(
                 && !f.is_main
                 && !f.has_allow_dead_code
                 && !f.is_api
+                && !f.is_test_helper
                 && !f.is_trait_impl
                 && !config.is_ignored_function(&f.name)
                 && !dead_names.contains(f.name.as_str())

@@ -60,6 +60,28 @@ pub struct AnalysisResult {
     pub structural: Option<crate::adapters::analyzers::structural::StructuralAnalysis>,
     /// Findings from the Architecture dimension (port-based analyzers).
     pub architecture_findings: Vec<crate::domain::Finding>,
+    /// `// qual:allow(...)` markers that matched no finding in their
+    /// annotation window — stale or misplaced suppressions that should
+    /// be removed or corrected. Coupling-only markers are verified
+    /// against line-anchored Coupling findings (Structural OI/SIT/DEH/IET)
+    /// if present; when the file has only module-global coupling reports,
+    /// the marker is skipped rather than falsely flagged as orphan.
+    pub orphan_suppressions: Vec<OrphanSuppressionWarning>,
+}
+
+/// A `// qual:allow(...)` marker that failed to match any finding in
+/// its annotation window. Represents a stale or misplaced suppression.
+#[derive(Debug, Clone)]
+pub struct OrphanSuppressionWarning {
+    pub file: String,
+    /// 1-based line of the marker (already shifted to the last line
+    /// of the contiguous `//`-comment block containing the marker).
+    pub line: usize,
+    /// Which dimensions the marker tried to suppress. Empty = wildcard
+    /// (bare `// qual:allow`).
+    pub dimensions: Vec<crate::domain::Dimension>,
+    /// Optional human-readable rationale attached to the marker.
+    pub reason: Option<String>,
 }
 
 /// Summary statistics for a full analysis run.
@@ -134,6 +156,11 @@ pub struct Summary {
     pub all_suppressions: usize,
     /// Whether the suppression ratio exceeds the configured maximum.
     pub suppression_ratio_exceeded: bool,
+    /// Number of `// qual:allow(...)` markers that did not match any
+    /// finding within their annotation window. Orphan markers are
+    /// typically stale suppressions (the underlying finding was fixed
+    /// or moved) or misplaced annotations.
+    pub orphan_suppressions: usize,
 }
 
 impl Summary {
@@ -249,6 +276,8 @@ impl Summary {
             + self.tq_untested_logic_warnings
             + self.structural_srp_warnings
             + self.structural_coupling_warnings
+            + self.architecture_warnings
+            + self.orphan_suppressions
     }
 }
 

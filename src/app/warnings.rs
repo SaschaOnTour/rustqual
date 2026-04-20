@@ -266,3 +266,5 @@ pub(super) fn check_suppression_ratio(total: usize, suppressed: usize, max_ratio
     }
     (suppressed as f64 / total as f64) > max_ratio
 }
+
+// Orphan-suppression detection lives in `super::orphan_suppressions`.

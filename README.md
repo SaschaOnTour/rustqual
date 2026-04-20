@@ -272,7 +272,7 @@ strict_error_propagation = false     # If true, ? operator counts as logic
 # ────────────────────────────────────────────────────────────────
 # Maximum fraction of functions that may be suppressed (0.0–1.0).
 # Exceeding this ratio produces a warning.
-max_suppression_ratio = 0.10
+max_suppression_ratio = 0.05
 
 # If true, exit with code 1 when warnings are present (e.g. suppression ratio exceeded).
 # Default: false. Use --fail-on-warnings CLI flag to enable.
@@ -492,11 +492,31 @@ Supported dimensions: `iosp`, `complexity`, `coupling`, `srp`, `dry`, `test_qual
 
 The legacy `// iosp:allow` syntax is still supported as an alias for `// qual:allow(iosp)`.
 
-Suppressed functions appear as `SUPPRESSED` in the output and do not count toward findings. If more than `max_suppression_ratio` (default 10%) of functions are suppressed, a warning is displayed.
+Suppressed functions appear as `SUPPRESSED` in the output and do not count toward findings. If more than `max_suppression_ratio` (default 5%) of functions are suppressed, a warning is displayed.
+
+**Multi-line rationales are supported.** If you want to explain *why* a suppression is in place over several comment lines, just put them directly below the marker — the annotation window measures from the block's last comment line, not from the marker itself. Works with `#[derive]` in between:
+
+```rust
+// qual:allow(srp) — false-positive LCOM4=2
+// The struct's methods form one coherent data-layer abstraction
+// (validate() reads every field; append() calls it via debug_assert!).
+#[derive(Default)]
+pub struct LayerStorage { /* ... */ }
+```
+
+A blank line breaks the block — misplaced markers (marker far away from the item with a gap) don't silently reach across.
+
+**Orphan detection.** Any `// qual:allow(...)` marker that doesn't match a finding in its window is emitted as an `ORPHAN_SUPPRESSION` finding in every output format (text, JSON, AI, SARIF). Typical causes:
+
+- *Stale*: the underlying finding was fixed; the marker was left behind.
+- *Misplaced*: the marker is too far from the item (outside `ANNOTATION_WINDOW=3` after block-end shift).
+- *Wrong dimension*: the marker says `qual:allow(dry)` but the real finding at that line is, say, SRP.
+
+Orphans appear in `--findings` output and count toward `total_findings()`, so default-fail (`Err(1)` on any finding) triggers on them — a one-shot rustqual run surfaces every stale marker for cleanup. They do not currently gate `--fail-on-warnings` (which only checks `suppression_ratio_exceeded`). `// qual:allow(coupling)` markers are exempt from orphan detection because coupling warnings are module-global (no file/line anchor to match).
 
 ### API Annotation
 
-Mark public API functions with `// qual:api` to exclude them from dead code (DRY-003) and untested function (TQ-003) detection:
+Mark public API functions with `// qual:api` to exclude them from dead code (DRY-002) and untested function (TQ-003) detection:
 
 ```rust
 // qual:api
@@ -511,6 +531,26 @@ pub fn decode(data: &[u8], config: &Config) -> Result<Vec<f32>> {
 ```
 
 Unlike `// qual:allow`, API markers do **not** count against the suppression ratio. Use `// qual:api` for functions that are part of your library's public interface — they have no callers within the project because they're meant to be called by external consumers.
+
+### Test-Helper Annotation
+
+Mark integration-test helpers with `// qual:test_helper` to exclude them from dead code (DRY-002 `testonly`) and untested function (TQ-003) detection, **while keeping every other check active**:
+
+```rust
+// qual:test_helper
+pub fn assert_in_range(actual: f64, expected: f64, tolerance: f64) {
+    assert!((actual - expected).abs() < tolerance);
+}
+```
+
+This is the narrow fix for the „helper called from `tests/*.rs` but not from production" case that used to force a choice between `ignore_functions` (which silently disables **every** check for that function) and a `qual:allow(dry)` + `qual:allow(test_quality)` stack (which costs against the suppression ratio). Semantic distinction from `qual:api`:
+
+| Marker | Intent | What it suppresses |
+|---|---|---|
+| `// qual:api` | „this is the public library API" | DRY-002 (`testonly` dead code) + TQ-003 (untested) |
+| `// qual:test_helper` | „this exists so test binaries can call into it" | DRY-002 `testonly` dead code + TQ-003 (untested) |
+
+Neither marker counts against `max_suppression_ratio`. Complexity, SRP, duplicate detection, and coupling checks keep applying — if a test helper grows to 200 lines with nested match arms, `LONG_FN` and `COGNITIVE` will still flag it.
 
 ### Inverse Annotation
 

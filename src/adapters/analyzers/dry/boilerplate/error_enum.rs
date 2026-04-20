@@ -6,9 +6,9 @@ use crate::config::sections::BoilerplateConfig;
 /// Minimum From impls to flag as error enum boilerplate.
 const MIN_FROM_IMPLS_FOR_ERROR: usize = 3;
 
+// qual:allow(complexity) reason: "From impl grouping requires nested AST inspection"
 /// Detect enums with multiple trivial `impl From<T>` for wrapping errors.
 /// Operation: grouping + counting logic; helper calls in closures.
-// qual:allow(complexity) reason: "From impl grouping requires nested AST inspection"
 pub(super) fn check_error_enum_boilerplate(
     parsed: &[(String, String, syn::File)],
     config: &BoilerplateConfig,

@@ -20,38 +20,8 @@ fn idx(graph: &ModuleGraph, name: &str) -> usize {
         .unwrap_or_else(|| panic!("module '{name}' not found in graph"))
 }
 
-// ── file_to_module tests ────────────────────────────────────────
-
-#[test]
-fn test_file_to_module_root_file() {
-    assert_eq!(file_to_module("main.rs"), "main");
-    assert_eq!(file_to_module("pipeline.rs"), "pipeline");
-}
-
-#[test]
-fn test_file_to_module_subdir_mod() {
-    assert_eq!(file_to_module("config/mod.rs"), "config");
-    assert_eq!(file_to_module("analyzer/mod.rs"), "analyzer");
-}
-
-#[test]
-fn test_file_to_module_subdir_file() {
-    assert_eq!(file_to_module("analyzer/types.rs"), "analyzer");
-    assert_eq!(file_to_module("report/text.rs"), "report");
-}
-
-#[test]
-fn test_file_to_module_src_prefix() {
-    assert_eq!(file_to_module("src/main.rs"), "main");
-    assert_eq!(file_to_module("src/config/mod.rs"), "config");
-    assert_eq!(file_to_module("src/analyzer/types.rs"), "analyzer");
-}
-
-#[test]
-fn test_file_to_module_backslash() {
-    assert_eq!(file_to_module("src\\config\\mod.rs"), "config");
-    assert_eq!(file_to_module("analyzer\\types.rs"), "analyzer");
-}
+// `file_to_module` lives in `adapters::shared::file_to_module`; its
+// tests are in `adapters::shared::tests::file_to_module`.
 
 // ── build_module_graph tests ────────────────────────────────────
 

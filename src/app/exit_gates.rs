@@ -34,7 +34,12 @@ fn warn_suppression_ratio(summary: &Summary, max_ratio: f64) {
     );
 }
 
-/// Return Err(1) iff `--fail-on-warnings` is set and there are warnings.
+/// Return Err(1) iff `--fail-on-warnings` is set and the
+/// suppression-ratio threshold has been exceeded. This gate is
+/// narrowly scoped to the suppression-ratio signal — it does *not*
+/// participate in the ORPHAN_SUPPRESSION path, which flows through
+/// `check_default_fail` via `summary.total_findings()` like every
+/// other finding category.
 /// Operation: conditional check.
 pub(crate) fn check_fail_on_warnings(config: &Config, summary: &Summary) -> Result<(), i32> {
     if config.fail_on_warnings && summary.suppression_ratio_exceeded {

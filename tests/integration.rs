@@ -10,10 +10,11 @@ fn cargo_bin() -> Command {
 
 #[test]
 fn test_self_analysis_no_violations() {
-    let output = cargo_bin()
-        .args(["src/"])
-        .output()
-        .expect("Failed to execute");
+    // Must run with "." (not "src/") as the analysis root. Architecture
+    // rule globs (e.g. `src/adapters/**`) match against paths relative
+    // to the analysis root — running with "src/" would strip the
+    // prefix and silently disable every architecture check.
+    let output = cargo_bin().args(["."]).output().expect("Failed to execute");
     assert!(
         output.status.success(),
         "Self-analysis should have 0 violations.\nstdout: {}\nstderr: {}",

@@ -41,8 +41,26 @@ pub fn collect_all_findings(analysis: &AnalysisResult) -> Vec<FindingEntry> {
     collect_tq_findings(analysis, &mut entries);
     collect_structural_findings(analysis, &mut entries);
     collect_architecture_findings(analysis, &mut entries);
+    collect_orphan_suppression_findings(analysis, &mut entries);
     entries.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
     entries
+}
+
+/// Project orphan-suppression warnings into `FindingEntry` rows so
+/// they appear in every output format (text, JSON, AI, SARIF, ...).
+/// Detail lists the suppressed dimensions (or "all dims" for bare
+/// `// qual:allow` wildcards).
+/// Operation: iterator-chain projection.
+fn collect_orphan_suppression_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntry>) {
+    entries.extend(analysis.orphan_suppressions.iter().map(|w| {
+        let detail = if w.dimensions.is_empty() {
+            "stale qual:allow (all dims, wildcard)".to_string()
+        } else {
+            let dims: Vec<String> = w.dimensions.iter().map(|d| format!("{d}")).collect();
+            format!("stale qual:allow({})", dims.join(","))
+        };
+        FindingEntry::new(&w.file, w.line, "ORPHAN_SUPPRESSION", detail, String::new())
+    }));
 }
 
 /// Collect Architecture-dimension findings from the port-based analyzers.

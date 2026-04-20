@@ -19,9 +19,22 @@ pub(crate) fn collect_cfg_test_file_paths(
 ) -> HashSet<String> {
     let resolver = ChildPathResolver::from_parsed(parsed);
     let mut set = direct_cfg_test_files(parsed, &resolver);
+    set.extend(inner_cfg_test_files(parsed));
     set.extend(integration_test_files(parsed));
     propagate_cfg_test_through_plain_mods(parsed, &resolver, &mut set);
     set
+}
+
+/// Files with a top-level `#![cfg(test)]` inner attribute — the Rust
+/// convention for "this whole file is test-only", commonly used on
+/// companion `*_tests.rs` files linked via `#[path]` redirects.
+/// Operation: iterates parsed files checking file-level attrs.
+fn inner_cfg_test_files(parsed: &[(String, String, syn::File)]) -> HashSet<String> {
+    parsed
+        .iter()
+        .filter(|(_, _, file)| super::cfg_test::has_cfg_test(&file.attrs))
+        .map(|(path, _, _)| path.clone())
+        .collect()
 }
 
 /// Files Cargo automatically treats as integration tests — everything
@@ -53,7 +66,34 @@ impl<'a> ChildPathResolver<'a> {
         }
     }
 
-    fn resolve(&self, parent_path: &str, mod_name: &str) -> Option<String> {
+    fn resolve(&self, parent_path: &str, mod_item: &syn::ItemMod) -> Option<String> {
+        if let Some(explicit) = path_attribute(&mod_item.attrs) {
+            return self.resolve_explicit_path(parent_path, &explicit);
+        }
+        self.resolve_by_convention(parent_path, &mod_item.ident.to_string())
+    }
+
+    /// `#[path = "custom.rs"]` is resolved relative to the directory
+    /// containing the parent file, matching rustc's own semantics.
+    /// Operation: path arithmetic + existence check, no own calls.
+    fn resolve_explicit_path(&self, parent_path: &str, relative: &str) -> Option<String> {
+        let parent_dir = Path::new(parent_path)
+            .parent()
+            .unwrap_or(Path::new(""))
+            .to_path_buf();
+        let candidate = parent_dir
+            .join(relative)
+            .to_string_lossy()
+            .replace('\\', "/");
+        self.known_paths
+            .contains(candidate.as_str())
+            .then_some(candidate)
+    }
+
+    /// Naming-convention resolution: try `{dir}/{name}.rs` then
+    /// `{dir}/{name}/mod.rs` under the parent file's module directory.
+    /// Operation: path arithmetic + existence checks, no own calls.
+    fn resolve_by_convention(&self, parent_path: &str, mod_name: &str) -> Option<String> {
         let parent = Path::new(parent_path);
         let child_dir = if parent
             .file_stem()
@@ -82,6 +122,26 @@ impl<'a> ChildPathResolver<'a> {
     }
 }
 
+/// Extract the string value of a `#[path = "..."]` attribute if present.
+/// Operation: attribute lookup + literal parsing, no own calls.
+fn path_attribute(attrs: &[syn::Attribute]) -> Option<String> {
+    attrs.iter().find_map(|attr| {
+        if !attr.path().is_ident("path") {
+            return None;
+        }
+        match &attr.meta {
+            syn::Meta::NameValue(nv) => match &nv.value {
+                syn::Expr::Lit(expr_lit) => match &expr_lit.lit {
+                    syn::Lit::Str(s) => Some(s.value()),
+                    _ => None,
+                },
+                _ => None,
+            },
+            _ => None,
+        }
+    })
+}
+
 /// Files referenced by an explicit `#[cfg(test)] mod foo;` in a parent file.
 fn direct_cfg_test_files(
     parsed: &[(String, String, syn::File)],
@@ -94,15 +154,13 @@ fn direct_cfg_test_files(
         .flat_map(|(path, _, file)| {
             file.items
                 .iter()
-                .filter_map(|item| match item {
-                    syn::Item::Mod(m) if is_ext_cfg_test(m) => {
-                        Some((path.as_str(), m.ident.to_string()))
-                    }
+                .filter_map(move |item| match item {
+                    syn::Item::Mod(m) if is_ext_cfg_test(m) => Some((path.as_str(), m)),
                     _ => None,
                 })
                 .collect::<Vec<_>>()
         })
-        .filter_map(|(parent, name)| resolver.resolve(parent, &name))
+        .filter_map(|(parent, m)| resolver.resolve(parent, m))
         .collect()
 }
 
@@ -128,9 +186,7 @@ fn propagate_cfg_test_through_plain_mods(
                 file.items
                     .iter()
                     .filter_map(|item| match item {
-                        syn::Item::Mod(m) if is_any_ext_mod(m) => {
-                            resolver.resolve(parent_path, &m.ident.to_string())
-                        }
+                        syn::Item::Mod(m) if is_any_ext_mod(m) => resolver.resolve(parent_path, m),
                         _ => None,
                     })
                     .collect::<Vec<_>>()

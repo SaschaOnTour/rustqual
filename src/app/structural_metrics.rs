@@ -25,10 +25,13 @@ pub(super) fn mark_structural_suppressions(
     suppression_lines: &std::collections::HashMap<String, Vec<Suppression>>,
 ) {
     let Some(structural) = structural else { return };
+    // Window width shared with the orphan detector, see
+    // `app::suppression_windows::STRUCTURAL`.
+    let window = super::suppression_windows::STRUCTURAL;
     structural.warnings.iter_mut().for_each(|w| {
         if let Some(sups) = suppression_lines.get(&w.file) {
             w.suppressed = sups.iter().any(|sup| {
-                let in_window = sup.line <= w.line && w.line - sup.line <= 5;
+                let in_window = sup.line <= w.line && w.line - sup.line <= window;
                 in_window && sup.covers(w.dimension)
             });
         }

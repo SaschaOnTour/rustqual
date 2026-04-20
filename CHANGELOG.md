@@ -5,6 +5,118 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-04-20
+
+Patch release addressing five bugs reported against v0.5.6 (verified
+against v1.0) plus one pre-existing CI gap uncovered during
+investigation. No breaking changes; drop-in upgrade.
+
+Self-analysis: `cargo run -- . --fail-on-warnings --coverage
+coverage.lcov` reports 1913 functions, 100.0% quality score across all
+7 dimensions, 0 findings. 1176 tests pass (35 new).
+
+### Added
+- **`// qual:test_helper` annotation** — narrow marker for
+  integration-test helpers. Suppresses **only** the DRY-002 `testonly`
+  dead-code finding and TQ-003 (`untested` production functions); all other
+  checks (DRY duplicates, complexity, SRP, coupling, structural) keep
+  applying. Does **not** count against `max_suppression_ratio`.
+  Replaces the overly broad `ignore_functions` entry for the
+  integration-test-helper use case.
+- **Multi-line `qual:allow` rationale** — suppressions placed above a
+  multi-line `//` comment block (a common pattern: marker on the first
+  line, rationale on subsequent lines, then `#[derive]` + item) now
+  work. The annotation window is measured from the block's last
+  comment line, not the marker itself. Blank lines still break the
+  block — misplaced markers don't reach their target.
+- **Orphan-suppression findings** — `// qual:allow(...)` markers that
+  match no finding in their annotation window are emitted as
+  first-class `ORPHAN_SUPPRESSION` findings, visible in every output
+  format (text, JSON, AI, SARIF, `--findings`). The AI format surfaces
+  the marker's original reason string so the agent can tell whether
+  it was a stale leftover or a misplaced annotation. Orphan findings
+  contribute to `total_findings()` and thus to default-fail (they do
+  not currently trigger `--fail-on-warnings`, which only gates on
+  `suppression_ratio_exceeded`) — the user experience is: run
+  rustqual, see the orphan in the list, delete or correct the marker,
+  rerun. The
+  detector reads raw complexity metrics (not the `*_warning` flags
+  that suppressions clear), so a `// qual:allow(complexity)` marker
+  on a genuinely over-threshold function is correctly recognized as
+  non-orphan even after the suppression has silenced the user-visible
+  finding. Coupling-only markers are skipped only when the file has
+  no line-anchored Coupling finding to match by line window; when a
+  line-anchored Coupling position exists (for example, a Structural
+  warning with `dimension == Coupling`), the marker is verifiable.
+- **`apply_parameter_warnings` marks suppressed entries instead of
+  dropping them** — internal change that lets the orphan-suppression
+  detector see SRP-param suppressions as matching targets. User-
+  visible behavior unchanged (`srp_param_warnings` count still only
+  tallies non-suppressed entries).
+
+### Fixed
+- **Test-companion files missed by cfg-test detection**. The
+  `#[cfg(test)] #[path = "foo_tests.rs"] mod tests;` pattern — common
+  for co-locating unit tests next to their production module — was
+  not recognized as cfg-test because (a) `ChildPathResolver` only
+  tried the naming-convention paths (`foo/tests.rs`,
+  `foo/tests/mod.rs`) and ignored the `#[path]` override, and (b)
+  top-level `#![cfg(test)]` inner attributes on the companion file
+  itself were never scanned. Both gaps closed: `#[path]` is now
+  resolved relative to the parent file's directory (rustc
+  semantics), and `file.attrs` is inspected for inner
+  `#![cfg(test)]`. Fixes systematic SRP_MODULE false-positives on
+  test-companion files whose many-test-one-cluster-each layout
+  triggers `max_independent_clusters` by design.
+- **Bug 2 — SRP LCOM4 false-positives via macro-wrapped method
+  calls**. `MethodBodyVisitor` in the SRP cohesion analyzer now
+  descends into macro token streams, so `self.method()` references
+  inside `debug_assert!(...)`, `assert_eq!(...)`, `format!(...)`
+  etc. count as inter-method edges. Paired reader/mutator patterns
+  where a mutator calls a reader via `debug_assert!` are now
+  correctly united into a single LCOM4 cluster.
+- **Bug 4 — AI format omitted SRP_MODULE cluster driver**.
+  `enrich_detail()` in the AI reporter now names both the length
+  driver (`N lines (max M)`) and the cluster driver (`N independent
+  clusters (max M)`) when either triggers, and combines both when
+  both fire. Extended the same completeness discipline to six more
+  finding categories: SDP (instability values), BOILERPLATE
+  (description + suggested fix), DEAD_CODE (full suggestion text),
+  STRUCTURAL (rule detail not just code), and kept the pre-existing
+  enrichers for VIOLATION, DUPLICATE, FRAGMENT, SRP_STRUCT,
+  COGNITIVE, CYCLOMATIC, LONG_FN, NESTING, SRP_PARAMS. Goal: a
+  single `--format ai` invocation is always enough — no JSON
+  fallback.
+- **Bug 1 — DEAD_CODE/testonly suggestion was hard to act on**. The
+  suggestion text now explicitly names both escape hatches:
+  `// qual:api` (for truly public API functions) and
+  `// qual:test_helper` (for test-only helpers in `src/`).
+- **CI/release workflow self-analysis gap (pre-existing)** —
+  `.github/workflows/ci.yml` and `release.yml` now run
+  `cargo run -- . --fail-on-warnings --coverage coverage.lcov` with
+  `.` as the analysis root (was `src/`). Architecture globs like
+  `src/adapters/**` only match when paths are relative to the
+  project root; running with `src/` stripped the prefix and silently
+  disabled architecture-rule checking. The gap was uncovered when
+  Bug 4's investigation revealed a forbidden-edge violation
+  (`structural::oi` → `coupling::file_to_module`) that had been
+  merged under this blind spot.
+- **Pre-existing architecture violation** — moved `file_to_module`
+  helper from `adapters::analyzers::coupling` to
+  `adapters::shared::file_to_module`. Dimension analyzers now don't
+  cross-import each other (forbidden-edge rule honored).
+
+### Internal
+- `cargo test` in CI/release replaced with `cargo nextest run` to
+  match local-development discipline.
+- New module `src/app/orphan_suppressions.rs` encapsulates the
+  verification pass; `src/app/warnings.rs` shrank from 475 to ~270
+  lines after the extraction.
+- `run_dry_detection` signature refactored: the two annotation-line
+  maps (`api` + `test_helper`) are passed as a single
+  `AnnotationLines<'a>` struct to keep parameter count under the
+  SRP_PARAMS threshold.
+
 ## [1.0.0] - 2026-04-20
 
 Clean-Architecture refactor and seventh quality dimension, **fully

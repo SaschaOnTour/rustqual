@@ -8,18 +8,26 @@ use crate::report::Summary;
 pub(super) fn compute_tq(
     parsed: &[(String, String, syn::File)],
     config: &Config,
-    scope: &crate::adapters::analyzers::iosp::scope::ProjectScope,
     all_results: &[FunctionAnalysis],
     dead_code: &[crate::adapters::analyzers::dry::dead_code::DeadCodeWarning],
+    annotation_lines: &super::metrics::AnnotationLines<'_>,
 ) -> Option<crate::adapters::analyzers::tq::TqAnalysis> {
     if !config.test_quality.enabled {
         return None;
     }
+    let scope_refs: Vec<(&str, &syn::File)> = parsed
+        .iter()
+        .map(|(path, _, file)| (path.as_str(), file))
+        .collect();
+    let scope = crate::adapters::analyzers::iosp::scope::ProjectScope::from_files(&scope_refs);
     let mut declared_fns = crate::adapters::analyzers::dry::collect_declared_functions(parsed);
-    let api_lines = crate::adapters::source::filesystem::collect_api_lines(parsed);
     crate::adapters::analyzers::dry::dead_code::mark_api_declarations(
         &mut declared_fns,
-        &api_lines,
+        annotation_lines.api,
+    );
+    crate::adapters::analyzers::dry::dead_code::mark_test_helper_declarations(
+        &mut declared_fns,
+        annotation_lines.test_helper,
     );
     let cfg_test_files =
         crate::adapters::analyzers::dry::dead_code::collect_cfg_test_file_paths(parsed);
@@ -32,7 +40,7 @@ pub(super) fn compute_tq(
         .map(std::path::Path::new);
     let ctx = crate::adapters::analyzers::tq::TqContext {
         parsed,
-        scope,
+        scope: &scope,
         config,
         declared_fns: &declared_fns,
         prod_calls: &prod_calls,
@@ -52,10 +60,13 @@ pub(super) fn mark_tq_suppressions(
 ) {
     let Some(tq) = tq else { return };
     let tq_dim = crate::domain::Dimension::TestQuality;
+    // Window width shared with the orphan detector, see
+    // `app::suppression_windows::TQ`.
+    let window = super::suppression_windows::TQ;
     tq.warnings.iter_mut().for_each(|w| {
         if let Some(sups) = suppression_lines.get(&w.file) {
             w.suppressed = sups.iter().any(|sup| {
-                let in_window = sup.line <= w.line && w.line - sup.line <= 5;
+                let in_window = sup.line <= w.line && w.line - sup.line <= window;
                 in_window && sup.covers(tq_dim)
             });
         }

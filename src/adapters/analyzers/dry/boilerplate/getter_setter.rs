@@ -4,9 +4,9 @@ use crate::config::sections::BoilerplateConfig;
 /// Minimum getter/setter methods to flag on one struct.
 const MIN_GETTER_SETTER_COUNT: usize = 3;
 
+// qual:allow(complexity) reason: "getter/setter detection requires nested AST inspection"
 /// Detect structs with many trivial getter/setter methods.
 /// Operation: per-impl counting logic; helper calls in closures.
-// qual:allow(complexity) reason: "getter/setter detection requires nested AST inspection"
 pub(super) fn check_manual_getter_setter(
     parsed: &[(String, String, syn::File)],
     config: &BoilerplateConfig,

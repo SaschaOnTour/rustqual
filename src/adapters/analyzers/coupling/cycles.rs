@@ -3,9 +3,9 @@ use super::{CycleReport, ModuleGraph};
 /// Minimum SCC size to report as a cycle (single nodes are not cycles).
 const MIN_CYCLE_SIZE: usize = 2;
 
+// qual:allow(complexity) reason: "Kosaraju three-pass algorithm is inherently complex"
 /// Detect circular dependencies using Kosaraju's algorithm (iterative).
 /// Operation: graph traversal logic (two-pass DFS), no own calls.
-// qual:allow(complexity) reason: "Kosaraju three-pass algorithm is inherently complex"
 pub(super) fn detect_cycles(graph: &ModuleGraph) -> Vec<CycleReport> {
     let n = graph.modules.len();
     if n == 0 {

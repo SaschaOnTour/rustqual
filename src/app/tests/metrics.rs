@@ -73,16 +73,23 @@ fn test_param_warning_trait_impl_excluded() {
 }
 
 #[test]
-fn test_param_warning_suppressed_fn_excluded() {
+fn test_param_warning_suppressed_fn_is_flagged_but_marked_suppressed() {
+    // Suppressed over-threshold functions now emit a warning with
+    // `suppressed=true` instead of being filtered out silently. This
+    // lets the orphan-suppression checker see that a `qual:allow(srp)`
+    // marker did have a target. `summary.srp_param_warnings` still
+    // counts only non-suppressed entries, so user-visible behavior
+    // (finding count, quality score) is unchanged.
     let config = SrpConfig::default();
     let mut func = make_func("suppressed_fn", 10, false);
     func.suppressed = true;
     let results = vec![func];
     let mut srp = make_srp();
     apply_parameter_warnings(&results, Some(&mut srp), &config);
+    assert_eq!(srp.param_warnings.len(), 1, "entry recorded");
     assert!(
-        srp.param_warnings.is_empty(),
-        "suppressed fn should be excluded"
+        srp.param_warnings[0].suppressed,
+        "entry must be marked suppressed"
     );
 }
 

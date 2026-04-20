@@ -49,6 +49,7 @@ impl<'ast> Visit<'ast> for DeclaredFnCollector {
             is_trait_impl: false,
             has_allow_dead_code: has_allow_dead_code(&node.attrs),
             is_api: false,
+            is_test_helper: false,
             name,
             file: self.file.clone(),
             line,
@@ -89,6 +90,7 @@ impl<'ast> Visit<'ast> for DeclaredFnCollector {
             is_trait_impl: self.is_trait_impl,
             has_allow_dead_code: has_allow_dead_code(&node.attrs),
             is_api: false,
+            is_test_helper: false,
             name,
             file: self.file.clone(),
             line,
@@ -106,6 +108,7 @@ impl<'ast> Visit<'ast> for DeclaredFnCollector {
                 is_trait_impl: true,
                 has_allow_dead_code: false,
                 is_api: false,
+                is_test_helper: false,
                 name,
                 file: self.file.clone(),
                 line,
@@ -154,11 +157,13 @@ pub fn detect_dead_code(
     parsed: &[(String, String, syn::File)],
     config: &crate::config::Config,
     api_lines: &std::collections::HashMap<String, std::collections::HashSet<usize>>,
+    test_helper_lines: &std::collections::HashMap<String, std::collections::HashSet<usize>>,
     cfg_test_files: &std::collections::HashSet<String>,
 ) -> Vec<DeadCodeWarning> {
     let declared = super::collect_declared_functions(parsed);
     let mut declared = mark_cfg_test_declarations(declared, cfg_test_files);
     mark_api_declarations(&mut declared, api_lines);
+    mark_test_helper_declarations(&mut declared, test_helper_lines);
     let (prod_calls, test_calls) = collect_all_calls(parsed, cfg_test_files);
     let uncalled = find_uncalled(&declared, &prod_calls, &test_calls, config);
     let test_only = find_test_only(&declared, &prod_calls, &test_calls, config);
@@ -175,6 +180,22 @@ pub(crate) fn mark_api_declarations(
         if let Some(lines) = api_lines.get(&d.file) {
             if crate::findings::has_annotation_in_window(lines, d.line) {
                 d.is_api = true;
+            }
+        }
+    });
+}
+
+/// Mark functions that have a `// qual:test_helper` annotation within
+/// the annotation window.
+/// Operation: iterates declarations checking line proximity to markers.
+pub(crate) fn mark_test_helper_declarations(
+    declared: &mut [super::DeclaredFunction],
+    test_helper_lines: &std::collections::HashMap<String, std::collections::HashSet<usize>>,
+) {
+    declared.iter_mut().for_each(|d| {
+        if let Some(lines) = test_helper_lines.get(&d.file) {
+            if crate::findings::has_annotation_in_window(lines, d.line) {
+                d.is_test_helper = true;
             }
         }
     });
@@ -212,6 +233,10 @@ pub(crate) use super::call_targets::collect_all_calls;
 // ── Finding logic ───────────────────────────────────────────────
 
 /// Find functions that are never called from anywhere.
+/// `// qual:test_helper` does NOT exclude here — a helper marker on a
+/// function with no callers at all is still worth flagging (the
+/// marker is likely stale). `// qual:api` does exclude because
+/// public-API functions legitimately have no in-crate callers.
 /// Operation: set logic + filtering, no own calls.
 fn find_uncalled(
     declared: &[DeclaredFunction],
@@ -221,7 +246,7 @@ fn find_uncalled(
 ) -> Vec<DeadCodeWarning> {
     declared
         .iter()
-        .filter(|d| !should_exclude(d, config))
+        .filter(|d| !should_exclude_uncalled(d, config))
         .filter(|d| !prod_calls.contains(&d.name) && !test_calls.contains(&d.name))
         .filter(|d| {
             !prod_calls.contains(&d.qualified_name) && !test_calls.contains(&d.qualified_name)
@@ -238,6 +263,7 @@ fn find_uncalled(
 }
 
 /// Find functions that are only called from test code.
+/// `// qual:test_helper` excludes here (narrow purpose of the marker).
 /// Operation: set logic + filtering, no own calls.
 fn find_test_only(
     declared: &[DeclaredFunction],
@@ -247,7 +273,7 @@ fn find_test_only(
 ) -> Vec<DeadCodeWarning> {
     declared
         .iter()
-        .filter(|d| !should_exclude(d, config))
+        .filter(|d| !should_exclude_test_only(d, config))
         // Must be called from tests but NOT from production
         .filter(|d| {
             let called_from_tests =
@@ -262,15 +288,22 @@ fn find_test_only(
             file: d.file.clone(),
             line: d.line,
             kind: DeadCodeKind::TestOnly,
-            suggestion: "only called from test code; consider moving to test module".to_string(),
+            suggestion: concat!(
+                "only called from test code; move to tests/ or annotate with ",
+                "// qual:api (public API) or // qual:test_helper (test-only helper)"
+            )
+            .to_string(),
         })
         .collect()
 }
 
-/// Check if a declared function should be excluded from dead code analysis.
+/// Check if a declared function should be excluded from the Uncalled
+/// dead-code check. `// qual:test_helper` is NOT in this list — a
+/// helper marker on a function with no callers at all is still worth
+/// flagging so the user sees that their annotation is stale.
 /// Operation: boolean logic combining multiple exclusion criteria.
 /// The `is_ignored_function` call is hidden in a closure (lenient mode).
-fn should_exclude(d: &DeclaredFunction, config: &crate::config::Config) -> bool {
+fn should_exclude_uncalled(d: &DeclaredFunction, config: &crate::config::Config) -> bool {
     let is_ignored = |name: &str| config.is_ignored_function(name);
     d.is_main
         || d.is_test
@@ -278,4 +311,12 @@ fn should_exclude(d: &DeclaredFunction, config: &crate::config::Config) -> bool 
         || d.has_allow_dead_code
         || d.is_api
         || is_ignored(&d.name)
+}
+
+/// Check if a declared function should be excluded from the TestOnly
+/// dead-code check. `// qual:test_helper` IS in this list — silencing
+/// the testonly finding is the whole point of the annotation.
+/// Operation: delegates to should_exclude_uncalled + test_helper check.
+fn should_exclude_test_only(d: &DeclaredFunction, config: &crate::config::Config) -> bool {
+    d.is_test_helper || should_exclude_uncalled(d, config)
 }
