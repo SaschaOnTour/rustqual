@@ -102,15 +102,18 @@ fn test_no_violations_single_module() {
 
 #[test]
 fn test_multiple_violations() {
-    // Stable hub A depends on two unstable leaf modules B and C
-    // D → A, E → A (makes A stable)
-    // A → B, A → C (B and C are unstable leaves)
+    // Edge-case regression: the label "unstable leaf" is a common
+    // intuition trap. B and C have Ce=0 and Ca=1 → instability = 0.0
+    // (maximally stable). A → B is therefore NOT an SDP violation even
+    // though the test name suggests multiple. The assertion locks the
+    // correct "zero violations" behaviour so future refactors can't
+    // silently change it.
     let graph = ModuleGraph {
         modules: vec!["a".into(), "b".into(), "c".into(), "d".into(), "e".into()],
         forward: vec![
             vec![1, 2], // a → b, a → c
-            vec![],     // b (leaf, I=0 because no outgoing, but Ca=1)
-            vec![],     // c (leaf)
+            vec![],     // b (Ca=1, Ce=0 → I=0.0, stable)
+            vec![],     // c (Ca=1, Ce=0 → I=0.0, stable)
             vec![0],    // d → a
             vec![0],    // e → a
         ],
@@ -118,9 +121,8 @@ fn test_multiple_violations() {
     let metrics = compute_coupling_metrics(&graph);
     let violations = check_sdp(&graph, &metrics);
     // A: Ca=2, Ce=2, I=0.5
-    // B: Ca=1, Ce=0, I=0.0 (stable!)
-    // So A(0.5) → B(0.0) is NOT a violation (A is less stable, B is more stable)
-    // This means no violations in this case
+    // B: Ca=1, Ce=0, I=0.0 (stable)
+    // A (0.5) → B (0.0) is not a violation: the callee is more stable.
     assert!(violations.is_empty());
 }
 

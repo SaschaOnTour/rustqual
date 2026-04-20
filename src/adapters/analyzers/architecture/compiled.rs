@@ -121,20 +121,32 @@ fn parse_unmatched_behavior(raw: &str) -> Result<UnmatchedBehavior, String> {
     }
 }
 
+/// Return `true` iff `key` is a literal crate name — only then is exact
+/// lookup safe. Any other character (including `*`, `?`, `[`, `{`) means
+/// the key is a glob pattern and must be compiled via `globset`.
+/// Operation: pure predicate over the character set.
+fn is_exact_crate_key(key: &str) -> bool {
+    !key.is_empty()
+        && key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
 /// Compile the `external_crates` map into an exact map and a glob list.
-/// Exact map = keys without glob meta-characters; glob list = keys with `*` or `?`.
+/// Exact map = literal crate-name keys (`[A-Za-z0-9_-]+`); glob list = any
+/// key containing glob meta (`*`, `?`, `[...]`, `{a,b}`, etc.).
 /// Operation: per-entry classification + compilation.
 fn compile_external_crates(raw: &HashMap<String, String>) -> Result<ExternalCrates, String> {
     let mut exact = HashMap::new();
     let mut globs = Vec::new();
     for (key, layer) in raw {
-        if key.contains('*') || key.contains('?') {
+        if is_exact_crate_key(key) {
+            exact.insert(key.clone(), layer.clone());
+        } else {
             let matcher = Glob::new(key)
                 .map_err(|e| format!("external_crates \"{key}\" glob error: {e}"))?
                 .compile_matcher();
             globs.push((matcher, layer.clone()));
-        } else {
-            exact.insert(key.clone(), layer.clone());
         }
     }
     Ok((exact, globs))
