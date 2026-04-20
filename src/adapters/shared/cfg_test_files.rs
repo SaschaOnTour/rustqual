@@ -85,7 +85,9 @@ impl<'a> ChildPathResolver<'a> {
             .join(relative)
             .to_string_lossy()
             .replace('\\', "/");
-        self.known_paths.contains(candidate.as_str()).then_some(candidate)
+        self.known_paths
+            .contains(candidate.as_str())
+            .then_some(candidate)
     }
 
     /// Naming-convention resolution: try `{dir}/{name}.rs` then
@@ -184,9 +186,7 @@ fn propagate_cfg_test_through_plain_mods(
                 file.items
                     .iter()
                     .filter_map(|item| match item {
-                        syn::Item::Mod(m) if is_any_ext_mod(m) => {
-                            resolver.resolve(parent_path, m)
-                        }
+                        syn::Item::Mod(m) if is_any_ext_mod(m) => resolver.resolve(parent_path, m),
                         _ => None,
                     })
                     .collect::<Vec<_>>()
