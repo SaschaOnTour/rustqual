@@ -90,13 +90,14 @@ pub(crate) struct StructuralMetadata {
     pub trait_defs: HashMap<String, TraitInfo>,
     /// trait_name → list of (impl_type, file)
     pub trait_impls: HashMap<String, Vec<(String, String)>>,
-    /// (type_name, impl_file) for inherent impls
-    pub inherent_impls: Vec<(String, String)>,
+    /// (type_name, impl_file, impl_block_line) for inherent impls
+    pub inherent_impls: Vec<(String, String, usize)>,
 }
 
 /// Metadata about a trait definition.
 pub(crate) struct TraitInfo {
     pub file: String,
+    pub line: usize,
     pub is_pub: bool,
     pub method_count: usize,
 }
@@ -145,6 +146,7 @@ fn collect_item_metadata(item: &syn::Item, path: &str, meta: &mut StructuralMeta
                 t.ident.to_string(),
                 TraitInfo {
                     file: path.to_string(),
+                    line: t.ident.span().start().line,
                     is_pub,
                     method_count,
                 },
@@ -152,6 +154,7 @@ fn collect_item_metadata(item: &syn::Item, path: &str, meta: &mut StructuralMeta
         }
         syn::Item::Impl(imp) => {
             if let Some(ref type_name) = impl_type_name(imp) {
+                let line = imp.impl_token.span.start().line;
                 if let Some((_, ref tp, _)) = imp.trait_ {
                     let tn = tp
                         .segments
@@ -164,7 +167,7 @@ fn collect_item_metadata(item: &syn::Item, path: &str, meta: &mut StructuralMeta
                         .push((type_name.clone(), path.to_string()));
                 } else {
                     meta.inherent_impls
-                        .push((type_name.clone(), path.to_string()));
+                        .push((type_name.clone(), path.to_string(), line));
                 }
             }
         }

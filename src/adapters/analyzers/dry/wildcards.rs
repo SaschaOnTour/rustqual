@@ -38,7 +38,9 @@ struct WildcardCollector {
 
 impl FileVisitor for WildcardCollector {
     fn reset_for_file(&mut self, file_path: &str) {
-        self.file = file_path.to_string();
+        // Normalise separators once so downstream checks (e.g. "/tests/"
+        // companion-file detection) work on Windows paths too.
+        self.file = file_path.replace('\\', "/");
         self.in_test = false;
     }
 }

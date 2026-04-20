@@ -31,7 +31,7 @@ pub(crate) fn detect_sit(
             let (impl_type, _) = &meta.trait_impls[trait_name][0];
             warnings.push(StructuralWarning {
                 file: info.file.clone(),
-                line: 1,
+                line: info.line,
                 name: trait_name.clone(),
                 kind: StructuralWarningKind::SingleImplTrait {
                     impl_type: impl_type.clone(),
