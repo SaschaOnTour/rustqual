@@ -105,12 +105,20 @@ fn join_with_leaf(segments: &[String], leaf: &str) -> String {
 /// prefix (`"tokio"`), the match requires an exact equality or a
 /// segment boundary so `"tokios"` does not false-positive on
 /// `"tokio"`.
-/// Operation: string comparison logic, no own calls.
+/// Operation: allocation-free string comparison, no own calls.
 fn matches_prefix(rendered: &str, prefix: &str) -> bool {
     if let Some(stripped) = prefix.strip_suffix("::") {
         rendered == stripped || rendered.starts_with(prefix)
     } else {
-        rendered == prefix || rendered.starts_with(&format!("{prefix}::"))
+        // `strip_prefix` is a single pass and allocates nothing; the
+        // previous `starts_with(&format!("{prefix}::"))` formed a new
+        // String for every (rendered, prefix) pair — noticeable on
+        // large workspaces with many configured prefixes.
+        match rendered.strip_prefix(prefix) {
+            Some("") => true,
+            Some(rest) => rest.starts_with("::"),
+            None => false,
+        }
     }
 }
 

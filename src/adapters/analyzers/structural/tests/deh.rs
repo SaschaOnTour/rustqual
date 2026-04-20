@@ -3,8 +3,7 @@ use crate::adapters::analyzers::structural::{StructuralWarning, StructuralWarnin
 use crate::config::StructuralConfig;
 
 fn detect_in(source: &str) -> Vec<StructuralWarning> {
-    let syntax = syn::parse_file(source).expect("test source");
-    let parsed = vec![("test.rs".to_string(), source.to_string(), syntax)];
+    let parsed = super::parse_single(source);
     let config = StructuralConfig::default();
     let mut warnings = Vec::new();
     detect_deh(&mut warnings, &parsed, &config);

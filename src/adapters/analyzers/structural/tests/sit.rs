@@ -4,8 +4,7 @@ use crate::adapters::analyzers::structural::{StructuralWarning, StructuralWarnin
 use crate::config::StructuralConfig;
 
 fn detect_from(source: &str) -> Vec<StructuralWarning> {
-    let syntax = syn::parse_file(source).expect("test source");
-    let parsed = vec![("lib.rs".to_string(), source.to_string(), syntax)];
+    let parsed = super::parse_single(source);
     let meta = collect_metadata(&parsed);
     let config = StructuralConfig::default();
     let mut warnings = Vec::new();

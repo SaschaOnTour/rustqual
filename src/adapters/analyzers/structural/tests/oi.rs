@@ -4,13 +4,7 @@ use crate::adapters::analyzers::structural::{StructuralWarning, StructuralWarnin
 use crate::config::StructuralConfig;
 
 fn detect_multi(sources: &[(&str, &str)]) -> Vec<StructuralWarning> {
-    let parsed: Vec<(String, String, syn::File)> = sources
-        .iter()
-        .map(|(path, src)| {
-            let syntax = syn::parse_file(src).expect("test source");
-            (path.to_string(), src.to_string(), syntax)
-        })
-        .collect();
+    let parsed = super::parse_multi(sources);
     let meta = collect_metadata(&parsed);
     let config = StructuralConfig::default();
     let mut warnings = Vec::new();
