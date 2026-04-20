@@ -88,6 +88,27 @@ fn write(p: &mut i32) {
 }
 
 #[test]
+fn test_count_production_lines_counts_code_before_block_comment() {
+    // `let x = 1; /* note */` has code before the comment and must count.
+    let source = "fn foo() {\n    let x = 1; /* note */\n}\n";
+    assert_eq!(count_production_lines(source), 3);
+}
+
+#[test]
+fn test_count_production_lines_counts_code_after_inline_block_comment() {
+    // `/* note */ let x = 1;` has code AFTER the inline comment.
+    // A leading-only heuristic would wrongly skip this.
+    let source = "fn foo() {\n    /* note */ let x = 1;\n}\n";
+    assert_eq!(count_production_lines(source), 3);
+}
+
+#[test]
+fn test_count_production_lines_skips_pure_inline_block_comment() {
+    let source = "fn foo() {\n    /* note */\n}\n";
+    assert_eq!(count_production_lines(source), 2);
+}
+
+#[test]
 fn test_count_production_lines_empty() {
     assert_eq!(count_production_lines(""), 0);
 }

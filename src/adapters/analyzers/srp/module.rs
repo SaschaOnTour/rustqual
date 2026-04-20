@@ -178,37 +178,49 @@ pub(crate) fn count_production_lines(source: &str) -> usize {
 }
 
 /// Classify a trimmed line as non-production (blank / comment) vs code.
-/// Tracks multi-line `/* … */` state via `in_block_comment` — lines
-/// inside a block comment are non-production, the line that opens
-/// `/*` is non-production regardless of what follows, and the line
-/// that closes `*/` is non-production too.
-/// Operation: heuristic string inspection + state update.
+/// Scans left-to-right, tracking multi-line `/* … */` state through
+/// `in_block_comment`. Correctly handles mid-line comments:
+/// `let x = 1; /* note */` counts as code, `/* note */ let x = 1;`
+/// also counts as code (unlike a leading-only heuristic), and
+/// `/* note */` alone counts as a comment. Lines inside a block
+/// comment that don't close it are pure comment.
+/// Operation: char-by-char scan with a block-comment state flag.
 fn is_noise_line(trimmed: &str, in_block_comment: &mut bool) -> bool {
     if trimmed.is_empty() {
         return true;
     }
-    if *in_block_comment {
-        if trimmed.contains("*/") {
-            *in_block_comment = false;
+    let mut has_code = false;
+    let mut chars = trimmed.chars().peekable();
+    while let Some(c) = chars.next() {
+        if *in_block_comment {
+            handle_in_comment(c, &mut chars, in_block_comment);
+            continue;
         }
-        return true;
-    }
-    if trimmed.starts_with("//") {
-        return true;
-    }
-    if trimmed.starts_with("/*") {
-        // Opening of a block comment — anything after `*/` on the
-        // same line we conservatively still treat as comment-only.
-        if !trimmed.contains("*/") {
-            *in_block_comment = true;
+        match (c, chars.peek().copied()) {
+            ('/', Some('/')) => return !has_code,
+            ('/', Some('*')) => {
+                chars.next();
+                *in_block_comment = true;
+            }
+            _ if !c.is_whitespace() => has_code = true,
+            _ => {}
         }
-        return true;
     }
-    // No special-case for lines that begin with `*`: outside a block
-    // comment that would hit valid code such as `*ptr = value;` or
-    // `*self.field += 1;`. Inside a block comment the earlier
-    // `in_block_comment` branch already swallows them.
-    false
+    !has_code
+}
+
+/// When inside a block comment, consume chars until we see `*/`,
+/// then clear the flag. Everything before is thrown away.
+/// Operation: two-char lookahead to close `*/`.
+fn handle_in_comment(
+    c: char,
+    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
+    in_block_comment: &mut bool,
+) {
+    if c == '*' && chars.peek() == Some(&'/') {
+        chars.next();
+        *in_block_comment = false;
+    }
 }
 
 /// Compute file length penalty score.
