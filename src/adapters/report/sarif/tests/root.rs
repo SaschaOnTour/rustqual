@@ -189,7 +189,9 @@ fn sarif_emits_orphan_suppression_finding() {
         reason: Some("legacy marker".into()),
     }];
     let value = build_sarif_value(&analysis);
-    let results = value["runs"][0]["results"].as_array().expect("results array");
+    let results = value["runs"][0]["results"]
+        .as_array()
+        .expect("results array");
     let orphan = results
         .iter()
         .find(|r| r["ruleId"] == "ORPHAN-001")
@@ -203,10 +205,11 @@ fn sarif_emits_orphan_suppression_finding() {
         orphan["locations"][0]["physicalLocation"]["region"]["startLine"],
         42
     );
-    let msg = orphan["message"]["text"]
-        .as_str()
-        .expect("message text");
-    assert!(msg.contains("srp"), "message should name suppressed dim: {msg}");
+    let msg = orphan["message"]["text"].as_str().expect("message text");
+    assert!(
+        msg.contains("srp"),
+        "message should name suppressed dim: {msg}"
+    );
     assert!(
         msg.contains("legacy marker"),
         "message should carry reason: {msg}"

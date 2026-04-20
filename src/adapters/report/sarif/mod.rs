@@ -112,7 +112,9 @@ fn collect_orphan_suppression_findings(
                     .join(",")
             };
             let message = match &w.reason {
-                Some(r) => format!("Stale qual:allow({dims}) marker — no finding in window. Reason was: {r}"),
+                Some(r) => format!(
+                    "Stale qual:allow({dims}) marker — no finding in window. Reason was: {r}"
+                ),
                 None => format!("Stale qual:allow({dims}) marker — no finding in window."),
             };
             serde_json::json!({
