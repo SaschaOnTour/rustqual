@@ -254,3 +254,45 @@ fn does_not_match_similar_but_different_prefix() {
         "tokio_util is not tokio:: and must not match: {hits:?}"
     );
 }
+
+// ── Bare `use tokio;` must match `"tokio::"` prefix ───────────────────
+
+#[test]
+fn bare_crate_use_matches_trailing_colon_prefix() {
+    let src = r#"
+        use tokio;
+    "#;
+    let hits = find(src, &["tokio::"]);
+    assert_eq!(
+        hits.len(),
+        1,
+        "`use tokio;` must match the `tokio::` prefix: {hits:?}"
+    );
+}
+
+#[test]
+fn bare_crate_rename_matches_trailing_colon_prefix() {
+    let src = r#"
+        use tokio as t;
+    "#;
+    let hits = find(src, &["tokio::"]);
+    assert_eq!(
+        hits.len(),
+        1,
+        "`use tokio as t;` must match the `tokio::` prefix: {hits:?}"
+    );
+}
+
+#[test]
+fn bare_prefix_matches_exact_and_segment_boundary_only() {
+    // Prefix without trailing `::` matches exact crate and segment-
+    // boundary paths, but NOT partial name overlap (tokio_util vs tokio).
+    let src = r#"
+        use tokio_util::codec::Decoder;
+    "#;
+    let hits = find(src, &["tokio"]);
+    assert!(
+        hits.is_empty(),
+        "bare prefix `tokio` must not match `tokio_util`: {hits:?}"
+    );
+}

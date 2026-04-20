@@ -44,7 +44,7 @@ struct PathPrefixVisitor<'a> {
 impl PathPrefixVisitor<'_> {
     fn check_rendered(&mut self, rendered: &str, span: proc_macro2::Span) {
         for prefix in self.prefixes {
-            if rendered.starts_with(prefix.as_str()) {
+            if matches_prefix(rendered, prefix) {
                 let start = span.start();
                 self.hits.push(MatchLocation {
                     file: self.file.to_string(),
@@ -98,6 +98,22 @@ fn join_with_leaf(segments: &[String], leaf: &str) -> String {
     }
 }
 
+/// Match `rendered` against a configured prefix with path-segment semantics.
+/// For a prefix with a trailing `::` (e.g. `"tokio::"`), both the bare
+/// crate (`use tokio;` → rendered `"tokio"`) and deeper paths
+/// (`use tokio::spawn;` → rendered `"tokio::spawn"`) hit. For a bare
+/// prefix (`"tokio"`), the match requires an exact equality or a
+/// segment boundary so `"tokios"` does not false-positive on
+/// `"tokio"`.
+/// Operation: string comparison logic, no own calls.
+fn matches_prefix(rendered: &str, prefix: &str) -> bool {
+    if let Some(stripped) = prefix.strip_suffix("::") {
+        rendered == stripped || rendered.starts_with(prefix)
+    } else {
+        rendered == prefix || rendered.starts_with(&format!("{prefix}::"))
+    }
+}
+
 impl<'ast> Visit<'ast> for PathPrefixVisitor<'_> {
     fn visit_path(&mut self, path: &'ast syn::Path) {
         let rendered = render_path(path);
@@ -116,11 +132,10 @@ impl<'ast> Visit<'ast> for PathPrefixVisitor<'_> {
     fn visit_item_extern_crate(&mut self, node: &'ast syn::ItemExternCrate) {
         let name = node.ident.to_string();
         for prefix in self.prefixes {
-            // `extern crate foo` only exposes a single crate identifier
-            // — no `::` sub-paths are possible here, so an equality
-            // check against the normalised prefix is sufficient.
-            let normalised = prefix.trim_end_matches("::");
-            if name == normalised {
+            // `extern crate foo` only exposes a single crate identifier.
+            // Reuse `matches_prefix` so the trimmed-`::` form behaves the
+            // same as the other matchers in this file.
+            if matches_prefix(&name, prefix) {
                 let start = node.ident.span().start();
                 self.hits.push(MatchLocation {
                     file: self.file.to_string(),
