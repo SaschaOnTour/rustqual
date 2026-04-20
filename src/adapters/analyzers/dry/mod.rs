@@ -90,15 +90,23 @@ pub(crate) fn collect_declared_functions(
 // (multi-dimension utility). Re-exports keep existing call sites working.
 pub(crate) use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
 
-/// Check if attributes contain `#[allow(dead_code)]`.
-/// Operation: attribute inspection logic.
+/// Check if attributes contain `#[allow(..., dead_code, ...)]`. Handles
+/// both the single-lint form (`#[allow(dead_code)]`) and the list form
+/// (`#[allow(dead_code, unused_variables)]`).
+/// Operation: attribute inspection + punctuated-path parsing.
 fn has_allow_dead_code(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        attr.path().is_ident("allow")
-            && attr
-                .parse_args::<syn::Ident>()
-                .is_ok_and(|ident| ident == "dead_code")
-    })
+    attrs
+        .iter()
+        .filter(|a| a.path().is_ident("allow"))
+        .any(allow_contains_dead_code)
+}
+
+/// True if this `#[allow(...)]` attribute's argument list contains
+/// `dead_code` as one of its (potentially many) path entries.
+/// Operation: punctuated parse + any-match, no own calls.
+fn allow_contains_dead_code(attr: &syn::Attribute) -> bool {
+    attr.parse_args_with(syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated)
+        .is_ok_and(|paths| paths.iter().any(|p| p.is_ident("dead_code")))
 }
 
 /// Build qualified name from optional parent type and base name.

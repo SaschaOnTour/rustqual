@@ -226,6 +226,31 @@ fn test_collect_declared_functions_allow_dead_code() {
 }
 
 #[test]
+fn test_collect_declared_functions_allow_dead_code_in_list() {
+    // `#[allow(..., dead_code, ...)]` is the common multi-lint form.
+    // A previous parse-as-Ident implementation silently missed this.
+    let code =
+        "#[allow(unused_variables, dead_code, unused_imports)] fn unused(x: i32) { let y = 1; }";
+    let parsed = parse(code);
+    let declared = collect_declared_functions(&parsed);
+    assert_eq!(declared.len(), 1);
+    assert!(
+        declared[0].has_allow_dead_code,
+        "dead_code inside a multi-lint allow list must be detected"
+    );
+}
+
+#[test]
+fn test_collect_declared_functions_allow_list_without_dead_code() {
+    // Control: a list that doesn't include dead_code must not match.
+    let code = "#[allow(unused_variables, unused_imports)] fn unused(x: i32) {}";
+    let parsed = parse(code);
+    let declared = collect_declared_functions(&parsed);
+    assert_eq!(declared.len(), 1);
+    assert!(!declared[0].has_allow_dead_code);
+}
+
+#[test]
 fn test_cfg_test_impl_methods_are_test() {
     let code = r#"
         pub struct Foo;
