@@ -29,6 +29,27 @@ fn test_count_production_lines_skips_blanks() {
 }
 
 #[test]
+fn test_count_production_lines_stops_on_single_line_cfg_test() {
+    // Single-line form: `#[cfg(test)] mod tests { ... }` on one line.
+    // Previously this would not match `trimmed == "#[cfg(test)]"` and
+    // the test body would be counted as production.
+    let source = "fn main() {}\n#[cfg(test)] mod tests { fn t() {} fn u() {} }\n";
+    assert_eq!(
+        count_production_lines(source),
+        1,
+        "single-line `#[cfg(test)] mod tests` must terminate counting"
+    );
+}
+
+#[test]
+fn test_count_production_lines_stops_on_cfg_test_with_trailing_whitespace() {
+    // `#[cfg(test)]    ` (trailing whitespace) — exact-equality check
+    // used to skip past this line.
+    let source = "fn main() {}\n#[cfg(test)]   \nmod tests { fn t() {} }\n";
+    assert_eq!(count_production_lines(source), 1);
+}
+
+#[test]
 fn test_count_production_lines_empty() {
     assert_eq!(count_production_lines(""), 0);
 }

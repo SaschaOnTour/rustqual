@@ -149,13 +149,17 @@ pub fn analyze_module_srp(
         .collect()
 }
 
-/// Count production lines: lines from start of file to first `#[cfg(test)]` module.
+/// Count production lines: lines from start of file to first
+/// `#[cfg(test)]` attribute. Stops on any line that begins with
+/// `#[cfg(test)]` so both the multi-line form
+/// (`#[cfg(test)]\nmod tests { … }`) and the single-line form
+/// (`#[cfg(test)] mod tests { … }`) are handled.
 /// Operation: string scanning logic, no own calls.
 pub(crate) fn count_production_lines(source: &str) -> usize {
     let mut count = 0;
     for line in source.lines() {
         let trimmed = line.trim();
-        if trimmed == "#[cfg(test)]" {
+        if trimmed.starts_with("#[cfg(test)]") {
             break;
         }
         // Skip blank lines and pure comment lines
