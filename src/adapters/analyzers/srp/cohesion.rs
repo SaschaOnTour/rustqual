@@ -127,32 +127,48 @@ pub(crate) fn compute_lcom4(
     });
     // O(1) membership check for the per-cluster field projection below.
     let struct_field_set: HashSet<&str> = struct_fields.iter().map(String::as_str).collect();
-    // Build clusters from connected components
+    // Build clusters from connected components. HashMap/HashSet
+    // iteration is non-deterministic, so sort `methods` and `fields`
+    // lexicographically inside each cluster and sort the clusters
+    // themselves by their sorted method lists. Report/snapshot output
+    // is stable across runs and platforms.
     let component_members = components(&mut uf);
-    let clusters: Vec<ResponsibilityCluster> = component_members
+    let mut clusters: Vec<ResponsibilityCluster> = component_members
         .values()
-        .map(|member_indices| {
-            let cluster_methods: Vec<String> = member_indices
+        .map(|member_indices| build_cluster(member_indices, methods, &struct_field_set))
+        .collect();
+    clusters.sort_by(|a, b| a.methods.cmp(&b.methods).then(a.fields.cmp(&b.fields)));
+    (component_members.len(), clusters)
+}
+
+/// Project one connected component into a sorted `ResponsibilityCluster`.
+/// Operation: projection + sort, no own calls.
+fn build_cluster(
+    member_indices: &[usize],
+    methods: &[&MethodFieldData],
+    struct_field_set: &HashSet<&str>,
+) -> ResponsibilityCluster {
+    let mut cluster_methods: Vec<String> = member_indices
+        .iter()
+        .map(|&i| methods[i].method_name.clone())
+        .collect();
+    cluster_methods.sort();
+    let cluster_fields_set: HashSet<String> = member_indices
+        .iter()
+        .flat_map(|&i| {
+            methods[i]
+                .field_accesses
                 .iter()
-                .map(|&i| methods[i].method_name.clone())
-                .collect();
-            let cluster_fields: HashSet<String> = member_indices
-                .iter()
-                .flat_map(|&i| {
-                    methods[i]
-                        .field_accesses
-                        .iter()
-                        .filter(|f| struct_field_set.contains(f.as_str()))
-                        .cloned()
-                })
-                .collect();
-            ResponsibilityCluster {
-                methods: cluster_methods,
-                fields: cluster_fields.into_iter().collect(),
-            }
+                .filter(|f| struct_field_set.contains(f.as_str()))
+                .cloned()
         })
         .collect();
-    (component_members.len(), clusters)
+    let mut cluster_fields: Vec<String> = cluster_fields_set.into_iter().collect();
+    cluster_fields.sort();
+    ResponsibilityCluster {
+        methods: cluster_methods,
+        fields: cluster_fields,
+    }
 }
 
 /// Compute total fan-out: distinct external call targets across all methods.

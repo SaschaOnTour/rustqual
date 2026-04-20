@@ -152,23 +152,46 @@ pub(crate) fn group_repeated_patterns(collected: Vec<CollectedMatch>) -> Vec<Rep
                 .first()
                 .map(|e| e.enum_name.clone())
                 .unwrap_or_default();
+            let mut projected: Vec<RepeatedMatchEntry> = entries
+                .into_iter()
+                .map(|e| RepeatedMatchEntry {
+                    file: e.file,
+                    line: e.line,
+                    function_name: e.function_name,
+                    arm_count: e.arm_count,
+                })
+                .collect();
+            // Sort entries within each group by (file, line, function) so the
+            // snapshot order is stable regardless of visit order.
+            projected.sort_by(|a, b| {
+                a.file
+                    .cmp(&b.file)
+                    .then(a.line.cmp(&b.line))
+                    .then(a.function_name.cmp(&b.function_name))
+            });
             RepeatedMatchGroup {
                 enum_name,
-                entries: entries
-                    .into_iter()
-                    .map(|e| RepeatedMatchEntry {
-                        file: e.file,
-                        line: e.line,
-                        function_name: e.function_name,
-                        arm_count: e.arm_count,
-                    })
-                    .collect(),
+                entries: projected,
                 suppressed: false,
             }
         })
         .collect();
 
-    result.sort_by_key(|g| std::cmp::Reverse(g.entries.len()));
+    // Group ordering: most-repeated first, ties broken by enum_name and then
+    // by the first entry's location. Without these tie-breakers, HashMap
+    // iteration order leaks into the output.
+    result.sort_by(|a, b| {
+        b.entries
+            .len()
+            .cmp(&a.entries.len())
+            .then(a.enum_name.cmp(&b.enum_name))
+            .then_with(|| match (a.entries.first(), b.entries.first()) {
+                (Some(a0), Some(b0)) => a0.file.cmp(&b0.file).then(a0.line.cmp(&b0.line)),
+                (Some(_), None) => std::cmp::Ordering::Greater,
+                (None, Some(_)) => std::cmp::Ordering::Less,
+                (None, None) => std::cmp::Ordering::Equal,
+            })
+    });
     result
 }
 
