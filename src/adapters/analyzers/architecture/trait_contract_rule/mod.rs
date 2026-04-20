@@ -46,14 +46,8 @@ pub fn check_trait_contracts(
 /// Run every rule against every trait in one file.
 /// Integration: dispatches per trait + per rule.
 fn check_file(path: &str, ast: &syn::File, rules: &[CompiledTraitContract]) -> Vec<MatchLocation> {
-    let traits: Vec<&syn::ItemTrait> = ast
-        .items
-        .iter()
-        .filter_map(|item| match item {
-            syn::Item::Trait(t) => Some(t),
-            _ => None,
-        })
-        .collect();
+    let mut traits: Vec<&syn::ItemTrait> = Vec::new();
+    collect_traits(&ast.items, &mut traits);
     rules
         .iter()
         .filter(|r| r.scope.is_match(path))
@@ -63,6 +57,24 @@ fn check_file(path: &str, ast: &syn::File, rules: &[CompiledTraitContract]) -> V
                 .flat_map(move |t| check_trait(path, t, ast, r))
         })
         .collect()
+}
+
+/// Gather every trait definition reachable through inline modules.
+/// Operation: recursive walk over `syn::Item` lists, no own calls.
+/// `// qual:recursive` — intentional recursion for nested `mod {}`.
+// qual:recursive
+fn collect_traits<'a>(items: &'a [syn::Item], out: &mut Vec<&'a syn::ItemTrait>) {
+    for item in items {
+        match item {
+            syn::Item::Trait(t) => out.push(t),
+            syn::Item::Mod(m) => {
+                if let Some((_, inner)) = &m.content {
+                    collect_traits(inner, out);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Run each enabled check against one trait.

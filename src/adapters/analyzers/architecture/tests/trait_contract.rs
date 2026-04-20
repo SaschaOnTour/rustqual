@@ -243,3 +243,47 @@ fn fully_compliant_trait_has_no_hits() {
     "#;
     assert!(run("any.rs", src, &rule).is_empty());
 }
+
+// ── trait inside inline module is still checked ──────────────────────
+
+#[test]
+fn trait_inside_inline_module_is_checked() {
+    let mut rule = empty();
+    rule.forbidden_return_type_contains = vec!["anyhow::".into()];
+    let src = r#"
+        mod inner {
+            pub trait Svc {
+                fn read(&self) -> anyhow::Result<()>;
+            }
+        }
+    "#;
+    let hits = run("any.rs", src, &rule);
+    assert_eq!(
+        checks(&hits),
+        vec!["return_type"],
+        "trait defined inside `mod inner {{ ... }}` must be checked"
+    );
+}
+
+#[test]
+fn trait_in_nested_inline_module_is_checked() {
+    let mut rule = empty();
+    rule.forbidden_return_type_contains = vec!["anyhow::".into()];
+    let src = r#"
+        mod outer {
+            pub mod middle {
+                pub mod inner {
+                    pub trait Svc {
+                        fn read(&self) -> anyhow::Result<()>;
+                    }
+                }
+            }
+        }
+    "#;
+    let hits = run("any.rs", src, &rule);
+    assert_eq!(
+        checks(&hits),
+        vec!["return_type"],
+        "traits inside deeply nested inline modules must be checked"
+    );
+}
