@@ -1,7 +1,6 @@
 use crate::adapters::analyzers::structural::deh::*;
 use crate::adapters::analyzers::structural::{StructuralWarning, StructuralWarningKind};
 use crate::config::StructuralConfig;
-use crate::findings::Dimension;
 use syn::visit::Visit;
 
 fn detect_in(source: &str) -> Vec<StructuralWarning> {

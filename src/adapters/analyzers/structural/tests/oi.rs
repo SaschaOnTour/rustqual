@@ -2,7 +2,6 @@ use crate::adapters::analyzers::structural::collect_metadata;
 use crate::adapters::analyzers::structural::oi::*;
 use crate::adapters::analyzers::structural::{StructuralWarning, StructuralWarningKind};
 use crate::config::StructuralConfig;
-use crate::findings::Dimension;
 
 fn detect_multi(sources: &[(&str, &str)]) -> Vec<StructuralWarning> {
     let parsed: Vec<(String, String, syn::File)> = sources

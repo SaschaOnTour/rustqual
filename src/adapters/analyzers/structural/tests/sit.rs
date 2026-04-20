@@ -2,7 +2,6 @@ use crate::adapters::analyzers::structural::collect_metadata;
 use crate::adapters::analyzers::structural::sit::*;
 use crate::adapters::analyzers::structural::{StructuralWarning, StructuralWarningKind};
 use crate::config::StructuralConfig;
-use crate::findings::Dimension;
 
 fn detect_from(source: &str) -> Vec<StructuralWarning> {
     let syntax = syn::parse_file(source).expect("test source");

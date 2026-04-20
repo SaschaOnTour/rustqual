@@ -65,10 +65,11 @@ impl<'ast> Visit<'ast> for WildcardCollector {
                     if self.in_test && prefix.first().is_some_and(|p| p == "super") {
                         continue;
                     }
-                    // Skip wildcard imports in files that live under a
-                    // `tests/` directory — those are companion test files
-                    // loaded via `#[cfg(test)] mod tests;` from a parent.
-                    if self.file.contains("/tests/") {
+                    // Skip wildcard imports in files under any `tests/`
+                    // directory: companion test subtrees inside `src/**/tests/`
+                    // AND workspace-root `tests/**` integration-test binaries.
+                    // `reset_for_file` already normalised `\` → `/`.
+                    if self.file.starts_with("tests/") || self.file.contains("/tests/") {
                         continue;
                     }
                     // Skip `prelude::*` paths
