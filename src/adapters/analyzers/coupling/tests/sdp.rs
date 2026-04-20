@@ -101,7 +101,7 @@ fn test_no_violations_single_module() {
 }
 
 #[test]
-fn test_multiple_violations() {
+fn test_zero_violations_for_stable_leaves() {
     // Edge-case regression: the label "unstable leaf" is a common
     // intuition trap. B and C have Ce=0 and Ca=1 → instability = 0.0
     // (maximally stable). A → B is therefore NOT an SDP violation even
