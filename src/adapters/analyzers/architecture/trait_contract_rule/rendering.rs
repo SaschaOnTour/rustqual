@@ -7,12 +7,35 @@
 
 use quote::ToTokens;
 
-/// Render a `syn::Type` back to its source form, with spaces stripped.
-/// Operation: token-stream stringification.
+/// Render a `syn::Type` back to source-like form for substring matching.
+///
+/// `proc_macro2::TokenStream::to_string()` inserts a single space between
+/// every token, so `Box<dyn Error + Send>` becomes `"Box < dyn Error + Send >"`.
+/// We strip the spaces that surround punctuation (`::`, `<`, `>`, `,`) so
+/// user substrings like `"Box<dyn"` and `"anyhow::"` match as written,
+/// while preserving the space between identifiers so keyword patterns
+/// like `"dyn Error"` or `"impl Trait"` still match.
+/// Operation: token-stream stringification + targeted whitespace normalisation.
 pub(super) fn render_type(ty: &syn::Type) -> String {
     let mut tokens = proc_macro2::TokenStream::new();
     ty.to_tokens(&mut tokens);
-    tokens.to_string().replace(' ', "")
+    normalise_rendering(&tokens.to_string())
+}
+
+/// Collapse whitespace that `TokenStream::to_string()` inserts around
+/// punctuation, but keep the single space between adjacent identifiers.
+/// Operation: sequential string replacements.
+fn normalise_rendering(s: &str) -> String {
+    s.replace(" :: ", "::")
+        .replace(":: ", "::")
+        .replace(" ::", "::")
+        .replace(" < ", "<")
+        .replace("< ", "<")
+        .replace(" <", "<")
+        .replace(" > ", ">")
+        .replace(" >", ">")
+        .replace("> ", ">")
+        .replace(" ,", ",")
 }
 
 /// Render a supertrait bound. Spaces left in so substring matches like
