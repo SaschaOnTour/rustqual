@@ -22,23 +22,25 @@ pub(crate) fn detect_sit(
         if info.method_count == 0 {
             return;
         }
-        let impl_count = meta
-            .trait_impls
-            .get(trait_name)
-            .map(|v| v.len())
-            .unwrap_or(0);
-        if impl_count == 1 {
-            let (impl_type, _) = &meta.trait_impls[trait_name][0];
-            warnings.push(StructuralWarning {
-                file: info.file.clone(),
-                line: info.line,
-                name: trait_name.clone(),
-                kind: StructuralWarningKind::SingleImplTrait {
-                    impl_type: impl_type.clone(),
-                },
-                dimension: Dimension::Coupling,
-                suppressed: false,
-            });
-        }
+        // Carry the Vec reference through so the single-impl case is
+        // verified and unwrapped in one place. Avoids a separate
+        // `[trait_name][0]` index that would panic if the collection
+        // invariant ever drifted.
+        let Some(impls) = meta.trait_impls.get(trait_name) else {
+            return;
+        };
+        let [(impl_type, _)] = impls.as_slice() else {
+            return;
+        };
+        warnings.push(StructuralWarning {
+            file: info.file.clone(),
+            line: info.line,
+            name: trait_name.clone(),
+            kind: StructuralWarningKind::SingleImplTrait {
+                impl_type: impl_type.clone(),
+            },
+            dimension: Dimension::Coupling,
+            suppressed: false,
+        });
     });
 }
