@@ -35,7 +35,11 @@ impl UnionFind {
             std::cmp::Ordering::Greater => self.parent[rb] = ra,
             std::cmp::Ordering::Equal => {
                 self.parent[rb] = ra;
-                self.rank[ra] += 1;
+                // `u8` is plenty for union-by-rank (tree height grows
+                // like log₂ N), but `saturating_add` removes the sharp
+                // edge of a debug-build panic or release-build wrap if
+                // someone ever exercises this with an adversarial N.
+                self.rank[ra] = self.rank[ra].saturating_add(1);
             }
         }
     }

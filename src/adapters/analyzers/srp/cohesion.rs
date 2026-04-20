@@ -203,9 +203,12 @@ pub(crate) fn compute_composite_score(
         }
     };
 
-    let field_norm = (field_count as f64 / config.max_fields as f64).min(1.0);
-    let method_norm = (method_count as f64 / config.max_methods as f64).min(1.0);
-    let fan_out_norm = (fan_out as f64 / config.max_fan_out as f64).min(1.0);
+    // Guard each denominator: a misconfigured `0` would otherwise
+    // produce inf / NaN and cascade into the composite score. Treat
+    // any non-zero count as maximally penalised when the cap is 0.
+    let field_norm = normalised_ratio(field_count, config.max_fields);
+    let method_norm = normalised_ratio(method_count, config.max_methods);
+    let fan_out_norm = normalised_ratio(fan_out, config.max_fan_out);
 
     let [w_lcom4, w_fields, w_methods, w_fan_out] = config.weights;
 
@@ -213,4 +216,15 @@ pub(crate) fn compute_composite_score(
         + w_fields * field_norm
         + w_methods * method_norm
         + w_fan_out * fan_out_norm
+}
+
+/// Return `(value / max).min(1.0)`, with a zero-guard: if `max == 0`,
+/// treat any non-zero value as fully penalised (1.0) and zero as 0.0
+/// so the score stays well-defined under a misconfigured threshold.
+/// Operation: arithmetic with one branch.
+fn normalised_ratio(value: usize, max: usize) -> f64 {
+    if max == 0 {
+        return if value == 0 { 0.0 } else { 1.0 };
+    }
+    (value as f64 / max as f64).min(1.0)
 }

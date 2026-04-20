@@ -42,7 +42,13 @@ struct MatchPatternCollector<'a> {
     file: String,
     collected: Vec<CollectedMatch>,
     in_test: bool,
+    /// For impl methods this holds the qualified form `Type::method` so
+    /// same-named methods across different `impl` blocks (e.g. two
+    /// `fn new()` bodies) aren't silently merged in grouping.
     current_fn: String,
+    /// Enclosing `impl Type` type name while visiting its methods; empty
+    /// for free functions.
+    current_impl_type: String,
 }
 
 impl FileVisitor for MatchPatternCollector<'_> {
@@ -52,6 +58,7 @@ impl FileVisitor for MatchPatternCollector<'_> {
         self.file = file_path.replace('\\', "/");
         self.in_test = false;
         self.current_fn = String::new();
+        self.current_impl_type = String::new();
     }
 }
 
@@ -69,8 +76,13 @@ impl<'ast> Visit<'ast> for MatchPatternCollector<'_> {
     }
 
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
-        let prev = std::mem::take(&mut self.current_fn);
-        self.current_fn = node.sig.ident.to_string();
+        let method = node.sig.ident.to_string();
+        let qualified = if self.current_impl_type.is_empty() {
+            method
+        } else {
+            format!("{}::{}", self.current_impl_type, method)
+        };
+        let prev = std::mem::replace(&mut self.current_fn, qualified);
         let is_test = has_test_attr(&node.attrs);
         if self.config.ignore_tests && (self.in_test || is_test) {
             self.current_fn = prev;
@@ -78,6 +90,22 @@ impl<'ast> Visit<'ast> for MatchPatternCollector<'_> {
         }
         syn::visit::visit_impl_item_fn(self, node);
         self.current_fn = prev;
+    }
+
+    fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
+        // Track the Self-type so nested methods render as `Type::method`.
+        let type_name = match &*node.self_ty {
+            syn::Type::Path(tp) => tp
+                .path
+                .segments
+                .last()
+                .map(|s| s.ident.to_string())
+                .unwrap_or_default(),
+            _ => String::new(),
+        };
+        let prev = std::mem::replace(&mut self.current_impl_type, type_name);
+        syn::visit::visit_item_impl(self, node);
+        self.current_impl_type = prev;
     }
 
     fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
@@ -125,6 +153,7 @@ pub fn detect_repeated_matches(
         collected: Vec::new(),
         in_test: false,
         current_fn: String::new(),
+        current_impl_type: String::new(),
     };
     crate::adapters::analyzers::dry::visit_all_files(parsed, &mut collector);
     group_repeated_patterns(collector.collected)
