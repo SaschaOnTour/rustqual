@@ -121,20 +121,23 @@ fn parse_unmatched_behavior(raw: &str) -> Result<UnmatchedBehavior, String> {
     }
 }
 
-/// Return `true` iff `key` is a literal crate name — only then is exact
-/// lookup safe. Any other character (including `*`, `?`, `[`, `{`) means
-/// the key is a glob pattern and must be compiled via `globset`.
+/// Return `true` iff `key` is a literal crate name (matches the
+/// code-level identifier, i.e. `[A-Za-z0-9_]+`). Any other character
+/// (including `*`, `?`, `[`, `{`) means the key is a glob pattern and
+/// must be compiled via `globset`. Hyphen is intentionally excluded:
+/// Rust imports use the underscore form (`tokio_util`, not
+/// `tokio-util`), so a hyphenated exact key could never match at
+/// runtime; users who want to match a hyphenated Cargo package name
+/// must supply the underscore form or a glob.
 /// Operation: pure predicate over the character set.
 fn is_exact_crate_key(key: &str) -> bool {
-    !key.is_empty()
-        && key
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// Compile the `external_crates` map into an exact map and a glob list.
-/// Exact map = literal crate-name keys (`[A-Za-z0-9_-]+`); glob list = any
-/// key containing glob meta (`*`, `?`, `[...]`, `{a,b}`, etc.).
+/// Exact map = literal crate-name keys (`[A-Za-z0-9_]+`); glob list = any
+/// key containing glob meta (`*`, `?`, `[...]`, `{a,b}`, etc.) or a
+/// hyphen (Rust-code import form uses underscores).
 /// Operation: per-entry classification + compilation.
 fn compile_external_crates(raw: &HashMap<String, String>) -> Result<ExternalCrates, String> {
     let mut exact = HashMap::new();

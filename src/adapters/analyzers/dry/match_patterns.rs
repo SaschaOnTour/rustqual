@@ -47,7 +47,9 @@ struct MatchPatternCollector<'a> {
 
 impl FileVisitor for MatchPatternCollector<'_> {
     fn reset_for_file(&mut self, file_path: &str) {
-        self.file = file_path.to_string();
+        // Normalise separators for deterministic findings across OSes,
+        // matching the other DRY collectors (e.g. wildcards.rs).
+        self.file = file_path.replace('\\', "/");
         self.in_test = false;
         self.current_fn = String::new();
     }
