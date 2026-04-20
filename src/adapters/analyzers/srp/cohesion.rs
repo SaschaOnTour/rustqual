@@ -117,6 +117,7 @@ pub(crate) fn compute_lcom4(
         return (0, vec![]);
     }
 
+    let _ = struct_fields; // not needed directly; membership already honoured via field_to_methods
     let make_uf = |size| UnionFind::new(size);
     let mut uf = make_uf(n);
     let unite = |uf: &mut UnionFind, a, b| uf.union(a, b);
@@ -125,8 +126,12 @@ pub(crate) fn compute_lcom4(
     field_to_methods.values().for_each(|indices| {
         indices.windows(2).for_each(|w| unite(&mut uf, w[0], w[1]));
     });
-    // O(1) membership check for the per-cluster field projection below.
-    let struct_field_set: HashSet<&str> = struct_fields.iter().map(String::as_str).collect();
+    // Invert `field_to_methods` into a per-method field set. This
+    // captures the SAME expanded view (direct accesses PLUS fields
+    // reached via one-level `self_method_calls`) used above for
+    // unioning — so a method that only connects to the cluster via a
+    // self-call still contributes its reached fields to the cluster.
+    let method_to_fields = invert_field_to_methods(field_to_methods, n);
     // Build clusters from connected components. HashMap/HashSet
     // iteration is non-deterministic, so sort `methods` and `fields`
     // lexicographically inside each cluster and sort the clusters
@@ -135,18 +140,36 @@ pub(crate) fn compute_lcom4(
     let component_members = components(&mut uf);
     let mut clusters: Vec<ResponsibilityCluster> = component_members
         .values()
-        .map(|member_indices| build_cluster(member_indices, methods, &struct_field_set))
+        .map(|member_indices| build_cluster(member_indices, methods, &method_to_fields))
         .collect();
     clusters.sort_by(|a, b| a.methods.cmp(&b.methods).then(a.fields.cmp(&b.fields)));
     (component_members.len(), clusters)
 }
 
+/// Invert `field_to_methods` into `method_index → list-of-fields`. A
+/// single method can touch many fields (directly or via one-level
+/// self-call expansion); the returned view matches what Union-Find
+/// saw when forming clusters.
+/// Operation: iterator-based grouping, no own calls.
+fn invert_field_to_methods<'a>(
+    field_to_methods: &HashMap<&'a str, Vec<usize>>,
+    method_count: usize,
+) -> Vec<Vec<&'a str>> {
+    let mut out: Vec<Vec<&'a str>> = vec![Vec::new(); method_count];
+    field_to_methods.iter().for_each(|(field, indices)| {
+        indices.iter().for_each(|&i| out[i].push(field));
+    });
+    out
+}
+
 /// Project one connected component into a sorted `ResponsibilityCluster`.
+/// Fields come from the pre-expanded `method_to_fields` so cluster
+/// membership and cluster contents stay in lock-step.
 /// Operation: projection + sort, no own calls.
 fn build_cluster(
     member_indices: &[usize],
     methods: &[&MethodFieldData],
-    struct_field_set: &HashSet<&str>,
+    method_to_fields: &[Vec<&str>],
 ) -> ResponsibilityCluster {
     let mut cluster_methods: Vec<String> = member_indices
         .iter()
@@ -155,13 +178,7 @@ fn build_cluster(
     cluster_methods.sort();
     let cluster_fields_set: HashSet<String> = member_indices
         .iter()
-        .flat_map(|&i| {
-            methods[i]
-                .field_accesses
-                .iter()
-                .filter(|f| struct_field_set.contains(f.as_str()))
-                .cloned()
-        })
+        .flat_map(|&i| method_to_fields[i].iter().map(|f| (*f).to_string()))
         .collect();
     let mut cluster_fields: Vec<String> = cluster_fields_set.into_iter().collect();
     cluster_fields.sort();
