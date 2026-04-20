@@ -813,6 +813,170 @@ fn suppressed_srp_param_over_threshold_is_not_orphan() {
 }
 
 #[test]
+fn coupling_marker_is_not_orphan_for_structural_coupling_finding() {
+    // Structural binary checks (OI, SIT, DEH, IET) carry
+    // `dimension == Coupling` and are line-anchored — a 5-line
+    // qual:allow(coupling) window DOES suppress them. The orphan
+    // checker must treat coupling-only markers as verifiable when a
+    // line-anchored coupling position is available in the file.
+    use crate::adapters::analyzers::structural::{
+        StructuralAnalysis, StructuralWarning, StructuralWarningKind,
+    };
+    use crate::findings::Suppression;
+    let mut sups = HashMap::new();
+    sups.insert(
+        "src/foo.rs".to_string(),
+        vec![Suppression {
+            line: 10,
+            dimensions: vec![crate::findings::Dimension::Coupling],
+            reason: None,
+        }],
+    );
+    let mut analysis = empty_analysis();
+    analysis.structural = Some(StructuralAnalysis {
+        warnings: vec![StructuralWarning {
+            file: "src/foo.rs".into(),
+            line: 12,
+            name: "Foo".into(),
+            kind: StructuralWarningKind::SingleImplTrait {
+                impl_type: "FooImpl".into(),
+            },
+            dimension: crate::findings::Dimension::Coupling,
+            suppressed: false,
+        }],
+    });
+    let orphans =
+        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    assert!(
+        orphans.is_empty(),
+        "coupling marker for a line-anchored structural finding must not be orphan, got: {orphans:?}"
+    );
+}
+
+#[test]
+fn coupling_only_marker_with_no_line_anchored_finding_is_skipped() {
+    // When the file has no line-anchored Coupling position, a
+    // coupling-only marker is unverifiable (pure module-level
+    // coupling is global). We skip it rather than emit a
+    // potentially-false orphan.
+    use crate::findings::Suppression;
+    let mut sups = HashMap::new();
+    sups.insert(
+        "src/foo.rs".to_string(),
+        vec![Suppression {
+            line: 5,
+            dimensions: vec![crate::findings::Dimension::Coupling],
+            reason: None,
+        }],
+    );
+    let analysis = empty_analysis();
+    let orphans =
+        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    assert!(
+        orphans.is_empty(),
+        "coupling-only marker without a line-anchored Coupling finding must be skipped, got: {orphans:?}"
+    );
+}
+
+#[test]
+fn dry_marker_on_dead_code_only_is_orphan() {
+    // `qual:allow(dry)` does NOT suppress dead-code warnings (there
+    // is no mark_dead_code_suppressions pass — exclusions happen via
+    // qual:api / qual:test_helper / is_test / has_allow_dead_code).
+    // So a qual:allow(dry) marker whose only nearby finding is
+    // DEAD_CODE should be reported as orphan.
+    use crate::adapters::analyzers::dry::dead_code::{DeadCodeKind, DeadCodeWarning};
+    use crate::findings::Suppression;
+    let mut sups = HashMap::new();
+    sups.insert(
+        "src/foo.rs".to_string(),
+        vec![Suppression {
+            line: 5,
+            dimensions: vec![crate::findings::Dimension::Dry],
+            reason: None,
+        }],
+    );
+    let mut analysis = empty_analysis();
+    analysis.dead_code = vec![DeadCodeWarning {
+        function_name: "helper".into(),
+        qualified_name: "helper".into(),
+        file: "src/foo.rs".into(),
+        line: 7,
+        kind: DeadCodeKind::Uncalled,
+        suggestion: String::new(),
+    }];
+    let orphans =
+        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    assert_eq!(
+        orphans.len(),
+        1,
+        "dry marker near dead_code only must be orphan (dead_code not dry-suppressible), got: {orphans:?}"
+    );
+}
+
+#[test]
+fn dry_marker_two_lines_above_wildcard_is_orphan() {
+    // `mark_wildcard_suppressions` accepts markers only on the same
+    // line or one line above. A marker two lines above the wildcard
+    // would NOT suppress it, so the orphan checker must report it.
+    use crate::adapters::analyzers::dry::wildcards::WildcardImportWarning;
+    use crate::findings::Suppression;
+    let mut sups = HashMap::new();
+    sups.insert(
+        "src/foo.rs".to_string(),
+        vec![Suppression {
+            line: 5,
+            dimensions: vec![crate::findings::Dimension::Dry],
+            reason: None,
+        }],
+    );
+    let mut analysis = empty_analysis();
+    analysis.wildcard_warnings = vec![WildcardImportWarning {
+        file: "src/foo.rs".into(),
+        line: 7,
+        module_path: "foo::*".into(),
+        suppressed: false,
+    }];
+    let orphans =
+        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    assert_eq!(
+        orphans.len(),
+        1,
+        "dry marker two lines above wildcard must be orphan (wildcard window is 1), got: {orphans:?}"
+    );
+}
+
+#[test]
+fn dry_marker_one_line_above_wildcard_is_not_orphan() {
+    // Guard: the wildcard window is exactly 0 or 1 — same line or
+    // line above. 1-line distance must still count as non-orphan.
+    use crate::adapters::analyzers::dry::wildcards::WildcardImportWarning;
+    use crate::findings::Suppression;
+    let mut sups = HashMap::new();
+    sups.insert(
+        "src/foo.rs".to_string(),
+        vec![Suppression {
+            line: 6,
+            dimensions: vec![crate::findings::Dimension::Dry],
+            reason: None,
+        }],
+    );
+    let mut analysis = empty_analysis();
+    analysis.wildcard_warnings = vec![WildcardImportWarning {
+        file: "src/foo.rs".into(),
+        line: 7,
+        module_path: "foo::*".into(),
+        suppressed: false,
+    }];
+    let orphans =
+        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    assert!(
+        orphans.is_empty(),
+        "dry marker one line above wildcard must not be orphan, got: {orphans:?}"
+    );
+}
+
+#[test]
 fn complexity_marker_is_orphan_when_complexity_dimension_disabled() {
     // Config disables the complexity dimension entirely. A
     // `qual:allow(complexity)` marker can't suppress what doesn't

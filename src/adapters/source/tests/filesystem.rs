@@ -183,11 +183,17 @@ fn parsed_single(path: &str, source: &str) -> Vec<(String, String, syn::File)> {
 
 #[test]
 fn qual_allow_honors_marker_inside_contiguous_comment_block() {
-    // Marker is on line 1; three more // comment lines follow; then a
-    // `#[derive]` attribute + struct on line 5. Without the block-end
-    // shift, ANNOTATION_WINDOW=3 from line 1 wouldn't reach line 6.
-    // With the shift, the effective line is 4 (last // line) and the
-    // window 4..=7 covers the struct on line 6.
+    // Layout:
+    //   line 1: // qual:allow(srp) — rustqual false-positive LCOM4=2
+    //   line 2: // The struct's methods form one coherent data layer.
+    //   line 3: // See docs/rustqual-bugs.md.
+    //   line 4: #[derive(Default)]
+    //   line 5: pub struct Foo { ... }
+    //
+    // Without the block-end shift, ANNOTATION_WINDOW=3 from line 1
+    // reaches only line 4 — too short to cover the struct on line 5.
+    // With the shift, the effective marker line is 3 (last // of the
+    // contiguous block) and the window 3..=6 covers the struct.
     let source = "// qual:allow(srp) — rustqual false-positive LCOM4=2\n\
                   // The struct's methods form one coherent data layer.\n\
                   // See docs/rustqual-bugs.md.\n\

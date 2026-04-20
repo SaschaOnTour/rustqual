@@ -8,6 +8,8 @@
 //! format (text, JSON, AI, SARIF, ...) just like any other finding —
 //! one-shot `--format ai` invocations don't miss them.
 
+mod complexity_predicates;
+
 use std::collections::HashMap;
 
 use crate::adapters::analyzers::iosp::Classification;
@@ -21,6 +23,10 @@ const WINDOW_IOSP_COMPLEXITY_DRY: usize = crate::findings::ANNOTATION_WINDOW; //
 const WINDOW_SRP_STRUCT_PARAM: usize = 5;
 const WINDOW_TQ: usize = 5;
 const WINDOW_STRUCTURAL: usize = 5;
+/// `mark_wildcard_suppressions` accepts a marker only on the same line
+/// or exactly one line above the wildcard `use`, so the orphan
+/// checker uses the same tight window rather than the DRY default.
+const WINDOW_DRY_WILDCARD: usize = 1;
 
 /// How a finding position is matched against a suppression marker.
 /// Mirrors the actual semantics of the per-dimension `mark_*`
@@ -54,7 +60,7 @@ pub(crate) fn detect_orphan_suppressions(
         .iter()
         .flat_map(|(file, sups)| {
             sups.iter()
-                .filter(|sup| is_verifiable(sup))
+                .filter(|sup| is_verifiable(sup, file, &positions))
                 .filter(|sup| !has_matching_finding(file, sup, &positions))
                 .map(|sup| OrphanSuppressionWarning {
                     file: file.clone(),
@@ -69,18 +75,34 @@ pub(crate) fn detect_orphan_suppressions(
     orphans
 }
 
-/// True if at least one of the suppression's dimensions has a
-/// point-location the orphan checker can verify. Bare suppressions
-/// (empty `dimensions`) are wildcards and verifiable. Coupling-only
-/// suppressions are *not* verifiable — Coupling warnings are emitted
-/// at the module level with no file/line anchor.
-/// Operation: predicate over the dimension list.
-fn is_verifiable(sup: &Suppression) -> bool {
+/// True if the suppression can be verified against line-anchored
+/// findings. Bare suppressions (empty `dimensions`) are wildcards
+/// and always verifiable. Suppressions with at least one non-Coupling
+/// dimension are verifiable on that dimension's positions. Coupling-
+/// only suppressions are verifiable *only* when the file has a
+/// line-anchored Coupling finding (e.g. a Structural OI/SIT/DEH/IET
+/// warning carries `dimension == Coupling`). Pure module-global
+/// coupling / cycle / SDP reports have no line anchor, so an
+/// unverifiable coupling-only marker is skipped rather than reported
+/// as a potentially-false orphan.
+/// Operation: predicate over dimensions + file position lookup.
+fn is_verifiable(
+    sup: &Suppression,
+    file: &str,
+    positions: &HashMap<String, Vec<FindingPosition>>,
+) -> bool {
     use crate::findings::Dimension;
     if sup.dimensions.is_empty() {
         return true;
     }
-    sup.dimensions.iter().any(|d| *d != Dimension::Coupling)
+    if sup.dimensions.iter().any(|d| *d != Dimension::Coupling) {
+        return true;
+    }
+    // Coupling-only marker: verifiable iff the file has a line-anchored
+    // Coupling finding.
+    positions
+        .get(file)
+        .is_some_and(|ps| ps.iter().any(|p| p.dim == Dimension::Coupling))
 }
 
 /// True if some finding in `file` matches the suppression under its
@@ -174,77 +196,12 @@ fn collect_iosp_complexity_positions<F>(
             return;
         }
         if let Some(c) = &f.complexity {
-            if would_trigger_complexity_warning(f, c, &config.complexity) {
+            if complexity_predicates::would_trigger(f, c, &config.complexity) {
                 push(&f.file, f.line, Dimension::Complexity, mode);
             }
             push_magic_numbers(f, c, &config.complexity, push);
         }
     });
-}
-
-/// True if the raw complexity metrics of a function would trigger any
-/// complexity warning under the active config — mirrors the predicates
-/// in `apply_extended_warnings` so `detect_unsafe`,
-/// `detect_error_handling`, `allow_expect`, and `is_test` are all
-/// honored. Used by the orphan checker to recognize
-/// `// qual:allow(complexity)` markers as non-orphan even after the
-/// suppression clears the `*_warning` flags on the `FunctionAnalysis`.
-/// Integration: delegates to per-aspect predicates.
-fn would_trigger_complexity_warning(
-    f: &crate::adapters::analyzers::iosp::FunctionAnalysis,
-    c: &crate::adapters::analyzers::iosp::ComplexityMetrics,
-    cx: &crate::config::sections::ComplexityConfig,
-) -> bool {
-    exceeds_basic_thresholds(c, cx)
-        || exceeds_length(f, c, cx)
-        || exceeds_unsafe(c, cx)
-        || exceeds_error_handling(f, c, cx)
-}
-
-/// True if cognitive / cyclomatic / nesting exceed their thresholds.
-/// Operation: comparison logic.
-fn exceeds_basic_thresholds(
-    c: &crate::adapters::analyzers::iosp::ComplexityMetrics,
-    cx: &crate::config::sections::ComplexityConfig,
-) -> bool {
-    c.cognitive_complexity > cx.max_cognitive
-        || c.cyclomatic_complexity > cx.max_cyclomatic
-        || c.max_nesting > cx.max_nesting_depth
-}
-
-/// True if the function (production, not test) exceeds the length cap.
-/// Operation: comparison logic.
-fn exceeds_length(
-    f: &crate::adapters::analyzers::iosp::FunctionAnalysis,
-    c: &crate::adapters::analyzers::iosp::ComplexityMetrics,
-    cx: &crate::config::sections::ComplexityConfig,
-) -> bool {
-    !f.is_test && c.function_lines > cx.max_function_lines
-}
-
-/// True if unsafe detection is enabled and the function contains at
-/// least one unsafe block.
-/// Operation: comparison logic.
-fn exceeds_unsafe(
-    c: &crate::adapters::analyzers::iosp::ComplexityMetrics,
-    cx: &crate::config::sections::ComplexityConfig,
-) -> bool {
-    cx.detect_unsafe && c.unsafe_blocks > 0
-}
-
-/// True if error-handling detection is enabled and the (production)
-/// function uses any of unwrap/panic/todo/(expect unless allowed).
-/// Operation: comparison logic.
-fn exceeds_error_handling(
-    f: &crate::adapters::analyzers::iosp::FunctionAnalysis,
-    c: &crate::adapters::analyzers::iosp::ComplexityMetrics,
-    cx: &crate::config::sections::ComplexityConfig,
-) -> bool {
-    if !cx.detect_error_handling || f.is_test {
-        return false;
-    }
-    let expect_threshold = if cx.allow_expect { 0 } else { 1 };
-    c.unwrap_count + c.panic_count + c.todo_count + c.expect_count.min(expect_threshold) > 0
 }
 
 /// Push complexity positions for every magic-number occurrence on the
@@ -292,16 +249,20 @@ fn collect_dry_positions<F>(
     if !config.duplicates.enabled && !config.boilerplate.enabled {
         return;
     }
+    // Default DRY window (duplicates, fragments, boilerplate,
+    // repeated matches). Dead-code findings are intentionally *not*
+    // included: they are not suppressible via `qual:allow(dry)` —
+    // exclusions happen via `qual:api`, `qual:test_helper`,
+    // `#[allow(dead_code)]`, or being a test function, all handled
+    // at the declaration-collection layer. Including them here
+    // would let an unrelated `qual:allow(dry)` marker falsely mask
+    // a stale suppression as non-orphan.
     let mode = MatchMode::LineWindow(WINDOW_IOSP_COMPLEXITY_DRY);
     analysis.duplicates.iter().for_each(|g| {
         g.entries
             .iter()
             .for_each(|e| push(&e.file, e.line, Dimension::Dry, mode));
     });
-    analysis
-        .dead_code
-        .iter()
-        .for_each(|w| push(&w.file, w.line, Dimension::Dry, mode));
     analysis.fragments.iter().for_each(|g| {
         g.entries
             .iter()
@@ -311,10 +272,13 @@ fn collect_dry_positions<F>(
         .boilerplate
         .iter()
         .for_each(|b| push(&b.file, b.line, Dimension::Dry, mode));
+    // Wildcards use a tighter window: `mark_wildcard_suppressions`
+    // only accepts the marker on the same line or immediately above.
+    let wildcard_mode = MatchMode::LineWindow(WINDOW_DRY_WILDCARD);
     analysis
         .wildcard_warnings
         .iter()
-        .for_each(|w| push(&w.file, w.line, Dimension::Dry, mode));
+        .for_each(|w| push(&w.file, w.line, Dimension::Dry, wildcard_mode));
     analysis.repeated_matches.iter().for_each(|g| {
         g.entries
             .iter()
