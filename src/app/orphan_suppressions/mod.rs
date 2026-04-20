@@ -16,17 +16,10 @@ use crate::adapters::analyzers::iosp::Classification;
 use crate::findings::Suppression;
 use crate::report::OrphanSuppressionWarning;
 
-/// Window widths that mirror the per-dimension marking semantics.
-/// Must stay in sync with the constants used by `mark_*_suppressions`
-/// in `app::metrics`, `app::structural_metrics`, `app::tq_metrics`.
-const WINDOW_IOSP_COMPLEXITY_DRY: usize = crate::findings::ANNOTATION_WINDOW; // 3
-const WINDOW_SRP_STRUCT_PARAM: usize = 5;
-const WINDOW_TQ: usize = 5;
-const WINDOW_STRUCTURAL: usize = 5;
-/// `mark_wildcard_suppressions` accepts a marker only on the same line
-/// or exactly one line above the wildcard `use`, so the orphan
-/// checker uses the same tight window rather than the DRY default.
-const WINDOW_DRY_WILDCARD: usize = 1;
+// Window widths come from the shared `app::suppression_windows`
+// module so the orphan detector and the `mark_*_suppressions`
+// passes can't silently diverge.
+use super::suppression_windows as windows;
 
 /// How a finding position is matched against a suppression marker.
 /// Mirrors the actual semantics of the per-dimension `mark_*`
@@ -191,7 +184,7 @@ fn collect_iosp_complexity_positions<F>(
     F: FnMut(&str, usize, crate::findings::Dimension, MatchMode),
 {
     use crate::findings::Dimension;
-    let mode = MatchMode::LineWindow(WINDOW_IOSP_COMPLEXITY_DRY);
+    let mode = MatchMode::LineWindow(windows::DEFAULT);
     let complexity_enabled = config.complexity.enabled;
     analysis.results.iter().for_each(|f| {
         if matches!(f.classification, Classification::Violation { .. }) {
@@ -223,7 +216,7 @@ fn push_magic_numbers<F>(
     if f.is_test || !cx.detect_magic_numbers {
         return;
     }
-    let mode = MatchMode::LineWindow(WINDOW_IOSP_COMPLEXITY_DRY);
+    let mode = MatchMode::LineWindow(windows::DEFAULT);
     c.magic_numbers.iter().for_each(|m| {
         push(
             &f.file,
@@ -262,7 +255,7 @@ fn collect_dry_positions<F>(
     // at the declaration-collection layer. Including them here
     // would let an unrelated `qual:allow(dry)` marker falsely mask
     // a stale suppression as non-orphan.
-    let mode = MatchMode::LineWindow(WINDOW_IOSP_COMPLEXITY_DRY);
+    let mode = MatchMode::LineWindow(windows::DEFAULT);
     analysis.duplicates.iter().for_each(|g| {
         g.entries
             .iter()
@@ -279,7 +272,7 @@ fn collect_dry_positions<F>(
         .for_each(|b| push(&b.file, b.line, Dimension::Dry, mode));
     // Wildcards use a tighter window: `mark_wildcard_suppressions`
     // only accepts the marker on the same line or immediately above.
-    let wildcard_mode = MatchMode::LineWindow(WINDOW_DRY_WILDCARD);
+    let wildcard_mode = MatchMode::LineWindow(windows::WILDCARD);
     analysis
         .wildcard_warnings
         .iter()
@@ -308,7 +301,7 @@ fn collect_srp_positions<F>(
         return;
     }
     let Some(srp) = &analysis.srp else { return };
-    let line_mode = MatchMode::LineWindow(WINDOW_SRP_STRUCT_PARAM);
+    let line_mode = MatchMode::LineWindow(windows::SRP_STRUCT_PARAM);
     srp.struct_warnings
         .iter()
         .for_each(|w| push(&w.file, w.line, Dimension::Srp, line_mode));
@@ -335,7 +328,7 @@ fn collect_tq_positions<F>(
         return;
     }
     let Some(tq) = &analysis.tq else { return };
-    let mode = MatchMode::LineWindow(WINDOW_TQ);
+    let mode = MatchMode::LineWindow(windows::TQ);
     tq.warnings
         .iter()
         .for_each(|w| push(&w.file, w.line, Dimension::TestQuality, mode));
@@ -358,7 +351,7 @@ fn collect_structural_positions<F>(
     let Some(st) = &analysis.structural else {
         return;
     };
-    let mode = MatchMode::LineWindow(WINDOW_STRUCTURAL);
+    let mode = MatchMode::LineWindow(windows::STRUCTURAL);
     st.warnings
         .iter()
         .for_each(|w| push(&w.file, w.line, w.dimension, mode));

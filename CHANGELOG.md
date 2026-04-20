@@ -44,8 +44,10 @@ coverage.lcov` reports 1913 functions, 100.0% quality score across all
   that suppressions clear), so a `// qual:allow(complexity)` marker
   on a genuinely over-threshold function is correctly recognized as
   non-orphan even after the suppression has silenced the user-visible
-  finding. Coupling-only markers are skipped because coupling
-  warnings are module-global and can't be matched by line window.
+  finding. Coupling-only markers are skipped only when the file has
+  no line-anchored Coupling finding to match by line window; when a
+  line-anchored Coupling position exists (for example, a Structural
+  warning with `dimension == Coupling`), the marker is verifiable.
 - **`apply_parameter_warnings` marks suppressed entries instead of
   dropping them** — internal change that lets the orphan-suppression
   detector see SRP-param suppressions as matching targets. User-

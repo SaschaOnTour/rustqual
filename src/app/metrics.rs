@@ -211,7 +211,9 @@ pub(super) fn mark_srp_suppressions(
     let Some(srp) = srp else { return };
 
     // Struct suppressions: comment may be several lines above due to #[derive(...)] attributes
-    const SRP_STRUCT_SUPPRESSION_WINDOW: usize = 5;
+    // Window width shared with the orphan detector, see
+    // `app::suppression_windows::SRP_STRUCT_PARAM`.
+    const SRP_STRUCT_SUPPRESSION_WINDOW: usize = super::suppression_windows::SRP_STRUCT_PARAM;
     let srp_dim = crate::findings::Dimension::Srp;
 
     srp.struct_warnings.iter_mut().for_each(|w| {
@@ -249,11 +251,13 @@ pub(super) fn mark_wildcard_suppressions(
     suppression_lines: &std::collections::HashMap<String, Vec<Suppression>>,
 ) {
     let dry_dim = crate::findings::Dimension::Dry;
+    // Window width shared with the orphan detector, see
+    // `app::suppression_windows::WILDCARD`.
+    let window = super::suppression_windows::WILDCARD;
     warnings.iter_mut().for_each(|w| {
         if let Some(sups) = suppression_lines.get(&w.file) {
             w.suppressed = sups.iter().any(|sup| {
-                (sup.line == w.line || (w.line > 0 && sup.line == w.line.saturating_sub(1)))
-                    && sup.covers(dry_dim)
+                sup.line <= w.line && w.line - sup.line <= window && sup.covers(dry_dim)
             });
         }
     });
