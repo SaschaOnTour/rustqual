@@ -152,9 +152,14 @@ fn file_to_module_segments(path: &str) -> Vec<String> {
 }
 
 /// Synthesise the candidate `src/…` file paths for a segment prefix (the
-/// `crate::` already stripped). Every ancestor of the leaf is a candidate —
-/// the leaf may be a module file, a module directory, or an item name
-/// living inside the parent module.
+/// `crate::` already stripped). Every ancestor of the leaf is a
+/// candidate — the leaf may be a module file, a module directory, or
+/// an item name living inside the parent module. For single-segment
+/// imports (`use crate::Foo`) we additionally consider `src/lib.rs`
+/// and `src/main.rs`, since `Foo` may be declared or re-exported at
+/// the crate root. For deeper paths (`use crate::foo::Bar`) the leaf
+/// item lives inside `foo`'s own file, so crate-root candidates are
+/// not added.
 /// Operation: loop building candidate list, no own calls.
 fn candidate_paths(inner: &[String]) -> Vec<String> {
     let mut candidates = Vec::new();
@@ -163,6 +168,10 @@ fn candidate_paths(inner: &[String]) -> Vec<String> {
         let joined = head.join("/");
         candidates.push(format!("src/{joined}.rs"));
         candidates.push(format!("src/{joined}/mod.rs"));
+    }
+    if inner.len() == 1 {
+        candidates.push("src/lib.rs".to_string());
+        candidates.push("src/main.rs".to_string());
     }
     candidates
 }

@@ -41,9 +41,10 @@ pub(crate) fn detect_oi(
         });
 }
 
-/// Extract the top-level module name from a file path (relative to `src/`).
-/// `src/foo/bar.rs` → `"foo"`, `src/foo.rs` → `"foo"`. Delegates to the
-/// canonical `coupling::file_to_module` helper.
+/// Extract the top-level module name from a file path. Accepts paths
+/// both with and without the `src/` prefix: `src/foo/bar.rs` → `"foo"`,
+/// `src/foo.rs` → `"foo"`, `lib.rs` → `"lib"`. Normalises Windows
+/// backslashes. Delegates to the canonical `coupling::file_to_module`.
 /// Trivial: single-delegation wrapper.
 fn top_level_module(path: &str) -> String {
     crate::adapters::analyzers::coupling::file_to_module(path)
