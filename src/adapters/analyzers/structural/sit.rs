@@ -36,7 +36,7 @@ pub(crate) fn detect_sit(
                 kind: StructuralWarningKind::SingleImplTrait {
                     impl_type: impl_type.clone(),
                 },
-                dimension: Dimension::Srp,
+                dimension: Dimension::Coupling,
                 suppressed: false,
             });
         }

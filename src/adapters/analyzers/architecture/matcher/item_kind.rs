@@ -72,20 +72,19 @@ fn collect_top_level_only(
         .for_each(|entry| hits.push(top_level_hit(file, entry)));
 }
 
-/// Classification result for one top-level item.
-struct TopLevelEntry<'a> {
+/// Classification result for one top-level item. The struct is owned
+/// (no borrowed fields) — earlier revisions carried an unused `'a`
+/// lifetime through a PhantomData marker; dropping it simplified the
+/// signatures without any behavioural change.
+struct TopLevelEntry {
     kind: &'static str,
     name: String,
     span: proc_macro2::Span,
-    _marker: std::marker::PhantomData<&'a ()>,
 }
 
 /// Decide whether a top-level item falls under one of the top-level-only kinds.
 /// Operation: pattern-match on Item enum.
-fn classify_top_level_item<'a>(
-    item: &'a syn::Item,
-    requested: &HashSet<&str>,
-) -> Option<TopLevelEntry<'a>> {
+fn classify_top_level_item(item: &syn::Item, requested: &HashSet<&str>) -> Option<TopLevelEntry> {
     match item {
         syn::Item::Mod(m) => classify_top_level_mod(m, requested),
         other => classify_top_level_non_mod(other, requested),
@@ -94,10 +93,7 @@ fn classify_top_level_item<'a>(
 
 /// Classify a top-level `mod` as inline_cfg_test_module when applicable.
 /// Operation: inspect attrs + content.
-fn classify_top_level_mod<'a>(
-    m: &'a syn::ItemMod,
-    requested: &HashSet<&str>,
-) -> Option<TopLevelEntry<'a>> {
+fn classify_top_level_mod(m: &syn::ItemMod, requested: &HashSet<&str>) -> Option<TopLevelEntry> {
     if !requested.contains(KIND_INLINE_CFG_TEST_MOD) {
         return None;
     }
@@ -108,16 +104,15 @@ fn classify_top_level_mod<'a>(
         kind: KIND_INLINE_CFG_TEST_MOD,
         name: m.ident.to_string(),
         span: m.ident.span(),
-        _marker: std::marker::PhantomData,
     })
 }
 
 /// Classify a non-mod top-level item as top_level_cfg_test_item when applicable.
 /// Operation: inspect attrs of known item variants.
-fn classify_top_level_non_mod<'a>(
-    item: &'a syn::Item,
+fn classify_top_level_non_mod(
+    item: &syn::Item,
     requested: &HashSet<&str>,
-) -> Option<TopLevelEntry<'a>> {
+) -> Option<TopLevelEntry> {
     if !requested.contains(KIND_TOP_LEVEL_CFG_TEST_ITEM) {
         return None;
     }
@@ -140,13 +135,12 @@ fn classify_top_level_non_mod<'a>(
         kind: KIND_TOP_LEVEL_CFG_TEST_ITEM,
         name,
         span,
-        _marker: std::marker::PhantomData,
     })
 }
 
 /// Turn a `TopLevelEntry` into a reportable `MatchLocation`.
 /// Operation: field copy + span decomposition.
-fn top_level_hit(file: &str, entry: TopLevelEntry<'_>) -> MatchLocation {
+fn top_level_hit(file: &str, entry: TopLevelEntry) -> MatchLocation {
     let start = entry.span.start();
     MatchLocation {
         file: file.to_string(),

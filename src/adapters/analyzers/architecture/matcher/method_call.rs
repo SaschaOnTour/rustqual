@@ -5,10 +5,11 @@
 //! - `x.unwrap()` → direct method call
 //! - `Option::unwrap(x)` → UFCS form, matched by final path segment
 //!
-//! The UFCS match is conservative: any two-segment `Path::name(...)` call
-//! whose tail segment matches a banned name triggers. False positives on
-//! free functions with matching names (e.g. `my_utils::unwrap(x)`) are
-//! rare and addressable by `qual:allow`.
+//! The UFCS match is conservative: any `Path::name(...)` call with two or
+//! more path segments triggers when its tail segment matches a banned
+//! name — including deeper paths like `std::option::Option::unwrap(x)`.
+//! False positives on free functions with matching names (e.g.
+//! `my_utils::unwrap(x)`) are rare and addressable by `qual:allow`.
 
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use syn::spanned::Spanned;
