@@ -5,9 +5,10 @@
 //! Symbol-Pattern matcher family (seven matchers), and the Trait-
 //! Signature Rule.
 
-// Some internal helpers are exercised only through unit tests; leaving
-// their visibility permissive keeps the test tree simple.
-#![allow(dead_code, unused_imports)]
+// Some internal helpers are exercised only through unit tests; scope
+// the relaxed warnings to test builds so non-test compiles still
+// surface dead-code or unused-import regressions.
+#![cfg_attr(test, allow(dead_code, unused_imports))]
 
 pub mod analyzer;
 pub mod compiled;

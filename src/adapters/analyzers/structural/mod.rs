@@ -8,6 +8,7 @@ pub(crate) mod sit;
 pub(crate) mod slm;
 
 use std::collections::HashMap;
+use syn::spanned::Spanned;
 
 use crate::config::StructuralConfig;
 use crate::findings::Dimension;
@@ -154,7 +155,7 @@ fn collect_item_metadata(item: &syn::Item, path: &str, meta: &mut StructuralMeta
         }
         syn::Item::Impl(imp) => {
             if let Some(ref type_name) = impl_type_name(imp) {
-                let line = imp.impl_token.span.start().line;
+                let line = imp.span().start().line;
                 if let Some((_, ref tp, _)) = imp.trait_ {
                     let tn = tp
                         .segments

@@ -1,13 +1,15 @@
-/// Iterative Union-Find with path halving.
+/// Iterative Union-Find with path halving (find) and union-by-rank.
 /// Operation: data structure with no external dependencies.
 pub(super) struct UnionFind {
     parent: Vec<usize>,
+    rank: Vec<u8>,
 }
 
 impl UnionFind {
     pub(super) fn new(size: usize) -> Self {
         Self {
             parent: (0..size).collect(),
+            rank: vec![0; size],
         }
     }
 
@@ -19,11 +21,22 @@ impl UnionFind {
         x
     }
 
+    /// Attach the tree with smaller rank under the one with larger rank.
+    /// Ranks are equivalent to tree heights and stay small even under
+    /// adversarial input (near-amortised inverse-Ackermann).
     pub(super) fn union(&mut self, a: usize, b: usize) {
         let ra = self.find(a);
         let rb = self.find(b);
-        if ra != rb {
-            self.parent[ra] = rb;
+        if ra == rb {
+            return;
+        }
+        match self.rank[ra].cmp(&self.rank[rb]) {
+            std::cmp::Ordering::Less => self.parent[ra] = rb,
+            std::cmp::Ordering::Greater => self.parent[rb] = ra,
+            std::cmp::Ordering::Equal => {
+                self.parent[rb] = ra;
+                self.rank[ra] += 1;
+            }
         }
     }
 
