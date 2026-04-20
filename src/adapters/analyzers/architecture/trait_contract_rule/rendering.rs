@@ -11,10 +11,12 @@ use quote::ToTokens;
 ///
 /// `proc_macro2::TokenStream::to_string()` inserts a single space between
 /// every token, so `Box<dyn Error + Send>` becomes `"Box < dyn Error + Send >"`.
-/// We strip the spaces that surround punctuation (`::`, `<`, `>`, `,`) so
-/// user substrings like `"Box<dyn"` and `"anyhow::"` match as written,
-/// while preserving the space between identifiers so keyword patterns
-/// like `"dyn Error"` or `"impl Trait"` still match.
+/// We collapse the whitespace around `::`, `<`, `>` completely, and the
+/// whitespace *before* `,` — the space *after* a comma is preserved so
+/// the rendered form matches how users write generic arguments
+/// (`Result<T, E>`, not `Result<T,E>`). Spaces between identifiers
+/// stay intact so keyword patterns like `"dyn Error"` or `"impl Trait"`
+/// match as written.
 /// Operation: token-stream stringification + targeted whitespace normalisation.
 pub(super) fn render_type(ty: &syn::Type) -> String {
     let mut tokens = proc_macro2::TokenStream::new();
@@ -23,7 +25,8 @@ pub(super) fn render_type(ty: &syn::Type) -> String {
 }
 
 /// Collapse whitespace that `TokenStream::to_string()` inserts around
-/// punctuation, but keep the single space between adjacent identifiers.
+/// punctuation. `::`, `<`, `>` are fully closed up; `,` keeps its
+/// trailing space for readability (matches common source form).
 /// Operation: sequential string replacements.
 fn normalise_rendering(s: &str) -> String {
     s.replace(" :: ", "::")
