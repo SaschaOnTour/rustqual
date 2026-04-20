@@ -230,15 +230,17 @@ fn external_crate_imports_not_affected() {
 }
 
 #[test]
-fn self_super_std_ignored() {
-    let fx = Fixture::new(&[(
-        "src/adapters/analyzers/iosp/mod.rs",
-        "use self::inner; use super::parent; use std::io;",
-    )]);
+fn std_import_is_ignored() {
+    // `std::…` has no in-crate file path and is left for other
+    // architecture rules (symbol patterns) to handle.
+    // `self::…` and `super::…` are NOT ignored — they are normalised
+    // to their crate-absolute form (covered by the dedicated
+    // self_/super_ tests above).
+    let fx = Fixture::new(&[("src/adapters/analyzers/iosp/mod.rs", "use std::io;")]);
     let rules = vec![rule(
         "src/adapters/analyzers/iosp/**",
         "**",
-        "none should match",
+        "std not matched",
     )];
     assert!(run(&fx, &rules).is_empty());
 }
@@ -290,4 +292,66 @@ fn grouped_use_flags_each_matching_leaf() {
         "peers",
     )];
     assert_eq!(run(&fx, &rules).len(), 1);
+}
+
+// ── relative imports (super / self) ───────────────────────────────────
+
+#[test]
+fn super_import_resolves_to_crate_absolute() {
+    // `super::srp` from src/adapters/analyzers/iosp/mod.rs resolves to
+    // src/adapters/analyzers/srp/… and must still be flagged by the
+    // peer-isolation rule. Previously `super` was silently skipped.
+    let fx = Fixture::new(&[(
+        "src/adapters/analyzers/iosp/mod.rs",
+        "use super::srp::measure;",
+    )]);
+    let rules = vec![rule(
+        "src/adapters/analyzers/iosp/**",
+        "src/adapters/analyzers/srp/**",
+        "peers",
+    )];
+    assert_eq!(run(&fx, &rules).len(), 1);
+}
+
+#[test]
+fn super_super_import_resolves_to_crate_absolute() {
+    // Two `super`s from a nested leaf file walk up two ancestors.
+    let fx = Fixture::new(&[(
+        "src/adapters/analyzers/iosp/scope.rs",
+        "use super::super::srp::measure;",
+    )]);
+    let rules = vec![rule(
+        "src/adapters/analyzers/iosp/**",
+        "src/adapters/analyzers/srp/**",
+        "peers",
+    )];
+    assert_eq!(run(&fx, &rules).len(), 1);
+}
+
+#[test]
+fn self_import_resolves_to_crate_absolute() {
+    // `self::srp` from src/adapters/analyzers/mod.rs resolves to
+    // src/adapters/analyzers/srp/… .
+    let fx = Fixture::new(&[("src/adapters/analyzers/mod.rs", "use self::srp::measure;")]);
+    let rules = vec![rule(
+        "src/adapters/analyzers/**",
+        "src/adapters/analyzers/srp/**",
+        "peer",
+    )];
+    assert_eq!(run(&fx, &rules).len(), 1);
+}
+
+#[test]
+fn super_does_not_match_unrelated_rule() {
+    // Control: a super import to a non-forbidden path is not flagged.
+    let fx = Fixture::new(&[(
+        "src/adapters/analyzers/iosp/mod.rs",
+        "use super::shared::use_tree;",
+    )]);
+    let rules = vec![rule(
+        "src/adapters/analyzers/iosp/**",
+        "src/adapters/analyzers/srp/**",
+        "peers",
+    )];
+    assert!(run(&fx, &rules).is_empty());
 }

@@ -5,13 +5,17 @@
 //! file-path matching `to`, unless that candidate also matches one of the
 //! `except` globs.
 //!
-//! Imports are resolved by synthesising candidate file paths from the
-//! `crate::<seg1>::<seg2>::…::<segN>` prefix: at every prefix length we
-//! consider both the leaf-as-file (`src/<seg1>/…/<segN>.rs`) and the
-//! leaf-as-dir (`src/<seg1>/…/<segN>/mod.rs`) layouts. Imports starting
-//! with `self`, `super`, `std`, `core`, `alloc`, or an external crate
-//! name are skipped — their target has no crate-relative file path, and
-//! other architecture rules cover external crates.
+//! Imports are resolved by synthesising candidate file paths from a
+//! crate-absolute segment list. `crate::a::b` resolves directly; `self`
+//! and `super` are normalised against the importing file's own module
+//! path (so `super::dry::helper` from `src/adapters/analyzers/iosp/…`
+//! becomes `adapters::analyzers::dry::helper` before matching). At every
+//! prefix length we consider both the leaf-as-file
+//! (`src/<seg1>/…/<segN>.rs`) and leaf-as-dir
+//! (`src/<seg1>/…/<segN>/mod.rs`) layouts. Imports starting with `std`,
+//! `core`, `alloc`, or an external crate name are skipped — they have
+//! no crate-relative file path, and other architecture rules cover
+//! external crates.
 
 #![cfg_attr(test, allow(dead_code))]
 
@@ -65,7 +69,7 @@ fn evaluate_import(
     span: proc_macro2::Span,
     rule: &CompiledForbiddenRule,
 ) -> Option<MatchLocation> {
-    let inner = crate_inner_segments(segments)?;
+    let inner = resolve_to_crate_absolute(path, segments)?;
     let candidates = candidate_paths(&inner);
     let to_hits = candidates.iter().any(|c| rule.to.is_match(c));
     if !to_hits {
@@ -87,15 +91,64 @@ fn evaluate_import(
     })
 }
 
-/// Strip the `crate::` prefix; return None for imports without a crate-relative
-/// target path (`self`, `super`, `std`, `core`, `alloc`, or external crates).
-/// Operation: first-segment routing logic.
-fn crate_inner_segments(segments: &[String]) -> Option<Vec<String>> {
+/// Resolve an import's segment list to its crate-absolute form.
+/// `crate::a::b` → `["a","b"]`. `self::x` / `super[::super]*::x` are
+/// normalised against the importing file's module path so the resolver
+/// sees the same segment list regardless of import style. Returns
+/// `None` for stdlib (`std`, `core`, `alloc`), external-crate imports,
+/// or resolved paths that still contain a wildcard `*` segment (e.g.
+/// `use crate::foo::*;`) — those cannot be turned into concrete
+/// candidate file paths.
+/// Operation: first-segment routing + path arithmetic, no own calls.
+fn resolve_to_crate_absolute(importing_file: &str, segments: &[String]) -> Option<Vec<String>> {
     let first = segments.first()?;
-    if first == "crate" {
-        return Some(segments[1..].to_vec());
+    let resolved = match first.as_str() {
+        "crate" => segments[1..].to_vec(),
+        "self" => {
+            let mut base = file_to_module_segments(importing_file);
+            base.extend_from_slice(&segments[1..]);
+            base
+        }
+        "super" => {
+            let mut base = file_to_module_segments(importing_file);
+            let mut i = 0;
+            while segments.get(i).is_some_and(|s| s == "super") {
+                // More `super`s than ancestors → silently ignore (no
+                // architecture-rule meaning we can derive).
+                base.pop()?;
+                i += 1;
+            }
+            base.extend_from_slice(&segments[i..]);
+            base
+        }
+        _ => return None,
+    };
+    // A resolved path with a `*` leaf (e.g. `crate::foo::*`) matches no
+    // concrete file — skip so we don't emit bogus `src/*/…` candidates
+    // that could collide with broad `to = "src/**"` rules.
+    if resolved.iter().any(|s| s == "*") {
+        return None;
     }
-    None
+    Some(resolved)
+}
+
+/// Convert a file path under `src/` to its crate-absolute module
+/// segment list. `src/lib.rs` / `src/main.rs` → `[]` (crate root);
+/// `src/foo.rs` → `["foo"]`; `src/foo/mod.rs` → `["foo"]`;
+/// `src/foo/bar.rs` → `["foo","bar"]`.
+/// Operation: path-component parsing, no own calls.
+fn file_to_module_segments(path: &str) -> Vec<String> {
+    let normalised = path.replace('\\', "/");
+    let stripped = normalised.strip_prefix("src/").unwrap_or(&normalised);
+    let without_ext = stripped.strip_suffix(".rs").unwrap_or(stripped);
+    if without_ext == "lib" || without_ext == "main" {
+        return Vec::new();
+    }
+    let mut parts: Vec<String> = without_ext.split('/').map(String::from).collect();
+    if parts.last().is_some_and(|s| s == "mod") {
+        parts.pop();
+    }
+    parts
 }
 
 /// Synthesise the candidate `src/…` file paths for a segment prefix (the

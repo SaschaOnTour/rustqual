@@ -27,18 +27,76 @@ pub(super) fn render_type(ty: &syn::Type) -> String {
 /// Collapse whitespace that `TokenStream::to_string()` inserts around
 /// punctuation. `::`, `<`, `>` are fully closed up; `,` keeps its
 /// trailing space for readability (matches common source form).
-/// Operation: sequential string replacements.
+/// Single-pass implementation — avoids the intermediate String
+/// allocations of chained `str::replace`.
+/// Integration: delegates per-character dispatch to small helpers.
 fn normalise_rendering(s: &str) -> String {
-    s.replace(" :: ", "::")
-        .replace(":: ", "::")
-        .replace(" ::", "::")
-        .replace(" < ", "<")
-        .replace("< ", "<")
-        .replace(" <", "<")
-        .replace(" > ", ">")
-        .replace(" >", ">")
-        .replace("> ", ">")
-        .replace(" ,", ",")
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        dispatch_char(c, &mut chars, &mut out);
+    }
+    out
+}
+
+/// Emit `c` into `out`, consuming follow-up chars when needed to
+/// close up around punctuation.
+/// Operation: pattern match + per-kind helper delegation.
+fn dispatch_char(c: char, chars: &mut std::iter::Peekable<std::str::Chars<'_>>, out: &mut String) {
+    match c {
+        ' ' => emit_space(chars, out),
+        '<' | '>' => emit_angle(c, chars, out),
+        ':' => emit_colon(chars, out),
+        other => out.push(other),
+    }
+}
+
+/// Drop a leading space if the following char is one we close up against.
+/// Operation: one-char lookahead with small cloned peek for `::`.
+fn emit_space(chars: &mut std::iter::Peekable<std::str::Chars<'_>>, out: &mut String) {
+    let keep = match chars.peek() {
+        Some('<' | '>' | ',') => false,
+        Some(':') => !next_two_are_colons(chars),
+        _ => true,
+    };
+    if keep {
+        out.push(' ');
+    }
+}
+
+/// Emit `<` or `>` and swallow any trailing spaces.
+/// Operation: push + consume-while.
+fn emit_angle(c: char, chars: &mut std::iter::Peekable<std::str::Chars<'_>>, out: &mut String) {
+    out.push(c);
+    eat_spaces(chars);
+}
+
+/// Emit either `::` (closing up trailing whitespace) or a lone `:`.
+/// Operation: one-char lookahead.
+fn emit_colon(chars: &mut std::iter::Peekable<std::str::Chars<'_>>, out: &mut String) {
+    if chars.peek() == Some(&':') {
+        chars.next();
+        out.push_str("::");
+        eat_spaces(chars);
+    } else {
+        out.push(':');
+    }
+}
+
+/// True if the iterator is positioned on `::`. Clones the peekable so
+/// the underlying stream is not advanced.
+/// Trivial: two peeks via a cloned iterator.
+fn next_two_are_colons(chars: &std::iter::Peekable<std::str::Chars<'_>>) -> bool {
+    let mut la = chars.clone();
+    la.next() == Some(':') && la.next() == Some(':')
+}
+
+/// Consume all consecutive spaces from `chars`.
+/// Operation: bounded loop, no own calls.
+fn eat_spaces(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) {
+    while chars.peek() == Some(&' ') {
+        chars.next();
+    }
 }
 
 /// Render a supertrait bound. Spaces left in so substring matches like
