@@ -13,8 +13,25 @@ use structural_collector::collect_structural_findings;
 use tq_collector::collect_tq_findings;
 
 /// Print results in SARIF v2.1.0 format for GitHub Code Scanning integration.
-/// Integration: orchestrates finding collection and SARIF envelope construction.
+/// Trivial: delegates to build_sarif_value + stdout rendering.
 pub fn print_sarif(analysis: &AnalysisResult) {
+    let sarif = build_sarif_value(analysis);
+    let rendered = serde_json::to_string_pretty(&sarif)
+        .unwrap_or_else(|e| format!("{{\"error\":\"SARIF serialization failed: {e}\"}}"));
+    println!("{rendered}");
+}
+
+/// Build the SARIF v2.1.0 JSON value from an analysis result. Exposed
+/// so tests can assert on the exact output without capturing stdout.
+/// Integration: orchestrates finding collection and envelope construction.
+pub fn build_sarif_value(analysis: &AnalysisResult) -> serde_json::Value {
+    let sarif_results = collect_all_findings(analysis);
+    build_sarif_envelope(sarif_results)
+}
+
+/// Gather every SARIF result entry for an analysis run.
+/// Integration: delegates per-dimension collection.
+fn collect_all_findings(analysis: &AnalysisResult) -> Vec<serde_json::Value> {
     let mut sarif_results = collect_violation_findings(&analysis.results);
     sarif_results.extend(collect_complexity_findings(&analysis.results));
     sarif_results.extend(collect_extended_complexity_findings(&analysis.results));
@@ -50,15 +67,18 @@ pub fn print_sarif(analysis: &AnalysisResult) {
         .iter()
         .for_each(|s| sarif_results.extend(collect_structural_findings(s)));
     sarif_results.extend(collect_repeated_match_findings(&analysis.repeated_matches));
+    sarif_results.extend(collect_orphan_suppression_findings(
+        &analysis.orphan_suppressions,
+    ));
     sarif_results.extend(collect_suppression_ratio_finding(&analysis.summary));
-    print_sarif_envelope(sarif_results);
+    sarif_results
 }
 
-/// Construct and print the SARIF envelope with tool metadata and results.
+/// Construct the SARIF envelope with tool metadata and results.
 /// Operation: JSON construction logic, no own calls (rules via closure).
-fn print_sarif_envelope(sarif_results: Vec<serde_json::Value>) {
+fn build_sarif_envelope(sarif_results: Vec<serde_json::Value>) -> serde_json::Value {
     let get_rules = || rules::sarif_rules();
-    let sarif = serde_json::json!({
+    serde_json::json!({
         "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
         "version": "2.1.0",
         "runs": [{
@@ -71,11 +91,43 @@ fn print_sarif_envelope(sarif_results: Vec<serde_json::Value>) {
             },
             "results": sarif_results,
         }]
-    });
+    })
+}
 
-    let rendered = serde_json::to_string_pretty(&sarif)
-        .unwrap_or_else(|e| format!("{{\"error\":\"SARIF serialization failed: {e}\"}}"));
-    println!("{rendered}");
+/// Collect SARIF result entries for orphan-suppression findings.
+/// Operation: iteration + JSON construction.
+fn collect_orphan_suppression_findings(
+    orphans: &[crate::adapters::report::OrphanSuppressionWarning],
+) -> Vec<serde_json::Value> {
+    orphans
+        .iter()
+        .map(|w| {
+            let dims: String = if w.dimensions.is_empty() {
+                "all dims (wildcard)".to_string()
+            } else {
+                w.dimensions
+                    .iter()
+                    .map(|d| format!("{d}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            };
+            let message = match &w.reason {
+                Some(r) => format!("Stale qual:allow({dims}) marker — no finding in window. Reason was: {r}"),
+                None => format!("Stale qual:allow({dims}) marker — no finding in window."),
+            };
+            serde_json::json!({
+                "ruleId": "ORPHAN-001",
+                "level": "warning",
+                "message": { "text": message },
+                "locations": [{
+                    "physicalLocation": {
+                        "artifactLocation": { "uri": w.file },
+                        "region": { "startLine": w.line }
+                    }
+                }]
+            })
+        })
+        .collect()
 }
 
 /// Collect SARIF result entries for SDP violations, skipping suppressed ones.

@@ -272,7 +272,7 @@ strict_error_propagation = false     # If true, ? operator counts as logic
 # ────────────────────────────────────────────────────────────────
 # Maximum fraction of functions that may be suppressed (0.0–1.0).
 # Exceeding this ratio produces a warning.
-max_suppression_ratio = 0.10
+max_suppression_ratio = 0.05
 
 # If true, exit with code 1 when warnings are present (e.g. suppression ratio exceeded).
 # Default: false. Use --fail-on-warnings CLI flag to enable.
@@ -492,7 +492,7 @@ Supported dimensions: `iosp`, `complexity`, `coupling`, `srp`, `dry`, `test_qual
 
 The legacy `// iosp:allow` syntax is still supported as an alias for `// qual:allow(iosp)`.
 
-Suppressed functions appear as `SUPPRESSED` in the output and do not count toward findings. If more than `max_suppression_ratio` (default 10%) of functions are suppressed, a warning is displayed.
+Suppressed functions appear as `SUPPRESSED` in the output and do not count toward findings. If more than `max_suppression_ratio` (default 5%) of functions are suppressed, a warning is displayed.
 
 **Multi-line rationales are supported.** If you want to explain *why* a suppression is in place over several comment lines, just put them directly below the marker — the annotation window measures from the block's last comment line, not from the marker itself. Works with `#[derive]` in between:
 

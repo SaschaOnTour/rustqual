@@ -175,3 +175,60 @@ fn test_print_sarif_multiple_violations() {
     ]);
     print_sarif(&analysis);
 }
+
+// ── Orphan-suppression SARIF coverage ─────────────────────────
+
+#[test]
+fn sarif_emits_orphan_suppression_finding() {
+    use crate::adapters::report::OrphanSuppressionWarning;
+    let mut analysis = make_analysis(vec![]);
+    analysis.orphan_suppressions = vec![OrphanSuppressionWarning {
+        file: "src/foo.rs".into(),
+        line: 42,
+        dimensions: vec![crate::findings::Dimension::Srp],
+        reason: Some("legacy marker".into()),
+    }];
+    let value = build_sarif_value(&analysis);
+    let results = value["runs"][0]["results"].as_array().expect("results array");
+    let orphan = results
+        .iter()
+        .find(|r| r["ruleId"] == "ORPHAN-001")
+        .expect("orphan result in SARIF output");
+    assert_eq!(orphan["level"], "warning");
+    assert_eq!(
+        orphan["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+        "src/foo.rs"
+    );
+    assert_eq!(
+        orphan["locations"][0]["physicalLocation"]["region"]["startLine"],
+        42
+    );
+    let msg = orphan["message"]["text"]
+        .as_str()
+        .expect("message text");
+    assert!(msg.contains("srp"), "message should name suppressed dim: {msg}");
+    assert!(
+        msg.contains("legacy marker"),
+        "message should carry reason: {msg}"
+    );
+}
+
+#[test]
+fn sarif_rules_include_orphan_suppression() {
+    let analysis = make_analysis(vec![]);
+    let value = build_sarif_value(&analysis);
+    let rules = value["runs"][0]["tool"]["driver"]["rules"]
+        .as_array()
+        .expect("rules array");
+    let orphan_rule = rules
+        .iter()
+        .find(|r| r["id"] == "ORPHAN-001")
+        .expect("ORPHAN-001 rule present in tool.driver.rules");
+    let desc = orphan_rule["shortDescription"]["text"]
+        .as_str()
+        .expect("shortDescription text");
+    assert!(
+        desc.to_lowercase().contains("orphan") || desc.to_lowercase().contains("stale"),
+        "rule description should name the orphan concept: {desc}"
+    );
+}

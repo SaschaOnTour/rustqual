@@ -67,6 +67,10 @@ pub(super) fn sarif_rules() -> Vec<serde_json::Value> {
         rule("BP-009", "Struct update boilerplate"),
         rule("BP-010", "Format string repetition"),
         rule("SUP-001", "Suppression ratio exceeds configured maximum"),
+        rule(
+            "ORPHAN-001",
+            "Stale qual:allow marker: no finding in the annotation window",
+        ),
     ]
 }
 
