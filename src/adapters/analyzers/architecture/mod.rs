@@ -17,14 +17,12 @@
 #![allow(dead_code, unused_imports)]
 
 pub mod analyzer;
-pub mod cli;
 pub mod compiled;
 pub mod explain;
 pub mod forbidden_rule;
 pub mod layer_rule;
 pub mod matcher;
 pub mod trait_contract_rule;
-pub(crate) mod use_tree;
 pub mod violation;
 
 pub use analyzer::ArchitectureAnalyzer;

@@ -1,5 +1,6 @@
 use crate::adapters::analyzers::dry::match_patterns::*;
-use crate::adapters::analyzers::dry::{has_cfg_test, has_test_attr, FileVisitor};
+use crate::adapters::analyzers::dry::FileVisitor;
+use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
 use crate::config::sections::DuplicatesConfig;
 use std::collections::HashMap;
 use syn::visit::Visit;

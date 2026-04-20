@@ -23,5 +23,14 @@ pub use macro_call::find_macro_calls;
 pub use method_call::find_method_call_matches;
 pub use path_prefix::find_path_prefix_matches;
 
+/// Render a `syn::Path` as `a::b::c`, dropping any turbofish/generic arguments.
+pub(super) fn render_path(path: &syn::Path) -> String {
+    path.segments
+        .iter()
+        .map(|s| s.ident.to_string())
+        .collect::<Vec<_>>()
+        .join("::")
+}
+
 #[cfg(test)]
 mod tests;

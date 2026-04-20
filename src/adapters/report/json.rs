@@ -288,5 +288,6 @@ pub(crate) fn build_json_string(analysis: &AnalysisResult) -> String {
         srp: srp.map(json_srp::build_json_srp),
     };
 
-    serde_json::to_string_pretty(&output).expect("JSON serialization failed")
+    serde_json::to_string_pretty(&output)
+        .unwrap_or_else(|e| format!("{{\"error\":\"JSON serialization failed: {e}\"}}"))
 }

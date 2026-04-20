@@ -1,7 +1,6 @@
 use super::html_escape;
-use crate::adapters::analyzers::iosp::{
-    Classification, FunctionAnalysis, Severity, PERCENTAGE_MULTIPLIER,
-};
+use crate::adapters::analyzers::iosp::{Classification, FunctionAnalysis, Severity};
+use crate::domain::PERCENTAGE_MULTIPLIER;
 use crate::report::Summary;
 
 /// Build an HTML table row for a single IOSP violation.

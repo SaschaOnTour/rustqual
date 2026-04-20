@@ -111,15 +111,19 @@ fn collect_function_findings(results: &[FunctionAnalysis], entries: &mut Vec<Fin
             entries.push(e("CYCLOMATIC", format!("complexity {cx}")));
         }
         if let Some(ref m) = f.complexity {
-            m.magic_numbers.iter().for_each(|mn| {
-                entries.push(FindingEntry::new(
-                    &f.file,
-                    mn.line,
-                    "MAGIC_NUMBER",
-                    mn.value.clone(),
-                    f.qualified_name.clone(),
-                ));
-            });
+            // Skip magic-number noise in test functions — literal numbers
+            // (e.g. `assert_eq!(x, 42)`) are idiomatic there.
+            if !f.is_test {
+                m.magic_numbers.iter().for_each(|mn| {
+                    entries.push(FindingEntry::new(
+                        &f.file,
+                        mn.line,
+                        "MAGIC_NUMBER",
+                        mn.value.clone(),
+                        f.qualified_name.clone(),
+                    ));
+                });
+            }
         }
         if f.nesting_depth_warning {
             let depth = f.complexity.as_ref().map_or(0, |m| m.max_nesting);

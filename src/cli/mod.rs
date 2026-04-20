@@ -1,3 +1,6 @@
+pub(crate) mod explain;
+pub(crate) mod handlers;
+
 use std::path::PathBuf;
 
 use clap::Parser;

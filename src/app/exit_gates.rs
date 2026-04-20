@@ -6,9 +6,9 @@
 //! and the default-fail guard (`--no-fail` inverts it). The first
 //! violated gate returns `Err(1)`; everything else returns `Ok(())`.
 
-use crate::adapters::analyzers::iosp::PERCENTAGE_MULTIPLIER;
 use crate::cli::Cli;
 use crate::config::Config;
+use crate::domain::PERCENTAGE_MULTIPLIER;
 use crate::report::Summary;
 
 /// Apply all exit gates in order.

@@ -45,6 +45,7 @@ fn minimal_compiled() -> CompiledArchitecture {
         external_exact: HashMap::new(),
         external_glob: Vec::new(),
         forbidden: Vec::new(),
+        trait_contracts: Vec::new(),
     }
 }
 

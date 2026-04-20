@@ -2,7 +2,8 @@ use std::collections::HashMap;
 
 use syn::visit::Visit;
 
-use crate::adapters::analyzers::dry::{has_cfg_test, has_test_attr, FileVisitor};
+use crate::adapters::analyzers::dry::FileVisitor;
+use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
 
 /// Minimum number of match arms for a match to be considered.
 const MIN_MATCH_ARMS: usize = 3;

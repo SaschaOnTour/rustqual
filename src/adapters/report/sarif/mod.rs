@@ -73,10 +73,9 @@ fn print_sarif_envelope(sarif_results: Vec<serde_json::Value>) {
         }]
     });
 
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&sarif).expect("SARIF serialization failed")
-    );
+    let rendered = serde_json::to_string_pretty(&sarif)
+        .unwrap_or_else(|e| format!("{{\"error\":\"SARIF serialization failed: {e}\"}}"));
+    println!("{rendered}");
 }
 
 /// Collect SARIF result entries for SDP violations, skipping suppressed ones.

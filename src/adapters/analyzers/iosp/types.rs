@@ -2,8 +2,6 @@
 pub const SEVERITY_HIGH_THRESHOLD: usize = 5;
 /// Severity threshold: violations with more than this many total locations are MEDIUM.
 pub const SEVERITY_MEDIUM_THRESHOLD: usize = 2;
-/// Multiplier for converting score ratio (0.0–1.0) to percentage (0–100).
-pub const PERCENTAGE_MULTIPLIER: f64 = 100.0;
 
 /// Classification of a function according to IOSP.
 #[derive(Debug, Clone, PartialEq, Eq)]

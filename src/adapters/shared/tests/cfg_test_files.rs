@@ -1,4 +1,4 @@
-use crate::adapters::analyzers::dry::cfg_test_detection::collect_cfg_test_file_paths;
+use crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths;
 
 #[test]
 fn cfg_test_propagates_transitively_through_mod_chain() {

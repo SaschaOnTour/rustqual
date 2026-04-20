@@ -114,25 +114,43 @@ fn build_function_analysis(
 pub struct Analyzer<'a> {
     config: &'a Config,
     scope: &'a ProjectScope,
+    cfg_test_files: Option<&'a std::collections::HashSet<String>>,
 }
 
 impl<'a> Analyzer<'a> {
     pub fn new(config: &'a Config, scope: &'a ProjectScope) -> Self {
-        Self { config, scope }
+        Self {
+            config,
+            scope,
+            cfg_test_files: None,
+        }
+    }
+
+    /// Attach the set of cfg-test-reachable file paths. Functions in files
+    /// listed here start analysis with `in_test = true`, so helper
+    /// functions inside companion test files (not annotated `#[test]`
+    /// directly) are still recognised as test code.
+    pub fn with_cfg_test_files(
+        mut self,
+        cfg_test_files: &'a std::collections::HashSet<String>,
+    ) -> Self {
+        self.cfg_test_files = Some(cfg_test_files);
+        self
     }
 
     /// Analyze all functions in a parsed syn::File.
     /// Trivial: iterator chain with logic in closures (lenient).
     pub fn analyze_file(&self, file: &File, file_path: &str) -> Vec<FunctionAnalysis> {
+        let file_in_test = self.cfg_test_files.is_some_and(|s| s.contains(file_path));
         file.items
             .iter()
             .flat_map(|item| match item {
                 Item::Fn(f) => self
-                    .analyze_item_fn(f, file_path, None, false)
+                    .analyze_item_fn(f, file_path, None, file_in_test)
                     .into_iter()
                     .collect::<Vec<_>>(),
                 Item::Impl(i) => {
-                    let test = crate::adapters::analyzers::dry::has_cfg_test(&i.attrs);
+                    let test = crate::adapters::shared::cfg_test::has_cfg_test(&i.attrs);
                     self.analyze_impl(i, file_path, test)
                 }
                 Item::Trait(t) => self.analyze_trait(t, file_path, false),
@@ -181,7 +199,8 @@ impl<'a> Analyzer<'a> {
             let mut fa =
                 self.classify_and_build(name, file_path, &item_fn.block, parent_type, &item_fn.sig);
             fa.parameter_count = count_non_self_params(&item_fn.sig);
-            fa.is_test = in_test || crate::adapters::analyzers::dry::has_test_attr(&item_fn.attrs);
+            fa.is_test =
+                in_test || crate::adapters::shared::cfg_test::has_test_attr(&item_fn.attrs);
             fa
         })
     }
@@ -268,7 +287,8 @@ impl<'a> Analyzer<'a> {
         file_path: &str,
         in_test: bool,
     ) -> Vec<FunctionAnalysis> {
-        let mod_is_test = in_test || crate::adapters::analyzers::dry::has_cfg_test(&item_mod.attrs);
+        let mod_is_test =
+            in_test || crate::adapters::shared::cfg_test::has_cfg_test(&item_mod.attrs);
         item_mod
             .content
             .as_ref()
@@ -282,7 +302,7 @@ impl<'a> Analyzer<'a> {
                             .collect::<Vec<_>>(),
                         Item::Impl(i) => {
                             let test = mod_is_test
-                                || crate::adapters::analyzers::dry::has_cfg_test(&i.attrs);
+                                || crate::adapters::shared::cfg_test::has_cfg_test(&i.attrs);
                             self.analyze_impl(i, file_path, test)
                         }
                         Item::Trait(t) => self.analyze_trait(t, file_path, mod_is_test),

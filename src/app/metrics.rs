@@ -102,7 +102,7 @@ pub(super) fn run_dry_detection(
     config: &Config,
     suppression_lines: &std::collections::HashMap<String, Vec<Suppression>>,
     api_lines: &std::collections::HashMap<String, std::collections::HashSet<usize>>,
-    summary: &mut Summary,
+    cfg_test_files: &std::collections::HashSet<String>,
 ) -> DryResults {
     let duplicates = run_guarded_detection(
         config.duplicates.enabled,
@@ -116,13 +116,16 @@ pub(super) fn run_dry_detection(
             if !c.duplicates.detect_dead_code {
                 return vec![];
             }
-            crate::adapters::analyzers::dry::dead_code::detect_dead_code(p, c, api_lines)
+            crate::adapters::analyzers::dry::dead_code::detect_dead_code(
+                p,
+                c,
+                api_lines,
+                cfg_test_files,
+            )
         },
         parsed,
         config,
     );
-    summary.dead_code_warnings = dead_code.len();
-
     let fragments = run_guarded_detection(
         config.duplicates.enabled,
         |p, c| crate::adapters::analyzers::dry::fragments::detect_fragments(p, &c.duplicates),
@@ -147,7 +150,6 @@ pub(super) fn run_dry_detection(
         config,
     );
     mark_wildcard_suppressions(&mut wildcard_warnings, suppression_lines);
-    summary.wildcard_import_warnings = wildcard_warnings.iter().filter(|w| !w.suppressed).count();
 
     DryResults {
         duplicates,
@@ -165,6 +167,12 @@ pub(super) fn count_dry_findings(
     repeated_matches: &[crate::adapters::analyzers::dry::match_patterns::RepeatedMatchGroup],
     summary: &mut Summary,
 ) {
+    summary.dead_code_warnings = dry.dead_code.len();
+    summary.wildcard_import_warnings = dry
+        .wildcard_warnings
+        .iter()
+        .filter(|w| !w.suppressed)
+        .count();
     summary.duplicate_groups = dry
         .duplicates
         .iter()

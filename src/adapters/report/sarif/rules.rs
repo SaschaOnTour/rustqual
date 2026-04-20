@@ -78,10 +78,12 @@ fn rule(id: &str, description: &str) -> serde_json::Value {
         "shortDescription": { "text": description }
     });
     if id == "iosp/violation" {
-        entry.as_object_mut().expect("rule is object").insert(
-            "helpUri".to_string(),
-            serde_json::json!("https://flow-design.info/"),
-        );
+        if let Some(obj) = entry.as_object_mut() {
+            obj.insert(
+                "helpUri".to_string(),
+                serde_json::json!("https://flow-design.info/"),
+            );
+        }
     }
     entry
 }

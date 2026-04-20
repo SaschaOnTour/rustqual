@@ -19,8 +19,8 @@ use crate::adapters::analyzers::architecture::forbidden_rule::{
 use crate::adapters::analyzers::architecture::layer_rule::{
     check_layer_rule, LayerRuleInput, UnmatchedBehavior,
 };
-use crate::adapters::analyzers::architecture::use_tree::gather_imports;
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
+use crate::adapters::shared::use_tree::gather_imports;
 use std::fmt::Write;
 
 /// Complete explain report for one file.

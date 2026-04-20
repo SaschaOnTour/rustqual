@@ -2,7 +2,7 @@ pub(super) use super::srp_tables::html_srp_section;
 pub(super) use super::tq_table::html_tq_section;
 
 use super::html_escape;
-use crate::adapters::analyzers::iosp::PERCENTAGE_MULTIPLIER;
+use crate::domain::PERCENTAGE_MULTIPLIER;
 
 /// Build the DRY findings section: duplicates, fragments, dead code, boilerplate, wildcards, repeated matches.
 /// Integration: assembles per-category HTML builders.

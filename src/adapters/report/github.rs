@@ -145,12 +145,12 @@ fn print_summary_annotation(summary: &Summary) {
         println!(
             "::error::Quality analysis: {} violation(s), {:.1}% quality score",
             summary.violations,
-            summary.quality_score * crate::adapters::analyzers::iosp::PERCENTAGE_MULTIPLIER,
+            summary.quality_score * crate::domain::PERCENTAGE_MULTIPLIER,
         );
     } else {
         println!(
             "::notice::Quality score: {:.1}% ({} functions analyzed)",
-            summary.quality_score * crate::adapters::analyzers::iosp::PERCENTAGE_MULTIPLIER,
+            summary.quality_score * crate::domain::PERCENTAGE_MULTIPLIER,
             summary.total,
         );
     }

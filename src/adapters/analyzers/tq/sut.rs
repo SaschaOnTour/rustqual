@@ -167,4 +167,4 @@ fn path_type_prefix(path: &syn::Path) -> Option<String> {
     }
 }
 
-use crate::adapters::analyzers::dry::has_test_attr;
+use crate::adapters::shared::cfg_test::has_test_attr;

@@ -1,8 +1,8 @@
 use crate::adapters::analyzers::iosp::{compute_severity, Classification, FunctionAnalysis};
+use crate::app::dry_suppressions::{mark_dry_suppressions, mark_inverse_suppressions};
+use crate::app::metrics::*;
 use crate::config::sections::SrpConfig;
 use crate::findings::Suppression;
-use crate::pipeline::dry_suppressions::{mark_dry_suppressions, mark_inverse_suppressions};
-use crate::pipeline::metrics::*;
 use crate::report::Summary;
 
 fn make_func(name: &str, param_count: usize, trait_impl: bool) -> FunctionAnalysis {

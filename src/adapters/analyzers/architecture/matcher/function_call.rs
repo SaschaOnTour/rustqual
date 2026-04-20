@@ -88,12 +88,4 @@ impl<'ast> Visit<'ast> for FunctionCallVisitor<'_> {
     }
 }
 
-/// Render a `syn::Path` as `a::b::c`, ignoring turbofish/generic arguments.
-/// Operation: iterator-chain join.
-fn render_path(path: &syn::Path) -> String {
-    path.segments
-        .iter()
-        .map(|s| s.ident.to_string())
-        .collect::<Vec<_>>()
-        .join("::")
-}
+use super::render_path;

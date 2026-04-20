@@ -10,12 +10,14 @@
 
 pub mod dimension;
 pub mod finding;
+pub mod score;
 pub mod severity;
 pub mod source_unit;
 pub mod suppression;
 
 pub use dimension::Dimension;
 pub use finding::Finding;
+pub use score::PERCENTAGE_MULTIPLIER;
 pub use severity::Severity;
 pub use source_unit::SourceUnit;
 pub use suppression::Suppression;

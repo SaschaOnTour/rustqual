@@ -1,6 +1,5 @@
 pub mod boilerplate;
 pub(crate) mod call_targets;
-pub(crate) mod cfg_test_detection;
 pub mod dead_code;
 pub mod fragments;
 pub mod functions;
@@ -87,22 +86,9 @@ pub(crate) fn collect_declared_functions(
 
 // ── Attribute helpers ───────────────────────────────────────────
 
-/// Check if attributes contain `#[cfg(test)]`.
-/// Operation: attribute inspection logic.
-pub(crate) fn has_cfg_test(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| {
-        attr.path().is_ident("cfg")
-            && attr
-                .parse_args::<syn::Ident>()
-                .is_ok_and(|ident| ident == "test")
-    })
-}
-
-/// Check if attributes contain `#[test]`.
-/// Operation: attribute inspection logic.
-pub(crate) fn has_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(|attr| attr.path().is_ident("test"))
-}
+// `has_cfg_test` and `has_test_attr` live in `adapters::shared::cfg_test`
+// (multi-dimension utility). Re-exports keep existing call sites working.
+pub(crate) use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
 
 /// Check if attributes contain `#[allow(dead_code)]`.
 /// Operation: attribute inspection logic.

@@ -29,40 +29,29 @@ fn load_config(cli: &Cli) -> Result<Config, i32> {
         .unwrap_or_else(|| load_auto_config(&cli.path))
 }
 
+/// Print `Error: {e}` on stderr and map to exit code 2.
+/// Operation: I/O + value, no own calls.
+fn report_config_error<E: std::fmt::Display>(e: E) -> i32 {
+    eprintln!("Error: {e}");
+    2
+}
+
 /// Load config from an explicit config file path.
-/// Operation: error handling logic.
+/// Trivial: single delegation to load_from_file.
 fn load_explicit_config(config_path: &Path) -> Result<Config, i32> {
-    match std::fs::read_to_string(config_path) {
-        Ok(content) => match toml::from_str(&content) {
-            Ok(c) => Ok(c),
-            Err(e) => {
-                eprintln!("Error parsing config: {e}");
-                Err(2)
-            }
-        },
-        Err(e) => {
-            eprintln!("Error reading config: {e}");
-            Err(2)
-        }
-    }
+    Config::load_from_file(config_path).map_err(report_config_error)
 }
 
 /// Load config via auto-discovery from the project path.
-/// Operation: error mapping logic.
+/// Trivial: single delegation to load.
 fn load_auto_config(path: &Path) -> Result<Config, i32> {
-    Config::load(path).map_err(|e| {
-        eprintln!("Error: {e}");
-        2
-    })
+    Config::load(path).map_err(report_config_error)
 }
 
 /// Validate config settings that require cross-field checks.
-/// Operation: error mapping logic.
+/// Trivial: single delegation to validate_weights.
 fn validate_config_weights(config: &Config) -> Result<(), i32> {
-    config::validate_weights(config).map_err(|e| {
-        eprintln!("Error: {e}");
-        2
-    })
+    config::validate_weights(config).map_err(report_config_error)
 }
 
 /// Apply CLI flag overrides to config.

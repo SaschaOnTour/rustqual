@@ -15,8 +15,8 @@
 
 #![allow(dead_code)]
 
-use crate::adapters::analyzers::architecture::use_tree::gather_imports;
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
+use crate::adapters::shared::use_tree::gather_imports;
 use globset::{GlobMatcher, GlobSet};
 
 /// Pre-compiled rule ready for checking.
@@ -29,47 +29,31 @@ pub struct CompiledForbiddenRule {
 }
 
 /// Check every file/rule pair.
-/// Integration: delegates to per-file helper via for-loop.
+/// Integration: per-file iteration + flat-map of per-file hits.
 // qual:api
 pub fn check_forbidden_rules(
     files: &[(String, &syn::File)],
     rules: &[CompiledForbiddenRule],
 ) -> Vec<MatchLocation> {
-    let mut hits = Vec::new();
-    for (path, ast) in files {
-        append_file_hits(path, ast, rules, &mut hits);
-    }
-    hits
+    files
+        .iter()
+        .flat_map(|(path, ast)| file_hits(path, ast, rules))
+        .collect()
 }
 
-/// For one file, evaluate every applicable rule.
-/// Integration: iterator-chain over rules, delegates to per-rule helper.
-fn append_file_hits(
-    path: &str,
-    ast: &syn::File,
-    rules: &[CompiledForbiddenRule],
-    hits: &mut Vec<MatchLocation>,
-) {
+/// Collect every hit for one file across all applicable rules.
+/// Operation: iterator chain over applicable rules × imports.
+fn file_hits(path: &str, ast: &syn::File, rules: &[CompiledForbiddenRule]) -> Vec<MatchLocation> {
     let imports = gather_imports(ast);
     rules
         .iter()
         .filter(|r| r.from.is_match(path))
-        .for_each(|r| append_rule_hits(path, &imports, r, hits));
-}
-
-/// For one (file, rule) pair, evaluate every import against the rule.
-/// Operation: iterator chain collecting hits, no own calls.
-fn append_rule_hits(
-    path: &str,
-    imports: &[(Vec<String>, proc_macro2::Span)],
-    rule: &CompiledForbiddenRule,
-    hits: &mut Vec<MatchLocation>,
-) {
-    hits.extend(
-        imports
-            .iter()
-            .filter_map(|(segments, span)| evaluate_import(path, segments, *span, rule)),
-    );
+        .flat_map(|r| {
+            imports
+                .iter()
+                .filter_map(|(segments, span)| evaluate_import(path, segments, *span, r))
+        })
+        .collect()
 }
 
 /// Evaluate one import against one rule; return a hit iff `to` matches a

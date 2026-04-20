@@ -151,7 +151,7 @@ fn macro_ident_name(mac: &syn::Macro) -> String {
         .unwrap_or_default()
 }
 
-use crate::adapters::analyzers::dry::{has_cfg_test, has_test_attr};
+use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
 
 /// Check if attributes contain `#[should_panic]`.
 /// Operation: attribute matching.

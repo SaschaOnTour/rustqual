@@ -123,6 +123,21 @@ impl<'ast> Visit<'ast> for FullCallGraphCollector {
         }
         syn::visit::visit_expr_path(self, node);
     }
+
+    fn visit_macro(&mut self, node: &'ast syn::Macro) {
+        // Parse macro arguments as expressions so calls inside vec![], assert!(), format!()
+        // etc. become edges in the graph. Without this, TQ-003 misses reachability through
+        // macro-wrapped calls (e.g. `vec![make_unmatched(path)]`).
+        use syn::punctuated::Punctuated;
+        if let Ok(args) = syn::parse::Parser::parse2(
+            Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated,
+            node.tokens.clone(),
+        ) {
+            args.iter()
+                .for_each(|expr| syn::visit::visit_expr(self, expr));
+        }
+        syn::visit::visit_macro(self, node);
+    }
 }
 
 /// Build a per-function call graph from all parsed files, including ignored functions.

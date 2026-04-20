@@ -124,11 +124,9 @@ fn build_globset(patterns: &[String]) -> GlobSet {
             }
         }
     }
-    builder.build().unwrap_or_else(|_| {
-        globset::GlobSetBuilder::new()
-            .build()
-            .expect("empty GlobSet")
-    })
+    builder
+        .build()
+        .unwrap_or_else(|_| globset::GlobSet::empty())
 }
 
 /// Check if a target string matches any pattern in a list.
@@ -153,6 +151,25 @@ fn match_any_pattern(patterns: &[String], compiled: &Option<GlobSet>, target: &s
 /// The config file name used by rustqual.
 const CONFIG_FILE_NAME: &str = "rustqual.toml";
 
+/// Walk upward from `project_root` until a `rustqual.toml` is found.
+/// Operation: filesystem probe loop, no own calls.
+fn find_config_file(project_root: &Path) -> Option<std::path::PathBuf> {
+    let start = if project_root.is_file() {
+        project_root.parent().unwrap_or(project_root)
+    } else {
+        project_root
+    };
+    let mut dir = Some(start);
+    while let Some(d) = dir {
+        let candidate = d.join(CONFIG_FILE_NAME);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+        dir = d.parent();
+    }
+    None
+}
+
 impl Config {
     /// Compile glob patterns into GlobSets for fast matching.
     /// Call this after loading or constructing a Config.
@@ -161,29 +178,25 @@ impl Config {
         self.compiled_exclude_files = Some(build_globset(&self.exclude_files));
     }
 
+    /// Load a configuration from an explicit file path (no ancestor search).
+    /// Operation: reads file and parses TOML; returns a descriptive error on
+    /// either failure. The caller decides how to surface the error.
+    pub fn load_from_file(config_path: &Path) -> Result<Self, String> {
+        let content = std::fs::read_to_string(config_path)
+            .map_err(|e| format!("Failed to read {}: {e}", config_path.display()))?;
+        toml::from_str(&content)
+            .map_err(|e| format!("Failed to parse {}: {e}", config_path.display()))
+    }
+
     /// Try to load configuration from a `rustqual.toml` file.
     /// Searches the given path and its ancestors.
     /// Returns an error if a config file exists but cannot be parsed.
     /// Falls back to defaults if no config file is found.
+    /// Integration: delegates ancestor search + file load.
     pub fn load(project_root: &Path) -> Result<Self, String> {
-        let start = if project_root.is_file() {
-            project_root.parent().unwrap_or(project_root)
-        } else {
-            project_root
-        };
-        let mut dir = Some(start);
-        while let Some(d) = dir {
-            let config_path = d.join(CONFIG_FILE_NAME);
-            if config_path.exists() {
-                let content = std::fs::read_to_string(&config_path)
-                    .map_err(|e| format!("Failed to read {}: {e}", config_path.display()))?;
-                let config: Config = toml::from_str(&content)
-                    .map_err(|e| format!("Failed to parse {}: {e}", config_path.display()))?;
-                return Ok(config);
-            }
-            dir = d.parent();
-        }
-        Ok(Self::default())
+        find_config_file(project_root)
+            .map(|p| Self::load_from_file(&p))
+            .unwrap_or_else(|| Ok(Self::default()))
     }
 
     /// Check if a function call path looks like an external/allowed call.

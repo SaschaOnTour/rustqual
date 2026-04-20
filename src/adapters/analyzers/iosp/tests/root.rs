@@ -12,8 +12,8 @@ fn parse_and_analyze(code: &str) -> Vec<FunctionAnalysis> {
     let mut results = analyzer.analyze_file(&syntax, "test.rs");
     let parsed = vec![("test.rs".to_string(), code.to_string(), syntax)];
     let recursive_lines = crate::adapters::source::filesystem::collect_recursive_lines(&parsed);
-    crate::pipeline::warnings::apply_recursive_annotations(&mut results, &recursive_lines);
-    crate::pipeline::warnings::apply_leaf_reclassification(&mut results);
+    crate::app::warnings::apply_recursive_annotations(&mut results, &recursive_lines);
+    crate::app::warnings::apply_leaf_reclassification(&mut results);
     results
 }
 

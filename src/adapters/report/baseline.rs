@@ -1,6 +1,7 @@
 use colored::Colorize;
 
-use crate::adapters::analyzers::iosp::{Classification, FunctionAnalysis, PERCENTAGE_MULTIPLIER};
+use crate::adapters::analyzers::iosp::{Classification, FunctionAnalysis};
+use crate::domain::PERCENTAGE_MULTIPLIER;
 
 use super::Summary;
 
@@ -98,7 +99,8 @@ pub fn create_baseline(results: &[FunctionAnalysis], summary: &Summary) -> Strin
         violation_details,
     };
 
-    serde_json::to_string_pretty(&baseline).expect("Baseline serialization failed")
+    serde_json::to_string_pretty(&baseline)
+        .unwrap_or_else(|e| format!("{{\"error\":\"baseline serialization failed: {e}\"}}"))
 }
 
 /// Print v2-specific deltas: TQ warnings, findings, and quality score.

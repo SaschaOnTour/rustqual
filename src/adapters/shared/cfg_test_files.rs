@@ -12,13 +12,31 @@ use std::path::Path;
 /// Compute the set of source paths that are reachable only under
 /// `#[cfg(test)]`. Combines direct hits with transitive propagation
 /// through plain `mod name;` chains inside test-only files.
+/// Also includes workspace-root `tests/**/*.rs` files, which Cargo
+/// compiles exclusively as integration-test binaries.
 pub(crate) fn collect_cfg_test_file_paths(
     parsed: &[(String, String, syn::File)],
 ) -> HashSet<String> {
     let resolver = ChildPathResolver::from_parsed(parsed);
     let mut set = direct_cfg_test_files(parsed, &resolver);
+    set.extend(integration_test_files(parsed));
     propagate_cfg_test_through_plain_mods(parsed, &resolver, &mut set);
     set
+}
+
+/// Files Cargo automatically treats as integration tests — everything
+/// under the workspace-root `tests/` directory. Each is its own test
+/// binary; no production code lives there. Companion test subtrees
+/// under `src/**/tests/` are already reached via the `#[cfg(test)] mod`
+/// detection above.
+/// Operation: path-prefix filter, no own calls.
+fn integration_test_files(parsed: &[(String, String, syn::File)]) -> HashSet<String> {
+    parsed
+        .iter()
+        .map(|(path, _, _)| path.as_str())
+        .filter(|p| p.starts_with("tests/"))
+        .map(String::from)
+        .collect()
 }
 
 /// Resolves `mod name;` declarations to child file paths by probing the
@@ -69,7 +87,8 @@ fn direct_cfg_test_files(
     parsed: &[(String, String, syn::File)],
     resolver: &ChildPathResolver<'_>,
 ) -> HashSet<String> {
-    let is_ext_cfg_test = |m: &syn::ItemMod| m.content.is_none() && super::has_cfg_test(&m.attrs);
+    let is_ext_cfg_test =
+        |m: &syn::ItemMod| m.content.is_none() && super::cfg_test::has_cfg_test(&m.attrs);
     parsed
         .iter()
         .flat_map(|(path, _, file)| {
@@ -124,6 +143,3 @@ fn propagate_cfg_test_through_plain_mods(
         set.extend(new_children);
     }
 }
-
-#[cfg(test)]
-mod tests;

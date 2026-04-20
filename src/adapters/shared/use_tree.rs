@@ -1,15 +1,17 @@
-//! Shared `syn::UseTree` walker used by multiple architecture rules.
+//! `syn::UseTree` walker shared across analyzer adapters.
 //!
-//! Each call flattens a `use` tree into a list of leaf imports, where a leaf
-//! is any terminal of the tree (`Name`, `Rename`, or `Glob`). Groups are
-//! expanded and nested `Path` segments are accumulated into the prefix.
+//! Every analyzer that reasons about imports (architecture's layer rule,
+//! forbidden rule, glob-import matcher; coupling's module graph; DRY's
+//! wildcard detector) needs the same traversal: flatten nested `UseTree`
+//! groups into leaf paths with spans. Owning that traversal here keeps
+//! the semantics consistent — a single fix applies everywhere.
 
 use syn::spanned::Spanned;
 use syn::UseTree;
 
 /// Flatten every `use` item in `ast` into its leaf paths.
 /// Operation: iterator-chain collection (no own-call recording in lenient mode).
-pub(super) fn gather_imports(ast: &syn::File) -> Vec<(Vec<String>, proc_macro2::Span)> {
+pub fn gather_imports(ast: &syn::File) -> Vec<(Vec<String>, proc_macro2::Span)> {
     let mut out = Vec::new();
     ast.items
         .iter()
@@ -25,7 +27,7 @@ pub(super) fn gather_imports(ast: &syn::File) -> Vec<(Vec<String>, proc_macro2::
 /// list of segments leading to the leaf plus the leaf's span.
 /// Operation: recursive tree walk (self-call is recursion, not concern-mixing).
 // qual:recursive
-pub(super) fn collect_use_paths(
+pub fn collect_use_paths(
     prefix: &[String],
     tree: &UseTree,
     out: &mut Vec<(Vec<String>, proc_macro2::Span)>,

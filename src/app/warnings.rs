@@ -113,7 +113,11 @@ pub(super) fn apply_complexity_warnings(
                 fa.cyclomatic_warning = m.cyclomatic_complexity > config.complexity.max_cyclomatic;
                 summary.complexity_warnings += 1;
             }
-            summary.magic_number_warnings += m.magic_numbers.len();
+            // Magic numbers are expected in tests (assert_eq!(x, 42) etc.),
+            // so skip test functions for this specific check.
+            if !fa.is_test {
+                summary.magic_number_warnings += m.magic_numbers.len();
+            }
         }
     }
 }
@@ -131,6 +135,20 @@ fn has_error_handling_issue(
         && !fa.is_test
         && (m.unwrap_count + m.panic_count + m.todo_count + m.expect_count.min(expect_threshold)
             > 0)
+}
+
+/// Check if a function exceeds the length threshold in production code.
+/// Tests are excluded — arrange-act-assert sequences are legitimately long.
+/// Operation: trivial field read.
+fn is_production_length_over(
+    fa: &FunctionAnalysis,
+    m: &crate::adapters::analyzers::iosp::ComplexityMetrics,
+    max_lines: usize,
+) -> bool {
+    if fa.is_test {
+        return false;
+    }
+    m.function_lines > max_lines
 }
 
 /// Check if a function has a `// qual:allow(unsafe)` annotation within the window.
@@ -172,6 +190,13 @@ pub(super) fn apply_extended_warnings(
         has_error_handling_issue(fa, m, check_errors, expect_threshold)
     };
 
+    // Tests legitimately contain long arrange-act-assert sequences; skip
+    // LONG_FN for them to keep the check focused on production code.
+    let has_length_issue =
+        |fa: &FunctionAnalysis, m: &crate::adapters::analyzers::iosp::ComplexityMetrics| {
+            is_production_length_over(fa, m, max_lines)
+        };
+
     results
         .iter_mut()
         .filter(|fa| is_active(fa))
@@ -184,7 +209,7 @@ pub(super) fn apply_extended_warnings(
                 fa.nesting_depth_warning = true;
                 summary.nesting_depth_warnings += 1;
             }
-            if m.function_lines > max_lines {
+            if has_length_issue(fa, m) {
                 fa.function_length_warning = true;
                 summary.function_length_warnings += 1;
             }

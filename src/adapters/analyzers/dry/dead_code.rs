@@ -154,12 +154,12 @@ pub fn detect_dead_code(
     parsed: &[(String, String, syn::File)],
     config: &crate::config::Config,
     api_lines: &std::collections::HashMap<String, std::collections::HashSet<usize>>,
+    cfg_test_files: &std::collections::HashSet<String>,
 ) -> Vec<DeadCodeWarning> {
-    let cfg_test_files = collect_cfg_test_file_paths(parsed);
     let declared = super::collect_declared_functions(parsed);
-    let mut declared = mark_cfg_test_declarations(declared, &cfg_test_files);
+    let mut declared = mark_cfg_test_declarations(declared, cfg_test_files);
     mark_api_declarations(&mut declared, api_lines);
-    let (prod_calls, test_calls) = collect_all_calls(parsed, &cfg_test_files);
+    let (prod_calls, test_calls) = collect_all_calls(parsed, cfg_test_files);
     let uncalled = find_uncalled(&declared, &prod_calls, &test_calls, config);
     let test_only = find_test_only(&declared, &prod_calls, &test_calls, config);
     merge_warnings(uncalled, test_only)
@@ -190,7 +190,7 @@ fn merge_warnings(
     uncalled
 }
 
-pub(crate) use super::cfg_test_detection::collect_cfg_test_file_paths;
+pub(crate) use crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths;
 
 /// Mark declared functions from cfg-test files as test code.
 /// Trivial: iteration + field mutation.

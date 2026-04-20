@@ -4,15 +4,24 @@
 
 
 # Function names (or patterns with trailing *) to exclude from analysis.
+#   - `main` / `run` — Composition-Root-Dispatcher, IOSP-Ignore
+#     (Top-Level-Entrypoints mischen zwangsläufig Branching + Delegation).
+#   - `visit_*` — syn-Visitor-Methoden mit fester extern-Signatur. Sie
+#     werden von `syn::visit::visit_file` via Trait-Dispatch aufgerufen,
+#     nicht direkt von Rustcode — daher sieht TQ-003 keinen Call-Pfad
+#     und `DimensionAnalyzer` keine eigenen Calls.
+# `test_*` entfernt: Test-Aware-Analyse (is_test) erledigt die Filterung
+# jetzt strukturell; ein Namens-Präfix ist nicht mehr nötig.
 ignore_functions = [
     "main",
     "run",
-    "test_*",
     "visit_*",
 ]
 
 # Glob patterns for files to exclude.
-exclude_files = []
+# `examples/**` hält per-rule Fixture-Crates, die NICHT Teil rustquals sind —
+# sie werden von den Analyzer-Tests geladen, aber nicht mit-analysiert.
+exclude_files = ["examples/**"]
 
 # If true, closures count as "logic" even when passed to iterator adaptors.
 # Default: false (lenient — closures inside .map()/.filter() are ignored).
@@ -43,7 +52,7 @@ enabled = true
 # max_function_lines = 60
 # detect_unsafe = true
 # detect_error_handling = true
-allow_expect = true
+allow_expect = false
 
 # ── DRY / Duplicate Detection ───────────────────────────────────────────
 
@@ -92,30 +101,33 @@ architecture = 0.10
 
 # ── Architecture Dimension ─────────────────────────────────────────────
 #
-# Rules carry a phase marker (e.g. "Phase 1 live") indicating the phase
-# in which the corresponding tool feature is implemented. Rules before
-# their phase are parsed but ignored; rules at or after their phase are
-# enforced.
+# Rules are grouped thematically (see section headers below). Every rule
+# is live and enforced.
 
 [architecture]
-# Phase 7 status: infrastructure live. no_inline_cfg_test_module and
-# no_top_level_cfg_test_item are satisfied by the test-extraction pass
-# (manual verification: `cargo run -- . --no-fail --findings | grep
-# cfg_test_module` returns no hits). Other rules (syn/globset isolation,
-# clap boundary, anyhow boundary) surface real issues still slated for
-# phases 8/9 — enabling them here would break CI today. Phase 9 flips
-# this back to `true` once the codebase is compliant.
-enabled = false
+enabled = true
 
 
-# ── Layer definitions (Phase 3 live) ───────────────────────────────────
+# ── Layer definitions ──────────────────────────────────────────────────
 #
-# Reihenfolge von innen (Rang 0) nach außen. Application (Rang 2) darf
-# Port (Rang 1) importieren — das ist der Kern der hexagonalen Architektur.
+# Reihenfolge von innen (Rang 0) nach außen. Ungewöhnlich gegenüber
+# klassisch-hexagonal: rustquals Analyse-Logik lebt in `adapters/`, ist
+# aber konzeptuell näher an der Domain als an klassischer Infrastruktur.
+# Deshalb teilen wir den Adapter-Ring:
+#   - infrastructure  — I/O-Adapter (Config, Source, Suppression)
+#   - analysis        — die eigentliche Analyse + ihre Präsentation
+#                       (adapters/analyzers, adapters/shared, adapters/report)
+#
+# Reports sitzen bewusst auf `analysis`-Rang: sie rendern Analyse-Output
+# und dürfen die zugehörigen Datentypen kennen. Das vermeidet den
+# kosmetischen Zwang, jede Detail-Struktur in Finding hineinzuquetschen.
+#
+# Application orchestriert — kennt deshalb legitim alle darunter liegenden
+# Ringe. Composition Root ist reexport point.
 
 [architecture.layers]
-order = ["domain", "port", "application", "adapter"]
-unmatched_behavior = "composition_root"
+order = ["domain", "port", "infrastructure", "analysis", "application"]
+unmatched_behavior = "strict_error"
 
 [architecture.layers.domain]
 paths = ["src/domain/**"]
@@ -123,20 +135,38 @@ paths = ["src/domain/**"]
 [architecture.layers.port]
 paths = ["src/ports/**"]
 
+[architecture.layers.infrastructure]
+paths = [
+    "src/adapters/config/**",
+    "src/adapters/source/**",
+    "src/adapters/suppression/**",
+]
+
+[architecture.layers.analysis]
+paths = [
+    "src/adapters/analyzers/**",
+    "src/adapters/shared/**",
+    "src/adapters/report/**",
+]
+
 [architecture.layers.application]
 paths = ["src/app/**"]
 
-[architecture.layers.adapter]
-paths = ["src/adapters/**"]
 
-
-# ── Re-export points (Phase 3 live) ────────────────────────────────────
+# ── Re-export points ───────────────────────────────────────────────────
 
 [architecture.reexport_points]
-paths = ["src/lib.rs", "src/main.rs"]
+paths = [
+    "src/lib.rs",
+    "src/main.rs",
+    "src/adapters/mod.rs",
+    "src/bin/**",
+    "src/cli/**",
+    "tests/**",
+]
 
 
-# ── External-crate mapping (Phase 3 live, leer für Single-Crate) ───────
+# ── External-crate mapping (leer für Single-Crate) ─────────────────────
 #
 # Rustqual ist Single-Crate; Workspace-Nutzer mappen hier ihre Crates
 # auf Layer (z.B. "pv_port_*" = "port").
@@ -144,9 +174,15 @@ paths = ["src/lib.rs", "src/main.rs"]
 [architecture.external_crates]
 
 
-# ── Forbidden edges (Phase 4 live) ─────────────────────────────────────
+# ── Forbidden edges ────────────────────────────────────────────────────
 
-# Dimension-Analyzer sind isoliert: keiner importiert einen anderen.
+# Dimension-Analyzer sind isoliert: neue Dimension lässt sich hinzufügen,
+# ohne existierende zu ändern. Ausnahmen:
+#   - IOSP liefert die Basis-Datentypen (FunctionAnalysis, ProjectScope).
+#     Jeder Analyzer darf daraus lesen.
+#   - DRY liefert die Dead-Code-/Declared-Function-Infrastruktur, auf der
+#     TQ-003/004/005 aufbauen. Strukturell abgeleitet, nicht peer.
+# Jede andere Analyzer↔Analyzer-Referenz ist unerwünscht.
 [[architecture.forbidden]]
 from = "src/adapters/analyzers/iosp/**"
 to = "src/adapters/analyzers/**"
@@ -156,37 +192,58 @@ reason = "Dimension-Analyzer kennen sich nicht gegenseitig"
 [[architecture.forbidden]]
 from = "src/adapters/analyzers/complexity/**"
 to = "src/adapters/analyzers/**"
-except = ["src/adapters/analyzers/complexity/**"]
+except = [
+    "src/adapters/analyzers/complexity/**",
+    "src/adapters/analyzers/iosp/**",
+]
 reason = "Dimension-Analyzer kennen sich nicht gegenseitig"
 
 [[architecture.forbidden]]
 from = "src/adapters/analyzers/dry/**"
 to = "src/adapters/analyzers/**"
-except = ["src/adapters/analyzers/dry/**"]
+except = [
+    "src/adapters/analyzers/dry/**",
+    "src/adapters/analyzers/iosp/**",
+]
 reason = "Dimension-Analyzer kennen sich nicht gegenseitig"
 
 [[architecture.forbidden]]
 from = "src/adapters/analyzers/srp/**"
 to = "src/adapters/analyzers/**"
-except = ["src/adapters/analyzers/srp/**"]
+except = [
+    "src/adapters/analyzers/srp/**",
+    "src/adapters/analyzers/iosp/**",
+]
 reason = "Dimension-Analyzer kennen sich nicht gegenseitig"
 
 [[architecture.forbidden]]
 from = "src/adapters/analyzers/coupling/**"
 to = "src/adapters/analyzers/**"
-except = ["src/adapters/analyzers/coupling/**"]
+except = [
+    "src/adapters/analyzers/coupling/**",
+    "src/adapters/analyzers/iosp/**",
+]
 reason = "Dimension-Analyzer kennen sich nicht gegenseitig"
 
+# TQ ist explizit abgeleitete Dimension: baut auf DRY-Dead-Code-
+# Infrastruktur (DeclaredFunction, DeadCodeWarning) und IOSP-Scope auf.
 [[architecture.forbidden]]
 from = "src/adapters/analyzers/tq/**"
 to = "src/adapters/analyzers/**"
-except = ["src/adapters/analyzers/tq/**"]
-reason = "Dimension-Analyzer kennen sich nicht gegenseitig"
+except = [
+    "src/adapters/analyzers/tq/**",
+    "src/adapters/analyzers/dry/**",
+    "src/adapters/analyzers/iosp/**",
+]
+reason = "Dimension-Analyzer kennen sich nicht gegenseitig (TQ ist derivativ)"
 
 [[architecture.forbidden]]
 from = "src/adapters/analyzers/structural/**"
 to = "src/adapters/analyzers/**"
-except = ["src/adapters/analyzers/structural/**"]
+except = [
+    "src/adapters/analyzers/structural/**",
+    "src/adapters/analyzers/iosp/**",
+]
 reason = "Dimension-Analyzer kennen sich nicht gegenseitig"
 
 [[architecture.forbidden]]
@@ -201,11 +258,13 @@ from = "src/adapters/analyzers/**"
 to = "src/adapters/report/**"
 reason = "Analyzer erzeugen Findings; Reporter konsumieren sie separat"
 
-# Reporter konsumieren Findings, analysieren nicht
-[[architecture.forbidden]]
-from = "src/adapters/report/**"
-to = "src/adapters/analyzers/**"
-reason = "Reporter konsumieren Findings, analysieren nicht"
+# Reporter lesen Analyzer-Datentypen (FunctionAnalysis, Classification,
+# DeadCodeWarning etc.) zum Rendern — das ist legitime DTO-Kopplung auf
+# gleichem Layer-Rang (beide in `analysis`). Was Reporter NICHT dürfen:
+# Analyzer-Funktionen aufrufen (d.h. Analyse auslösen). Das verhindert
+# bereits die Layer-Struktur: report ist gleichrangig mit analyzer, hat
+# aber keinen Anlass, orchestration zu bauen. Die Gegenrichtung
+# (Analyzer → Report) oben bleibt strikt verboten.
 
 # Adapter kennen Application nicht (folgt aus Layer-Reihenfolge,
 # explizites Verbot verhindert Adapter → App Import)
@@ -215,14 +274,19 @@ to = "src/app/**"
 reason = "Adapter kennt Ports + Domain, aber keine Application-Use-Cases"
 
 
-# ── Symbol rules: Phase 1 (live mit Domain) ────────────────────────────
+# ── Symbol rules: Language boundaries ──────────────────────────────────
+# Where specific crates (syn, globset, rayon, serialization, filesystem)
+# may appear. Keeps Domain and Ports free of implementation-detail types.
 
-# AST-Parsing-Libraries gehören in Adapter
+# AST-Parsing ist überall erlaubt ausser in Domain. Der syn-Typ ist
+# rustquals primäre Datendarstellung nach dem Parsen — Adapter, Ports,
+# App und CLI reichen ihn durch. Nur Domain muss rein bleiben: Findings,
+# Severity, Score sind sprach-agnostische Werttypen.
 [[architecture.pattern]]
-name = "syn_only_in_adapters"
+name = "no_syn_in_domain"
 forbid_path_prefix = ["syn::", "proc_macro2::", "quote::"]
-allowed_in = ["src/adapters/**", "**/tests/**"]
-reason = "AST-Parsing ist Adapter-Detail"
+forbidden_in = ["src/domain/**"]
+reason = "Domain-Typen kennen keine AST-Darstellung"
 
 # Glob-Imports in Domain verboten — verstecken Layer-Tunneling
 [[architecture.pattern]]
@@ -260,7 +324,9 @@ allowed_in = ["src/adapters/**", "**/tests/**"]
 reason = "Glob- und Regex-Matching leben in Adaptern"
 
 
-# ── Symbol rules: Phase 2 (live mit Ports) ─────────────────────────────
+# ── Symbol rules: Error-handling policy ────────────────────────────────
+# Production propagates errors through Result. Panic helpers, panic
+# macros, and stdout writes belong in narrowly-scoped locations only.
 
 # Keine Panic-Helper (.unwrap/.expect) in Production
 [[architecture.pattern]]
@@ -270,13 +336,31 @@ forbidden_in = ["src/**"]
 except = ["**/tests/**"]
 reason = "Production propagiert Fehler typisiert statt zu panicken"
 
-# Kein println/eprintln/dbg in Library-Code
+# stdout ist das Report-Channel: nur Report-Adapter und CLI dürfen dorthin
+# schreiben. Analyzer/App/Domain/Ports müssen Daten zurückgeben, nicht drucken.
 [[architecture.pattern]]
 name = "no_stdout_in_library_code"
-forbid_macro_call = ["println", "eprintln", "dbg"]
+forbid_macro_call = ["println", "print", "dbg"]
 forbidden_in = ["src/**"]
-except = ["src/main.rs", "src/bin/**", "**/tests/**"]
-reason = "Reporter nehmen Writer-Argumente; stdout-Dispatch nur im CLI"
+except = [
+    "src/main.rs",
+    "src/lib.rs",
+    "src/bin/**",
+    "src/cli/**",
+    "src/adapters/report/**",
+    "**/tests/**",
+]
+reason = "Stdout-Dispatch nur in Report-Adaptern und Composition Root"
+
+# stderr ist das Error/Warning-Channel. Nur Domain und Ports sind rein —
+# dort muss jeder Fehler über Result propagieren. Alles andere darf am
+# Rand stderr nutzen (App entscheidet exit codes, Adapter degradieren
+# graceful mit Warnings).
+[[architecture.pattern]]
+name = "no_stderr_in_pure_layers"
+forbid_macro_call = ["eprintln", "eprint"]
+forbidden_in = ["src/domain/**", "src/ports/**"]
+reason = "Domain und Ports propagieren Fehler über Result, nicht über stderr"
 
 # Keine Panic-Makros in Production
 [[architecture.pattern]]
@@ -287,20 +371,22 @@ except = ["**/tests/**"]
 reason = "Production-Code hat typisierte Errors, keine Panics"
 
 
-# ── Symbol rules: Phase 5 (live mit Application) ───────────────────────
+# ── Symbol rules: Composition-root boundary ────────────────────────────
+# CLI parsing, anyhow, and Box<dyn Error> are only allowed where the
+# process meets the outside world — not in Domain/App/Ports/Adapter.
 
 # CLI-Parsing nur im Composition Root
 [[architecture.pattern]]
 name = "clap_only_in_composition_root"
 forbid_path_prefix = ["clap::", "clap_complete::"]
-allowed_in = ["src/main.rs", "src/bin/**", "src/cli/**"]
+allowed_in = ["src/main.rs", "src/lib.rs", "src/bin/**", "src/cli/**", "**/tests/**"]
 reason = "CLI-Parsing ist Verdrahtungs-Concern im Composition Root"
 
 # anyhow nur an der Boundary
 [[architecture.pattern]]
 name = "anyhow_only_at_boundary"
 forbid_path_prefix = ["anyhow::"]
-allowed_in = ["src/main.rs", "src/bin/**", "**/tests/**"]
+allowed_in = ["src/main.rs", "src/lib.rs", "src/bin/**", "**/tests/**"]
 reason = "Typisierte Errors in Domain/App/Ports/Adapter; anyhow nur am Rand"
 
 # Kein Box<dyn Error> im Code
@@ -312,7 +398,8 @@ except = ["**/tests/**"]
 reason = "Typisierte Errors; kein Zerfall zu dyn Error"
 
 
-# ── Symbol rules: Phase 6 (live nach Composition-Root-Cleanup) ─────────
+# ── Symbol rules: Runtime guarantees ───────────────────────────────────
+# Rustqual is a pure analyzer — no unsafe, no FFI.
 
 # Kein unsafe in rustqual
 [[architecture.pattern]]
@@ -322,7 +409,9 @@ forbidden_in = ["src/**"]
 reason = "Rustqual ist reiner Analyser, kein FFI, kein unsafe"
 
 
-# ── Symbol rules: Phase 7 (live nach Test-Auslagerung) ─────────────────
+# ── Symbol rules: Test placement ───────────────────────────────────────
+# Tests live in companion `tests/` subtrees (or workspace-root `tests/`)
+# — never inline inside production files.
 
 # Keine inline #[cfg(test)] mod tests { … }-Blöcke
 # Erlaubt: #[cfg(test)] mod tests; (Deklaration ohne Body)
@@ -340,7 +429,9 @@ forbidden_in = ["src/**"]
 reason = "Test-Helpers in Companion-Files oder mod tests, nicht lose zwischen Production-Code"
 
 
-# ── Trait-signature rules: Phase 8 (live mit Trait-Contract) ──────────
+# ── Trait-signature rules: Port contract ───────────────────────────────
+# Every Port trait must be object-safe, Send + Sync, and must never leak
+# adapter-specific error types through its Result.
 
 [[architecture.trait_contract]]
 name = "port_traits"

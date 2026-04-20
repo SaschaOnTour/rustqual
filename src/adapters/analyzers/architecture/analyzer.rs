@@ -65,6 +65,13 @@ fn collect_all_findings(
     findings.extend(collect_symbol_findings(ctx, &arch.patterns));
     findings.extend(collect_layer_findings(ctx, compiled));
     findings.extend(collect_forbidden_findings(ctx, &compiled.forbidden));
+    findings.extend(
+        crate::adapters::analyzers::architecture::trait_contract_rule::collect_findings(
+            ctx,
+            &compiled.trait_contracts,
+            format_match_message,
+        ),
+    );
     findings
 }
 

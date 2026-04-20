@@ -1,6 +1,6 @@
 use crate::adapters::analyzers::iosp::{Classification, ComplexityMetrics, FunctionAnalysis};
+use crate::app::warnings::*;
 use crate::config::Config;
-use crate::pipeline::warnings::*;
 use crate::report::Summary;
 use std::collections::{HashMap, HashSet};
 

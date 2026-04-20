@@ -188,7 +188,7 @@ fn extract_impl_type_name(imp: &syn::ItemImpl) -> Option<String> {
     }
 }
 
-use crate::adapters::analyzers::dry::has_cfg_test as has_cfg_test_attr;
+use crate::adapters::shared::cfg_test::has_cfg_test as has_cfg_test_attr;
 
 /// Visit all inherent (non-trait) impl methods in parsed files, excluding test modules.
 /// Operation: iterates items, dispatches to callback via closure.

@@ -55,7 +55,9 @@ pub(super) fn build_module_graph(parsed: &[(String, String, syn::File)]) -> Modu
                 _ => {} // Name, Rename, Glob handled below
             }
 
-            // Terminal nodes: compute final path segments
+            // Terminal nodes: compute final path segments. A future `syn`
+            // variant (the enum is `#[non_exhaustive]` in spirit) should be
+            // silently skipped, not panic.
             let final_segments = match tree {
                 syn::UseTree::Name(name) => {
                     let mut s = segments;
@@ -68,7 +70,7 @@ pub(super) fn build_module_graph(parsed: &[(String, String, syn::File)]) -> Modu
                     s
                 }
                 syn::UseTree::Glob(_) => segments,
-                _ => unreachable!(),
+                _ => continue,
             };
 
             // Only track intra-crate dependencies (use crate::xxx)

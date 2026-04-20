@@ -9,6 +9,7 @@
 
 use crate::adapters::analyzers::architecture::forbidden_rule::CompiledForbiddenRule;
 use crate::adapters::analyzers::architecture::layer_rule::{LayerDefinitions, UnmatchedBehavior};
+use crate::adapters::analyzers::architecture::trait_contract_rule::CompiledTraitContract;
 use crate::config::ArchitectureConfig;
 use globset::{Glob, GlobMatcher, GlobSet, GlobSetBuilder};
 use std::collections::HashMap;
@@ -24,6 +25,7 @@ pub struct CompiledArchitecture {
     pub external_exact: HashMap<String, String>,
     pub external_glob: Vec<(GlobMatcher, String)>,
     pub forbidden: Vec<CompiledForbiddenRule>,
+    pub trait_contracts: Vec<CompiledTraitContract>,
 }
 
 /// Compile the raw config into `CompiledArchitecture`.
@@ -34,6 +36,7 @@ pub fn compile_architecture(cfg: &ArchitectureConfig) -> Result<CompiledArchitec
     let unmatched_behavior = parse_unmatched_behavior(&cfg.layers.unmatched_behavior)?;
     let (external_exact, external_glob) = compile_external_crates(&cfg.external_crates)?;
     let forbidden = compile_forbidden_rules(&cfg.forbidden_rules)?;
+    let trait_contracts = compile_trait_contracts(&cfg.trait_contracts)?;
     Ok(CompiledArchitecture {
         layers,
         reexport_points,
@@ -41,7 +44,47 @@ pub fn compile_architecture(cfg: &ArchitectureConfig) -> Result<CompiledArchitec
         external_exact,
         external_glob,
         forbidden,
+        trait_contracts,
     })
+}
+
+/// Compile `[[architecture.trait_contract]]` entries into runtime rules.
+/// Operation: per-entry glob compilation + field copy.
+fn compile_trait_contracts(
+    raw: &[crate::config::architecture::TraitContract],
+) -> Result<Vec<CompiledTraitContract>, String> {
+    raw.iter()
+        .map(|tc| {
+            let scope = Glob::new(&tc.scope)
+                .map_err(|e| format!("trait_contract.scope \"{}\": {e}", tc.scope))?;
+            let mut b = GlobSetBuilder::new();
+            b.add(scope);
+            let scope = b
+                .build()
+                .map_err(|e| format!("trait_contract.scope: {e}"))?;
+            Ok(CompiledTraitContract {
+                name: tc.name.clone(),
+                scope,
+                receiver_may_be: tc.receiver_may_be.clone(),
+                required_param_type_contains: tc.required_param_type_contains.clone(),
+                forbidden_return_type_contains: tc
+                    .forbidden_return_type_contains
+                    .clone()
+                    .unwrap_or_default(),
+                forbidden_error_variant_contains: tc
+                    .forbidden_error_variant_contains
+                    .clone()
+                    .unwrap_or_default(),
+                error_types: tc.error_types.clone().unwrap_or_default(),
+                methods_must_be_async: tc.methods_must_be_async,
+                must_be_object_safe: tc.must_be_object_safe,
+                required_supertraits_contain: tc
+                    .required_supertraits_contain
+                    .clone()
+                    .unwrap_or_default(),
+            })
+        })
+        .collect()
 }
 
 /// Compile `[architecture.layers]` into a `LayerDefinitions`.

@@ -105,7 +105,7 @@ pub fn analyze_srp(
 
     let struct_warnings = cohesion::build_struct_warnings(&structs, &methods, config);
     let cfg_test_files =
-        crate::adapters::analyzers::dry::cfg_test_detection::collect_cfg_test_file_paths(parsed);
+        crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(parsed);
     let module_warnings =
         module::analyze_module_srp(parsed, config, file_call_graph, &cfg_test_files);
     let param_warnings = Vec::new();

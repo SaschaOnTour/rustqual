@@ -88,13 +88,7 @@ impl PathPrefixVisitor<'_> {
     }
 }
 
-fn render_path(path: &syn::Path) -> String {
-    path.segments
-        .iter()
-        .map(|s| s.ident.to_string())
-        .collect::<Vec<_>>()
-        .join("::")
-}
+use super::render_path;
 
 fn join_with_leaf(segments: &[String], leaf: &str) -> String {
     if segments.is_empty() {

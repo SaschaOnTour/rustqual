@@ -33,15 +33,12 @@ struct CallTargetCollector {
 /// Insert the last path segment and qualified `Type::method` form into the target set.
 fn insert_path_segments(target: &mut HashSet<String>, path: &syn::Path) {
     let segments: Vec<_> = path.segments.iter().map(|s| s.ident.to_string()).collect();
-    if let Some(last) = segments.last() {
-        target.insert(last.clone());
-    }
+    let Some(last) = segments.last() else {
+        return;
+    };
+    target.insert(last.clone());
     if segments.len() >= 2 {
-        target.insert(format!(
-            "{}::{}",
-            segments[segments.len() - 2],
-            segments.last().unwrap()
-        ));
+        target.insert(format!("{}::{}", segments[segments.len() - 2], last));
     }
 }
 

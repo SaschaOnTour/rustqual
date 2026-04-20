@@ -1,4 +1,5 @@
 use super::sections;
+use std::path::Path;
 
 /// Headroom factor applied to current maximums for tailored config thresholds.
 const HEADROOM_FACTOR: f64 = 1.2;
@@ -11,6 +12,40 @@ pub struct ProjectMetrics {
     pub max_cyclomatic: usize,
     pub max_nesting_depth: usize,
     pub max_function_lines: usize,
+}
+
+/// Generate the full `rustqual.toml` content for `--init`, tailored when the
+/// project has Rust files and defaulted otherwise.
+/// Integration: delegates file discovery, parsing, analysis, metric extraction,
+/// and config rendering to helpers.
+pub fn prepare_init_content(path: &Path) -> String {
+    let files = crate::adapters::source::filesystem::collect_rust_files(path);
+    if files.is_empty() {
+        return generate_default_config().to_string();
+    }
+    let metrics = compute_project_metrics(&files, path);
+    generate_tailored_config(&metrics)
+}
+
+/// Parse the project files, run the IOSP analyzer, and project the results
+/// into `ProjectMetrics`.
+/// Integration: orchestrates parsing, scope build, analysis, extraction.
+fn compute_project_metrics(files: &[std::path::PathBuf], path: &Path) -> ProjectMetrics {
+    use crate::adapters::analyzers::iosp::{scope::ProjectScope, Analyzer};
+    use crate::adapters::source::filesystem::read_and_parse_files;
+    use crate::config::Config;
+
+    let parsed = read_and_parse_files(files, path);
+    let default_config = Config::default();
+    let scope_refs: Vec<(&str, &syn::File)> =
+        parsed.iter().map(|(p, _, f)| (p.as_str(), f)).collect();
+    let scope = ProjectScope::from_files(&scope_refs);
+    let analyzer = Analyzer::new(&default_config, &scope);
+    let all_results: Vec<_> = parsed
+        .iter()
+        .flat_map(|(p, _, syntax)| analyzer.analyze_file(syntax, p))
+        .collect();
+    extract_init_metrics(files.len(), &all_results)
 }
 
 /// Extract project metrics from analysis results for tailored config generation.

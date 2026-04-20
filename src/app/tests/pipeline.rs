@@ -1,10 +1,13 @@
 use crate::adapters::analyzers::iosp::Classification;
-use crate::adapters::source::filesystem::collect_rust_files;
+use crate::adapters::source::filesystem::{
+    collect_filtered_files, collect_rust_files, collect_suppression_lines, read_and_parse_files,
+};
+use crate::app::metrics::{count_coupling_warnings, mark_coupling_suppressions};
+use crate::app::pipeline::{output_results, run_analysis};
+use crate::app::warnings::{check_suppression_ratio, count_all_suppressions};
 use crate::config::Config;
 use crate::findings::Suppression;
-use crate::pipeline::metrics::{count_coupling_warnings, mark_coupling_suppressions};
-use crate::pipeline::warnings::{check_suppression_ratio, count_all_suppressions};
-use crate::pipeline::*;
+use crate::report::{AnalysisResult, Summary};
 use std::fs;
 
 fn test_dir() -> tempfile::TempDir {

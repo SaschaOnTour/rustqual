@@ -49,19 +49,18 @@ cargo install rustqual
 cargo install --path .
 
 # Then use either:
-rustqual src/            # direct invocation
-cargo qual src/          # as cargo subcommand
+rustqual                 # direct invocation (defaults to .)
+cargo qual               # as cargo subcommand
 ```
 
 ## Quick Start
 
 ```bash
-# Analyze current directory
+# Analyze current directory (default — matches architecture-rule globs)
 rustqual
 
 # Analyze a specific file or directory
 rustqual src/lib.rs
-rustqual src/
 
 # Show all functions, not just findings
 rustqual --verbose
@@ -224,6 +223,7 @@ rustqual [OPTIONS] [PATH]
 | `--min-quality-score <SCORE>`   | Exit with code 1 if quality score is below threshold (0–100)         |
 | `--diff [REF]`                  | Only analyze files changed vs a git ref (default: HEAD)              |
 | `--coverage <LCOV_FILE>`        | Path to LCOV coverage file for test quality analysis (TQ-005)        |
+| `--explain <FILE>`              | Architecture dimension: print layer assignment, classified imports, and active rules for one file |
 
 ### Exit Codes
 
@@ -243,32 +243,21 @@ If a `rustqual.toml` exists but cannot be parsed (syntax errors, unknown fields)
 
 ```toml
 # ────────────────────────────────────────────────────────────────
-# External Prefixes
-# ────────────────────────────────────────────────────────────────
-# Calls to these crate/module prefixes are NOT counted as "own" calls.
-external_prefixes = [
-    "std", "core", "alloc", "log", "tracing", "anyhow", "thiserror",
-    "serde", "tokio", "println", "eprintln", "format", "vec", "dbg",
-    "todo", "unimplemented", "panic", "assert", "assert_eq", "assert_ne",
-    "debug_assert",
-]
-
-# ────────────────────────────────────────────────────────────────
 # Ignore Functions
 # ────────────────────────────────────────────────────────────────
 # Functions matching these patterns are completely excluded from analysis.
 # Supports full glob syntax: *, ?, [abc], [!abc]
 ignore_functions = [
     "main",      # entry point, always mixes logic + calls
-    "test_*",    # test functions
-    "visit_*",   # syn::Visit trait implementations
+    "run",       # composition-root dispatcher
+    "visit_*",   # syn::Visit trait implementations (external dispatch)
 ]
 
 # ────────────────────────────────────────────────────────────────
 # Exclude Files
 # ────────────────────────────────────────────────────────────────
 # Glob patterns for files to exclude from analysis entirely.
-exclude_files = []
+exclude_files = ["examples/**"]      # e.g. fixture crates for rule demos
 
 # ────────────────────────────────────────────────────────────────
 # Strictness
@@ -283,7 +272,7 @@ strict_error_propagation = false     # If true, ? operator counts as logic
 # ────────────────────────────────────────────────────────────────
 # Maximum fraction of functions that may be suppressed (0.0–1.0).
 # Exceeding this ratio produces a warning.
-max_suppression_ratio = 0.05
+max_suppression_ratio = 0.10
 
 # If true, exit with code 1 when warnings are present (e.g. suppression ratio exceeded).
 # Default: false. Use --fail-on-warnings CLI flag to enable.
@@ -326,7 +315,7 @@ similarity_threshold = 0.85          # Jaccard similarity for near-duplicates
 ignore_tests = true                  # Skip test functions
 detect_dead_code = true              # Enable dead code detection
 detect_wildcard_imports = true       # Flag use foo::* imports
-detect_repeated_matches = true      # Flag repeated match blocks (DRY-005)
+detect_repeated_matches = true       # Flag repeated match blocks (DRY-005)
 
 # ────────────────────────────────────────────────────────────────
 # Boilerplate Detection
@@ -350,7 +339,7 @@ max_methods = 15                     # Maximum impl methods
 max_fan_out = 10                     # Maximum external call targets
 max_parameters = 5                   # Maximum function parameters (AST-based)
 lcom4_threshold = 3                  # LCOM4 component threshold
-weights = [0.4, 0.25, 0.15, 0.2]    # [lcom4, fields, methods, fan_out]
+weights = [0.4, 0.25, 0.15, 0.2]     # [lcom4, fields, methods, fan_out]
 file_length_baseline = 300           # Production lines before penalty starts
 file_length_ceiling = 800            # Production lines at maximum penalty
 max_independent_clusters = 3         # Max independent function groups before warning
@@ -372,21 +361,108 @@ check_iet = true                     # Inconsistent Error Types (Coupling)
 # ────────────────────────────────────────────────────────────────
 # Test Quality Analysis
 # ────────────────────────────────────────────────────────────────
-[test]
+[test_quality]
 enabled = true
 coverage_file = ""                   # Path to LCOV file (or use --coverage CLI flag)
+# Extra macro names (beyond assert*/debug_assert*) to recognize as assertions in TQ-001
+# extra_assertion_macros = ["verify", "check", "expect_that"]
 
 # ────────────────────────────────────────────────────────────────
 # Quality Weights
 # ────────────────────────────────────────────────────────────────
 [weights]
-iosp = 0.25                          # Weight for IOSP dimension
-complexity = 0.20                    # Weight for Complexity dimension
-dry = 0.20                           # Weight for DRY dimension
-srp = 0.15                           # Weight for SRP dimension
-test_quality = 0.10                  # Weight for Test Quality dimension
-coupling = 0.10                      # Weight for Coupling dimension
+iosp         = 0.22
+complexity   = 0.18
+dry          = 0.13
+srp          = 0.18
+coupling     = 0.09
+test_quality = 0.10
+architecture = 0.10
 # Weights must sum to 1.0
+
+# ────────────────────────────────────────────────────────────────
+# Architecture Dimension (see "Architecture Dimension" section for details)
+# ────────────────────────────────────────────────────────────────
+[architecture]
+enabled = true
+
+[architecture.layers]
+order = ["domain", "port", "infrastructure", "analysis", "application"]
+unmatched_behavior = "strict_error"  # or "composition_root"
+
+[architecture.layers.domain]
+paths = ["src/domain/**"]
+
+[architecture.layers.port]
+paths = ["src/ports/**"]
+
+[architecture.layers.infrastructure]
+paths = [
+    "src/adapters/config/**",
+    "src/adapters/source/**",
+    "src/adapters/suppression/**",
+]
+
+[architecture.layers.analysis]
+paths = [
+    "src/adapters/analyzers/**",
+    "src/adapters/shared/**",
+    "src/adapters/report/**",
+]
+
+[architecture.layers.application]
+paths = ["src/app/**"]
+
+[architecture.reexport_points]
+paths = [
+    "src/lib.rs",
+    "src/main.rs",
+    "src/adapters/mod.rs",
+    "src/bin/**",
+    "src/cli/**",
+    "tests/**",
+]
+
+# Optional: map external crate names to your own layers (for workspaces)
+[architecture.external_crates]
+# "my_domain_crate" = "domain"
+# "my_infra_crate"  = "infrastructure"
+
+# Forbidden edges (cross-branch imports the layer rule permits but you don't want)
+[[architecture.forbidden]]
+from = "src/adapters/analyzers/**"
+to = "src/adapters/report/**"
+reason = "Analyzers produce findings; reporters consume them separately"
+
+# Symbol patterns (see "Architecture Dimension" below for all 7 matcher types)
+[[architecture.pattern]]
+name = "no_panic_helpers_in_production"
+forbid_method_call = ["unwrap", "expect"]
+forbidden_in = ["src/**"]
+except = ["**/tests/**"]
+reason = "Production propagates errors through Result"
+
+[[architecture.pattern]]
+name = "no_syn_in_domain"
+forbid_path_prefix = ["syn::", "proc_macro2::", "quote::"]
+forbidden_in = ["src/domain/**"]
+reason = "Domain types know no AST representation"
+
+# Trait-signature rule (port contract)
+[[architecture.trait_contract]]
+name = "port_traits"
+scope = "src/ports/**"
+receiver_may_be = ["shared_ref"]
+forbidden_return_type_contains = ["anyhow::", "Box<dyn"]
+forbidden_error_variant_contains = ["syn::", "toml::", "serde_json::"]
+must_be_object_safe = true
+required_supertraits_contain = ["Send", "Sync"]
+
+# ────────────────────────────────────────────────────────────────
+# Report Aggregation
+# ────────────────────────────────────────────────────────────────
+[report]
+aggregation = "loc_weighted"         # workspace-mode score aggregation
 ```
 
 ### Inline Suppression
@@ -416,7 +492,7 @@ Supported dimensions: `iosp`, `complexity`, `coupling`, `srp`, `dry`, `test_qual
 
 The legacy `// iosp:allow` syntax is still supported as an alias for `// qual:allow(iosp)`.
 
-Suppressed functions appear as `SUPPRESSED` in the output and do not count toward findings. If more than `max_suppression_ratio` (default 5%) of functions are suppressed, a warning is displayed.
+Suppressed functions appear as `SUPPRESSED` in the output and do not count toward findings. If more than `max_suppression_ratio` (default 10%) of functions are suppressed, a warning is displayed.
 
 ### API Annotation
 
@@ -519,16 +595,17 @@ Use `--strict-error-propagation` to count `?` as logic.
 
 ### Quality Score
 
-The overall quality score is a weighted average of six dimension scores (weights are configurable via `[weights]` in `rustqual.toml`):
+The overall quality score is a weighted average of seven dimension scores (weights are configurable via `[weights]` in `rustqual.toml`):
 
 | Dimension    | Default Weight | Metric |
 |--------------|----------------|--------|
-| IOSP         | 25%            | Compliance ratio (non-trivial functions) |
-| Complexity   | 20%            | 1 - (complexity + magic numbers + nesting + length + unsafe + error handling) / total |
-| DRY          | 20%            | 1 - (duplicates + fragments + dead code + boilerplate + wildcards + repeated matches) / total |
-| SRP          | 15%            | 1 - (struct warnings + module warnings + param warnings + structural BTC/SLM/NMS) / total |
-| Test Quality | 10%            | 1 - (assertion density + test length + mock-heavy + assertion-free + coverage gap) / total |
-| Coupling     | 10%            | 1 - (coupling warnings + 2×cycles + SDP violations + structural OI/SIT/DEH/IET) / total |
+| IOSP         | 22%            | Compliance ratio (non-trivial functions) |
+| Complexity   | 18%            | 1 - (complexity + magic numbers + nesting + length + unsafe + error handling) / total |
+| DRY          | 13%            | 1 - (duplicates + fragments + dead code + boilerplate + wildcards + repeated matches) / total |
+| SRP          | 18%            | 1 - (struct warnings + module warnings + param warnings + structural BTC/SLM/NMS) / total |
+| Coupling     | 9%             | 1 - (coupling warnings + 2×cycles + SDP violations + structural OI/SIT/DEH/IET) / total |
+| Test Quality | 10%            | 1 - (assertion-free + no-SUT + untested + uncovered + untested-logic) / total |
+| Architecture | 10%            | 1 - (layer violations + forbidden edges + pattern hits + trait-contract breaches) / total |
 
 Quality score ranges from 0% (all findings) to 100% (no findings). Weights must sum to 1.0.
 
@@ -624,18 +701,39 @@ Four rule types check the structural shape of the codebase against an
 explicit layered architecture. Enabled via `[architecture] enabled = true`.
 
 **Layer Rule** — files are assigned to layers via path globs; inner layers
-may not import from outer layers. Example:
+(lower rank) may not import from outer layers (higher rank). With
+`unmatched_behavior = "strict_error"`, every production file must match
+a layer glob; unmatched files become violations. With `"composition_root"`,
+unmatched files bypass the rule entirely (useful for Cargo-workspace roots).
+
+A minimal hexagonal layering:
 
 ```toml
 [architecture.layers]
 order = ["domain", "port", "application", "adapter"]
-unmatched_behavior = "composition_root"
+unmatched_behavior = "strict_error"
 
 [architecture.layers.domain]
 paths = ["src/domain/**"]
+
+[architecture.layers.port]
+paths = ["src/ports/**"]
+
+[architecture.layers.application]
+paths = ["src/app/**"]
+
+[architecture.layers.adapter]
+paths = ["src/adapters/**"]
+
+[architecture.reexport_points]
+paths = ["src/lib.rs", "src/main.rs"]
 ```
 
 A file in `src/domain/**` importing from `src/adapters/**` is flagged.
+Rustqual itself uses a five-rank variant that separates
+infrastructure-style adapters (`config`, `source`, `suppression`) from
+analysis-logic adapters (`analyzers`, `shared`, `report`) — see the
+committed `rustqual.toml` for the full structure.
 
 **Forbidden Rule** — paired `from` / `to` path globs forbid cross-branch
 imports:
@@ -875,77 +973,75 @@ The analyzer uses a **two-pass pipeline**:
 
 ### Source Files
 
-~80 source files in `src/`, ~23,000 lines total (including tests):
+~200 production files in `src/`, ~19 400 lines. Layered per Clean Architecture:
 
 ```
 src/
-├── lib.rs             Crate root: CLI, config, quality gates, run() (~710 lines)
-├── cli.rs             Clap CLI struct and argument definitions       (~125 lines)
-├── main.rs            Thin binary wrapper (rustqual)                (~5 lines)
-├── bin/
-│   └── cargo-qual/
-│       └── main.rs    Thin binary wrapper (cargo qual)              (~5 lines)
-├── pipeline/          Analysis orchestration (split into submodules)
-│   ├── mod.rs         run_analysis, output_results                  (~750 lines)
-│   ├── discovery.rs   File collection, parsing, git diff            (~245 lines)
-│   ├── metrics.rs     Coupling + SRP + DRY computation              (~400 lines)
-│   └── warnings.rs    Complexity/ext warnings, suppression ratio    (~385 lines)
-├── analyzer/
-│   ├── mod.rs         Core analysis engine, Analyzer struct         (~908 lines)
-│   ├── types.rs       Classification, FunctionAnalysis, metrics     (~290 lines)
-│   ├── visitor/       BodyVisitor (AST walking, trivial match)
-│   │   ├── mod.rs     Struct, helpers, is_trivial_match_arm         (~630 lines)
-│   │   └── visit.rs   Visit trait implementation                    (~290 lines)
-│   └── classify.rs    classify_function (3-tuple w/ own_calls)      (~330 lines)
-├── config/
-│   ├── mod.rs         Config loading, glob compilation              (~475 lines)
-│   ├── init.rs        Tailored config generation, ProjectMetrics    (~410 lines)
-│   └── sections.rs    Sub-configs, DEFAULT_* constants, WeightsConfig (~380 lines)
-├── dry/
-│   ├── mod.rs         FileVisitor trait, function collectors        (~600 lines)
-│   ├── functions.rs   Duplicate function detection                  (~433 lines)
-│   ├── fragments.rs   Fragment-level duplicate detection            (~809 lines)
-│   ├── dead_code.rs   Dead code detection                           (~470 lines)
-│   ├── wildcards.rs   Wildcard import detection                     (~265 lines)
-│   └── boilerplate/   Boilerplate pattern detection (BP-001–010)
-│       ├── mod.rs     Types, helpers, detect_boilerplate()          (~140 lines)
-│       └── ...        10 per-pattern files (BP-001–BP-010)
-├── report/
-│   ├── mod.rs         AnalysisResult, Summary, quality score        (~620 lines)
-│   ├── text/          Text format output (split into submodules)
-│   │   ├── mod.rs     print_report, file/function entries           (~300 lines)
-│   │   ├── summary.rs Summary section printers                      (~125 lines)
-│   │   ├── dry.rs     DRY section printer                           (~100 lines)
-│   │   ├── coupling.rs Coupling section printer                     (~200 lines)
-│   │   └── srp.rs     SRP section printer                           (~80 lines)
-│   ├── json.rs        JSON format output                            (~450 lines)
-│   ├── json_types.rs  Serializable JSON struct definitions          (~200 lines)
-│   ├── github.rs      GitHub Actions annotations                    (~375 lines)
-│   ├── dot.rs         DOT/Graphviz output                           (~155 lines)
-│   ├── sarif/         SARIF v2.1.0 output (split into submodule)
-│   │   ├── mod.rs     print_sarif Integration + envelope            (~455 lines)
-│   │   └── collectors.rs  collect_*_findings() Operations           (~300 lines)
-│   ├── html/          Self-contained HTML report (split into submodules)
-│   │   ├── mod.rs     print_html, build_html_string, dashboard      (~240 lines)
-│   │   ├── sections.rs IOSP, complexity, coupling sections          (~240 lines)
-│   │   └── tables.rs  DRY + SRP sections, generic table builder     (~300 lines)
-│   ├── suggestions.rs Refactoring suggestions                       (~192 lines)
-│   └── baseline.rs    Baseline v2 save/compare                      (~456 lines)
-├── srp/
-│   ├── mod.rs         SRP types, visitors, constructor detection    (~535 lines)
-│   ├── cohesion.rs    LCOM4 (with constructor support), composite   (~420 lines)
-│   └── module.rs      Production lines, function cohesion clusters  (~580 lines)
-├── coupling/          Module coupling analysis (split into submodules)
-│   ├── mod.rs         Types, analyze_coupling Integration, tests    (~430 lines)
-│   ├── graph.rs       build_module_graph (use-tree walking)         (~100 lines)
-│   ├── metrics.rs     compute_coupling_metrics (Ca/Ce/I)            (~45 lines)
-│   ├── cycles.rs      detect_cycles (Kosaraju iterative SCC)        (~80 lines)
-│   └── sdp.rs         Stable Dependencies Principle check           (~210 lines)
-├── normalize.rs       AST normalization for DRY                     (~784 lines)
-├── findings.rs        Dimension enum, suppression parsing           (~240 lines)
-├── scope.rs           ProjectScope, two-pass name resolution        (~264 lines)
-└── watch.rs           File watcher for --watch mode                 (~126 lines)
+├── lib.rs                      Composition root (run() entry, ~140 lines)
+├── main.rs                     Thin binary wrapper (rustqual)
+├── bin/cargo-qual/main.rs      Thin binary wrapper (cargo qual)
+│
+├── domain/                     Pure value types (no syn, no I/O)
+│   ├── dimension.rs
+│   ├── finding.rs              Port-emitted Finding struct
+│   ├── score.rs                PERCENTAGE_MULTIPLIER
+│   ├── severity.rs
+│   ├── source_unit.rs
+│   └── suppression.rs
+│
+├── ports/                      Trait contracts
+│   ├── dimension_analyzer.rs   DimensionAnalyzer + AnalysisContext + ParsedFile
+│   ├── reporter.rs
+│   ├── source_loader.rs
+│   └── suppression_parser.rs
+│
+├── adapters/
+│   ├── config/                 TOML loading, tailored --init, weight validation
+│   ├── source/                 Filesystem walk, parse, --watch
+│   ├── suppression/            qual:allow marker parsing
+│   ├── shared/                 Cross-analyzer utilities
+│   │   ├── cfg_test.rs         has_cfg_test, has_test_attr
+│   │   ├── cfg_test_files.rs   collect_cfg_test_file_paths
+│   │   ├── normalize.rs        AST normalization for DRY
+│   │   └── use_tree.rs         Canonical use-tree walker
+│   ├── analyzers/              Seven dimension analyzers
+│   │   ├── iosp/               Analyzer, BodyVisitor, classify, scope
+│   │   ├── complexity/
+│   │   ├── dry/                Incl. boilerplate/ (BP-001–BP-010)
+│   │   ├── srp/
+│   │   ├── coupling/
+│   │   ├── tq/
+│   │   ├── structural/         BTC, SLM, NMS, OI, SIT, DEH, IET
+│   │   └── architecture/       Layer + Forbidden + Symbol + Trait-contract rules
+│   └── report/                 Text, JSON, SARIF, HTML, DOT, GitHub,
+│                               AI, AI-JSON, baseline, suggestions
+│
+├── app/                        Application use cases
+│   ├── analyze_codebase.rs     Port-based use case
+│   ├── pipeline.rs             Full-pipeline orchestrator
+│   ├── secondary.rs            Per-dimension secondary passes
+│   ├── metrics.rs              Coupling/DRY/SRP helpers
+│   ├── tq_metrics.rs
+│   ├── structural_metrics.rs
+│   ├── architecture.rs         Architecture dim wiring via port
+│   ├── warnings.rs             Complexity + leaf reclass + suppression ratio
+│   ├── dry_suppressions.rs
+│   ├── exit_gates.rs           Default-fail, min-quality, fail-on-warnings
+│   └── setup.rs                Config loading + CLI overrides
+│
+└── cli/
+    ├── mod.rs                  Cli struct (clap), OutputFormat
+    ├── handlers.rs             --init, --completions, --save-baseline, --compare
+    └── explain.rs              --explain <file> architecture diagnostic
+
+tests/                          Workspace integration tests
+├── integration.rs              End-to-end CLI invocations
+└── showcase_iosp.rs            Before/after IOSP refactor demonstration
 ```
+
+Companion test trees live next to the production code they cover
+(`src/<module>/tests/<name>.rs`). Workspace-root `tests/**` are Cargo's
+integration-test binaries; each is its own crate.
 
 ### How Classification Works
 
@@ -1077,45 +1173,48 @@ Use `--suggestions` to get automated refactoring hints.
 
 ## Self-Compliance
 
-rustqual **analyzes itself** with zero findings:
+rustqual **analyzes itself** with zero findings across all seven dimensions:
 
 ```bash
-$ cargo run -- src/ --fail-on-warnings
+$ cargo run -- . --fail-on-warnings --coverage coverage.lcov
 
 ═══ Summary ═══
-  Functions: 310    Quality Score: 100.0%
+  Functions: 1805    Quality Score: 100.0%
 
-  IOSP:          100.0%  (60I, 153O, 97T)
-  Complexity:    100.0%
-  DRY:           100.0%
-  SRP:           100.0%
-  Test Quality:  100.0%
-  Coupling:      100.0%
+  IOSP:        100.0%  (996I, 270O, 521T)
+  Complexity:  100.0%
+  DRY:         100.0%
+  SRP:         100.0%
+  Coupling:    100.0%
+  Test Quality:100.0%
+  Architecture:100.0%
 
-  ~ All allows:   14 (qual:allow + #[allow])
+  ~ All allows:   27 (qual:allow + #[allow])
 
 All quality checks passed! ✓
 ```
 
-This is verified by the integration test suite and CI.
+This is verified by the integration test suite and CI. Note: use `.` as
+the analysis root (not `src/`) so that architecture-rule globs like
+`src/adapters/**` match the actual paths.
 
 ## Testing
 
 ```bash
-cargo test           # 597 tests (590 unit + 4 integration + 3 showcase)
-RUSTFLAGS="-Dwarnings" cargo clippy --all-targets  # lint check (0 warnings)
+cargo nextest run                                    # 1114 tests (1107 unit + 4 integration + 3 showcase)
+RUSTFLAGS="-Dwarnings" cargo clippy --all-targets    # lint check (0 warnings)
 ```
 
 The test suite covers:
-- **analyzer/** (tests across 4 modules): classification, closures, iterators, scope integration, recursion, `?` operator, async/await, severity, complexity metrics, suppression
-- **config/** (tests across 2 modules): external call matching, ignore patterns, config loading, validation, glob compilation, default generation
-- **report/** (tests across 8 modules): summary statistics, JSON structure, suppression counting, baseline roundtrip, complexity, HTML generation, SARIF structure, GitHub annotations
-- **dry/** (tests across 5 modules): duplicate detection, fragment detection, dead code detection, boilerplate patterns, normalization
-- **srp/** (tests across 3 modules): LCOM4 computation, composite scoring, module line counting, function cohesion clusters (shared-caller unification)
-- **pipeline** (25+ tests): file collection, suppression lines, coupling suppression, SRP suppression, suppression ratio
-- **scope** (16 tests): scope collection, `is_own_function`, `is_own_method`
-- **integration** (4 tests): self-analysis, sample expectations, JSON validity, verbose output
-- **showcase** (3 tests): before/after IOSP refactoring examples
+- **adapters/analyzers/** — classification, closures, iterators, scope, recursion, `?` operator, async/await, severity, complexity, IOSP/DRY/SRP/coupling/TQ/structural/architecture rule behaviour
+- **adapters/config/** — ignore patterns, glob compilation, TOML loading, validation, tailored `--init` generation, weight sum check
+- **adapters/report/** — summary stats, JSON structure, suppression counting, baseline roundtrip, HTML, SARIF, GitHub annotations, AI/TOON output
+- **adapters/shared/** — cfg-test detection, use-tree walking, AST normalization
+- **adapters/source/** — filesystem walk, `--watch` loop
+- **app/** — pipeline orchestration, exit gates, setup, secondary-pass coordination, warning accumulation
+- **domain/** + **ports/** — value-type invariants and trait-contract shape
+- **Integration tests** (`tests/integration.rs`): self-analysis, sample expectations, JSON validity, verbose output
+- **Showcase tests** (`tests/showcase_iosp.rs`): before/after IOSP refactoring examples
 
 ## Known Limitations
 

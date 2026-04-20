@@ -25,8 +25,8 @@
 
 #![allow(dead_code)]
 
-use crate::adapters::analyzers::architecture::use_tree::gather_imports;
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
+use crate::adapters::shared::use_tree::gather_imports;
 use globset::{GlobMatcher, GlobSet};
 use std::collections::HashMap;
 use syn::spanned::Spanned;
@@ -68,6 +68,15 @@ impl LayerDefinitions {
             .iter()
             .find(|(_, gs)| gs.is_match(path))
             .map(|(name, _)| name.as_str())
+    }
+
+    /// Layer name + rank for the file at `path`. Returns `None` if no glob
+    /// matches; the layer is guaranteed to be in the rank map because both
+    /// lookups consult the same definitions.
+    pub fn layer_and_rank_for_file(&self, path: &str) -> Option<(&str, usize)> {
+        let layer = self.layer_for_file(path)?;
+        let rank = self.rank_of(layer)?;
+        Some((layer, rank))
     }
 
     /// Layer of `crate::<seg>` by probing `src/<seg>.rs` and
@@ -118,30 +127,24 @@ enum ImportTarget<'a> {
 }
 
 /// Check every file's imports against the layer ordering.
-/// Integration: orchestrates per-file classification (for-loop delegation).
+/// Integration: per-file iteration + flat-map of per-file hits.
 // qual:api
 pub fn check_layer_rule(
     files: &[(String, &syn::File)],
     input: &LayerRuleInput<'_>,
 ) -> Vec<MatchLocation> {
-    let mut hits = Vec::new();
-    for (path, ast) in files {
-        append_file_violations(path, ast, input, &mut hits);
-    }
-    hits
+    files
+        .iter()
+        .flat_map(|(path, ast)| file_violations(path, ast, input))
+        .collect()
 }
 
-/// Dispatch per file based on its layer classification.
-/// Integration: pure match-dispatch delegation.
-fn append_file_violations(
-    path: &str,
-    ast: &syn::File,
-    input: &LayerRuleInput<'_>,
-    hits: &mut Vec<MatchLocation>,
-) {
+/// Collect every hit for one file by classifying it then walking imports.
+/// Integration: match-dispatch delegation over classification.
+fn file_violations(path: &str, ast: &syn::File, input: &LayerRuleInput<'_>) -> Vec<MatchLocation> {
     match classify_file(path, input) {
-        FileClass::Skip => {}
-        FileClass::Unmatched => hits.push(make_unmatched(path)),
+        FileClass::Skip => Vec::new(),
+        FileClass::Unmatched => vec![make_unmatched(path)],
         FileClass::Matched { layer, rank } => collect_file_violations(
             &FileInfo {
                 path,
@@ -150,7 +153,6 @@ fn append_file_violations(
                 rank,
             },
             input,
-            hits,
         ),
     }
 }
@@ -161,16 +163,12 @@ fn classify_file<'a>(path: &str, input: &'a LayerRuleInput<'_>) -> FileClass<'a>
     if input.reexport_points.is_match(path) {
         return FileClass::Skip;
     }
-    let Some(layer) = input.layers.layer_for_file(path) else {
+    let Some((layer, rank)) = input.layers.layer_and_rank_for_file(path) else {
         return match input.unmatched_behavior {
             UnmatchedBehavior::CompositionRoot => FileClass::Skip,
             UnmatchedBehavior::StrictError => FileClass::Unmatched,
         };
     };
-    let rank = input
-        .layers
-        .rank_of(layer)
-        .expect("layer assigned by layer_for_file must be in rank map");
     FileClass::Matched { layer, rank }
 }
 
@@ -190,17 +188,11 @@ fn make_unmatched(path: &str) -> MatchLocation {
 /// Walk a file's `use` items and flag imports that resolve to a higher-ranked
 /// layer than the file's own.
 /// Integration: orchestrates import gathering + evaluation through iterator chains.
-fn collect_file_violations(
-    file: &FileInfo<'_>,
-    input: &LayerRuleInput<'_>,
-    hits: &mut Vec<MatchLocation>,
-) {
-    let imports = gather_imports(file.ast);
-    hits.extend(
-        imports
-            .into_iter()
-            .filter_map(|(segments, span)| evaluate_import(file, &segments, span, input)),
-    );
+fn collect_file_violations(file: &FileInfo<'_>, input: &LayerRuleInput<'_>) -> Vec<MatchLocation> {
+    gather_imports(file.ast)
+        .into_iter()
+        .filter_map(|(segments, span)| evaluate_import(file, &segments, span, input))
+        .collect()
 }
 
 /// Resolve one import and return a violation hit if its target layer is outer.
