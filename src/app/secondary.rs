@@ -56,9 +56,14 @@ pub(super) fn run_secondary_analysis(
     summary: &mut Summary,
 ) -> SecondaryResults {
     let api_lines = discovery::collect_api_lines(ctx.parsed);
+    let test_helper_lines = discovery::collect_test_helper_lines(ctx.parsed);
+    let annotation_lines = metrics::AnnotationLines {
+        api: &api_lines,
+        test_helper: &test_helper_lines,
+    };
 
     let coupling = run_coupling_pass(ctx, summary);
-    let (dry, repeated_matches) = run_dry_pass(ctx, &api_lines, summary);
+    let (dry, repeated_matches) = run_dry_pass(ctx, &annotation_lines, summary);
     metrics::count_sdp_violations(coupling.as_ref(), &ctx.config.coupling, summary);
 
     let srp = run_srp_pass(ctx, summary);
@@ -101,7 +106,7 @@ fn run_coupling_pass(
 /// Integration: delegates detection + per-category suppressions + count.
 fn run_dry_pass(
     ctx: &SecondaryContext<'_>,
-    api_lines: &std::collections::HashMap<String, std::collections::HashSet<usize>>,
+    annotation_lines: &metrics::AnnotationLines<'_>,
     summary: &mut Summary,
 ) -> (
     metrics::DryResults,
@@ -111,7 +116,7 @@ fn run_dry_pass(
         ctx.parsed,
         ctx.config,
         ctx.suppression_lines,
-        api_lines,
+        annotation_lines,
         ctx.cfg_test_files,
     );
     dry_suppressions::mark_dry_suppressions(&mut dry.duplicates, ctx.suppression_lines);

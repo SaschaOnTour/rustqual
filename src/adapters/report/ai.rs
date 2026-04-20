@@ -55,6 +55,30 @@ pub(crate) struct EnrichIndex<'a> {
         (&'a str, usize),
         &'a crate::adapters::analyzers::srp::SrpWarning,
     >,
+    // SRP module warnings are emitted as findings at line 1 per file,
+    // so file alone is the natural key.
+    srp_modules:
+        std::collections::HashMap<&'a str, &'a crate::adapters::analyzers::srp::ModuleSrpWarning>,
+    // Global findings (file empty, line 0) need a different key: use
+    // the detail string shape the collector emits.
+    sdp: std::collections::HashMap<
+        String,
+        &'a crate::adapters::analyzers::coupling::sdp::SdpViolation,
+    >,
+    boilerplate: std::collections::HashMap<
+        (&'a str, usize),
+        &'a crate::adapters::analyzers::dry::boilerplate::BoilerplateFind,
+    >,
+    dead_code: std::collections::HashMap<
+        (&'a str, usize),
+        &'a crate::adapters::analyzers::dry::dead_code::DeadCodeWarning,
+    >,
+    structural: std::collections::HashMap<
+        (&'a str, usize),
+        &'a crate::adapters::analyzers::structural::StructuralWarning,
+    >,
+    orphan_suppressions:
+        std::collections::HashMap<(&'a str, usize), &'a crate::adapters::report::OrphanSuppressionWarning>,
 }
 
 /// Build enrichment indexes from analysis data for O(1) lookups.
@@ -93,11 +117,62 @@ pub(crate) fn build_enrich_index(analysis: &AnalysisResult) -> EnrichIndex<'_> {
                 .collect()
         })
         .unwrap_or_default();
+    let srp_modules = analysis
+        .srp
+        .as_ref()
+        .map(|s| {
+            s.module_warnings
+                .iter()
+                .map(|w| (w.file.as_str(), w))
+                .collect()
+        })
+        .unwrap_or_default();
+    let sdp = analysis
+        .coupling
+        .as_ref()
+        .map(|ca| {
+            ca.sdp_violations
+                .iter()
+                .map(|v| (format!("{} -> {}", v.from_module, v.to_module), v))
+                .collect()
+        })
+        .unwrap_or_default();
+    let boilerplate = analysis
+        .boilerplate
+        .iter()
+        .map(|b| ((b.file.as_str(), b.line), b))
+        .collect();
+    let dead_code = analysis
+        .dead_code
+        .iter()
+        .map(|w| ((w.file.as_str(), w.line), w))
+        .collect();
+    let structural = analysis
+        .structural
+        .as_ref()
+        .map(|s| {
+            s.warnings
+                .iter()
+                .map(|w| ((w.file.as_str(), w.line), w))
+                .collect()
+        })
+        .unwrap_or_default();
+    let orphan_suppressions = analysis
+        .orphan_suppressions
+        .iter()
+        .map(|w| ((w.file.as_str(), w.line), w))
+        .collect();
     EnrichIndex {
         results,
         duplicates,
         fragments,
         srp_structs,
+        srp_modules,
+        sdp,
+        boilerplate,
+        dead_code,
+        structural,
+        orphan_suppressions,
     }
 }
 
@@ -180,10 +255,125 @@ pub(crate) fn enrich_detail(
         "LONG_FN" => with_max(config.complexity.max_function_lines),
         "NESTING" => with_max(config.complexity.max_nesting_depth),
         "SRP_STRUCT" => enrich_srp_struct(entry, index.srp_structs.get(&key).copied()),
-        "SRP_MODULE" => with_max(config.srp.file_length_baseline),
+        "SRP_MODULE" => enrich_srp_module(
+            entry,
+            index.srp_modules.get(entry.file.as_str()).copied(),
+            config,
+        ),
         "SRP_PARAMS" => with_max(config.srp.max_parameters),
+        "SDP" => enrich_sdp(entry, index.sdp.get(entry.detail.as_str()).copied()),
+        "BOILERPLATE" => enrich_boilerplate(entry, index.boilerplate.get(&key).copied()),
+        "DEAD_CODE" => enrich_dead_code(entry, index.dead_code.get(&key).copied()),
+        "STRUCTURAL" => enrich_structural(entry, index.structural.get(&key).copied()),
+        "ORPHAN_SUPPRESSION" => {
+            enrich_orphan_suppression(entry, index.orphan_suppressions.get(&key).copied())
+        }
         _ => entry.detail.clone(),
     }
+}
+
+/// Enrich orphan-suppression detail with the original marker's reason
+/// (if any), so the AI agent knows what intent the stale marker had.
+/// Operation: format logic, no own calls.
+fn enrich_orphan_suppression(
+    entry: &crate::report::findings_list::FindingEntry,
+    warning: Option<&crate::adapters::report::OrphanSuppressionWarning>,
+) -> String {
+    let Some(w) = warning else {
+        return entry.detail.clone();
+    };
+    match &w.reason {
+        Some(r) => format!("{} — {}", entry.detail, r),
+        None => entry.detail.clone(),
+    }
+}
+
+/// Enrich SRP module detail with both length and cluster drivers so the
+/// AI sees whichever threshold the finding is actually triggered by (both
+/// if both are active). Falls back to the old "N (max M)" shape when no
+/// driver flag is set.
+/// Operation: format logic, no own calls.
+fn enrich_srp_module(
+    entry: &crate::report::findings_list::FindingEntry,
+    warning: Option<&crate::adapters::analyzers::srp::ModuleSrpWarning>,
+    config: &crate::config::Config,
+) -> String {
+    let Some(w) = warning else {
+        return format!("{} (max {})", entry.detail, config.srp.file_length_baseline);
+    };
+    let length_driver = w.length_score > 0.0;
+    let cluster_driver = w.independent_clusters > config.srp.max_independent_clusters;
+    let mut parts: Vec<String> = Vec::new();
+    if length_driver {
+        parts.push(format!(
+            "{} lines (max {})",
+            w.production_lines, config.srp.file_length_baseline
+        ));
+    }
+    if cluster_driver {
+        parts.push(format!(
+            "{} independent clusters (max {})",
+            w.independent_clusters, config.srp.max_independent_clusters
+        ));
+    }
+    if parts.is_empty() {
+        format!("{} (max {})", entry.detail, config.srp.file_length_baseline)
+    } else {
+        parts.join(", ")
+    }
+}
+
+/// Enrich SDP detail with the concrete instability values so the
+/// stability gap driving the violation is visible without a JSON round-trip.
+/// Operation: format logic, no own calls.
+fn enrich_sdp(
+    entry: &crate::report::findings_list::FindingEntry,
+    violation: Option<&crate::adapters::analyzers::coupling::sdp::SdpViolation>,
+) -> String {
+    let Some(v) = violation else {
+        return entry.detail.clone();
+    };
+    format!(
+        "{} -> {} (stable I={:.2} imports unstable I={:.2})",
+        v.from_module, v.to_module, v.from_instability, v.to_instability
+    )
+}
+
+/// Enrich boilerplate detail with description and concrete suggestion.
+/// Operation: format logic, no own calls.
+fn enrich_boilerplate(
+    entry: &crate::report::findings_list::FindingEntry,
+    find: Option<&crate::adapters::analyzers::dry::boilerplate::BoilerplateFind>,
+) -> String {
+    let Some(b) = find else {
+        return entry.detail.clone();
+    };
+    format!("{}: {} — {}", b.pattern_id, b.description, b.suggestion)
+}
+
+/// Enrich dead-code detail with the actionable suggestion string.
+/// Operation: format logic, no own calls.
+fn enrich_dead_code(
+    entry: &crate::report::findings_list::FindingEntry,
+    warning: Option<&crate::adapters::analyzers::dry::dead_code::DeadCodeWarning>,
+) -> String {
+    let Some(w) = warning else {
+        return entry.detail.clone();
+    };
+    format!("{} ({})", entry.detail, w.suggestion)
+}
+
+/// Enrich structural detail with the kind's human-readable message,
+/// not just the two/three-letter rule code.
+/// Operation: format logic, no own calls.
+fn enrich_structural(
+    entry: &crate::report::findings_list::FindingEntry,
+    warning: Option<&crate::adapters::analyzers::structural::StructuralWarning>,
+) -> String {
+    let Some(w) = warning else {
+        return entry.detail.clone();
+    };
+    format!("{}: {}", w.kind.code(), w.kind.detail())
 }
 
 /// Enrich SRP struct detail with method and field counts.
@@ -277,6 +467,7 @@ pub(crate) fn map_category(cat: &str) -> &str {
         "TQ_UNCOVERED" => "uncovered",
         "TQ_UNTESTED_LOGIC" => "untested_logic",
         "STRUCTURAL" => "structural",
+        "ORPHAN_SUPPRESSION" => "orphan_suppression",
         other => other,
     }
 }

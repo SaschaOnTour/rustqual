@@ -21,6 +21,12 @@ pub(super) fn compute_tq(
         &mut declared_fns,
         &api_lines,
     );
+    let test_helper_lines =
+        crate::adapters::source::filesystem::collect_test_helper_lines(parsed);
+    crate::adapters::analyzers::dry::dead_code::mark_test_helper_declarations(
+        &mut declared_fns,
+        &test_helper_lines,
+    );
     let cfg_test_files =
         crate::adapters::analyzers::dry::dead_code::collect_cfg_test_file_paths(parsed);
     let (prod_calls, test_calls) =

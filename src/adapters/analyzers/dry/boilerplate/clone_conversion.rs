@@ -4,9 +4,9 @@ use crate::config::sections::BoilerplateConfig;
 /// Minimum cloned fields for clone-heavy conversion detection.
 const MIN_CLONE_FIELDS: usize = 3;
 
+// qual:allow(complexity) reason: "clone detection with closure-based body check"
 /// Detect struct construction with many `.clone()` calls on fields.
 /// Operation: body inspection logic; helper calls in closures.
-// qual:allow(complexity) reason: "clone detection with closure-based body check"
 pub(super) fn check_clone_heavy_conversion(
     parsed: &[(String, String, syn::File)],
     config: &BoilerplateConfig,

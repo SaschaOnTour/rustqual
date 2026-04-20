@@ -11,7 +11,6 @@ use super::types::{CallOccurrence, ComplexityHotspot, LogicOccurrence, MagicNumb
 pub(crate) const HOTSPOT_NESTING_DEPTH: usize = 3;
 
 /// Visitor that collects all logic and call occurrences inside a function body.
-// qual:allow(srp) reason: "syn visitor pattern — all fields serve the single visit_expr traversal"
 pub(crate) struct BodyVisitor<'a> {
     pub config: &'a Config,
     pub scope: &'a ProjectScope,

@@ -123,9 +123,9 @@ pub(crate) fn extract_matching_pairs(windows: &[WindowEntry]) -> Vec<PairMatch> 
 
 // ── Fragment merging ────────────────────────────────────────────
 
+// qual:allow(complexity) reason: "interval merging algorithm with nested loops"
 /// Merge adjacent pair matches into maximal fragment groups.
 /// Operation: sorting + interval merging logic, no own calls.
-// qual:allow(complexity) reason: "interval merging algorithm with nested loops"
 pub(crate) fn merge_into_fragments(
     mut pairs: Vec<PairMatch>,
     fn_infos: &[FnInfo],

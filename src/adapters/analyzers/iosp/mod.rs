@@ -110,7 +110,6 @@ fn build_function_analysis(
 }
 
 /// Top-level file analyzer.
-// qual:allow(srp) reason: "facade struct — analyze_file/analyze_mod delegate to methods that access fields"
 pub struct Analyzer<'a> {
     config: &'a Config,
     scope: &'a ProjectScope,

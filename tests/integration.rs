@@ -10,8 +10,10 @@ fn cargo_bin() -> Command {
 
 #[test]
 fn test_self_analysis_no_violations() {
+    // Must run with "." (not "src/") as the analysis root so Architecture
+    // globs like `src/adapters/**` actually match — see CLAUDE.md.
     let output = cargo_bin()
-        .args(["src/"])
+        .args(["."])
         .output()
         .expect("Failed to execute");
     assert!(

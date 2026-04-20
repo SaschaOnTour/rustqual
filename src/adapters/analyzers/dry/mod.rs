@@ -59,6 +59,10 @@ pub struct DeclaredFunction {
     pub has_allow_dead_code: bool,
     /// Whether this function is marked as public API via `// qual:api`.
     pub is_api: bool,
+    /// Whether this function is marked as a test-only helper via
+    /// `// qual:test_helper`. Narrowly excludes DRY-004 (testonly) and
+    /// TQ-003 (untested) without disabling other checks.
+    pub is_test_helper: bool,
 }
 
 // ── Function hash collection ────────────────────────────────────

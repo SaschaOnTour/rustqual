@@ -32,6 +32,7 @@ fn test_map_category_all_known() {
         ("TQ_UNCOVERED", "uncovered"),
         ("TQ_UNTESTED_LOGIC", "untested_logic"),
         ("STRUCTURAL", "structural"),
+        ("ORPHAN_SUPPRESSION", "orphan_suppression"),
     ];
     cases.iter().for_each(|(input, expected)| {
         assert_eq!(
@@ -57,6 +58,7 @@ fn empty_analysis() -> AnalysisResult {
         tq: None,
         structural: None,
         architecture_findings: vec![],
+        orphan_suppressions: vec![],
     }
 }
 
@@ -466,8 +468,23 @@ fn test_enrich_srp_struct_detail() {
 
 #[test]
 fn test_enrich_srp_module_detail() {
+    // Length-only driver: keeps historical "N lines (max M)" shape.
+    use crate::adapters::analyzers::srp::{ModuleSrpWarning, SrpAnalysis};
     use crate::report::findings_list::FindingEntry;
-    let analysis = empty_analysis();
+    let mut analysis = empty_analysis();
+    analysis.srp = Some(SrpAnalysis {
+        struct_warnings: vec![],
+        module_warnings: vec![ModuleSrpWarning {
+            module: "src/lib.rs".into(),
+            file: "src/lib.rs".into(),
+            production_lines: 310,
+            length_score: 0.05,
+            independent_clusters: 1,
+            cluster_names: vec![],
+            suppressed: false,
+        }],
+        param_warnings: vec![],
+    });
     let entry = FindingEntry {
         file: "src/lib.rs".into(),
         line: 1,
@@ -485,6 +502,319 @@ fn test_enrich_srp_module_detail() {
     assert!(
         detail.contains(&format!("max {}", config.srp.file_length_baseline)),
         "should contain threshold, got: {detail}"
+    );
+}
+
+#[test]
+fn ai_srp_module_cluster_driver_is_named() {
+    // Bug 4 primary fix: when independent_clusters drives the finding
+    // (and length_score == 0), AI detail must surface that instead of
+    // the misleading "N lines (max M)".
+    use crate::adapters::analyzers::srp::{ModuleSrpWarning, SrpAnalysis};
+    use crate::report::findings_list::FindingEntry;
+    let mut analysis = empty_analysis();
+    analysis.srp = Some(SrpAnalysis {
+        struct_warnings: vec![],
+        module_warnings: vec![ModuleSrpWarning {
+            module: "tests/pq_tests.rs".into(),
+            file: "tests/pq_tests.rs".into(),
+            production_lines: 96,
+            length_score: 0.0,
+            independent_clusters: 4,
+            cluster_names: vec![
+                vec!["test_a".into()],
+                vec!["test_b".into()],
+                vec!["test_c".into()],
+                vec!["test_d".into()],
+            ],
+            suppressed: false,
+        }],
+        param_warnings: vec![],
+    });
+    let entry = FindingEntry {
+        file: "tests/pq_tests.rs".into(),
+        line: 1,
+        category: "SRP_MODULE",
+        detail: "96 lines".into(),
+        function_name: "pq_tests".into(),
+    };
+    let config = crate::config::Config::default();
+    let index = build_enrich_index(&analysis);
+    let detail = enrich_detail(&entry, &index, &config);
+    assert!(
+        detail.contains("4 independent clusters"),
+        "cluster-driven module should report clusters, got: {detail}"
+    );
+    assert!(
+        detail.contains(&format!("max {}", config.srp.max_independent_clusters)),
+        "cluster detail should include max_independent_clusters, got: {detail}"
+    );
+}
+
+#[test]
+fn ai_srp_module_combined_when_both_drivers_active() {
+    // Both length_score > 0 AND cluster count exceeds → both drivers
+    // must be in the detail so the AI agent sees the full picture.
+    use crate::adapters::analyzers::srp::{ModuleSrpWarning, SrpAnalysis};
+    use crate::report::findings_list::FindingEntry;
+    let mut analysis = empty_analysis();
+    analysis.srp = Some(SrpAnalysis {
+        struct_warnings: vec![],
+        module_warnings: vec![ModuleSrpWarning {
+            module: "src/big.rs".into(),
+            file: "src/big.rs".into(),
+            production_lines: 850,
+            length_score: 1.0,
+            independent_clusters: 4,
+            cluster_names: vec![vec!["a".into()], vec!["b".into()]],
+            suppressed: false,
+        }],
+        param_warnings: vec![],
+    });
+    let entry = FindingEntry {
+        file: "src/big.rs".into(),
+        line: 1,
+        category: "SRP_MODULE",
+        detail: "850 lines".into(),
+        function_name: "big".into(),
+    };
+    let config = crate::config::Config::default();
+    let index = build_enrich_index(&analysis);
+    let detail = enrich_detail(&entry, &index, &config);
+    assert!(
+        detail.contains("850 lines"),
+        "combined detail should retain line count, got: {detail}"
+    );
+    assert!(
+        detail.contains("4 independent clusters"),
+        "combined detail should include cluster count, got: {detail}"
+    );
+}
+
+#[test]
+fn ai_sdp_includes_instabilities() {
+    // SDP violations already carry from/to instability values —
+    // surface them in AI so the agent can see the concrete gap.
+    use crate::adapters::analyzers::coupling::sdp::SdpViolation;
+    use crate::adapters::analyzers::coupling::{CouplingAnalysis, ModuleGraph};
+    use crate::report::findings_list::FindingEntry;
+    let mut analysis = empty_analysis();
+    analysis.coupling = Some(CouplingAnalysis {
+        metrics: vec![],
+        cycles: vec![],
+        sdp_violations: vec![SdpViolation {
+            from_module: "a".into(),
+            to_module: "b".into(),
+            from_instability: 0.1,
+            to_instability: 0.9,
+            suppressed: false,
+        }],
+        graph: ModuleGraph::default(),
+    });
+    let entry = FindingEntry {
+        file: "".into(),
+        line: 0,
+        category: "SDP",
+        detail: "a -> b".into(),
+        function_name: "a".into(),
+    };
+    let config = crate::config::Config::default();
+    let index = build_enrich_index(&analysis);
+    let detail = enrich_detail(&entry, &index, &config);
+    assert!(
+        detail.contains("0.1") && detail.contains("0.9"),
+        "SDP detail should name both instabilities, got: {detail}"
+    );
+}
+
+#[test]
+fn ai_boilerplate_includes_suggestion() {
+    // BoilerplateFind already carries description + suggestion — the
+    // AI agent needs both to act without a JSON round-trip.
+    use crate::adapters::analyzers::dry::boilerplate::BoilerplateFind;
+    use crate::report::findings_list::FindingEntry;
+    let mut analysis = empty_analysis();
+    analysis.boilerplate = vec![BoilerplateFind {
+        pattern_id: "BP-005".into(),
+        file: "src/foo.rs".into(),
+        line: 42,
+        struct_name: Some("Foo".into()),
+        description: "manual Default impl".into(),
+        suggestion: "use #[derive(Default)]".into(),
+        suppressed: false,
+    }];
+    let entry = FindingEntry {
+        file: "src/foo.rs".into(),
+        line: 42,
+        category: "BOILERPLATE",
+        detail: "BP-005".into(),
+        function_name: "Foo".into(),
+    };
+    let config = crate::config::Config::default();
+    let index = build_enrich_index(&analysis);
+    let detail = enrich_detail(&entry, &index, &config);
+    assert!(
+        detail.contains("#[derive(Default)]"),
+        "boilerplate detail should include the suggestion, got: {detail}"
+    );
+}
+
+#[test]
+fn ai_dead_code_includes_suggestion() {
+    // DeadCodeWarning.suggestion carries the actionable hint (delete /
+    // move / annotate). Surface it in AI so a one-shot read is enough.
+    use crate::adapters::analyzers::dry::dead_code::{DeadCodeKind, DeadCodeWarning};
+    use crate::report::findings_list::FindingEntry;
+    let mut analysis = empty_analysis();
+    analysis.dead_code = vec![DeadCodeWarning {
+        function_name: "helper".into(),
+        qualified_name: "helper".into(),
+        file: "src/a.rs".into(),
+        line: 10,
+        kind: DeadCodeKind::TestOnly,
+        suggestion: "only called from test code; move or annotate".into(),
+    }];
+    let entry = FindingEntry {
+        file: "src/a.rs".into(),
+        line: 10,
+        category: "DEAD_CODE",
+        detail: "testonly".into(),
+        function_name: "helper".into(),
+    };
+    let config = crate::config::Config::default();
+    let index = build_enrich_index(&analysis);
+    let detail = enrich_detail(&entry, &index, &config);
+    assert!(
+        detail.contains("move or annotate"),
+        "dead_code detail should include suggestion, got: {detail}"
+    );
+}
+
+#[test]
+fn ai_orphan_suppression_detail_includes_reason() {
+    // Orphan suppression with a reason: AI detail must carry the
+    // original rationale so the agent can judge whether the marker
+    // was stale or misplaced.
+    use crate::adapters::report::OrphanSuppressionWarning;
+    use crate::report::findings_list::FindingEntry;
+    let mut analysis = empty_analysis();
+    analysis.orphan_suppressions = vec![OrphanSuppressionWarning {
+        file: "src/foo.rs".into(),
+        line: 12,
+        dimensions: vec![crate::findings::Dimension::Srp],
+        reason: Some("legacy helper, keep for one release".into()),
+    }];
+    let entry = FindingEntry {
+        file: "src/foo.rs".into(),
+        line: 12,
+        category: "ORPHAN_SUPPRESSION",
+        detail: "stale qual:allow(srp)".into(),
+        function_name: String::new(),
+    };
+    let config = crate::config::Config::default();
+    let index = build_enrich_index(&analysis);
+    let detail = enrich_detail(&entry, &index, &config);
+    assert!(
+        detail.contains("legacy helper"),
+        "orphan detail should carry the original reason, got: {detail}"
+    );
+}
+
+#[test]
+fn ai_orphan_without_reason_has_no_em_dash() {
+    use crate::adapters::report::OrphanSuppressionWarning;
+    use crate::report::findings_list::FindingEntry;
+    let mut analysis = empty_analysis();
+    analysis.orphan_suppressions = vec![OrphanSuppressionWarning {
+        file: "src/foo.rs".into(),
+        line: 12,
+        dimensions: vec![crate::findings::Dimension::Srp],
+        reason: None,
+    }];
+    let entry = FindingEntry {
+        file: "src/foo.rs".into(),
+        line: 12,
+        category: "ORPHAN_SUPPRESSION",
+        detail: "stale qual:allow(srp)".into(),
+        function_name: String::new(),
+    };
+    let config = crate::config::Config::default();
+    let index = build_enrich_index(&analysis);
+    let detail = enrich_detail(&entry, &index, &config);
+    assert_eq!(
+        detail, "stale qual:allow(srp)",
+        "no reason → detail stays bare, got: {detail}"
+    );
+}
+
+#[test]
+fn ai_build_ai_value_surfaces_orphan_suppressions() {
+    // End-to-end: an AnalysisResult with only an orphan (no other
+    // findings) must produce a one-call AI output that contains the
+    // orphan's file / line / category.
+    use crate::adapters::report::OrphanSuppressionWarning;
+    let mut analysis = empty_analysis();
+    analysis.orphan_suppressions = vec![OrphanSuppressionWarning {
+        file: "src/foo.rs".into(),
+        line: 42,
+        dimensions: vec![crate::findings::Dimension::Srp],
+        reason: None,
+    }];
+    let config = crate::config::Config::default();
+    let value = build_ai_value(&analysis, &config);
+    assert_eq!(value["findings"], 1);
+    let by_file = value
+        .get("findings_by_file")
+        .expect("findings_by_file present");
+    let arr = by_file["src/foo.rs"].as_array().expect("file group");
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["category"], "orphan_suppression");
+    assert_eq!(arr[0]["line"], 42);
+    assert!(
+        arr[0]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("stale qual:allow"),
+        "detail should describe the stale marker, got: {}",
+        arr[0]["detail"]
+    );
+}
+
+#[test]
+fn ai_structural_replaces_raw_code_with_detail() {
+    // Structural findings ship with both a short code (e.g. "SLM") and
+    // a rich detail message ("method does not use self"). AI detail
+    // must include the rich message, not just the code.
+    use crate::adapters::analyzers::structural::{
+        StructuralAnalysis, StructuralWarning, StructuralWarningKind,
+    };
+    use crate::report::findings_list::FindingEntry;
+    let mut analysis = empty_analysis();
+    analysis.structural = Some(StructuralAnalysis {
+        warnings: vec![StructuralWarning {
+            file: "src/x.rs".into(),
+            line: 5,
+            name: "Foo::bar".into(),
+            kind: StructuralWarningKind::SelflessMethod,
+            dimension: crate::findings::Dimension::Srp,
+            suppressed: false,
+        }],
+    });
+    let entry = FindingEntry {
+        file: "src/x.rs".into(),
+        line: 5,
+        category: "STRUCTURAL",
+        detail: "SLM".into(),
+        function_name: "Foo::bar".into(),
+    };
+    let config = crate::config::Config::default();
+    let index = build_enrich_index(&analysis);
+    let detail = enrich_detail(&entry, &index, &config);
+    // The kind's .detail() should appear in the enriched string so the
+    // AI sees the human-readable message, not just the rule code.
+    assert!(
+        detail.contains("self never referenced"),
+        "structural detail should carry rich message, got: {detail}"
     );
 }
 

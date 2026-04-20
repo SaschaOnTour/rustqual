@@ -344,3 +344,461 @@ fn test_unsafe_without_allow_still_warned() {
     );
     assert_eq!(summary.unsafe_warnings, 1);
 }
+
+// ── detect_orphan_suppressions ─────────────────────────────────
+
+fn empty_analysis() -> crate::report::AnalysisResult {
+    crate::report::AnalysisResult {
+        results: vec![],
+        summary: Summary::default(),
+        coupling: None,
+        duplicates: vec![],
+        dead_code: vec![],
+        fragments: vec![],
+        boilerplate: vec![],
+        wildcard_warnings: vec![],
+        repeated_matches: vec![],
+        srp: None,
+        tq: None,
+        structural: None,
+        architecture_findings: vec![],
+        orphan_suppressions: vec![],
+    }
+}
+
+#[test]
+fn orphan_suppression_without_matching_finding_is_counted() {
+    // Suppression marker at line 5 with no finding in the window:
+    // this is an orphan and must be counted.
+    use crate::findings::Suppression;
+    let mut sups = HashMap::new();
+    sups.insert(
+        "src/foo.rs".to_string(),
+        vec![Suppression {
+            line: 5,
+            dimensions: vec![crate::findings::Dimension::Srp],
+            reason: None,
+        }],
+    );
+    let analysis = empty_analysis();
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default()).len();
+    assert_eq!(orphans, 1, "unmatched marker should count as orphan");
+}
+
+#[test]
+fn suppression_covering_finding_in_window_is_not_orphan() {
+    // SRP struct finding at line 8; suppression marker at line 5 with
+    // ANNOTATION_WINDOW=3 reaches line 8. Must NOT be orphan.
+    use crate::adapters::analyzers::srp::{SrpAnalysis, SrpWarning};
+    use crate::findings::Suppression;
+    let mut sups = HashMap::new();
+    sups.insert(
+        "src/foo.rs".to_string(),
+        vec![Suppression {
+            line: 5,
+            dimensions: vec![crate::findings::Dimension::Srp],
+            reason: None,
+        }],
+    );
+    let mut analysis = empty_analysis();
+    analysis.srp = Some(SrpAnalysis {
+        struct_warnings: vec![SrpWarning {
+            struct_name: "Foo".into(),
+            file: "src/foo.rs".into(),
+            line: 8,
+            lcom4: 3,
+            field_count: 5,
+            method_count: 5,
+            fan_out: 2,
+            composite_score: 0.9,
+            clusters: vec![],
+            suppressed: false,
+        }],
+        module_warnings: vec![],
+        param_warnings: vec![],
+    });
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default()).len();
+    assert_eq!(orphans, 0, "in-window finding matches the marker");
+}
+
+#[test]
+fn suppression_with_wrong_dimension_is_orphan() {
+    // Finding is SRP, but marker suppresses only DRY → no dimension
+    // match → orphan.
+    use crate::adapters::analyzers::srp::{SrpAnalysis, SrpWarning};
+    use crate::findings::Suppression;
+    let mut sups = HashMap::new();
+    sups.insert(
+        "src/foo.rs".to_string(),
+        vec![Suppression {
+            line: 5,
+            dimensions: vec![crate::findings::Dimension::Dry],
+            reason: None,
+        }],
+    );
+    let mut analysis = empty_analysis();
+    analysis.srp = Some(SrpAnalysis {
+        struct_warnings: vec![SrpWarning {
+            struct_name: "Foo".into(),
+            file: "src/foo.rs".into(),
+            line: 7,
+            lcom4: 3,
+            field_count: 5,
+            method_count: 5,
+            fan_out: 2,
+            composite_score: 0.9,
+            clusters: vec![],
+            suppressed: false,
+        }],
+        module_warnings: vec![],
+        param_warnings: vec![],
+    });
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default()).len();
+    assert_eq!(orphans, 1, "dimension mismatch should still flag as orphan");
+}
+
+#[test]
+fn bare_qual_allow_is_wildcard_and_matches_any_dim() {
+    // Suppression has empty dimensions (bare `// qual:allow`) → matches
+    // any dimension. A finding in window must clear the orphan.
+    use crate::adapters::analyzers::srp::{SrpAnalysis, SrpWarning};
+    use crate::findings::Suppression;
+    let mut sups = HashMap::new();
+    sups.insert(
+        "src/foo.rs".to_string(),
+        vec![Suppression {
+            line: 5,
+            dimensions: vec![],
+            reason: None,
+        }],
+    );
+    let mut analysis = empty_analysis();
+    analysis.srp = Some(SrpAnalysis {
+        struct_warnings: vec![SrpWarning {
+            struct_name: "Foo".into(),
+            file: "src/foo.rs".into(),
+            line: 6,
+            lcom4: 3,
+            field_count: 5,
+            method_count: 5,
+            fan_out: 2,
+            composite_score: 0.9,
+            clusters: vec![],
+            suppressed: false,
+        }],
+        module_warnings: vec![],
+        param_warnings: vec![],
+    });
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default()).len();
+    assert_eq!(orphans, 0, "bare qual:allow is wildcard");
+}
+
+// ── Regression tests: no false-positive orphans when the marker ──
+// ── clears warning flags via suppression.                       ──
+//
+// These tests reproduce the Bug 3 iteration where my first orphan
+// checker read `fa.cognitive_warning` and friends — flags that
+// `apply_file_suppressions` clears when `// qual:allow(complexity)`
+// matches. The checker then saw no position and flagged the marker
+// as orphan, even though it was actively doing its job. The fixed
+// checker reads raw `complexity` metrics against config thresholds,
+// independent of the suppression flags.
+
+fn make_fa_with_complexity(
+    file: &str,
+    line: usize,
+    metrics: crate::adapters::analyzers::iosp::ComplexityMetrics,
+) -> FunctionAnalysis {
+    FunctionAnalysis {
+        name: "f".into(),
+        qualified_name: "f".into(),
+        file: file.into(),
+        line,
+        classification: Classification::Operation,
+        parent_type: None,
+        suppressed: false,
+        complexity: Some(metrics),
+        severity: None,
+        cognitive_warning: false,
+        cyclomatic_warning: false,
+        nesting_depth_warning: false,
+        function_length_warning: false,
+        unsafe_warning: false,
+        error_handling_warning: false,
+        complexity_suppressed: true,
+        own_calls: vec![],
+        parameter_count: 0,
+        is_trait_impl: false,
+        is_test: false,
+        effort_score: None,
+    }
+}
+
+#[test]
+fn suppressed_cognitive_over_threshold_is_not_orphan() {
+    // `qual:allow(complexity)` cleared cognitive_warning but the raw
+    // metric still exceeds max_cognitive — marker is not orphan.
+    use crate::adapters::analyzers::iosp::ComplexityMetrics;
+    use crate::findings::Suppression;
+    let mut sups = HashMap::new();
+    sups.insert(
+        "src/x.rs".to_string(),
+        vec![Suppression {
+            line: 5,
+            dimensions: vec![crate::findings::Dimension::Complexity],
+            reason: None,
+        }],
+    );
+    let mut analysis = empty_analysis();
+    analysis.results = vec![make_fa_with_complexity(
+        "src/x.rs",
+        6,
+        ComplexityMetrics {
+            cognitive_complexity: 99,
+            ..Default::default()
+        },
+    )];
+    let orphans =
+        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    assert!(
+        orphans.is_empty(),
+        "complexity marker clearing cognitive flag must not be orphan, got: {orphans:?}"
+    );
+}
+
+#[test]
+fn suppressed_cyclomatic_over_threshold_is_not_orphan() {
+    use crate::adapters::analyzers::iosp::ComplexityMetrics;
+    use crate::findings::Suppression;
+    let mut sups = HashMap::new();
+    sups.insert(
+        "src/x.rs".to_string(),
+        vec![Suppression {
+            line: 5,
+            dimensions: vec![crate::findings::Dimension::Complexity],
+            reason: None,
+        }],
+    );
+    let mut analysis = empty_analysis();
+    analysis.results = vec![make_fa_with_complexity(
+        "src/x.rs",
+        6,
+        ComplexityMetrics {
+            cyclomatic_complexity: 99,
+            ..Default::default()
+        },
+    )];
+    let orphans =
+        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    assert!(orphans.is_empty(), "got: {orphans:?}");
+}
+
+#[test]
+fn suppressed_function_length_over_threshold_is_not_orphan() {
+    use crate::adapters::analyzers::iosp::ComplexityMetrics;
+    use crate::findings::Suppression;
+    let mut sups = HashMap::new();
+    sups.insert(
+        "src/x.rs".to_string(),
+        vec![Suppression {
+            line: 5,
+            dimensions: vec![crate::findings::Dimension::Complexity],
+            reason: None,
+        }],
+    );
+    let mut analysis = empty_analysis();
+    analysis.results = vec![make_fa_with_complexity(
+        "src/x.rs",
+        6,
+        ComplexityMetrics {
+            function_lines: 200,
+            ..Default::default()
+        },
+    )];
+    let orphans =
+        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    assert!(orphans.is_empty(), "got: {orphans:?}");
+}
+
+#[test]
+fn suppressed_nesting_over_threshold_is_not_orphan() {
+    use crate::adapters::analyzers::iosp::ComplexityMetrics;
+    use crate::findings::Suppression;
+    let mut sups = HashMap::new();
+    sups.insert(
+        "src/x.rs".to_string(),
+        vec![Suppression {
+            line: 5,
+            dimensions: vec![crate::findings::Dimension::Complexity],
+            reason: None,
+        }],
+    );
+    let mut analysis = empty_analysis();
+    analysis.results = vec![make_fa_with_complexity(
+        "src/x.rs",
+        6,
+        ComplexityMetrics {
+            max_nesting: 10,
+            ..Default::default()
+        },
+    )];
+    let orphans =
+        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    assert!(orphans.is_empty(), "got: {orphans:?}");
+}
+
+#[test]
+fn suppressed_unsafe_block_is_not_orphan() {
+    use crate::adapters::analyzers::iosp::ComplexityMetrics;
+    use crate::findings::Suppression;
+    let mut sups = HashMap::new();
+    sups.insert(
+        "src/x.rs".to_string(),
+        vec![Suppression {
+            line: 5,
+            dimensions: vec![crate::findings::Dimension::Complexity],
+            reason: None,
+        }],
+    );
+    let mut analysis = empty_analysis();
+    analysis.results = vec![make_fa_with_complexity(
+        "src/x.rs",
+        6,
+        ComplexityMetrics {
+            unsafe_blocks: 1,
+            ..Default::default()
+        },
+    )];
+    let orphans =
+        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    assert!(orphans.is_empty(), "got: {orphans:?}");
+}
+
+#[test]
+fn suppressed_error_handling_unwrap_is_not_orphan() {
+    use crate::adapters::analyzers::iosp::ComplexityMetrics;
+    use crate::findings::Suppression;
+    let mut sups = HashMap::new();
+    sups.insert(
+        "src/x.rs".to_string(),
+        vec![Suppression {
+            line: 5,
+            dimensions: vec![crate::findings::Dimension::Complexity],
+            reason: None,
+        }],
+    );
+    let mut analysis = empty_analysis();
+    analysis.results = vec![make_fa_with_complexity(
+        "src/x.rs",
+        6,
+        ComplexityMetrics {
+            unwrap_count: 3,
+            ..Default::default()
+        },
+    )];
+    let orphans =
+        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    assert!(orphans.is_empty(), "got: {orphans:?}");
+}
+
+#[test]
+fn suppressed_magic_number_is_not_orphan() {
+    use crate::adapters::analyzers::iosp::{ComplexityMetrics, MagicNumberOccurrence};
+    use crate::findings::Suppression;
+    let mut sups = HashMap::new();
+    sups.insert(
+        "src/x.rs".to_string(),
+        vec![Suppression {
+            line: 10,
+            dimensions: vec![crate::findings::Dimension::Complexity],
+            reason: None,
+        }],
+    );
+    let mut analysis = empty_analysis();
+    analysis.results = vec![make_fa_with_complexity(
+        "src/x.rs",
+        6,
+        ComplexityMetrics {
+            magic_numbers: vec![MagicNumberOccurrence {
+                line: 12,
+                value: "42".into(),
+            }],
+            ..Default::default()
+        },
+    )];
+    let orphans =
+        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    assert!(orphans.is_empty(), "got: {orphans:?}");
+}
+
+#[test]
+fn suppressed_srp_param_over_threshold_is_not_orphan() {
+    // A `// qual:allow(srp)` marker on a function with >5 parameters:
+    // `apply_parameter_warnings` now records the warning with
+    // suppressed=true (it used to filter them out), so the orphan
+    // checker finds a matching SRP position.
+    use crate::adapters::analyzers::srp::{ParamSrpWarning, SrpAnalysis};
+    use crate::findings::Suppression;
+    let mut sups = HashMap::new();
+    sups.insert(
+        "src/x.rs".to_string(),
+        vec![Suppression {
+            line: 5,
+            dimensions: vec![crate::findings::Dimension::Srp],
+            reason: None,
+        }],
+    );
+    let mut analysis = empty_analysis();
+    analysis.srp = Some(SrpAnalysis {
+        struct_warnings: vec![],
+        module_warnings: vec![],
+        param_warnings: vec![ParamSrpWarning {
+            function_name: "big_factory".into(),
+            file: "src/x.rs".into(),
+            line: 6,
+            parameter_count: 7,
+            suppressed: true,
+        }],
+    });
+    let orphans =
+        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    assert!(
+        orphans.is_empty(),
+        "SRP param marker must match even on suppressed warnings, got: {orphans:?}"
+    );
+}
+
+#[test]
+fn complexity_marker_without_any_overshoot_is_orphan() {
+    // Sanity: if a marker truly has no target — all complexity metrics
+    // are within limits — it IS orphan.
+    use crate::adapters::analyzers::iosp::ComplexityMetrics;
+    use crate::findings::Suppression;
+    let mut sups = HashMap::new();
+    sups.insert(
+        "src/x.rs".to_string(),
+        vec![Suppression {
+            line: 5,
+            dimensions: vec![crate::findings::Dimension::Complexity],
+            reason: None,
+        }],
+    );
+    let mut analysis = empty_analysis();
+    analysis.results = vec![make_fa_with_complexity(
+        "src/x.rs",
+        6,
+        ComplexityMetrics {
+            cognitive_complexity: 1,
+            cyclomatic_complexity: 1,
+            function_lines: 5,
+            ..Default::default()
+        },
+    )];
+    let orphans =
+        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    assert_eq!(
+        orphans.len(),
+        1,
+        "marker with no over-threshold target must be orphan"
+    );
+}

@@ -103,7 +103,6 @@ fn check_trait(
     out
 }
 
-// qual:allow(dry) reason: "parallel to forbidden_rule's collect — each rule family owns its own mapping"
 /// Run every trait-contract rule on the workspace and project into Findings.
 /// Integration: delegates refs-build, check call, and per-hit mapping.
 pub fn collect_findings<F>(

@@ -26,6 +26,18 @@ pub(crate) struct JsonOutput {
     pub(crate) structural_warnings: Vec<JsonStructuralWarning>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) repeated_matches: Vec<JsonRepeatedMatchGroup>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) orphan_suppressions: Vec<JsonOrphanSuppression>,
+}
+
+/// `// qual:allow(...)` marker that matched no finding in its window.
+#[derive(serde::Serialize)]
+pub(crate) struct JsonOrphanSuppression {
+    pub(crate) file: String,
+    pub(crate) line: usize,
+    pub(crate) dimensions: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) reason: Option<String>,
 }
 
 #[derive(serde::Serialize)]

@@ -49,6 +49,7 @@ impl<'ast> Visit<'ast> for DeclaredFnCollector {
             is_trait_impl: false,
             has_allow_dead_code: has_allow_dead_code(&node.attrs),
             is_api: false,
+            is_test_helper: false,
             name,
             file: self.file.clone(),
             line,
@@ -89,6 +90,7 @@ impl<'ast> Visit<'ast> for DeclaredFnCollector {
             is_trait_impl: self.is_trait_impl,
             has_allow_dead_code: has_allow_dead_code(&node.attrs),
             is_api: false,
+            is_test_helper: false,
             name,
             file: self.file.clone(),
             line,
@@ -106,6 +108,7 @@ impl<'ast> Visit<'ast> for DeclaredFnCollector {
                 is_trait_impl: true,
                 has_allow_dead_code: false,
                 is_api: false,
+            is_test_helper: false,
                 name,
                 file: self.file.clone(),
                 line,
@@ -154,11 +157,13 @@ pub fn detect_dead_code(
     parsed: &[(String, String, syn::File)],
     config: &crate::config::Config,
     api_lines: &std::collections::HashMap<String, std::collections::HashSet<usize>>,
+    test_helper_lines: &std::collections::HashMap<String, std::collections::HashSet<usize>>,
     cfg_test_files: &std::collections::HashSet<String>,
 ) -> Vec<DeadCodeWarning> {
     let declared = super::collect_declared_functions(parsed);
     let mut declared = mark_cfg_test_declarations(declared, cfg_test_files);
     mark_api_declarations(&mut declared, api_lines);
+    mark_test_helper_declarations(&mut declared, test_helper_lines);
     let (prod_calls, test_calls) = collect_all_calls(parsed, cfg_test_files);
     let uncalled = find_uncalled(&declared, &prod_calls, &test_calls, config);
     let test_only = find_test_only(&declared, &prod_calls, &test_calls, config);
@@ -175,6 +180,22 @@ pub(crate) fn mark_api_declarations(
         if let Some(lines) = api_lines.get(&d.file) {
             if crate::findings::has_annotation_in_window(lines, d.line) {
                 d.is_api = true;
+            }
+        }
+    });
+}
+
+/// Mark functions that have a `// qual:test_helper` annotation within
+/// the annotation window.
+/// Operation: iterates declarations checking line proximity to markers.
+pub(crate) fn mark_test_helper_declarations(
+    declared: &mut [super::DeclaredFunction],
+    test_helper_lines: &std::collections::HashMap<String, std::collections::HashSet<usize>>,
+) {
+    declared.iter_mut().for_each(|d| {
+        if let Some(lines) = test_helper_lines.get(&d.file) {
+            if crate::findings::has_annotation_in_window(lines, d.line) {
+                d.is_test_helper = true;
             }
         }
     });
@@ -262,7 +283,9 @@ fn find_test_only(
             file: d.file.clone(),
             line: d.line,
             kind: DeadCodeKind::TestOnly,
-            suggestion: "only called from test code; consider moving to test module".to_string(),
+            suggestion: "only called from test code; move to tests/ or annotate with \
+                         // qual:api (public API) or // qual:test_helper (test-only helper)"
+                .to_string(),
         })
         .collect()
 }
@@ -277,5 +300,6 @@ fn should_exclude(d: &DeclaredFunction, config: &crate::config::Config) -> bool 
         || d.is_trait_impl
         || d.has_allow_dead_code
         || d.is_api
+        || d.is_test_helper
         || is_ignored(&d.name)
 }

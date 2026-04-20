@@ -3,9 +3,9 @@ use syn::spanned::Spanned;
 use super::{self_type_of, single_return_expr, trait_name_of, BoilerplateFind};
 use crate::config::sections::BoilerplateConfig;
 
+// qual:allow(complexity) reason: "AST pattern matching with nested closures"
 /// Detect trivial `impl From<T> for U` that just wraps a value.
 /// Operation: AST pattern matching logic; helper calls in closures.
-// qual:allow(complexity) reason: "AST pattern matching with nested closures"
 pub(super) fn check_trivial_from(
     parsed: &[(String, String, syn::File)],
     config: &BoilerplateConfig,

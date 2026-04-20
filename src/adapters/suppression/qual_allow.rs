@@ -29,6 +29,17 @@ pub fn is_api_marker(trimmed: &str) -> bool {
     trimmed == "// qual:api" || trimmed.starts_with("// qual:api ")
 }
 
+/// Check if a trimmed line is a `// qual:test_helper` marker.
+/// The annotation narrowly suppresses DRY-004 (testonly) and TQ-003
+/// (untested) on a function that is only called from test code —
+/// without silencing complexity, SRP, coupling, or DRY duplicate
+/// checks the way `ignore_functions` would. It does not count against
+/// `max_suppression_ratio`.
+/// Operation: string prefix check.
+pub fn is_test_helper_marker(trimmed: &str) -> bool {
+    trimmed == "// qual:test_helper" || trimmed.starts_with("// qual:test_helper ")
+}
+
 /// Check if a trimmed line is a `// qual:allow(unsafe)` marker.
 /// Operation: string check.
 pub fn is_unsafe_allow_marker(trimmed: &str) -> bool {
@@ -54,8 +65,9 @@ pub fn parse_inverse_marker(trimmed: &str) -> Option<String> {
 /// Parse a suppression comment line into a Suppression struct.
 /// Trivial: delegates to sub-parsers via closure chains.
 pub fn parse_suppression(line_number: usize, trimmed: &str) -> Option<Suppression> {
-    // qual:allow(unsafe) is a separate annotation, not a suppression
-    if is_unsafe_allow_marker(trimmed) {
+    // qual:allow(unsafe) and qual:test_helper are separate annotations,
+    // not suppressions — they must not count against max_suppression_ratio.
+    if is_unsafe_allow_marker(trimmed) || is_test_helper_marker(trimmed) {
         return None;
     }
     trimmed

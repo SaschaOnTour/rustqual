@@ -48,6 +48,7 @@ fn make_analysis(results: Vec<FunctionAnalysis>) -> AnalysisResult {
         tq: None,
         structural: None,
         architecture_findings: vec![],
+        orphan_suppressions: vec![],
     }
 }
 
@@ -269,4 +270,38 @@ fn test_json_complexity_has_extended_fields() {
     assert_eq!(c["expect_count"].as_u64().unwrap(), 1);
     assert_eq!(c["panic_count"].as_u64().unwrap(), 0);
     assert_eq!(c["todo_count"].as_u64().unwrap(), 0);
+}
+
+#[test]
+fn test_json_serializes_orphan_suppressions() {
+    use crate::adapters::report::OrphanSuppressionWarning;
+    let mut analysis = make_analysis(vec![]);
+    analysis.orphan_suppressions = vec![OrphanSuppressionWarning {
+        file: "src/foo.rs".into(),
+        line: 42,
+        dimensions: vec![crate::findings::Dimension::Srp],
+        reason: Some("legacy".into()),
+    }];
+    let json = build_json_string(&analysis);
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let arr = parsed["orphan_suppressions"].as_array().unwrap();
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["file"], "src/foo.rs");
+    assert_eq!(arr[0]["line"], 42);
+    assert_eq!(arr[0]["dimensions"][0], "srp");
+    assert_eq!(arr[0]["reason"], "legacy");
+}
+
+#[test]
+fn test_json_omits_empty_orphan_suppressions() {
+    // When the list is empty (clean codebase), the field is elided
+    // to keep JSON compact — matches the policy for other optional
+    // arrays (duplicates, dead_code, etc.).
+    let analysis = make_analysis(vec![]);
+    let json = build_json_string(&analysis);
+    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert!(
+        parsed.get("orphan_suppressions").is_none(),
+        "empty orphan list should be elided from JSON"
+    );
 }
