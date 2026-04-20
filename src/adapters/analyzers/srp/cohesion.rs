@@ -67,6 +67,9 @@ pub(crate) fn build_field_method_index<'a>(
         .iter()
         .map(|m| (m.method_name.as_str(), &m.field_accesses))
         .collect();
+    // O(1) membership check; previously an O(N) linear scan inside
+    // nested loops over methods × field accesses.
+    let struct_field_set: HashSet<&str> = struct_fields.iter().map(String::as_str).collect();
 
     let mut field_to_methods: HashMap<&str, Vec<usize>> = HashMap::new();
     methods.iter().enumerate().for_each(|(i, m)| {
@@ -75,7 +78,7 @@ pub(crate) fn build_field_method_index<'a>(
         } else {
             m.field_accesses
                 .iter()
-                .filter(|f| struct_fields.iter().any(|sf| sf == *f))
+                .filter(|f| struct_field_set.contains(f.as_str()))
                 .map(|f| f.as_str())
                 .collect()
         };
@@ -84,7 +87,7 @@ pub(crate) fn build_field_method_index<'a>(
             if let Some(callee_fields) = direct_fields.get(callee.as_str()) {
                 callee_fields
                     .iter()
-                    .filter(|f| struct_fields.iter().any(|sf| sf == *f))
+                    .filter(|f| struct_field_set.contains(f.as_str()))
                     .for_each(|f| fields_to_add.push(f.as_str()));
             }
         });
@@ -116,6 +119,8 @@ pub(crate) fn compute_lcom4(
     field_to_methods.values().for_each(|indices| {
         indices.windows(2).for_each(|w| unite(&mut uf, w[0], w[1]));
     });
+    // O(1) membership check for the per-cluster field projection below.
+    let struct_field_set: HashSet<&str> = struct_fields.iter().map(String::as_str).collect();
     // Build clusters from connected components
     let component_members = components(&mut uf);
     let clusters: Vec<ResponsibilityCluster> = component_members
@@ -131,7 +136,7 @@ pub(crate) fn compute_lcom4(
                     methods[i]
                         .field_accesses
                         .iter()
-                        .filter(|f| struct_fields.iter().any(|sf| sf == *f))
+                        .filter(|f| struct_field_set.contains(f.as_str()))
                         .cloned()
                 })
                 .collect();
