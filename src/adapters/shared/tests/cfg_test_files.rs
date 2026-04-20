@@ -107,3 +107,102 @@ fn collect_cfg_test_file_paths_basic() {
         "Should detect src/helpers.rs as cfg-test file"
     );
 }
+
+// ── Companion-file detection ─────────────────────────────────────
+
+#[test]
+fn inner_cfg_test_file_attribute_marks_file_as_cfg_test() {
+    // `#![cfg(test)]` as an inner attribute at the top of a file is
+    // the Rust-level "this whole file is test-only" signal. rustqual
+    // must recognize it on its own — without requiring a parent
+    // `#[cfg(test)] mod foo;` elsewhere.
+    let code = r#"
+        #![cfg(test)]
+        pub fn helper() -> u32 { 42 }
+    "#;
+    let parsed = vec![(
+        "src/foo_tests.rs".to_string(),
+        code.to_string(),
+        syn::parse_file(code).unwrap(),
+    )];
+    let result = collect_cfg_test_file_paths(&parsed);
+    assert!(
+        result.contains("src/foo_tests.rs"),
+        "inner `#![cfg(test)]` must tag the file as cfg-test: {result:?}"
+    );
+}
+
+#[test]
+fn path_attribute_on_cfg_test_mod_redirects_to_target_file() {
+    // Companion-file pattern common in test-co-location:
+    //
+    //   // src/foo.rs (production):
+    //   #[cfg(test)]
+    //   #[path = "foo_tests.rs"]
+    //   mod tests;
+    //
+    // The convention-based resolver would look for src/foo/tests.rs
+    // or src/foo/tests/mod.rs — neither exists. The `#[path]` points
+    // to the sibling file and must be honored.
+    let parent_code = r#"
+        #[cfg(test)]
+        #[path = "foo_tests.rs"]
+        mod tests;
+    "#;
+    let companion_code = r#"
+        pub fn helper() -> u32 { 42 }
+    "#;
+    let parsed = vec![
+        (
+            "src/foo.rs".to_string(),
+            parent_code.to_string(),
+            syn::parse_file(parent_code).unwrap(),
+        ),
+        (
+            "src/foo_tests.rs".to_string(),
+            companion_code.to_string(),
+            syn::parse_file(companion_code).unwrap(),
+        ),
+    ];
+    let result = collect_cfg_test_file_paths(&parsed);
+    assert!(
+        result.contains("src/foo_tests.rs"),
+        "`#[path]` on a cfg-test mod must redirect to the target file: {result:?}"
+    );
+}
+
+#[test]
+fn path_attribute_resolves_relative_to_parent_dir() {
+    // `#[path]` is relative to the *directory containing the parent
+    // file* — mimic the Rust compiler semantics.
+    //
+    //   src/ingest/code/rust.rs:
+    //     #[cfg(test)] #[path = "rust_tests.rs"] mod tests;
+    //
+    //   src/ingest/code/rust_tests.rs  ← target
+    let parent_code = r#"
+        #[cfg(test)]
+        #[path = "rust_tests.rs"]
+        mod tests;
+    "#;
+    let companion_code = r#"
+        pub fn helper() -> u32 { 42 }
+    "#;
+    let parsed = vec![
+        (
+            "src/ingest/code/rust.rs".to_string(),
+            parent_code.to_string(),
+            syn::parse_file(parent_code).unwrap(),
+        ),
+        (
+            "src/ingest/code/rust_tests.rs".to_string(),
+            companion_code.to_string(),
+            syn::parse_file(companion_code).unwrap(),
+        ),
+    ];
+    let result = collect_cfg_test_file_paths(&parsed);
+    assert!(
+        result.contains("src/ingest/code/rust_tests.rs"),
+        "relative `#[path]` must resolve against the parent file's directory: {result:?}"
+    );
+}

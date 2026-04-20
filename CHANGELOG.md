@@ -53,6 +53,19 @@ coverage.lcov` reports 1913 functions, 100.0% quality score across all
   tallies non-suppressed entries).
 
 ### Fixed
+- **Test-companion files missed by cfg-test detection**. The
+  `#[cfg(test)] #[path = "foo_tests.rs"] mod tests;` pattern — common
+  for co-locating unit tests next to their production module — was
+  not recognized as cfg-test because (a) `ChildPathResolver` only
+  tried the naming-convention paths (`foo/tests.rs`,
+  `foo/tests/mod.rs`) and ignored the `#[path]` override, and (b)
+  top-level `#![cfg(test)]` inner attributes on the companion file
+  itself were never scanned. Both gaps closed: `#[path]` is now
+  resolved relative to the parent file's directory (rustc
+  semantics), and `file.attrs` is inspected for inner
+  `#![cfg(test)]`. Fixes systematic SRP_MODULE false-positives on
+  test-companion files whose many-test-one-cluster-each layout
+  triggers `max_independent_clusters` by design.
 - **Bug 2 — SRP LCOM4 false-positives via macro-wrapped method
   calls**. `MethodBodyVisitor` in the SRP cohesion analyzer now
   descends into macro token streams, so `self.method()` references
