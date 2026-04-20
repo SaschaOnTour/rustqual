@@ -159,17 +159,19 @@ pub fn analyze_module_srp(
 /// (`#[cfg(test)]\nmod tests { … }`) and the single-line form
 /// (`#[cfg(test)] mod tests { … }`) are handled. Blank lines, `//`
 /// line comments, and the body of `/* … */` block comments (including
-/// their opening / closing lines) do not count.
-/// Operation: per-line classification with a block-comment state flag.
+/// their opening / closing lines) do not count. Rust allows nested
+/// block comments, so state is kept as a depth counter rather than a
+/// boolean flag.
+/// Operation: per-line classification with a block-comment depth counter.
 pub(crate) fn count_production_lines(source: &str) -> usize {
     let mut count = 0;
-    let mut in_block_comment = false;
+    let mut comment_depth: usize = 0;
     for line in source.lines() {
         let trimmed = line.trim();
-        if !in_block_comment && trimmed.starts_with("#[cfg(test)]") {
+        if comment_depth == 0 && trimmed.starts_with("#[cfg(test)]") {
             break;
         }
-        if is_noise_line(trimmed, &mut in_block_comment) {
+        if is_noise_line(trimmed, &mut comment_depth) {
             continue;
         }
         count += 1;
@@ -178,29 +180,31 @@ pub(crate) fn count_production_lines(source: &str) -> usize {
 }
 
 /// Classify a trimmed line as non-production (blank / comment) vs code.
-/// Scans left-to-right, tracking multi-line `/* … */` state through
-/// `in_block_comment`. Correctly handles mid-line comments:
-/// `let x = 1; /* note */` counts as code, `/* note */ let x = 1;`
-/// also counts as code (unlike a leading-only heuristic), and
-/// `/* note */` alone counts as a comment. Lines inside a block
-/// comment that don't close it are pure comment.
-/// Operation: char-by-char scan with a block-comment state flag.
-fn is_noise_line(trimmed: &str, in_block_comment: &mut bool) -> bool {
+/// Scans left-to-right, tracking multi-line `/* … */` state through a
+/// nesting depth counter (Rust supports nested block comments —
+/// `/* outer /* inner */ still outer */` — so a plain boolean would
+/// close on the inner `*/` and mistake "still outer" for code).
+/// Correctly handles mid-line comments: `let x = 1; /* note */`
+/// counts as code, `/* note */ let x = 1;` also counts as code
+/// (unlike a leading-only heuristic), `/* note */` alone counts as a
+/// comment.
+/// Operation: char-by-char scan with a block-comment depth counter.
+fn is_noise_line(trimmed: &str, comment_depth: &mut usize) -> bool {
     if trimmed.is_empty() {
         return true;
     }
     let mut has_code = false;
     let mut chars = trimmed.chars().peekable();
     while let Some(c) = chars.next() {
-        if *in_block_comment {
-            handle_in_comment(c, &mut chars, in_block_comment);
+        if *comment_depth > 0 {
+            handle_in_comment(c, &mut chars, comment_depth);
             continue;
         }
         match (c, chars.peek().copied()) {
             ('/', Some('/')) => return !has_code,
             ('/', Some('*')) => {
                 chars.next();
-                *in_block_comment = true;
+                *comment_depth += 1;
             }
             _ if !c.is_whitespace() => has_code = true,
             _ => {}
@@ -209,17 +213,24 @@ fn is_noise_line(trimmed: &str, in_block_comment: &mut bool) -> bool {
     !has_code
 }
 
-/// When inside a block comment, consume chars until we see `*/`,
-/// then clear the flag. Everything before is thrown away.
-/// Operation: two-char lookahead to close `*/`.
+/// Inside a block comment: `/*` nests one deeper, `*/` pops one
+/// level, other chars are discarded.
+/// Operation: two-char lookahead for `/*` / `*/` detection.
 fn handle_in_comment(
     c: char,
     chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
-    in_block_comment: &mut bool,
+    comment_depth: &mut usize,
 ) {
-    if c == '*' && chars.peek() == Some(&'/') {
-        chars.next();
-        *in_block_comment = false;
+    match (c, chars.peek().copied()) {
+        ('/', Some('*')) => {
+            chars.next();
+            *comment_depth += 1;
+        }
+        ('*', Some('/')) => {
+            chars.next();
+            *comment_depth = comment_depth.saturating_sub(1);
+        }
+        _ => {}
     }
 }
 

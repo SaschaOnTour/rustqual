@@ -109,6 +109,32 @@ fn test_count_production_lines_skips_pure_inline_block_comment() {
 }
 
 #[test]
+fn test_count_production_lines_handles_nested_block_comments() {
+    // Rust supports nested block comments: the inner `*/` must NOT
+    // close the outer, so "still outer" stays inside the comment.
+    let source = "\
+/* outer
+   /* inner */
+   still outer */
+fn foo() {}
+";
+    assert_eq!(
+        count_production_lines(source),
+        1,
+        "nested block comments must track depth, not a boolean flag"
+    );
+}
+
+#[test]
+fn test_count_production_lines_nested_block_closes_properly() {
+    // Confirm depth unwinds correctly: after both `*/` the scanner
+    // is back at depth 0 and recognises `fn bar() {}` on the same
+    // line as real code.
+    let source = "/* a /* b */ c */ fn bar() {}\n";
+    assert_eq!(count_production_lines(source), 1);
+}
+
+#[test]
 fn test_count_production_lines_empty() {
     assert_eq!(count_production_lines(""), 0);
 }
