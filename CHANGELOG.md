@@ -17,8 +17,8 @@ coverage.lcov` reports 1913 functions, 100.0% quality score across all
 
 ### Added
 - **`// qual:test_helper` annotation** — narrow marker for
-  integration-test helpers. Suppresses **only** DRY-004 (`testonly`
-  dead code) and TQ-003 (`untested` production functions); all other
+  integration-test helpers. Suppresses **only** the DRY-002 `testonly`
+  dead-code finding and TQ-003 (`untested` production functions); all other
   checks (DRY duplicates, complexity, SRP, coupling, structural) keep
   applying. Does **not** count against `max_suppression_ratio`.
   Replaces the overly broad `ignore_functions` entry for the

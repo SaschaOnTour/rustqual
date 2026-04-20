@@ -547,8 +547,8 @@ This is the narrow fix for the „helper called from `tests/*.rs` but not from p
 
 | Marker | Intent | What it suppresses |
 |---|---|---|
-| `// qual:api` | „this is the public library API" | DRY-004 + TQ-003 |
-| `// qual:test_helper` | „this exists so test binaries can call into it" | DRY-004 + TQ-003 |
+| `// qual:api` | „this is the public library API" | DRY-002 (`testonly` dead code) + TQ-003 (untested) |
+| `// qual:test_helper` | „this exists so test binaries can call into it" | DRY-002 `testonly` dead code + TQ-003 (untested) |
 
 Neither marker counts against `max_suppression_ratio`. Complexity, SRP, duplicate detection, and coupling checks keep applying — if a test helper grows to 200 lines with nested match arms, `LONG_FN` and `COGNITIVE` will still flag it.
 

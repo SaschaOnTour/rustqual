@@ -233,6 +233,10 @@ pub(crate) use super::call_targets::collect_all_calls;
 // ── Finding logic ───────────────────────────────────────────────
 
 /// Find functions that are never called from anywhere.
+/// `// qual:test_helper` does NOT exclude here — a helper marker on a
+/// function with no callers at all is still worth flagging (the
+/// marker is likely stale). `// qual:api` does exclude because
+/// public-API functions legitimately have no in-crate callers.
 /// Operation: set logic + filtering, no own calls.
 fn find_uncalled(
     declared: &[DeclaredFunction],
@@ -242,7 +246,7 @@ fn find_uncalled(
 ) -> Vec<DeadCodeWarning> {
     declared
         .iter()
-        .filter(|d| !should_exclude(d, config))
+        .filter(|d| !should_exclude_uncalled(d, config))
         .filter(|d| !prod_calls.contains(&d.name) && !test_calls.contains(&d.name))
         .filter(|d| {
             !prod_calls.contains(&d.qualified_name) && !test_calls.contains(&d.qualified_name)
@@ -259,6 +263,7 @@ fn find_uncalled(
 }
 
 /// Find functions that are only called from test code.
+/// `// qual:test_helper` excludes here (narrow purpose of the marker).
 /// Operation: set logic + filtering, no own calls.
 fn find_test_only(
     declared: &[DeclaredFunction],
@@ -268,7 +273,7 @@ fn find_test_only(
 ) -> Vec<DeadCodeWarning> {
     declared
         .iter()
-        .filter(|d| !should_exclude(d, config))
+        .filter(|d| !should_exclude_test_only(d, config))
         // Must be called from tests but NOT from production
         .filter(|d| {
             let called_from_tests =
@@ -292,16 +297,26 @@ fn find_test_only(
         .collect()
 }
 
-/// Check if a declared function should be excluded from dead code analysis.
+/// Check if a declared function should be excluded from the Uncalled
+/// dead-code check. `// qual:test_helper` is NOT in this list — a
+/// helper marker on a function with no callers at all is still worth
+/// flagging so the user sees that their annotation is stale.
 /// Operation: boolean logic combining multiple exclusion criteria.
 /// The `is_ignored_function` call is hidden in a closure (lenient mode).
-fn should_exclude(d: &DeclaredFunction, config: &crate::config::Config) -> bool {
+fn should_exclude_uncalled(d: &DeclaredFunction, config: &crate::config::Config) -> bool {
     let is_ignored = |name: &str| config.is_ignored_function(name);
     d.is_main
         || d.is_test
         || d.is_trait_impl
         || d.has_allow_dead_code
         || d.is_api
-        || d.is_test_helper
         || is_ignored(&d.name)
+}
+
+/// Check if a declared function should be excluded from the TestOnly
+/// dead-code check. `// qual:test_helper` IS in this list — silencing
+/// the testonly finding is the whole point of the annotation.
+/// Operation: delegates to should_exclude_uncalled + test_helper check.
+fn should_exclude_test_only(d: &DeclaredFunction, config: &crate::config::Config) -> bool {
+    d.is_test_helper || should_exclude_uncalled(d, config)
 }

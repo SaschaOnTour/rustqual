@@ -30,11 +30,11 @@ pub fn is_api_marker(trimmed: &str) -> bool {
 }
 
 /// Check if a trimmed line is a `// qual:test_helper` marker.
-/// The annotation narrowly suppresses DRY-004 (testonly) and TQ-003
-/// (untested) on a function that is only called from test code —
-/// without silencing complexity, SRP, coupling, or DRY duplicate
-/// checks the way `ignore_functions` would. It does not count against
-/// `max_suppression_ratio`.
+/// The annotation narrowly suppresses DRY-002 (`testonly` dead code)
+/// and TQ-003 (untested) on a function that is only called from test
+/// code — without silencing complexity, SRP, coupling, or DRY
+/// duplicate checks the way `ignore_functions` would. It does not
+/// count against `max_suppression_ratio`.
 /// Operation: string prefix check.
 pub fn is_test_helper_marker(trimmed: &str) -> bool {
     trimmed == "// qual:test_helper" || trimmed.starts_with("// qual:test_helper ")

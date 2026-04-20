@@ -137,11 +137,11 @@ fn enumerate_finding_positions(
         }
     };
     collect_iosp_complexity_positions(analysis, config, &mut push);
-    collect_dry_positions(analysis, &mut push);
-    collect_srp_positions(analysis, &mut push);
-    collect_tq_positions(analysis, &mut push);
-    collect_structural_positions(analysis, &mut push);
-    collect_architecture_positions(analysis, &mut push);
+    collect_dry_positions(analysis, config, &mut push);
+    collect_srp_positions(analysis, config, &mut push);
+    collect_tq_positions(analysis, config, &mut push);
+    collect_structural_positions(analysis, config, &mut push);
+    collect_architecture_positions(analysis, config, &mut push);
     out
 }
 
@@ -165,9 +165,13 @@ fn collect_iosp_complexity_positions<F>(
 {
     use crate::findings::Dimension;
     let mode = MatchMode::LineWindow(WINDOW_IOSP_COMPLEXITY_DRY);
+    let complexity_enabled = config.complexity.enabled;
     analysis.results.iter().for_each(|f| {
         if matches!(f.classification, Classification::Violation { .. }) {
             push(&f.file, f.line, Dimension::Iosp, mode);
+        }
+        if !complexity_enabled {
+            return;
         }
         if let Some(c) = &f.complexity {
             if would_trigger_complexity_warning(f, c, &config.complexity) {
@@ -271,11 +275,22 @@ fn push_magic_numbers<F>(
 /// Positions for DRY findings (duplicates, dead code, fragments,
 /// boilerplate, wildcards, repeated matches).
 /// Operation: iterates DRY finding arrays pushing each entry.
-fn collect_dry_positions<F>(analysis: &crate::report::AnalysisResult, push: &mut F)
-where
+fn collect_dry_positions<F>(
+    analysis: &crate::report::AnalysisResult,
+    config: &crate::config::Config,
+    push: &mut F,
+) where
     F: FnMut(&str, usize, crate::findings::Dimension, MatchMode),
 {
     use crate::findings::Dimension;
+    // DRY findings come from two top-level config toggles:
+    // `duplicates.enabled` (DRY-001/002/003/005) and
+    // `boilerplate.enabled` (DRY-004-style boilerplate). If both are
+    // off, suppressing DRY is a no-op and any qual:allow(dry) marker
+    // SHOULD surface as orphan.
+    if !config.duplicates.enabled && !config.boilerplate.enabled {
+        return;
+    }
     let mode = MatchMode::LineWindow(WINDOW_IOSP_COMPLEXITY_DRY);
     analysis.duplicates.iter().for_each(|g| {
         g.entries
@@ -311,11 +326,17 @@ where
 /// are file-scoped because `mark_srp_suppressions` accepts any
 /// `qual:allow(srp)` in the file as a module-level suppression.
 /// Operation: iterates SRP warning arrays pushing each entry.
-fn collect_srp_positions<F>(analysis: &crate::report::AnalysisResult, push: &mut F)
-where
+fn collect_srp_positions<F>(
+    analysis: &crate::report::AnalysisResult,
+    config: &crate::config::Config,
+    push: &mut F,
+) where
     F: FnMut(&str, usize, crate::findings::Dimension, MatchMode),
 {
     use crate::findings::Dimension;
+    if !config.srp.enabled {
+        return;
+    }
     let Some(srp) = &analysis.srp else { return };
     let line_mode = MatchMode::LineWindow(WINDOW_SRP_STRUCT_PARAM);
     srp.struct_warnings
@@ -332,11 +353,17 @@ where
 /// Positions for Test-Quality warnings. TQ suppressions use a 5-line
 /// window (mark_tq_suppressions).
 /// Operation: iterates TQ warnings pushing each entry.
-fn collect_tq_positions<F>(analysis: &crate::report::AnalysisResult, push: &mut F)
-where
+fn collect_tq_positions<F>(
+    analysis: &crate::report::AnalysisResult,
+    config: &crate::config::Config,
+    push: &mut F,
+) where
     F: FnMut(&str, usize, crate::findings::Dimension, MatchMode),
 {
     use crate::findings::Dimension;
+    if !config.test_quality.enabled {
+        return;
+    }
     let Some(tq) = &analysis.tq else { return };
     let mode = MatchMode::LineWindow(WINDOW_TQ);
     tq.warnings
@@ -348,10 +375,16 @@ where
 /// own mapped dimension (SRP or Coupling). Structural suppressions
 /// use a 5-line window (mark_structural_suppressions).
 /// Operation: iterates structural warnings pushing each entry.
-fn collect_structural_positions<F>(analysis: &crate::report::AnalysisResult, push: &mut F)
-where
+fn collect_structural_positions<F>(
+    analysis: &crate::report::AnalysisResult,
+    config: &crate::config::Config,
+    push: &mut F,
+) where
     F: FnMut(&str, usize, crate::findings::Dimension, MatchMode),
 {
+    if !config.structural.enabled {
+        return;
+    }
     let Some(st) = &analysis.structural else {
         return;
     };
@@ -365,11 +398,17 @@ where
 /// suppressions are file-scoped (mark_architecture_suppressions
 /// accepts any `qual:allow(architecture)` anywhere in the file).
 /// Operation: iterates architecture findings pushing each entry.
-fn collect_architecture_positions<F>(analysis: &crate::report::AnalysisResult, push: &mut F)
-where
+fn collect_architecture_positions<F>(
+    analysis: &crate::report::AnalysisResult,
+    config: &crate::config::Config,
+    push: &mut F,
+) where
     F: FnMut(&str, usize, crate::findings::Dimension, MatchMode),
 {
     use crate::findings::Dimension;
+    if !config.architecture.enabled {
+        return;
+    }
     analysis.architecture_findings.iter().for_each(|f| {
         push(
             &f.file,

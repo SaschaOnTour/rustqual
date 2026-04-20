@@ -1132,12 +1132,14 @@ fn test_helper_marker_suppresses_testonly_dead_code() {
 }
 
 #[test]
-fn test_helper_marker_does_not_suppress_api_uncalled() {
-    // Guard: test_helper only covers the testonly/uncalled path; a
-    // function that was never marked must still flag. Also: the marker
-    // does not cascade into any other dimension — this test only
-    // confirms the *absence* of a spurious suppression on another
-    // function in the same file.
+fn test_helper_marker_does_not_suppress_uncalled() {
+    // `// qual:test_helper` narrowly silences the TestOnly variant
+    // of dead code — not the Uncalled variant. A function marked as
+    // test_helper but with no callers anywhere (including tests) is
+    // still worth flagging: the marker is likely stale or placed on
+    // the wrong function. This is the counterpart to
+    // `test_helper_marker_suppresses_testonly_dead_code` — both
+    // together specify the full semantics.
     let code = r#"
         // qual:test_helper
         pub fn marked_but_not_called() { let _ = 1; }
@@ -1162,13 +1164,17 @@ fn test_helper_marker_does_not_suppress_api_uncalled() {
         &test_helper_lines,
         &std::collections::HashSet::new(),
     );
-    let names: Vec<&str> = warnings.iter().map(|w| w.function_name.as_str()).collect();
+    let uncalled: Vec<&str> = warnings
+        .iter()
+        .filter(|w| w.kind == DeadCodeKind::Uncalled)
+        .map(|w| w.function_name.as_str())
+        .collect();
     assert!(
-        names.contains(&"unmarked_and_uncalled"),
-        "unmarked uncalled function must still flag, got {names:?}"
+        uncalled.contains(&"marked_but_not_called"),
+        "test_helper on a function with no callers must still flag as Uncalled, got {uncalled:?}"
     );
     assert!(
-        !names.contains(&"marked_but_not_called"),
-        "marked function must be excluded, got {names:?}"
+        uncalled.contains(&"unmarked_and_uncalled"),
+        "unmarked uncalled function must still flag, got {uncalled:?}"
     );
 }

@@ -813,6 +813,87 @@ fn suppressed_srp_param_over_threshold_is_not_orphan() {
 }
 
 #[test]
+fn complexity_marker_is_orphan_when_complexity_dimension_disabled() {
+    // Config disables the complexity dimension entirely. A
+    // `qual:allow(complexity)` marker can't suppress what doesn't
+    // run, so it IS orphan even on a function with over-threshold
+    // metrics.
+    use crate::adapters::analyzers::iosp::ComplexityMetrics;
+    use crate::findings::Suppression;
+    let mut sups = HashMap::new();
+    sups.insert(
+        "src/x.rs".to_string(),
+        vec![Suppression {
+            line: 5,
+            dimensions: vec![crate::findings::Dimension::Complexity],
+            reason: None,
+        }],
+    );
+    let mut analysis = empty_analysis();
+    analysis.results = vec![make_fa_with_complexity(
+        "src/x.rs",
+        6,
+        ComplexityMetrics {
+            cognitive_complexity: 99,
+            ..Default::default()
+        },
+    )];
+    let mut config = Config::default();
+    config.complexity.enabled = false;
+    let orphans =
+        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &config);
+    assert_eq!(
+        orphans.len(),
+        1,
+        "complexity marker with dimension disabled must be orphan"
+    );
+}
+
+#[test]
+fn srp_marker_is_orphan_when_srp_dimension_disabled() {
+    // Same pattern for SRP: disable the dimension, a qual:allow(srp)
+    // can't suppress anything → orphan even if a SrpWarning is in
+    // the analysis struct (stale from a previous run, or leftover).
+    use crate::adapters::analyzers::srp::{SrpAnalysis, SrpWarning};
+    use crate::findings::Suppression;
+    let mut sups = HashMap::new();
+    sups.insert(
+        "src/foo.rs".to_string(),
+        vec![Suppression {
+            line: 2,
+            dimensions: vec![crate::findings::Dimension::Srp],
+            reason: None,
+        }],
+    );
+    let mut analysis = empty_analysis();
+    analysis.srp = Some(SrpAnalysis {
+        struct_warnings: vec![SrpWarning {
+            struct_name: "Foo".into(),
+            file: "src/foo.rs".into(),
+            line: 7,
+            lcom4: 3,
+            field_count: 5,
+            method_count: 5,
+            fan_out: 2,
+            composite_score: 0.9,
+            clusters: vec![],
+            suppressed: false,
+        }],
+        module_warnings: vec![],
+        param_warnings: vec![],
+    });
+    let mut config = Config::default();
+    config.srp.enabled = false;
+    let orphans =
+        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &config);
+    assert_eq!(
+        orphans.len(),
+        1,
+        "SRP marker with dimension disabled must be orphan"
+    );
+}
+
+#[test]
 fn srp_struct_marker_within_5_line_window_is_not_orphan() {
     // SRP struct suppressions use SRP_STRUCT_SUPPRESSION_WINDOW=5
     // (wider than ANNOTATION_WINDOW=3) because #[derive(...)]
@@ -999,11 +1080,10 @@ fn architecture_marker_anywhere_in_file_is_not_orphan() {
         severity: crate::domain::Severity::Medium,
         suppressed: false,
     }];
-    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
-        &sups,
-        &analysis,
-        &Config::default(),
-    );
+    let mut config = Config::default();
+    config.architecture.enabled = true;
+    let orphans =
+        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &config);
     assert!(
         orphans.is_empty(),
         "Architecture marker at any line must match file-global finding, got: {orphans:?}"
