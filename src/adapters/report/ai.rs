@@ -77,8 +77,10 @@ pub(crate) struct EnrichIndex<'a> {
         (&'a str, usize),
         &'a crate::adapters::analyzers::structural::StructuralWarning,
     >,
-    orphan_suppressions:
-        std::collections::HashMap<(&'a str, usize), &'a crate::adapters::report::OrphanSuppressionWarning>,
+    orphan_suppressions: std::collections::HashMap<
+        (&'a str, usize),
+        &'a crate::adapters::report::OrphanSuppressionWarning,
+    >,
 }
 
 /// Build enrichment indexes from analysis data for O(1) lookups.

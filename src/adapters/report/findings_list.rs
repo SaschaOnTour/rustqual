@@ -51,10 +51,7 @@ pub fn collect_all_findings(analysis: &AnalysisResult) -> Vec<FindingEntry> {
 /// Detail lists the suppressed dimensions (or "all dims" for bare
 /// `// qual:allow` wildcards).
 /// Operation: iterator-chain projection.
-fn collect_orphan_suppression_findings(
-    analysis: &AnalysisResult,
-    entries: &mut Vec<FindingEntry>,
-) {
+fn collect_orphan_suppression_findings(analysis: &AnalysisResult, entries: &mut Vec<FindingEntry>) {
     entries.extend(analysis.orphan_suppressions.iter().map(|w| {
         let detail = if w.dimensions.is_empty() {
             "stale qual:allow (all dims, wildcard)".to_string()
@@ -62,13 +59,7 @@ fn collect_orphan_suppression_findings(
             let dims: Vec<String> = w.dimensions.iter().map(|d| format!("{d}")).collect();
             format!("stale qual:allow({})", dims.join(","))
         };
-        FindingEntry::new(
-            &w.file,
-            w.line,
-            "ORPHAN_SUPPRESSION",
-            detail,
-            String::new(),
-        )
+        FindingEntry::new(&w.file, w.line, "ORPHAN_SUPPRESSION", detail, String::new())
     }));
 }
 

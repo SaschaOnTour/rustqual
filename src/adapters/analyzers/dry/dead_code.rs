@@ -108,7 +108,7 @@ impl<'ast> Visit<'ast> for DeclaredFnCollector {
                 is_trait_impl: true,
                 has_allow_dead_code: false,
                 is_api: false,
-            is_test_helper: false,
+                is_test_helper: false,
                 name,
                 file: self.file.clone(),
                 line,

@@ -72,8 +72,7 @@ fn has_matching_finding(
         return false;
     };
     file_positions.iter().any(|(line, dim)| {
-        let in_window =
-            *line >= sup.line && *line - sup.line <= crate::findings::ANNOTATION_WINDOW;
+        let in_window = *line >= sup.line && *line - sup.line <= crate::findings::ANNOTATION_WINDOW;
         in_window && sup.covers(*dim)
     })
 }

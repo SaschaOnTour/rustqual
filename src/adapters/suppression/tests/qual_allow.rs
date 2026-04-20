@@ -85,9 +85,7 @@ fn test_test_helper_marker_exact() {
 
 #[test]
 fn test_test_helper_marker_with_trailing_text() {
-    assert!(is_test_helper_marker(
-        "// qual:test_helper shared asserter"
-    ));
+    assert!(is_test_helper_marker("// qual:test_helper shared asserter"));
 }
 
 #[test]

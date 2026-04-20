@@ -381,7 +381,12 @@ fn orphan_suppression_without_matching_finding_is_counted() {
         }],
     );
     let analysis = empty_analysis();
-    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default()).len();
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
+        &sups,
+        &analysis,
+        &Config::default(),
+    )
+    .len();
     assert_eq!(orphans, 1, "unmatched marker should count as orphan");
 }
 
@@ -417,7 +422,12 @@ fn suppression_covering_finding_in_window_is_not_orphan() {
         module_warnings: vec![],
         param_warnings: vec![],
     });
-    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default()).len();
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
+        &sups,
+        &analysis,
+        &Config::default(),
+    )
+    .len();
     assert_eq!(orphans, 0, "in-window finding matches the marker");
 }
 
@@ -453,7 +463,12 @@ fn suppression_with_wrong_dimension_is_orphan() {
         module_warnings: vec![],
         param_warnings: vec![],
     });
-    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default()).len();
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
+        &sups,
+        &analysis,
+        &Config::default(),
+    )
+    .len();
     assert_eq!(orphans, 1, "dimension mismatch should still flag as orphan");
 }
 
@@ -489,7 +504,12 @@ fn bare_qual_allow_is_wildcard_and_matches_any_dim() {
         module_warnings: vec![],
         param_warnings: vec![],
     });
-    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default()).len();
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
+        &sups,
+        &analysis,
+        &Config::default(),
+    )
+    .len();
     assert_eq!(orphans, 0, "bare qual:allow is wildcard");
 }
 
@@ -558,8 +578,11 @@ fn suppressed_cognitive_over_threshold_is_not_orphan() {
             ..Default::default()
         },
     )];
-    let orphans =
-        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
+        &sups,
+        &analysis,
+        &Config::default(),
+    );
     assert!(
         orphans.is_empty(),
         "complexity marker clearing cognitive flag must not be orphan, got: {orphans:?}"
@@ -588,8 +611,11 @@ fn suppressed_cyclomatic_over_threshold_is_not_orphan() {
             ..Default::default()
         },
     )];
-    let orphans =
-        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
+        &sups,
+        &analysis,
+        &Config::default(),
+    );
     assert!(orphans.is_empty(), "got: {orphans:?}");
 }
 
@@ -615,8 +641,11 @@ fn suppressed_function_length_over_threshold_is_not_orphan() {
             ..Default::default()
         },
     )];
-    let orphans =
-        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
+        &sups,
+        &analysis,
+        &Config::default(),
+    );
     assert!(orphans.is_empty(), "got: {orphans:?}");
 }
 
@@ -642,8 +671,11 @@ fn suppressed_nesting_over_threshold_is_not_orphan() {
             ..Default::default()
         },
     )];
-    let orphans =
-        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
+        &sups,
+        &analysis,
+        &Config::default(),
+    );
     assert!(orphans.is_empty(), "got: {orphans:?}");
 }
 
@@ -669,8 +701,11 @@ fn suppressed_unsafe_block_is_not_orphan() {
             ..Default::default()
         },
     )];
-    let orphans =
-        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
+        &sups,
+        &analysis,
+        &Config::default(),
+    );
     assert!(orphans.is_empty(), "got: {orphans:?}");
 }
 
@@ -696,8 +731,11 @@ fn suppressed_error_handling_unwrap_is_not_orphan() {
             ..Default::default()
         },
     )];
-    let orphans =
-        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
+        &sups,
+        &analysis,
+        &Config::default(),
+    );
     assert!(orphans.is_empty(), "got: {orphans:?}");
 }
 
@@ -726,8 +764,11 @@ fn suppressed_magic_number_is_not_orphan() {
             ..Default::default()
         },
     )];
-    let orphans =
-        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
+        &sups,
+        &analysis,
+        &Config::default(),
+    );
     assert!(orphans.is_empty(), "got: {orphans:?}");
 }
 
@@ -760,8 +801,11 @@ fn suppressed_srp_param_over_threshold_is_not_orphan() {
             suppressed: true,
         }],
     });
-    let orphans =
-        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
+        &sups,
+        &analysis,
+        &Config::default(),
+    );
     assert!(
         orphans.is_empty(),
         "SRP param marker must match even on suppressed warnings, got: {orphans:?}"
@@ -794,8 +838,11 @@ fn complexity_marker_without_any_overshoot_is_orphan() {
             ..Default::default()
         },
     )];
-    let orphans =
-        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
+        &sups,
+        &analysis,
+        &Config::default(),
+    );
     assert_eq!(
         orphans.len(),
         1,
