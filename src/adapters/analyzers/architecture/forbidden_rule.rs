@@ -95,10 +95,13 @@ fn evaluate_import(
 /// `crate::a::b` → `["a","b"]`. `self::x` / `super[::super]*::x` are
 /// normalised against the importing file's module path so the resolver
 /// sees the same segment list regardless of import style. Returns
-/// `None` for stdlib (`std`, `core`, `alloc`), external-crate imports,
-/// or resolved paths that still contain a wildcard `*` segment (e.g.
-/// `use crate::foo::*;`) — those cannot be turned into concrete
-/// candidate file paths.
+/// `None` for everything else — i.e. imports whose first segment is
+/// not `crate` / `self` / `super`. That includes the stdlib
+/// (`std::…`, `core::…`, `alloc::…`), external crates (`serde::…`,
+/// `syn::…`, etc.) and any other unrecognised leading segment, plus
+/// resolved paths that still contain a wildcard `*` segment (e.g.
+/// `use crate::foo::*;`) — none of those can be turned into concrete
+/// candidate file paths in this crate.
 /// Operation: first-segment routing + path arithmetic, no own calls.
 fn resolve_to_crate_absolute(importing_file: &str, segments: &[String]) -> Option<Vec<String>> {
     let first = segments.first()?;

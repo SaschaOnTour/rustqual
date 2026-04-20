@@ -30,8 +30,9 @@ pub(super) fn check_receiver(
             return;
         };
         if !allowed.iter().any(|a| a == kind) {
-            out.push(hit(
+            out.push(hit_method(
                 site,
+                m,
                 "receiver",
                 format!("{} has {kind} receiver", m.sig.ident),
             ));
@@ -50,7 +51,12 @@ pub(super) fn check_async(
     }
     site.methods.iter().for_each(|m| {
         if m.sig.asyncness.is_none() {
-            out.push(hit(site, "async", format!("{} is not async", m.sig.ident)));
+            out.push(hit_method(
+                site,
+                m,
+                "async",
+                format!("{} is not async", m.sig.ident),
+            ));
         }
     });
 }
@@ -73,8 +79,9 @@ pub(super) fn check_return_type(
             .iter()
             .filter(|s| rendered.contains(s.as_str()))
             .for_each(|s| {
-                out.push(hit(
+                out.push(hit_method(
                     site,
+                    m,
                     "return_type",
                     format!("{} returns type containing {s:?}", m.sig.ident),
                 ));
@@ -97,8 +104,9 @@ pub(super) fn check_required_param(
             _ => false,
         });
         if !has_required {
-            out.push(hit(
+            out.push(hit_method(
                 site,
+                m,
                 "required_param",
                 format!("{} lacks a {required:?} parameter", m.sig.ident),
             ));
@@ -126,7 +134,7 @@ pub(super) fn check_supertraits(
         .iter()
         .filter(|req| !rendered.contains(req.as_str()))
         .for_each(|req| {
-            out.push(hit(
+            out.push(hit_trait(
                 site,
                 "supertrait",
                 format!("supertrait list missing {req:?}"),
@@ -145,14 +153,16 @@ pub(super) fn check_object_safety(
     }
     site.methods.iter().for_each(|m| {
         if returns_self(&m.sig.output) {
-            out.push(hit(
+            out.push(hit_method(
                 site,
+                m,
                 "object_safety",
                 format!("{} returns Self", m.sig.ident),
             ));
         } else if !m.sig.generics.params.is_empty() {
-            out.push(hit(
+            out.push(hit_method(
                 site,
+                m,
                 "object_safety",
                 format!("{} has method-level generics", m.sig.ident),
             ));
@@ -186,7 +196,11 @@ pub(super) fn check_error_variants(
                 .filter(|s| rendered.contains(s.as_str()))
                 .for_each(|s| {
                     if reported.insert(s.as_str()) {
-                        out.push(hit(
+                        // Anchor at the trait ident — the offending
+                        // variant lives in another item (the error
+                        // enum), and pointing at the trait gives a
+                        // stable, suppression-friendly target.
+                        out.push(hit_trait(
                             site,
                             "error_variant",
                             format!("{error_name} variant contains {s:?}"),
@@ -275,17 +289,43 @@ pub(super) fn trait_methods(t: &syn::ItemTrait) -> Vec<&syn::TraitItemFn> {
         .collect()
 }
 
-/// Construct a hit anchored at the trait's name span.
-fn hit(site: &TraitSite<'_>, check: &'static str, detail: String) -> MatchLocation {
-    let span = site.t.ident.span().start();
+/// Construct a hit anchored at an arbitrary span. For method-level
+/// checks the method ident is a better target than the trait ident;
+/// for trait-level checks the caller passes the trait ident span via
+/// `hit_trait`.
+/// Operation: struct construction from span, no own calls.
+fn hit_at(
+    site: &TraitSite<'_>,
+    span: proc_macro2::Span,
+    check: &'static str,
+    detail: String,
+) -> MatchLocation {
+    let start = span.start();
     MatchLocation {
         file: site.path.to_string(),
-        line: span.line,
-        column: span.column,
+        line: start.line,
+        column: start.column,
         kind: ViolationKind::TraitContract {
             trait_name: site.t.ident.to_string(),
             check,
             detail,
         },
     }
+}
+
+/// Convenience: hit anchored at the trait's name span.
+/// Trivial: single-delegation wrapper.
+fn hit_trait(site: &TraitSite<'_>, check: &'static str, detail: String) -> MatchLocation {
+    hit_at(site, site.t.ident.span(), check, detail)
+}
+
+/// Convenience: hit anchored at a method's name span.
+/// Trivial: single-delegation wrapper.
+fn hit_method(
+    site: &TraitSite<'_>,
+    m: &syn::TraitItemFn,
+    check: &'static str,
+    detail: String,
+) -> MatchLocation {
+    hit_at(site, m.sig.ident.span(), check, detail)
 }
