@@ -516,7 +516,7 @@ Orphans appear in `--findings` output and count toward `total_findings()`, so de
 
 ### API Annotation
 
-Mark public API functions with `// qual:api` to exclude them from dead code (DRY-003) and untested function (TQ-003) detection:
+Mark public API functions with `// qual:api` to exclude them from dead code (DRY-002) and untested function (TQ-003) detection:
 
 ```rust
 // qual:api
@@ -534,7 +534,7 @@ Unlike `// qual:allow`, API markers do **not** count against the suppression rat
 
 ### Test-Helper Annotation
 
-Mark integration-test helpers with `// qual:test_helper` to exclude them from dead code (DRY-004 `testonly`) and untested function (TQ-003) detection, **while keeping every other check active**:
+Mark integration-test helpers with `// qual:test_helper` to exclude them from dead code (DRY-002 `testonly`) and untested function (TQ-003) detection, **while keeping every other check active**:
 
 ```rust
 // qual:test_helper

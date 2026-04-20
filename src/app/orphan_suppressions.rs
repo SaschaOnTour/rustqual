@@ -284,10 +284,11 @@ fn collect_dry_positions<F>(
 {
     use crate::findings::Dimension;
     // DRY findings come from two top-level config toggles:
-    // `duplicates.enabled` (DRY-001/002/003/005) and
-    // `boilerplate.enabled` (DRY-004-style boilerplate). If both are
-    // off, suppressing DRY is a no-op and any qual:allow(dry) marker
-    // SHOULD surface as orphan.
+    // `duplicates.enabled` (DRY-001 duplicates, DRY-002 dead code,
+    // DRY-003 fragments, DRY-004 wildcard imports, DRY-005 repeated
+    // match patterns) and `boilerplate.enabled` (BP-001..BP-010
+    // pattern family). If both are off, suppressing DRY is a no-op
+    // and any qual:allow(dry) marker SHOULD surface as orphan.
     if !config.duplicates.enabled && !config.boilerplate.enabled {
         return;
     }
