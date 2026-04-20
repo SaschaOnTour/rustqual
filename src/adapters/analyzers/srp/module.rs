@@ -204,10 +204,10 @@ fn is_noise_line(trimmed: &str, in_block_comment: &mut bool) -> bool {
         }
         return true;
     }
-    // Interior `*` lines (doc-style block-comment bodies).
-    if trimmed.starts_with('*') {
-        return true;
-    }
+    // No special-case for lines that begin with `*`: outside a block
+    // comment that would hit valid code such as `*ptr = value;` or
+    // `*self.field += 1;`. Inside a block comment the earlier
+    // `in_block_comment` branch already swallows them.
     false
 }
 

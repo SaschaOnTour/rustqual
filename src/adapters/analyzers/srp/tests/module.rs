@@ -74,6 +74,20 @@ fn test_count_production_lines_skips_single_line_block_comment() {
 }
 
 #[test]
+fn test_count_production_lines_counts_deref_starting_lines() {
+    // Lines starting with `*` outside a block comment are valid code
+    // (deref / assign-through pointer) and must count as production.
+    let source = "\
+fn write(p: &mut i32) {
+    *p = 42;
+    *p += 1;
+}
+";
+    // Body lines: `fn` signature, 2 deref assignments, closing `}` — 4.
+    assert_eq!(count_production_lines(source), 4);
+}
+
+#[test]
 fn test_count_production_lines_empty() {
     assert_eq!(count_production_lines(""), 0);
 }

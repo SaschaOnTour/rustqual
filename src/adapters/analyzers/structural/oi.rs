@@ -1,3 +1,4 @@
+use crate::adapters::analyzers::coupling::file_to_module;
 use crate::config::StructuralConfig;
 use crate::findings::Dimension;
 
@@ -22,8 +23,8 @@ pub(crate) fn detect_oi(
         .iter()
         .for_each(|(type_name, impl_file, impl_line)| {
             if let Some(def_file) = meta.type_defs.get(type_name) {
-                let def_module = top_level_module(def_file);
-                let impl_module = top_level_module(impl_file);
+                let def_module = file_to_module(def_file);
+                let impl_module = file_to_module(impl_file);
                 // Same top-level module is OK (e.g. analyzer/mod.rs + analyzer/types.rs)
                 if def_module != impl_module {
                     warnings.push(StructuralWarning {
@@ -39,13 +40,4 @@ pub(crate) fn detect_oi(
                 }
             }
         });
-}
-
-/// Extract the top-level module name from a file path. Accepts paths
-/// both with and without the `src/` prefix: `src/foo/bar.rs` → `"foo"`,
-/// `src/foo.rs` → `"foo"`, `lib.rs` → `"lib"`. Normalises Windows
-/// backslashes. Delegates to the canonical `coupling::file_to_module`.
-/// Trivial: single-delegation wrapper.
-fn top_level_module(path: &str) -> String {
-    crate::adapters::analyzers::coupling::file_to_module(path)
 }
