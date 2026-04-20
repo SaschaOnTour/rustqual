@@ -845,8 +845,11 @@ fn coupling_marker_is_not_orphan_for_structural_coupling_finding() {
             suppressed: false,
         }],
     });
-    let orphans =
-        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
+        &sups,
+        &analysis,
+        &Config::default(),
+    );
     assert!(
         orphans.is_empty(),
         "coupling marker for a line-anchored structural finding must not be orphan, got: {orphans:?}"
@@ -870,8 +873,11 @@ fn coupling_only_marker_with_no_line_anchored_finding_is_skipped() {
         }],
     );
     let analysis = empty_analysis();
-    let orphans =
-        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
+        &sups,
+        &analysis,
+        &Config::default(),
+    );
     assert!(
         orphans.is_empty(),
         "coupling-only marker without a line-anchored Coupling finding must be skipped, got: {orphans:?}"
@@ -905,8 +911,11 @@ fn dry_marker_on_dead_code_only_is_orphan() {
         kind: DeadCodeKind::Uncalled,
         suggestion: String::new(),
     }];
-    let orphans =
-        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
+        &sups,
+        &analysis,
+        &Config::default(),
+    );
     assert_eq!(
         orphans.len(),
         1,
@@ -937,8 +946,11 @@ fn dry_marker_two_lines_above_wildcard_is_orphan() {
         module_path: "foo::*".into(),
         suppressed: false,
     }];
-    let orphans =
-        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
+        &sups,
+        &analysis,
+        &Config::default(),
+    );
     assert_eq!(
         orphans.len(),
         1,
@@ -968,8 +980,11 @@ fn dry_marker_one_line_above_wildcard_is_not_orphan() {
         module_path: "foo::*".into(),
         suppressed: false,
     }];
-    let orphans =
-        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &Config::default());
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
+        &sups,
+        &analysis,
+        &Config::default(),
+    );
     assert!(
         orphans.is_empty(),
         "dry marker one line above wildcard must not be orphan, got: {orphans:?}"
