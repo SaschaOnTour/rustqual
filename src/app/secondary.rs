@@ -5,7 +5,7 @@
 //! (`run_secondary_analysis`) walks the passes in dependency order and
 //! gathers their outputs into one `SecondaryResults` bundle.
 
-use crate::adapters::analyzers::iosp::{scope::ProjectScope, FunctionAnalysis};
+use crate::adapters::analyzers::iosp::FunctionAnalysis;
 use crate::config::Config;
 use crate::report::Summary;
 
@@ -67,7 +67,7 @@ pub(super) fn run_secondary_analysis(
     metrics::count_sdp_violations(coupling.as_ref(), &ctx.config.coupling, summary);
 
     let srp = run_srp_pass(ctx, summary);
-    let tq = run_tq_pass(ctx, &dry.dead_code, summary);
+    let tq = run_tq_pass(ctx, &annotation_lines, &dry.dead_code, summary);
     let structural = run_structural_pass(ctx, summary);
 
     SecondaryResults {
@@ -151,24 +151,22 @@ fn run_srp_pass(
 }
 
 /// Run Test-Quality analysis + suppressions + count.
+/// `annotation_lines` is threaded in from the shared collection above
+/// so `compute_tq` doesn't re-scan every source file for the `qual:api`
+/// and `qual:test_helper` markers that DRY already collected.
 /// Integration: delegates scope build + compute + suppression + count.
 fn run_tq_pass(
     ctx: &SecondaryContext<'_>,
+    annotation_lines: &metrics::AnnotationLines<'_>,
     dead_code: &[crate::adapters::analyzers::dry::dead_code::DeadCodeWarning],
     summary: &mut Summary,
 ) -> Option<crate::adapters::analyzers::tq::TqAnalysis> {
-    let scope_refs: Vec<(&str, &syn::File)> = ctx
-        .parsed
-        .iter()
-        .map(|(path, _, file)| (path.as_str(), file))
-        .collect();
-    let tq_scope = ProjectScope::from_files(&scope_refs);
     let mut tq = compute_tq(
         ctx.parsed,
         ctx.config,
-        &tq_scope,
         ctx.all_results,
         dead_code,
+        annotation_lines,
     );
     mark_tq_suppressions(tq.as_mut(), ctx.suppression_lines);
     count_tq_warnings(tq.as_ref(), summary);

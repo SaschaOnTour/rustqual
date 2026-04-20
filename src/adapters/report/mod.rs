@@ -62,8 +62,10 @@ pub struct AnalysisResult {
     pub architecture_findings: Vec<crate::domain::Finding>,
     /// `// qual:allow(...)` markers that matched no finding in their
     /// annotation window — stale or misplaced suppressions that should
-    /// be removed or corrected. Coupling-only markers are skipped
-    /// because coupling warnings are module-global.
+    /// be removed or corrected. Coupling-only markers are verified
+    /// against line-anchored Coupling findings (Structural OI/SIT/DEH/IET)
+    /// if present; when the file has only module-global coupling reports,
+    /// the marker is skipped rather than falsely flagged as orphan.
     pub orphan_suppressions: Vec<OrphanSuppressionWarning>,
 }
 

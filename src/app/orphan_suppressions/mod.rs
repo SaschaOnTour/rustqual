@@ -46,9 +46,14 @@ enum MatchMode {
 /// Detect `// qual:allow(...)` markers that do not match any finding
 /// within their annotation window. Bare `// qual:allow` (no
 /// dimensions) is a wildcard and matches any finding in range.
-/// Markers that only suppress Coupling are skipped because coupling
-/// warnings are module-global and have no point location a
-/// line-scoped check could verify.
+///
+/// Coupling-only markers are handled specially: they are verifiable
+/// when the file has at least one line-anchored Coupling finding
+/// (e.g. a Structural OI/SIT/DEH/IET warning carries `dimension ==
+/// Coupling`). If the file has no line-anchored Coupling position —
+/// only pure module-global coupling / cycle / SDP reports — the
+/// marker is skipped (not reported as orphan), because we cannot
+/// verify line-scoped match against a module-scoped finding.
 /// Integration: collects finding positions, then filters unmatched markers.
 pub(crate) fn detect_orphan_suppressions(
     suppression_lines: &HashMap<String, Vec<Suppression>>,

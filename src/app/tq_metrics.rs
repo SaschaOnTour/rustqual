@@ -8,23 +8,26 @@ use crate::report::Summary;
 pub(super) fn compute_tq(
     parsed: &[(String, String, syn::File)],
     config: &Config,
-    scope: &crate::adapters::analyzers::iosp::scope::ProjectScope,
     all_results: &[FunctionAnalysis],
     dead_code: &[crate::adapters::analyzers::dry::dead_code::DeadCodeWarning],
+    annotation_lines: &super::metrics::AnnotationLines<'_>,
 ) -> Option<crate::adapters::analyzers::tq::TqAnalysis> {
     if !config.test_quality.enabled {
         return None;
     }
+    let scope_refs: Vec<(&str, &syn::File)> = parsed
+        .iter()
+        .map(|(path, _, file)| (path.as_str(), file))
+        .collect();
+    let scope = crate::adapters::analyzers::iosp::scope::ProjectScope::from_files(&scope_refs);
     let mut declared_fns = crate::adapters::analyzers::dry::collect_declared_functions(parsed);
-    let api_lines = crate::adapters::source::filesystem::collect_api_lines(parsed);
     crate::adapters::analyzers::dry::dead_code::mark_api_declarations(
         &mut declared_fns,
-        &api_lines,
+        annotation_lines.api,
     );
-    let test_helper_lines = crate::adapters::source::filesystem::collect_test_helper_lines(parsed);
     crate::adapters::analyzers::dry::dead_code::mark_test_helper_declarations(
         &mut declared_fns,
-        &test_helper_lines,
+        annotation_lines.test_helper,
     );
     let cfg_test_files =
         crate::adapters::analyzers::dry::dead_code::collect_cfg_test_file_paths(parsed);
@@ -37,7 +40,7 @@ pub(super) fn compute_tq(
         .map(std::path::Path::new);
     let ctx = crate::adapters::analyzers::tq::TqContext {
         parsed,
-        scope,
+        scope: &scope,
         config,
         declared_fns: &declared_fns,
         prod_calls: &prod_calls,
