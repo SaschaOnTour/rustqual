@@ -45,14 +45,14 @@ pub(crate) struct PubFnInfo<'ast> {
 /// `cfg_test_files`, and impl methods on private types are skipped.
 /// Integration: delegates per-file layer lookup + per-file collection.
 pub(crate) fn collect_pub_fns_by_layer<'ast>(
-    files: &'ast [(String, String, &'ast syn::File)],
+    files: &[(&'ast str, &'ast syn::File)],
     layers: &LayerDefinitions,
     cfg_test_files: &HashSet<String>,
 ) -> HashMap<String, Vec<PubFnInfo<'ast>>> {
     let visible_types = collect_visible_type_names_workspace(files, cfg_test_files);
     let mut out: HashMap<String, Vec<PubFnInfo<'ast>>> = HashMap::new();
-    for (path, _src, ast) in files {
-        if cfg_test_files.contains(path) {
+    for (path, ast) in files {
+        if cfg_test_files.contains(*path) {
             continue;
         }
         let Some(layer) = layers.layer_for_file(path) else {
@@ -60,7 +60,7 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
         };
         let layer = layer.to_string();
         let mut collector = PubFnCollector {
-            file: path.clone(),
+            file: path.to_string(),
             found: Vec::new(),
             visible_types: &visible_types,
             impl_stack: Vec::new(),
@@ -82,12 +82,12 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
 /// files both match; that's MVP-level imprecision — false positives
 /// (over-counting) rather than false negatives.
 fn collect_visible_type_names_workspace(
-    files: &[(String, String, &syn::File)],
+    files: &[(&str, &syn::File)],
     cfg_test_files: &HashSet<String>,
 ) -> HashSet<String> {
     let mut out = HashSet::new();
-    for (path, _, ast) in files {
-        if cfg_test_files.contains(path) {
+    for (path, ast) in files {
+        if cfg_test_files.contains(*path) {
             continue;
         }
         for item in &ast.items {

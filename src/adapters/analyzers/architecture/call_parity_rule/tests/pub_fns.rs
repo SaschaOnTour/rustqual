@@ -52,7 +52,7 @@ fn test_collect_pub_fns_in_layer_free_fn() {
         pub fn cmd_stats() {}
         "#,
     );
-    let files = vec![("src/cli/handlers.rs".to_string(), "".to_string(), &file)];
+    let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = collect_pub_fns_by_layer(&files, &adapter_layers(), &HashSet::new());
     let cli = names_for_layer(&by_layer, "cli");
     assert!(cli.contains("cmd_stats"), "cli = {cli:?}");
@@ -66,7 +66,7 @@ fn test_collect_pub_fns_skips_private_fns() {
         pub fn cmd_stats() {}
         "#,
     );
-    let files = vec![("src/cli/handlers.rs".to_string(), "".to_string(), &file)];
+    let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = collect_pub_fns_by_layer(&files, &adapter_layers(), &HashSet::new());
     let cli = names_for_layer(&by_layer, "cli");
     assert!(cli.contains("cmd_stats"));
@@ -83,7 +83,7 @@ fn test_pub_crate_is_treated_as_public_for_intra_crate_layers() {
         pub(crate) fn cmd_stats() {}
         "#,
     );
-    let files = vec![("src/cli/handlers.rs".to_string(), "".to_string(), &file)];
+    let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = collect_pub_fns_by_layer(&files, &adapter_layers(), &HashSet::new());
     let cli = names_for_layer(&by_layer, "cli");
     assert!(cli.contains("cmd_stats"), "pub(crate) must be collected");
@@ -97,7 +97,7 @@ fn test_pub_super_and_pub_in_path_treated_as_public() {
         pub(in crate::cli) fn cmd_b() {}
         "#,
     );
-    let files = vec![("src/cli/handlers.rs".to_string(), "".to_string(), &file)];
+    let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = collect_pub_fns_by_layer(&files, &adapter_layers(), &HashSet::new());
     let cli = names_for_layer(&by_layer, "cli");
     assert!(cli.contains("cmd_a"));
@@ -115,11 +115,7 @@ fn test_collect_pub_fns_collects_pub_impl_methods_for_pub_type() {
         }
         "#,
     );
-    let files = vec![(
-        "src/application/session.rs".to_string(),
-        "".to_string(),
-        &file,
-    )];
+    let files = vec![("src/application/session.rs", &file)];
     let by_layer = collect_pub_fns_by_layer(&files, &adapter_layers(), &HashSet::new());
     let app = names_for_layer(&by_layer, "application");
     assert!(app.contains("search"), "pub impl method must be collected");
@@ -144,16 +140,8 @@ fn test_collect_pub_fns_recognises_impl_across_files() {
         "#,
     );
     let files = vec![
-        (
-            "src/application/session.rs".to_string(),
-            "".to_string(),
-            &decl_file,
-        ),
-        (
-            "src/application/session_impls.rs".to_string(),
-            "".to_string(),
-            &impl_file,
-        ),
+        ("src/application/session.rs", &decl_file),
+        ("src/application/session_impls.rs", &impl_file),
     ];
     let by_layer = collect_pub_fns_by_layer(&files, &adapter_layers(), &HashSet::new());
     let app = names_for_layer(&by_layer, "application");
@@ -176,11 +164,7 @@ fn test_collect_pub_fns_skips_impl_methods_on_private_type() {
         }
         "#,
     );
-    let files = vec![(
-        "src/application/session.rs".to_string(),
-        "".to_string(),
-        &file,
-    )];
+    let files = vec![("src/application/session.rs", &file)];
     let by_layer = collect_pub_fns_by_layer(&files, &adapter_layers(), &HashSet::new());
     let app = names_for_layer(&by_layer, "application");
     assert!(
@@ -195,13 +179,9 @@ fn test_collect_pub_fns_groups_by_layer() {
     let mcp_file = parse("pub fn handle_stats() {}");
     let app_file = parse("pub fn get_stats() {}");
     let files = vec![
-        ("src/cli/handlers.rs".to_string(), "".to_string(), &cli_file),
-        ("src/mcp/handlers.rs".to_string(), "".to_string(), &mcp_file),
-        (
-            "src/application/stats.rs".to_string(),
-            "".to_string(),
-            &app_file,
-        ),
+        ("src/cli/handlers.rs", &cli_file),
+        ("src/mcp/handlers.rs", &mcp_file),
+        ("src/application/stats.rs", &app_file),
     ];
     let by_layer = collect_pub_fns_by_layer(&files, &adapter_layers(), &HashSet::new());
     assert_eq!(
@@ -221,7 +201,7 @@ fn test_collect_pub_fns_groups_by_layer() {
 #[test]
 fn test_collect_pub_fns_skips_cfg_test_files() {
     let file = parse("pub fn cmd_stats() {}");
-    let files = vec![("src/cli/handlers.rs".to_string(), "".to_string(), &file)];
+    let files = vec![("src/cli/handlers.rs", &file)];
     let mut cfg_test = HashSet::new();
     cfg_test.insert("src/cli/handlers.rs".to_string());
     let by_layer = collect_pub_fns_by_layer(&files, &adapter_layers(), &cfg_test);
@@ -240,7 +220,7 @@ fn test_collect_pub_fns_skips_test_attr_fns() {
         pub fn cmd_stats() {}
         "#,
     );
-    let files = vec![("src/cli/handlers.rs".to_string(), "".to_string(), &file)];
+    let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = collect_pub_fns_by_layer(&files, &adapter_layers(), &HashSet::new());
     let cli = names_for_layer(&by_layer, "cli");
     assert!(cli.contains("cmd_stats"));
@@ -252,7 +232,7 @@ fn test_collect_pub_fns_skips_unmatched_files() {
     // File not covered by any layer — its pub fns are not part of the
     // call-parity scope (neither as adapter member nor as target).
     let file = parse("pub fn free_floating() {}");
-    let files = vec![("src/utils/misc.rs".to_string(), "".to_string(), &file)];
+    let files = vec![("src/utils/misc.rs", &file)];
     let by_layer = collect_pub_fns_by_layer(&files, &adapter_layers(), &HashSet::new());
     for layer in ["application", "cli", "mcp"] {
         assert!(

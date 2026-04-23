@@ -191,16 +191,16 @@ impl WalkState {
 /// canonical calls (via `collect_canonical_calls`) becomes an edge.
 /// Integration: walks files + delegates per-fn canonical-call collection.
 pub(crate) fn build_call_graph<'ast>(
-    files: &'ast [(String, String, &'ast syn::File)],
+    files: &[(&'ast str, &'ast syn::File)],
     aliases_per_file: &HashMap<String, HashMap<String, Vec<String>>>,
     cfg_test_files: &HashSet<String>,
 ) -> CallGraph {
     let mut graph = CallGraph::new();
-    for (path, _src, ast) in files {
-        if cfg_test_files.contains(path) {
+    for (path, ast) in files {
+        if cfg_test_files.contains(*path) {
             continue;
         }
-        let Some(alias_map) = aliases_per_file.get(path) else {
+        let Some(alias_map) = aliases_per_file.get(*path) else {
             continue;
         };
         let local_symbols = collect_local_symbols(ast);

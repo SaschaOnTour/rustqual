@@ -49,16 +49,12 @@ pub fn collect_findings(
         .map(|f| (f.path.as_str(), &f.ast))
         .collect();
     let cfg_test_files = collect_cfg_test_file_paths_from_refs(&refs);
-    let borrowed: Vec<(String, String, &syn::File)> = refs
-        .iter()
-        .map(|(p, f)| (p.to_string(), String::new(), *f))
-        .collect();
     let aliases_per_file: HashMap<String, HashMap<String, Vec<String>>> = refs
         .iter()
         .map(|(p, f)| (p.to_string(), gather_alias_map(f)))
         .collect();
-    let pub_fns = pub_fns::collect_pub_fns_by_layer(&borrowed, &compiled.layers, &cfg_test_files);
-    let graph = workspace_graph::build_call_graph(&borrowed, &aliases_per_file, &cfg_test_files);
+    let pub_fns = pub_fns::collect_pub_fns_by_layer(&refs, &compiled.layers, &cfg_test_files);
+    let graph = workspace_graph::build_call_graph(&refs, &aliases_per_file, &cfg_test_files);
     let mut out = Vec::new();
     for hit in check_a::check_no_delegation(&pub_fns, &graph, &compiled.layers, cp) {
         out.push(project_call_parity(hit));

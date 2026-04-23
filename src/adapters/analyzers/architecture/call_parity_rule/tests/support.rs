@@ -38,10 +38,8 @@ pub(super) fn build_workspace(entries: &[(&str, &str)]) -> Workspace {
     }
 }
 
-/// Borrow the parsed files as `&syn::File` for the check entry points.
-pub(super) fn borrowed_files(ws: &Workspace) -> Vec<(String, String, &syn::File)> {
-    ws.files
-        .iter()
-        .map(|(p, s, f)| (p.clone(), s.clone(), f))
-        .collect()
+/// Borrow the parsed files as `(&path, &syn::File)` — the shape the
+/// graph + pub-fn collectors accept. Tied to `ws`'s lifetime.
+pub(super) fn borrowed_files(ws: &Workspace) -> Vec<(&str, &syn::File)> {
+    ws.files.iter().map(|(p, _, f)| (p.as_str(), f)).collect()
 }
