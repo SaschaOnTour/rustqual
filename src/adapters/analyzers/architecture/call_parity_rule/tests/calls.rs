@@ -5,6 +5,7 @@
 use crate::adapters::analyzers::architecture::call_parity_rule::calls::{
     collect_canonical_calls, FnContext,
 };
+use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::collect_local_symbols;
 use crate::adapters::shared::use_tree::gather_alias_map;
 use std::collections::{HashMap, HashSet};
 
@@ -22,12 +23,18 @@ fn parse_type(src: &str) -> syn::Type {
 struct FileCtx {
     file: syn::File,
     alias_map: HashMap<String, Vec<String>>,
+    local_symbols: HashSet<String>,
 }
 
 fn load(src: &str) -> FileCtx {
     let file = parse_file(src);
     let alias_map = gather_alias_map(&file);
-    FileCtx { file, alias_map }
+    let local_symbols = collect_local_symbols(&file);
+    FileCtx {
+        file,
+        alias_map,
+        local_symbols,
+    }
 }
 
 fn find_fn<'a>(file: &'a syn::File, name: &str) -> &'a syn::ItemFn {
@@ -90,6 +97,7 @@ fn ctx_for_fn<'a>(fctx: &'a FileCtx, fn_name: &str, importing_file: &'a str) -> 
         signature_params: sig_params(&f.sig),
         self_type: None,
         alias_map: &fctx.alias_map,
+        local_symbols: &fctx.local_symbols,
         importing_file,
     }
 }
@@ -257,6 +265,7 @@ fn test_collect_self_dispatch_in_impl() {
         signature_params: sig_params(&f.sig),
         self_type: self_ty,
         alias_map: &fctx.alias_map,
+        local_symbols: &fctx.local_symbols,
         importing_file: "src/application/session.rs",
     };
     let calls = collect_canonical_calls(&ctx);
@@ -495,4 +504,85 @@ fn test_empty_body_yields_no_calls() {
     let ctx = ctx_for_fn(&fctx, "f", "src/cli/handlers.rs");
     let calls = collect_canonical_calls(&ctx);
     assert_eq!(calls, HashSet::<String>::new());
+}
+
+#[test]
+fn test_local_helper_call_resolves_to_crate_module() {
+    // Regression: `helper()` without a `use` statement is a valid Rust
+    // same-module call. Must resolve to `crate::<file_module>::helper`
+    // so the graph sees the edge — not `<bare>:helper` dead-end.
+    let fctx = load(
+        r#"
+        fn helper() {}
+        pub fn cmd_foo() {
+            helper();
+        }
+        "#,
+    );
+    let ctx = ctx_for_fn(&fctx, "cmd_foo", "src/cli/handlers.rs");
+    let calls = collect_canonical_calls(&ctx);
+    assert!(
+        calls.contains("crate::cli::handlers::helper"),
+        "local helper must resolve via file module, got {calls:?}"
+    );
+    assert!(
+        !calls.contains("<bare>:helper"),
+        "local helper must not fall back to bare, got {calls:?}"
+    );
+}
+
+#[test]
+fn test_external_call_without_use_still_falls_to_bare() {
+    // Conservative: if the first segment isn't in local_symbols (and no
+    // `use` aliased it), stay `<bare>:…`. Otherwise external crate or
+    // stdlib calls would be wrongly attributed to the local module.
+    let fctx = load(
+        r#"
+        pub fn cmd_foo() {
+            not_a_local_symbol();
+        }
+        "#,
+    );
+    let ctx = ctx_for_fn(&fctx, "cmd_foo", "src/cli/handlers.rs");
+    let calls = collect_canonical_calls(&ctx);
+    assert!(
+        calls.contains("<bare>:not_a_local_symbol"),
+        "unknown fn must stay bare, got {calls:?}"
+    );
+}
+
+#[test]
+fn test_qualified_impl_path_does_not_double_crate() {
+    // `impl crate::app::Session { fn search() }` — the impl header
+    // already gives a crate-rooted path. The canonical Self-target must
+    // be `crate::app::Session::search`, NOT
+    // `crate::<file_module>::crate::app::Session::search`.
+    let fctx = load(
+        r#"
+        impl crate::app::Session {
+            pub fn search(&self) {
+                Self::internal_helper();
+            }
+        }
+        "#,
+    );
+    let (item, f) = find_impl_fn(&fctx.file, "Session", "search");
+    let self_ty = canonical_of_impl_self(item);
+    let ctx = FnContext {
+        body: &f.block,
+        signature_params: sig_params(&f.sig),
+        self_type: self_ty,
+        alias_map: &fctx.alias_map,
+        local_symbols: &fctx.local_symbols,
+        importing_file: "src/other_file.rs",
+    };
+    let calls = collect_canonical_calls(&ctx);
+    assert!(
+        calls.contains("crate::app::Session::internal_helper"),
+        "qualified impl path must canonicalise as-is, got {calls:?}"
+    );
+    assert!(
+        !calls.iter().any(|c| c.contains("crate::crate::")),
+        "must not double-crate, got {calls:?}"
+    );
 }

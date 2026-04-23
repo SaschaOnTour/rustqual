@@ -41,11 +41,16 @@ pub struct FnContext<'a> {
     /// resolves correctly.
     pub signature_params: Vec<(String, &'a syn::Type)>,
     /// Type-path of the enclosing `impl` block, if any. Just the
-    /// type-name segments (e.g. `["RlmSession"]`). The importing file's
-    /// module path is prepended to form the canonical Self-target.
+    /// type-name segments (e.g. `["RlmSession"]`), or a crate-rooted
+    /// path like `["crate","foo","Bar"]` for `impl crate::foo::Bar`.
     pub self_type: Option<Vec<String>>,
     /// File-level import alias map (output of `gather_alias_map`).
     pub alias_map: &'a HashMap<String, Vec<String>>,
+    /// Set of top-level item names declared in the same file. Unqualified
+    /// calls (`helper()`, no `use` statement) whose first segment is in
+    /// this set resolve to `crate::<file_module>::<ident>` so the call
+    /// graph sees local delegation chains.
+    pub local_symbols: &'a HashSet<String>,
     /// File path of the fn under analysis. Used to resolve
     /// `crate::` / `self::` / `super::` prefixes and `Self::…`.
     pub importing_file: &'a str,
@@ -67,6 +72,7 @@ pub fn collect_canonical_calls(ctx: &FnContext<'_>) -> HashSet<String> {
 // visit-order invariants the walker depends on.
 struct CanonicalCallCollector<'a> {
     alias_map: &'a HashMap<String, Vec<String>>,
+    local_symbols: &'a HashSet<String>,
     importing_file: &'a str,
     /// Full canonical path of the enclosing impl's self-type (with
     /// `crate` prefix), if any — used to resolve `Self::method`.
@@ -82,14 +88,20 @@ struct CanonicalCallCollector<'a> {
 impl<'a> CanonicalCallCollector<'a> {
     fn new(ctx: &'a FnContext<'a>) -> Self {
         let self_type_canonical = ctx.self_type.as_ref().map(|segs| {
-            let mut base = file_to_module_segments(ctx.importing_file);
-            base.extend_from_slice(segs);
+            // Qualified impl path (`impl crate::foo::Bar { ... }`) — use
+            // as-is so Self::method canonicalises to `crate::foo::Bar::method`,
+            // matching graph nodes built via `canonical_fn_name`.
+            if segs.first().map(|s| s.as_str()) == Some("crate") {
+                return segs.clone();
+            }
             let mut full = vec!["crate".to_string()];
-            full.extend(base);
+            full.extend(file_to_module_segments(ctx.importing_file));
+            full.extend_from_slice(segs);
             full
         });
         Self {
             alias_map: ctx.alias_map,
+            local_symbols: ctx.local_symbols,
             importing_file: ctx.importing_file,
             self_type_canonical,
             signature_params: ctx.signature_params.clone(),
@@ -164,6 +176,19 @@ impl<'a> CanonicalCallCollector<'a> {
         if let Some(alias) = self.alias_map.get(&segments[0]) {
             let mut full = alias.clone();
             full.extend_from_slice(&segments[1..]);
+            return full.join("::");
+        }
+        // Same-module fallback: unqualified call whose first segment is
+        // a top-level item in the same file resolves to
+        // `crate::<file_module>::<segments>`. Without this, idiomatic
+        // Rust like `fn helper() {}` + `pub fn cmd() { helper(); }`
+        // leaves `cmd → <bare>:helper` as a dead-end edge, and Check A
+        // can falsely report "no delegation" when the actual delegation
+        // flows through the local helper.
+        if self.local_symbols.contains(&segments[0]) {
+            let mut full = vec!["crate".to_string()];
+            full.extend(file_to_module_segments(self.importing_file));
+            full.extend_from_slice(segments);
             return full.join("::");
         }
         // Unknown path (external crate, stdlib, or not imported) → bare.

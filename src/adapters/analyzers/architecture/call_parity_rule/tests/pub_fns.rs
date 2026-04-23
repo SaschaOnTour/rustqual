@@ -130,6 +130,40 @@ fn test_collect_pub_fns_collects_pub_impl_methods_for_pub_type() {
 }
 
 #[test]
+fn test_collect_pub_fns_recognises_impl_across_files() {
+    // Regression: `pub struct Session` in one file, `impl Session { pub
+    // fn search() }` in another — the workspace-wide visible-type set
+    // must let the impl methods through, otherwise Check B misses
+    // legitimate target-layer API.
+    let decl_file = parse("pub struct Session;");
+    let impl_file = parse(
+        r#"
+        impl Session {
+            pub fn search(&self) {}
+        }
+        "#,
+    );
+    let files = vec![
+        (
+            "src/application/session.rs".to_string(),
+            "".to_string(),
+            &decl_file,
+        ),
+        (
+            "src/application/session_impls.rs".to_string(),
+            "".to_string(),
+            &impl_file,
+        ),
+    ];
+    let by_layer = collect_pub_fns_by_layer(&files, &adapter_layers(), &HashSet::new());
+    let app = names_for_layer(&by_layer, "application");
+    assert!(
+        app.contains("search"),
+        "cross-file impl on pub type must be collected, got {app:?}"
+    );
+}
+
+#[test]
 fn test_collect_pub_fns_skips_impl_methods_on_private_type() {
     // Conservative: if the enclosing `impl Type { ... }` is for a private
     // (no-modifier) type, its pub methods aren't really reachable from

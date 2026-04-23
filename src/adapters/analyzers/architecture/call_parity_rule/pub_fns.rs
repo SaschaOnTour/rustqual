@@ -49,6 +49,7 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
     layers: &LayerDefinitions,
     cfg_test_files: &HashSet<String>,
 ) -> HashMap<String, Vec<PubFnInfo<'ast>>> {
+    let visible_types = collect_visible_type_names_workspace(files, cfg_test_files);
     let mut out: HashMap<String, Vec<PubFnInfo<'ast>>> = HashMap::new();
     for (path, _src, ast) in files {
         if cfg_test_files.contains(path) {
@@ -58,11 +59,10 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
             continue;
         };
         let layer = layer.to_string();
-        let visible_types = collect_visible_type_names(ast);
         let mut collector = PubFnCollector {
             file: path.clone(),
             found: Vec::new(),
-            visible_types,
+            visible_types: &visible_types,
             impl_stack: Vec::new(),
         };
         collector.visit_file(ast);
@@ -71,40 +71,66 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
     out
 }
 
-/// Pre-pass: collect the names of top-level struct / enum / union /
-/// trait / type-alias declarations whose visibility modifier makes them
-/// reachable (anything but `Visibility::Inherited`). Impl methods on
-/// types not in this set are skipped.
-fn collect_visible_type_names(ast: &syn::File) -> HashSet<String> {
-    ast.items
-        .iter()
-        .filter_map(|item| match item {
-            syn::Item::Struct(s) if is_visible(&s.vis) => Some(s.ident.to_string()),
-            syn::Item::Enum(e) if is_visible(&e.vis) => Some(e.ident.to_string()),
-            syn::Item::Union(u) if is_visible(&u.vis) => Some(u.ident.to_string()),
-            syn::Item::Trait(t) if is_visible(&t.vis) => Some(t.ident.to_string()),
-            syn::Item::Type(t) if is_visible(&t.vis) => Some(t.ident.to_string()),
-            _ => None,
-        })
-        .collect()
+/// Collect every visible (non-inherited-visibility) top-level type name
+/// across the whole non-test workspace. Impls on the same type name get
+/// counted as visible regardless of which file the impl lives in — so
+/// `pub struct Session` in `src/app/session.rs` and its `impl Session`
+/// in a companion file both contribute to the check.
+///
+/// The matching is string-equality on the last segment of the impl's
+/// self-type path. Two distinct types with the same name in different
+/// files both match; that's MVP-level imprecision — false positives
+/// (over-counting) rather than false negatives.
+fn collect_visible_type_names_workspace(
+    files: &[(String, String, &syn::File)],
+    cfg_test_files: &HashSet<String>,
+) -> HashSet<String> {
+    let mut out = HashSet::new();
+    for (path, _, ast) in files {
+        if cfg_test_files.contains(path) {
+            continue;
+        }
+        for item in &ast.items {
+            match item {
+                syn::Item::Struct(s) if is_visible(&s.vis) => {
+                    out.insert(s.ident.to_string());
+                }
+                syn::Item::Enum(e) if is_visible(&e.vis) => {
+                    out.insert(e.ident.to_string());
+                }
+                syn::Item::Union(u) if is_visible(&u.vis) => {
+                    out.insert(u.ident.to_string());
+                }
+                syn::Item::Trait(t) if is_visible(&t.vis) => {
+                    out.insert(t.ident.to_string());
+                }
+                syn::Item::Type(t) if is_visible(&t.vis) => {
+                    out.insert(t.ident.to_string());
+                }
+                _ => {}
+            }
+        }
+    }
+    out
 }
 
 /// Workspace-walker — visits items, tracks impl-type visibility
 /// for nested impl methods, collects pub fn metadata.
-struct PubFnCollector<'ast> {
+struct PubFnCollector<'ast, 'vis> {
     file: String,
     found: Vec<PubFnInfo<'ast>>,
-    /// Pre-computed set of type names in this file whose declaration
-    /// carries a visibility modifier (pub / pub(crate) / pub(super) /
-    /// pub(in path)). Impl methods on any type not in this set are
-    /// skipped — impls on private types aren't reachable from outside.
-    visible_types: HashSet<String>,
+    /// Workspace-wide set of type names whose declaration carries a
+    /// visibility modifier. Impls on any type not in this set are
+    /// skipped — impls on private types aren't reachable from outside
+    /// their declaring file. Shared across files so cross-file impls
+    /// on a `pub struct` are correctly recognised.
+    visible_types: &'vis HashSet<String>,
     /// Stack of enclosing `impl` blocks: `(self-type segments, is-visible)`.
     /// Merged so the two halves can't drift out of sync.
     impl_stack: Vec<(Vec<String>, bool)>,
 }
 
-impl<'ast> PubFnCollector<'ast> {
+impl<'ast, 'vis> PubFnCollector<'ast, 'vis> {
     fn current_self_type(&self) -> Option<Vec<String>> {
         self.impl_stack.last().map(|(segs, _)| segs.clone())
     }
@@ -144,7 +170,7 @@ fn is_test_fn(attrs: &[syn::Attribute]) -> bool {
     has_test_attr(attrs) || has_cfg_test(attrs)
 }
 
-impl<'ast> Visit<'ast> for PubFnCollector<'ast> {
+impl<'ast, 'vis> Visit<'ast> for PubFnCollector<'ast, 'vis> {
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
         if is_visible(&node.vis) && !is_test_fn(&node.attrs) {
             let line = syn::spanned::Spanned::span(&node.sig.ident).start().line;

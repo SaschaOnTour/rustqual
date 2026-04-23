@@ -66,14 +66,57 @@ pub(crate) fn canonical_name_for_pub_fn(info: &super::pub_fns::PubFnInfo<'_>) ->
 /// between `canonical_name_for_pub_fn` (which adapts a `PubFnInfo`) and
 /// `FileFnCollector::canonical_name` (which composes segments during
 /// the graph walk).
+///
+/// Qualified impl paths (`impl crate::foo::Bar { ... }`) are used as-is
+/// — if the user already spelled out the canonical path in the impl
+/// header, we must not prepend the file's module segments or we'd
+/// produce `crate::<file_mod>::crate::foo::Bar::method`, which never
+/// matches receiver-tracked method targets.
 fn canonical_fn_name(file: &str, self_type: Option<&[String]>, fn_name: &str) -> String {
-    let mut segs: Vec<String> = vec!["crate".to_string()];
-    segs.extend(file_to_module_segments(file));
-    if let Some(impl_segs) = self_type {
-        segs.extend(impl_segs.iter().cloned());
+    let mut segs: Vec<String> = Vec::new();
+    match self_type {
+        Some(impl_segs) if is_crate_rooted(impl_segs) => {
+            segs.extend(impl_segs.iter().cloned());
+        }
+        Some(impl_segs) => {
+            segs.push("crate".to_string());
+            segs.extend(file_to_module_segments(file));
+            segs.extend(impl_segs.iter().cloned());
+        }
+        None => {
+            segs.push("crate".to_string());
+            segs.extend(file_to_module_segments(file));
+        }
     }
     segs.push(fn_name.to_string());
     segs.join("::")
+}
+
+fn is_crate_rooted(segments: &[String]) -> bool {
+    segments.first().map(|s| s.as_str()) == Some("crate")
+}
+
+/// Collect the names of top-level items declared in this file — fns,
+/// mods, types, consts, statics. The call collector uses this set to
+/// resolve unqualified calls like `helper()` (without a `use`
+/// statement) into `crate::<file_module>::helper`, instead of bare-name
+/// dead-ends that disconnect local delegation chains.
+pub(crate) fn collect_local_symbols(ast: &syn::File) -> HashSet<String> {
+    ast.items
+        .iter()
+        .filter_map(|item| match item {
+            syn::Item::Fn(f) => Some(f.sig.ident.to_string()),
+            syn::Item::Mod(m) => Some(m.ident.to_string()),
+            syn::Item::Struct(s) => Some(s.ident.to_string()),
+            syn::Item::Enum(e) => Some(e.ident.to_string()),
+            syn::Item::Union(u) => Some(u.ident.to_string()),
+            syn::Item::Trait(t) => Some(t.ident.to_string()),
+            syn::Item::Type(t) => Some(t.ident.to_string()),
+            syn::Item::Const(c) => Some(c.ident.to_string()),
+            syn::Item::Static(s) => Some(s.ident.to_string()),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Extract `(name, &Type)` pairs for every typed positional parameter
@@ -160,9 +203,11 @@ pub(crate) fn build_call_graph<'ast>(
         let Some(alias_map) = aliases_per_file.get(path) else {
             continue;
         };
+        let local_symbols = collect_local_symbols(ast);
         let mut collector = FileFnCollector {
             path,
             alias_map,
+            local_symbols: &local_symbols,
             impl_type_stack: Vec::new(),
             graph: &mut graph,
         };
@@ -174,6 +219,7 @@ pub(crate) fn build_call_graph<'ast>(
 struct FileFnCollector<'a> {
     path: &'a str,
     alias_map: &'a HashMap<String, Vec<String>>,
+    local_symbols: &'a HashSet<String>,
     impl_type_stack: Vec<Vec<String>>,
     graph: &'a mut CallGraph,
 }
@@ -192,6 +238,7 @@ impl<'a> FileFnCollector<'a> {
             signature_params: extract_signature_params(sig),
             self_type,
             alias_map: self.alias_map,
+            local_symbols: self.local_symbols,
             importing_file: self.path,
         };
         let calls = collect_canonical_calls(&ctx);
