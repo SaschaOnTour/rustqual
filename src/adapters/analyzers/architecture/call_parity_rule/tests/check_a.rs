@@ -48,9 +48,7 @@ fn run_check_a(
     ws: &Workspace,
     layers: &LayerDefinitions,
     cp: &CompiledCallParity,
-    call_depth: Option<usize>,
 ) -> Vec<MatchLocation> {
-    let _ = call_depth; // honoured via the compiled config
     let borrowed = borrowed_files(ws);
     let cfg_test = HashSet::new();
     let pub_fns = collect_pub_fns_by_layer(&borrowed, layers, &cfg_test);
@@ -86,7 +84,7 @@ fn test_adapter_fn_direct_delegation_passes() {
     ]);
     let layers = three_layer();
     let cp = call_parity_config(3);
-    let findings = run_check_a(&ws, &layers, &cp, None);
+    let findings = run_check_a(&ws, &layers, &cp);
     assert!(
         assert_no_delegation_fn_names(&findings).is_empty(),
         "direct delegation should pass, got {findings:?}"
@@ -106,7 +104,7 @@ fn test_adapter_fn_inline_impl_fails() {
             "#,
         ),
     ]);
-    let findings = run_check_a(&ws, &three_layer(), &call_parity_config(3), None);
+    let findings = run_check_a(&ws, &three_layer(), &call_parity_config(3));
     let names = assert_no_delegation_fn_names(&findings);
     assert!(
         names.contains(&"cmd_stats".to_string()),
@@ -137,7 +135,7 @@ fn test_adapter_fn_transitive_delegation_via_helper_passes() {
             "#,
         ),
     ]);
-    let findings = run_check_a(&ws, &three_layer(), &call_parity_config(3), None);
+    let findings = run_check_a(&ws, &three_layer(), &call_parity_config(3));
     let names = assert_no_delegation_fn_names(&findings);
     assert!(
         !names.contains(&"cmd_stats".to_string()),
@@ -169,7 +167,7 @@ fn test_adapter_fn_transitive_depth_exceeds_limit_fails() {
             "#,
         ),
     ]);
-    let findings = run_check_a(&ws, &three_layer(), &call_parity_config(3), None);
+    let findings = run_check_a(&ws, &three_layer(), &call_parity_config(3));
     let names = assert_no_delegation_fn_names(&findings);
     assert!(
         names.contains(&"cmd_stats".to_string()),
@@ -198,7 +196,7 @@ fn test_call_depth_1_only_direct_calls() {
             "#,
         ),
     ]);
-    let findings = run_check_a(&ws, &three_layer(), &call_parity_config(1), None);
+    let findings = run_check_a(&ws, &three_layer(), &call_parity_config(1));
     let names = assert_no_delegation_fn_names(&findings);
     assert!(
         names.contains(&"cmd_stats".to_string()),
@@ -221,7 +219,7 @@ fn test_adapter_fn_method_call_does_not_count() {
             "#,
         ),
     ]);
-    let findings = run_check_a(&ws, &three_layer(), &call_parity_config(3), None);
+    let findings = run_check_a(&ws, &three_layer(), &call_parity_config(3));
     let names = assert_no_delegation_fn_names(&findings);
     assert!(
         names.contains(&"cmd_stats".to_string()),
@@ -249,7 +247,7 @@ fn test_adapter_fn_cross_adapter_call_does_not_count() {
             "#,
         ),
     ]);
-    let findings = run_check_a(&ws, &three_layer(), &call_parity_config(1), None);
+    let findings = run_check_a(&ws, &three_layer(), &call_parity_config(1));
     // At depth 1, cmd_stats only reaches handle_stats (in mcp, not app). → fail.
     let names = assert_no_delegation_fn_names(&findings);
     assert!(
@@ -280,7 +278,7 @@ fn test_adapter_fn_cross_adapter_call_counted_at_deeper_depth() {
             "#,
         ),
     ]);
-    let findings = run_check_a(&ws, &three_layer(), &call_parity_config(2), None);
+    let findings = run_check_a(&ws, &three_layer(), &call_parity_config(2));
     let names = assert_no_delegation_fn_names(&findings);
     assert!(
         !names.contains(&"cmd_stats".to_string()),
@@ -327,7 +325,7 @@ fn test_adapter_fn_not_in_any_adapter_layer_ignored() {
             "#,
         ),
     ]);
-    let findings = run_check_a(&ws, &three_layer(), &call_parity_config(3), None);
+    let findings = run_check_a(&ws, &three_layer(), &call_parity_config(3));
     assert!(
         findings.is_empty(),
         "non-adapter-layer fn must not be checked"
@@ -341,7 +339,7 @@ fn test_finding_line_is_fn_sig_line() {
         ("src/application/stats.rs", "pub fn get_stats() {}"),
         ("src/cli/handlers.rs", src),
     ]);
-    let findings = run_check_a(&ws, &three_layer(), &call_parity_config(3), None);
+    let findings = run_check_a(&ws, &three_layer(), &call_parity_config(3));
     let finding = findings
         .iter()
         .find(|f| matches!(f.kind, ViolationKind::CallParityNoDelegation { .. }))
@@ -388,7 +386,7 @@ fn test_convergent_graph_does_not_double_enqueue() {
             "#,
         ),
     ]);
-    let findings = run_check_a(&ws, &three_layer(), &call_parity_config(3), None);
+    let findings = run_check_a(&ws, &three_layer(), &call_parity_config(3));
     let names = assert_no_delegation_fn_names(&findings);
     assert!(
         !names.contains(&"cmd_x".to_string()),

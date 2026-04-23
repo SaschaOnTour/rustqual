@@ -67,14 +67,16 @@ pub fn collect_findings(
 
 /// `collect_cfg_test_file_paths` takes an owned-tuple slice — refactoring
 /// it to accept references would ripple across the dry / tq pipelines,
-/// so we absorb the clone here. `syn::File::clone` is a full structural
-/// AST copy, not cheap; amortised over one invocation per analysis run
-/// on workspace-bounded size. Follow-up: thread cfg_test_files through
-/// `AnalysisContext` to eliminate this clone.
+/// so we absorb the cost here. The middle element (source content) is
+/// never read by cfg-test detection, so we pass `String::new()` to skip
+/// that clone. The AST clone is a full structural copy — the remaining
+/// cost; follow-up: thread an already-computed `cfg_test_files` through
+/// `AnalysisContext` (the main pipeline already builds it) so this rule
+/// can drop the clone entirely.
 fn clone_ctx_files(ctx: &AnalysisContext<'_>) -> Vec<(String, String, syn::File)> {
     ctx.files
         .iter()
-        .map(|f| (f.path.clone(), f.content.clone(), f.ast.clone()))
+        .map(|f| (f.path.clone(), String::new(), f.ast.clone()))
         .collect()
 }
 
