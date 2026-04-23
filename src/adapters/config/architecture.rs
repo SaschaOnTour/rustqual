@@ -51,6 +51,14 @@ pub struct ArchitectureConfig {
     /// Trait-signature rules: `[[architecture.trait_contract]]`.
     #[serde(rename = "trait_contract")]
     pub trait_contracts: Vec<TraitContract>,
+
+    /// Call-parity check: `[architecture.call_parity]`.
+    ///
+    /// When `Some`, enforces that peer adapter layers delegate to a shared
+    /// target layer (Check A) and that target-layer pub fns are reached from
+    /// every adapter layer (Check B). When `None`, the check is inert.
+    #[serde(default)]
+    pub call_parity: Option<CallParityConfig>,
 }
 
 /// `[architecture.layers]` — layer order + per-layer path definitions.
@@ -219,6 +227,44 @@ pub struct TraitContract {
     /// Direct supertrait clause must contain these substrings (non-transitive).
     #[serde(default)]
     pub required_supertraits_contain: Option<Vec<String>>,
+}
+
+/// `[architecture.call_parity]` — cross-adapter delegation check.
+///
+/// Declares a set of peer adapter layers (e.g. `cli`, `mcp`, `rest`) and a
+/// shared target layer (e.g. `application`). Two checks run under one rule:
+///
+/// 1. **No-delegation**: each `pub fn` in an adapter layer must transitively
+///    (up to `call_depth` hops) call into the target layer.
+/// 2. **Missing-adapter**: each `pub fn` in the target layer must be
+///    (transitively) reached from every adapter layer.
+///
+/// `exclude_targets` is a glob list silencing Check-B for legitimately
+/// asymmetric target fns (setup, debug-only endpoints). Fn-level escape
+/// via `// qual:allow(architecture)`.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(deny_unknown_fields)]
+pub struct CallParityConfig {
+    /// Layer names that act as peer adapters. Must exist in
+    /// `[architecture.layers]`, be disjoint from each other and from `target`.
+    pub adapters: Vec<String>,
+
+    /// Target layer name that adapters delegate into. Must exist in
+    /// `[architecture.layers]` and not overlap `adapters`.
+    pub target: String,
+
+    /// Transitive call-graph depth for both checks. Default 3, range 1..=10.
+    #[serde(default = "default_call_depth")]
+    pub call_depth: usize,
+
+    /// Glob patterns (matched against canonical `<layer>::<path>::<fn>`)
+    /// that silence Check-B (missing-adapter) for matching target fns.
+    #[serde(default)]
+    pub exclude_targets: Vec<String>,
+}
+
+pub(crate) fn default_call_depth() -> usize {
+    3
 }
 
 // ── Tests ──────────────────────────────────────────────────────

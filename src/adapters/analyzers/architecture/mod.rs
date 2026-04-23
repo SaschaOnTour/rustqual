@@ -11,11 +11,13 @@
 #![cfg_attr(test, allow(dead_code, unused_imports))]
 
 pub mod analyzer;
+pub mod call_parity_rule;
 pub mod compiled;
 pub mod explain;
 pub mod forbidden_rule;
 pub mod layer_rule;
 pub mod matcher;
+pub(crate) mod rendering;
 pub mod trait_contract_rule;
 pub mod violation;
 

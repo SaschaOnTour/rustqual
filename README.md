@@ -828,6 +828,45 @@ Checks: `receiver_may_be`, `methods_must_be_async`,
 `required_supertraits_contain`, `must_be_object_safe` (conservative: flags
 `Self` returns and method-level generics), `forbidden_error_variant_contains`.
 
+**5. `[architecture.call_parity]` — cross-adapter delegation drift check (v1.1).**
+Detects when N peer adapters (CLI + MCP + REST + …) fall out of sync
+with the shared Application layer. Two rules run under one config
+section:
+
+- **`no_delegation`** — each `pub fn` in an adapter layer must
+  transitively call into the target layer within `call_depth` hops.
+  Catches adapter handlers that inline business logic instead of
+  delegating to the shared dispatcher.
+- **`missing_adapter`** — each `pub fn` in the target layer must be
+  reached from every adapter layer. Catches asymmetric ausbau
+  (e.g. CLI + MCP call `application::do_thing`, REST doesn't).
+
+```toml
+[architecture.call_parity]
+adapters = ["cli", "mcp", "rest"]   # layer names from [architecture.layers]
+target   = "application"
+call_depth = 3                       # transitive BFS depth (default 3)
+exclude_targets = ["application::setup::*"]  # glob escape for legit asymmetry
+```
+
+Zero per-function annotation: adapter fns are enumerated automatically
+from the layer globs you already have. Receiver-type tracking resolves
+`let s = Session::open(); s.search();` idioms through `let` bindings,
+`fn` signatures, and common wrappers (`Arc<T>`, `Box<T>`, `Rc<T>`,
+`&T`, `&mut T`, `Cow<'_, T>`), so Session/Service/Context-pattern
+architectures aren't 100% false-positive out of the box.
+
+Two escape mechanisms:
+- `exclude_targets` — glob list in config for whole groups of
+  legitimately asymmetric target fns.
+- `// qual:allow(architecture)` — per-fn escape for individual
+  exceptions. Counts against `max_suppression_ratio`.
+
+See `examples/architecture/call_parity/` for a runnable 3-adapter
+fixture. Known MVP limitation: factory-helper return types aren't
+inferred — `let s = helpers::open()?;` stays `<method>:search`.
+Workaround: explicit `let s: Session = helpers::open()?;`.
+
 **`--explain <FILE>`** diagnostic mode prints the file's layer assignment,
 classified imports, and rule hits — useful for understanding why a rule
 fires or when tuning config:

@@ -103,7 +103,10 @@ fn evaluate_import(
 /// `use crate::foo::*;`) — none of those can be turned into concrete
 /// candidate file paths in this crate.
 /// Operation: first-segment routing + path arithmetic, no own calls.
-fn resolve_to_crate_absolute(importing_file: &str, segments: &[String]) -> Option<Vec<String>> {
+pub(crate) fn resolve_to_crate_absolute(
+    importing_file: &str,
+    segments: &[String],
+) -> Option<Vec<String>> {
     let first = segments.first()?;
     let resolved = match first.as_str() {
         "crate" => segments[1..].to_vec(),
@@ -140,7 +143,7 @@ fn resolve_to_crate_absolute(importing_file: &str, segments: &[String]) -> Optio
 /// `src/foo.rs` → `["foo"]`; `src/foo/mod.rs` → `["foo"]`;
 /// `src/foo/bar.rs` → `["foo","bar"]`.
 /// Operation: path-component parsing, no own calls.
-fn file_to_module_segments(path: &str) -> Vec<String> {
+pub(crate) fn file_to_module_segments(path: &str) -> Vec<String> {
     let normalised = path.replace('\\', "/");
     let stripped = normalised.strip_prefix("src/").unwrap_or(&normalised);
     let without_ext = stripped.strip_suffix(".rs").unwrap_or(stripped);

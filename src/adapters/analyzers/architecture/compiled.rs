@@ -10,9 +10,10 @@
 use crate::adapters::analyzers::architecture::forbidden_rule::CompiledForbiddenRule;
 use crate::adapters::analyzers::architecture::layer_rule::{LayerDefinitions, UnmatchedBehavior};
 use crate::adapters::analyzers::architecture::trait_contract_rule::CompiledTraitContract;
+use crate::config::architecture::CallParityConfig;
 use crate::config::ArchitectureConfig;
 use globset::{Glob, GlobMatcher, GlobSet, GlobSetBuilder};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 type ExternalCrates = (HashMap<String, String>, Vec<(GlobMatcher, String)>);
 
@@ -26,6 +27,18 @@ pub struct CompiledArchitecture {
     pub external_glob: Vec<(GlobMatcher, String)>,
     pub forbidden: Vec<CompiledForbiddenRule>,
     pub trait_contracts: Vec<CompiledTraitContract>,
+    pub call_parity: Option<CompiledCallParity>,
+}
+
+/// Runtime-ready `[architecture.call_parity]` config. `exclude_targets` is
+/// pre-compiled into a `GlobSet`; layer names are validated against
+/// `[architecture.layers]` during compile.
+#[derive(Debug)]
+pub struct CompiledCallParity {
+    pub adapters: Vec<String>,
+    pub target: String,
+    pub call_depth: usize,
+    pub exclude_targets: GlobSet,
 }
 
 /// Compile the raw config into `CompiledArchitecture`.
@@ -37,6 +50,7 @@ pub fn compile_architecture(cfg: &ArchitectureConfig) -> Result<CompiledArchitec
     let (external_exact, external_glob) = compile_external_crates(&cfg.external_crates)?;
     let forbidden = compile_forbidden_rules(&cfg.forbidden_rules)?;
     let trait_contracts = compile_trait_contracts(&cfg.trait_contracts)?;
+    let call_parity = compile_call_parity(cfg.call_parity.as_ref(), &layers)?;
     Ok(CompiledArchitecture {
         layers,
         reexport_points,
@@ -45,7 +59,63 @@ pub fn compile_architecture(cfg: &ArchitectureConfig) -> Result<CompiledArchitec
         external_glob,
         forbidden,
         trait_contracts,
+        call_parity,
     })
+}
+
+const CALL_DEPTH_MAX: usize = 10;
+
+/// Compile `[architecture.call_parity]` into a runtime struct.
+/// Operation: field validation + glob compilation.
+fn compile_call_parity(
+    raw: Option<&CallParityConfig>,
+    layers: &LayerDefinitions,
+) -> Result<Option<CompiledCallParity>, String> {
+    let Some(cp) = raw else {
+        return Ok(None);
+    };
+    if cp.adapters.is_empty() {
+        return Err("call_parity.adapters must be non-empty".to_string());
+    }
+    if !(1..=CALL_DEPTH_MAX).contains(&cp.call_depth) {
+        return Err(format!(
+            "call_parity.call_depth must be in 1..={CALL_DEPTH_MAX}, got {}",
+            cp.call_depth
+        ));
+    }
+    let mut seen = HashSet::new();
+    for name in &cp.adapters {
+        if !seen.insert(name.as_str()) {
+            return Err(format!(
+                "call_parity.adapters must be disjoint — duplicate entry \"{name}\""
+            ));
+        }
+        if layers.rank_of(name).is_none() {
+            return Err(format!(
+                "call_parity.adapters references unknown layer \"{name}\" — not listed in [architecture.layers]"
+            ));
+        }
+    }
+    if seen.contains(cp.target.as_str()) {
+        return Err(format!(
+            "call_parity.target \"{}\" must not appear in call_parity.adapters",
+            cp.target
+        ));
+    }
+    if layers.rank_of(&cp.target).is_none() {
+        return Err(format!(
+            "call_parity.target references unknown layer \"{}\" — not listed in [architecture.layers]",
+            cp.target
+        ));
+    }
+    let exclude_targets = build_globset(&cp.exclude_targets)
+        .map_err(|e| format!("call_parity.exclude_targets: {e}"))?;
+    Ok(Some(CompiledCallParity {
+        adapters: cp.adapters.clone(),
+        target: cp.target.clone(),
+        call_depth: cp.call_depth,
+        exclude_targets,
+    }))
 }
 
 /// Compile `[[architecture.trait_contract]]` entries into runtime rules.
