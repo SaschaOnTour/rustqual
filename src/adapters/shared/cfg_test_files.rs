@@ -9,6 +9,13 @@
 use std::collections::HashSet;
 use std::path::Path;
 
+/// Borrowed workspace slice shape. The test-file detector never needs
+/// the source content (the middle `String` in the pipeline's parsed
+/// tuple), just path + AST — so the internal helpers only take these.
+/// Adapters (`collect_cfg_test_file_paths`) translate from their
+/// richer tuple shape without cloning the ASTs.
+type ParsedRefs<'a> = [(&'a str, &'a syn::File)];
+
 /// Compute the set of source paths that are reachable only under
 /// `#[cfg(test)]`. Combines direct hits with transitive propagation
 /// through plain `mod name;` chains inside test-only files.
@@ -17,6 +24,15 @@ use std::path::Path;
 pub(crate) fn collect_cfg_test_file_paths(
     parsed: &[(String, String, syn::File)],
 ) -> HashSet<String> {
+    let refs: Vec<(&str, &syn::File)> = parsed.iter().map(|(p, _, f)| (p.as_str(), f)).collect();
+    collect_cfg_test_file_paths_from_refs(&refs)
+}
+
+/// Borrowed variant for callers that don't have owned `syn::File`
+/// tuples on hand (e.g. the architecture analyzer running over
+/// `AnalysisContext`). Semantics identical to the owned form — the
+/// detector never reads the source content String, only path + AST.
+pub(crate) fn collect_cfg_test_file_paths_from_refs(parsed: &ParsedRefs<'_>) -> HashSet<String> {
     let resolver = ChildPathResolver::from_parsed(parsed);
     let mut set = direct_cfg_test_files(parsed, &resolver);
     set.extend(inner_cfg_test_files(parsed));
@@ -29,11 +45,11 @@ pub(crate) fn collect_cfg_test_file_paths(
 /// convention for "this whole file is test-only", commonly used on
 /// companion `*_tests.rs` files linked via `#[path]` redirects.
 /// Operation: iterates parsed files checking file-level attrs.
-fn inner_cfg_test_files(parsed: &[(String, String, syn::File)]) -> HashSet<String> {
+fn inner_cfg_test_files(parsed: &ParsedRefs<'_>) -> HashSet<String> {
     parsed
         .iter()
-        .filter(|(_, _, file)| super::cfg_test::has_cfg_test(&file.attrs))
-        .map(|(path, _, _)| path.clone())
+        .filter(|(_, file)| super::cfg_test::has_cfg_test(&file.attrs))
+        .map(|(path, _)| path.to_string())
         .collect()
 }
 
@@ -43,10 +59,10 @@ fn inner_cfg_test_files(parsed: &[(String, String, syn::File)]) -> HashSet<Strin
 /// under `src/**/tests/` are already reached via the `#[cfg(test)] mod`
 /// detection above.
 /// Operation: path-prefix filter, no own calls.
-fn integration_test_files(parsed: &[(String, String, syn::File)]) -> HashSet<String> {
+fn integration_test_files(parsed: &ParsedRefs<'_>) -> HashSet<String> {
     parsed
         .iter()
-        .map(|(path, _, _)| path.as_str())
+        .map(|(path, _)| *path)
         .filter(|p| p.starts_with("tests/"))
         .map(String::from)
         .collect()
@@ -60,9 +76,9 @@ struct ChildPathResolver<'a> {
 }
 
 impl<'a> ChildPathResolver<'a> {
-    fn from_parsed(parsed: &'a [(String, String, syn::File)]) -> Self {
+    fn from_parsed(parsed: &'a ParsedRefs<'a>) -> Self {
         Self {
-            known_paths: parsed.iter().map(|(p, _, _)| p.as_str()).collect(),
+            known_paths: parsed.iter().map(|(p, _)| *p).collect(),
         }
     }
 
@@ -144,18 +160,18 @@ fn path_attribute(attrs: &[syn::Attribute]) -> Option<String> {
 
 /// Files referenced by an explicit `#[cfg(test)] mod foo;` in a parent file.
 fn direct_cfg_test_files(
-    parsed: &[(String, String, syn::File)],
+    parsed: &ParsedRefs<'_>,
     resolver: &ChildPathResolver<'_>,
 ) -> HashSet<String> {
     let is_ext_cfg_test =
         |m: &syn::ItemMod| m.content.is_none() && super::cfg_test::has_cfg_test(&m.attrs);
     parsed
         .iter()
-        .flat_map(|(path, _, file)| {
+        .flat_map(|(path, file)| {
             file.items
                 .iter()
                 .filter_map(move |item| match item {
-                    syn::Item::Mod(m) if is_ext_cfg_test(m) => Some((path.as_str(), m)),
+                    syn::Item::Mod(m) if is_ext_cfg_test(m) => Some((*path, m)),
                     _ => None,
                 })
                 .collect::<Vec<_>>()
@@ -167,12 +183,12 @@ fn direct_cfg_test_files(
 /// Propagate cfg-test status through plain `mod foo;` chains until fix-point.
 /// A sub-module declared inside an already-cfg-test file becomes cfg-test too.
 fn propagate_cfg_test_through_plain_mods(
-    parsed: &[(String, String, syn::File)],
+    parsed: &ParsedRefs<'_>,
     resolver: &ChildPathResolver<'_>,
     set: &mut HashSet<String>,
 ) {
     let path_to_file: std::collections::HashMap<&str, &syn::File> =
-        parsed.iter().map(|(p, _, f)| (p.as_str(), f)).collect();
+        parsed.iter().map(|(p, f)| (*p, *f)).collect();
     let is_any_ext_mod = |m: &syn::ItemMod| m.content.is_none();
     loop {
         let new_children: Vec<String> = set

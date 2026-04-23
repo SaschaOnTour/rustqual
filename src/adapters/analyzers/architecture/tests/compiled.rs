@@ -354,3 +354,23 @@ fn test_layer_of_crate_path_rejects_non_crate_prefix() {
     assert_eq!(layers.layer_of_crate_path("std::fs::read"), None);
     assert_eq!(layers.layer_of_crate_path(""), None);
 }
+
+#[test]
+fn test_layer_of_crate_path_resolves_crate_root_items() {
+    // `crate::run` can target a fn declared directly in `src/lib.rs` or
+    // `src/main.rs`. Without a crate-root fallback, Check A would
+    // false-positive "no delegation" when an adapter calls such a fn.
+    let defs = vec![
+        (
+            "root".to_string(),
+            globset_for(&["src/lib.rs", "src/main.rs"]),
+        ),
+        ("adapter".to_string(), globset_for(&["src/cli/**"])),
+    ];
+    let layers = LayerDefinitions::new(vec!["root".to_string(), "adapter".to_string()], defs);
+    assert_eq!(
+        layers.layer_of_crate_path("crate::run"),
+        Some("root"),
+        "crate-root single-segment path must resolve to lib/main's layer"
+    );
+}

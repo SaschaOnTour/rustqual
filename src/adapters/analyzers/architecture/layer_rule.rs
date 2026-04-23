@@ -127,6 +127,15 @@ impl LayerDefinitions {
                 }
             }
         }
+        // Single-segment path (`crate::run`) may target an item declared
+        // directly in the crate root — probe `src/lib.rs` / `src/main.rs`
+        // last, after the per-segment candidates. Ordering keeps
+        // `crate::foo` preferring `src/foo.rs` when both exist.
+        if segments.len() == 1 {
+            return ["src/lib.rs", "src/main.rs"]
+                .iter()
+                .find_map(|c| self.layer_for_file(c));
+        }
         None
     }
 }

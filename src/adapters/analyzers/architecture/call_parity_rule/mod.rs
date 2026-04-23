@@ -23,7 +23,7 @@ pub mod workspace_graph;
 use crate::adapters::analyzers::architecture::compiled::CompiledArchitecture;
 use crate::adapters::analyzers::architecture::rendering::build_architecture_finding;
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
-use crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths;
+use crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths_from_refs;
 use crate::adapters::shared::use_tree::gather_alias_map;
 use crate::domain::{Finding, Severity};
 use crate::ports::AnalysisContext;
@@ -43,15 +43,19 @@ pub fn collect_findings(
     let Some(cp) = compiled.call_parity.as_ref() else {
         return Vec::new();
     };
-    let owned = clone_ctx_files(ctx);
-    let borrowed: Vec<(String, String, &syn::File)> = owned
+    let refs: Vec<(&str, &syn::File)> = ctx
+        .files
         .iter()
-        .map(|(p, s, f)| (p.clone(), s.clone(), f))
+        .map(|f| (f.path.as_str(), &f.ast))
         .collect();
-    let cfg_test_files = collect_cfg_test_file_paths(&owned);
-    let aliases_per_file: HashMap<String, HashMap<String, Vec<String>>> = borrowed
+    let cfg_test_files = collect_cfg_test_file_paths_from_refs(&refs);
+    let borrowed: Vec<(String, String, &syn::File)> = refs
         .iter()
-        .map(|(p, _, f)| (p.clone(), gather_alias_map(f)))
+        .map(|(p, f)| (p.to_string(), String::new(), *f))
+        .collect();
+    let aliases_per_file: HashMap<String, HashMap<String, Vec<String>>> = refs
+        .iter()
+        .map(|(p, f)| (p.to_string(), gather_alias_map(f)))
         .collect();
     let pub_fns = pub_fns::collect_pub_fns_by_layer(&borrowed, &compiled.layers, &cfg_test_files);
     let graph = workspace_graph::build_call_graph(&borrowed, &aliases_per_file, &cfg_test_files);
@@ -63,21 +67,6 @@ pub fn collect_findings(
         out.push(project_call_parity(hit));
     }
     out
-}
-
-/// `collect_cfg_test_file_paths` takes an owned-tuple slice — refactoring
-/// it to accept references would ripple across the dry / tq pipelines,
-/// so we absorb the cost here. The middle element (source content) is
-/// never read by cfg-test detection, so we pass `String::new()` to skip
-/// that clone. The AST clone is a full structural copy — the remaining
-/// cost; follow-up: thread an already-computed `cfg_test_files` through
-/// `AnalysisContext` (the main pipeline already builds it) so this rule
-/// can drop the clone entirely.
-fn clone_ctx_files(ctx: &AnalysisContext<'_>) -> Vec<(String, String, syn::File)> {
-    ctx.files
-        .iter()
-        .map(|f| (f.path.clone(), String::new(), f.ast.clone()))
-        .collect()
 }
 
 fn project_call_parity(hit: MatchLocation) -> Finding {
