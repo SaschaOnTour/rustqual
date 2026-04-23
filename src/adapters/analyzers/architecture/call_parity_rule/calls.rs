@@ -16,7 +16,7 @@
 //! See `D-3` and `D-4` in the v1.1.0 plan for the resolution order and
 //! the binding scan patterns.
 
-use super::bindings::{canonical_from_type, extract_let_binding};
+use super::bindings::{canonical_from_type, extract_let_binding, normalize_alias_expansion};
 use crate::adapters::analyzers::architecture::forbidden_rule::{
     file_to_module_segments, resolve_to_crate_absolute,
 };
@@ -113,7 +113,9 @@ impl<'a> CanonicalCallCollector<'a> {
     fn seed_signature_bindings(&mut self) {
         let params = self.signature_params.clone();
         for (name, ty) in &params {
-            if let Some(canonical) = canonical_from_type(ty, self.alias_map, self.importing_file) {
+            if let Some(canonical) =
+                canonical_from_type(ty, self.alias_map, self.local_symbols, self.importing_file)
+            {
                 self.bindings[0].insert(name.clone(), canonical);
             }
         }
@@ -172,11 +174,15 @@ impl<'a> CanonicalCallCollector<'a> {
             }
             return bare(&segments.join("::"));
         }
-        // Alias-map hit on first segment → replace prefix.
+        // Alias-map hit on first segment → replace prefix, then
+        // re-normalise in case the alias itself resolves through
+        // `self::` / `super::` (e.g. `use super::foo::Bar;`).
         if let Some(alias) = self.alias_map.get(&segments[0]) {
             let mut full = alias.clone();
             full.extend_from_slice(&segments[1..]);
-            return full.join("::");
+            if let Some(normalized) = normalize_alias_expansion(full, self.importing_file) {
+                return normalized.join("::");
+            }
         }
         // Same-module fallback: unqualified call whose first segment is
         // a top-level item in the same file resolves to
@@ -247,9 +253,12 @@ impl<'a, 'ast> Visit<'ast> for CanonicalCallCollector<'a> {
                 self.visit_expr(else_expr);
             }
         }
-        if let Some((name, ty_canonical)) =
-            extract_let_binding(local, self.alias_map, self.importing_file)
-        {
+        if let Some((name, ty_canonical)) = extract_let_binding(
+            local,
+            self.alias_map,
+            self.local_symbols,
+            self.importing_file,
+        ) {
             self.current_scope_mut().insert(name, ty_canonical);
         }
     }
@@ -307,9 +316,12 @@ impl<'a, 'ast> Visit<'ast> for CanonicalCallCollector<'a> {
             if let syn::Pat::Type(pt) = input {
                 if let syn::Pat::Ident(pi) = pt.pat.as_ref() {
                     let name = pi.ident.to_string();
-                    if let Some(canonical) =
-                        canonical_from_type(&pt.ty, self.alias_map, self.importing_file)
-                    {
+                    if let Some(canonical) = canonical_from_type(
+                        &pt.ty,
+                        self.alias_map,
+                        self.local_symbols,
+                        self.importing_file,
+                    ) {
                         self.current_scope_mut().insert(name, canonical);
                     }
                 }

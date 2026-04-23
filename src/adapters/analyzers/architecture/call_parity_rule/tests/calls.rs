@@ -552,6 +552,60 @@ fn test_external_call_without_use_still_falls_to_bare() {
 }
 
 #[test]
+fn test_super_aliased_call_normalises_to_crate_rooted() {
+    // `use super::stats::get_stats;` expands to `["super","stats","get_stats"]`
+    // in the alias map. Without normalisation the canonical would be
+    // `super::stats::get_stats`, which never matches graph nodes.
+    // Post-alias re-normalisation turns it into `crate::…::get_stats`.
+    let fctx = load(
+        r#"
+        use super::stats::get_stats;
+        pub fn cmd_foo() {
+            get_stats();
+        }
+        "#,
+    );
+    let ctx = ctx_for_fn(&fctx, "cmd_foo", "src/cli/handlers.rs");
+    let calls = collect_canonical_calls(&ctx);
+    assert!(
+        calls.contains("crate::cli::stats::get_stats"),
+        "super-aliased call must normalise to crate::, got {calls:?}"
+    );
+    assert!(
+        !calls.iter().any(|c| c.starts_with("super::")),
+        "super-rooted canonical must not leak, got {calls:?}"
+    );
+}
+
+#[test]
+fn test_unqualified_local_type_in_signature_resolves() {
+    // `struct Session;` declared in this file + `fn f(s: Session)` — Rust
+    // doesn't require a `use` for same-file types. Receiver tracking must
+    // still resolve `s.search()` via the local-type fallback.
+    let fctx = load(
+        r#"
+        pub struct Session;
+        impl Session {
+            pub fn search(&self) {}
+        }
+        pub fn cmd_foo(s: Session) {
+            s.search();
+        }
+        "#,
+    );
+    let ctx = ctx_for_fn(&fctx, "cmd_foo", "src/application/session.rs");
+    let calls = collect_canonical_calls(&ctx);
+    assert!(
+        calls.contains("crate::application::session::Session::search"),
+        "unqualified local-type receiver must resolve, got {calls:?}"
+    );
+    assert!(
+        !calls.contains("<method>:search"),
+        "must not fall back to <method>:, got {calls:?}"
+    );
+}
+
+#[test]
 fn test_qualified_impl_path_does_not_double_crate() {
     // `impl crate::app::Session { fn search() }` — the impl header
     // already gives a crate-rooted path. The canonical Self-target must
