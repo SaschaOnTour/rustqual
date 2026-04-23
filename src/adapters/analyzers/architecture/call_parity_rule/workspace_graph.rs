@@ -15,6 +15,7 @@
 
 use super::calls::{collect_canonical_calls, FnContext};
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
+use crate::adapters::shared::cfg_test::has_cfg_test;
 use std::collections::{HashMap, HashSet, VecDeque};
 use syn::visit::Visit;
 
@@ -94,6 +95,30 @@ fn canonical_fn_name(file: &str, self_type: Option<&[String]>, fn_name: &str) ->
 
 fn is_crate_rooted(segments: &[String]) -> bool {
     segments.first().map(|s| s.as_str()) == Some("crate")
+}
+
+/// Collect the set of first-segment module names at the crate root.
+/// Every `src/<name>.rs` / `src/<name>/**.rs` file contributes `<name>`.
+/// Used so Rust 2018+ absolute imports (`use app::foo;` — no `crate::`
+/// prefix) resolve to `crate::app::foo` instead of a bare `app::foo`
+/// that never matches graph nodes.
+pub(crate) fn collect_crate_root_modules(files: &[(&str, &syn::File)]) -> HashSet<String> {
+    files
+        .iter()
+        .filter_map(|(path, _)| crate_root_module_of(path))
+        .collect()
+}
+
+/// Extract the first module segment from a `src/...` path. Returns
+/// `None` for `src/lib.rs` / `src/main.rs` (crate roots, not modules).
+fn crate_root_module_of(path: &str) -> Option<String> {
+    let rest = path.strip_prefix("src/")?;
+    let first = rest.split('/').next()?;
+    let name = first.strip_suffix(".rs").unwrap_or(first);
+    if matches!(name, "lib" | "main") {
+        return None;
+    }
+    Some(name.to_string())
 }
 
 /// Collect the names of top-level items declared in this file — fns,
@@ -195,6 +220,7 @@ pub(crate) fn build_call_graph<'ast>(
     aliases_per_file: &HashMap<String, HashMap<String, Vec<String>>>,
     cfg_test_files: &HashSet<String>,
 ) -> CallGraph {
+    let crate_root_modules = collect_crate_root_modules(files);
     let mut graph = CallGraph::new();
     for (path, ast) in files {
         if cfg_test_files.contains(*path) {
@@ -208,6 +234,7 @@ pub(crate) fn build_call_graph<'ast>(
             path,
             alias_map,
             local_symbols: &local_symbols,
+            crate_root_modules: &crate_root_modules,
             impl_type_stack: Vec::new(),
             graph: &mut graph,
         };
@@ -220,6 +247,7 @@ struct FileFnCollector<'a> {
     path: &'a str,
     alias_map: &'a HashMap<String, Vec<String>>,
     local_symbols: &'a HashSet<String>,
+    crate_root_modules: &'a HashSet<String>,
     impl_type_stack: Vec<Vec<String>>,
     graph: &'a mut CallGraph,
 }
@@ -239,6 +267,7 @@ impl<'a> FileFnCollector<'a> {
             self_type,
             alias_map: self.alias_map,
             local_symbols: self.local_symbols,
+            crate_root_modules: self.crate_root_modules,
             importing_file: self.path,
         };
         let calls = collect_canonical_calls(&ctx);
@@ -251,6 +280,9 @@ impl<'a> FileFnCollector<'a> {
 
 impl<'a, 'ast> Visit<'ast> for FileFnCollector<'a> {
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        if has_cfg_test(&node.attrs) {
+            return;
+        }
         let name = node.sig.ident.to_string();
         self.record_fn(&name, &node.sig, &node.block);
         syn::visit::visit_item_fn(self, node);
@@ -264,8 +296,21 @@ impl<'a, 'ast> Visit<'ast> for FileFnCollector<'a> {
     }
 
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+        if has_cfg_test(&node.attrs) {
+            return;
+        }
         let name = node.sig.ident.to_string();
         self.record_fn(&name, &node.sig, &node.block);
         syn::visit::visit_impl_item_fn(self, node);
+    }
+
+    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+        // Skip inline `#[cfg(test)] mod tests { ... }` blocks entirely.
+        // Their fns are test-only and must not pollute the call graph
+        // (Check B could otherwise count a test as adapter coverage).
+        if has_cfg_test(&node.attrs) {
+            return;
+        }
+        syn::visit::visit_item_mod(self, node);
     }
 }

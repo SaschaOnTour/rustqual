@@ -20,6 +20,7 @@ pub(super) fn canonical_from_type(
     ty: &syn::Type,
     alias_map: &HashMap<String, Vec<String>>,
     local_symbols: &HashSet<String>,
+    crate_root_modules: &HashSet<String>,
     importing_file: &str,
 ) -> Option<Vec<String>> {
     let inner = strip_wrappers(ty);
@@ -31,7 +32,13 @@ pub(super) fn canonical_from_type(
                 .iter()
                 .map(|s| s.ident.to_string())
                 .collect();
-            canonicalise_type_segments(&segments, alias_map, local_symbols, importing_file)
+            canonicalise_type_segments(
+                &segments,
+                alias_map,
+                local_symbols,
+                crate_root_modules,
+                importing_file,
+            )
         }
         _ => None,
     }
@@ -75,6 +82,7 @@ pub(super) fn canonicalise_type_segments(
     segments: &[String],
     alias_map: &HashMap<String, Vec<String>>,
     local_symbols: &HashSet<String>,
+    crate_root_modules: &HashSet<String>,
     importing_file: &str,
 ) -> Option<Vec<String>> {
     if segments.is_empty() {
@@ -89,7 +97,7 @@ pub(super) fn canonicalise_type_segments(
     if let Some(alias) = alias_map.get(&segments[0]) {
         let mut full = alias.clone();
         full.extend_from_slice(&segments[1..]);
-        return normalize_after_alias(full, importing_file);
+        return normalize_after_alias(full, importing_file, crate_root_modules);
     }
     // Same-file fallback: `fn f(s: Session)` or `let s = Session::open()`
     // where `Session` is declared in this file (no `use` needed in Rust).
@@ -101,20 +109,37 @@ pub(super) fn canonicalise_type_segments(
         full.extend_from_slice(segments);
         return Some(full);
     }
+    // Rust 2018+ absolute import: `let s: app::Session = ...` where
+    // `app` is a workspace crate-root module → prepend `crate`.
+    if crate_root_modules.contains(&segments[0]) {
+        let mut full = vec!["crate".to_string()];
+        full.extend_from_slice(segments);
+        return Some(full);
+    }
     None
 }
 
-/// After alias-map substitution, re-run `self`/`super` normalisation so
-/// the expanded path always starts with `crate::` when it refers to
-/// workspace code. Without this, `use super::foo::Bar;` would yield
-/// canonicals like `super::foo::Bar::…` that never match graph nodes
-/// (which are always `crate::`-rooted).
-fn normalize_after_alias(expanded: Vec<String>, importing_file: &str) -> Option<Vec<String>> {
+/// After alias-map substitution, re-run `self` / `super` normalisation
+/// and prepend `crate` for Rust 2018+ absolute imports that resolve
+/// into a known workspace root module (`use app::foo;` →
+/// `crate::app::foo`). Without this, both forms leak non-crate-rooted
+/// canonicals that never match graph nodes.
+fn normalize_after_alias(
+    expanded: Vec<String>,
+    importing_file: &str,
+    crate_root_modules: &HashSet<String>,
+) -> Option<Vec<String>> {
     match expanded.first().map(|s| s.as_str()) {
         Some("self") | Some("super") => {
             let resolved = resolve_to_crate_absolute(importing_file, &expanded)?;
             let mut full = vec!["crate".to_string()];
             full.extend(resolved);
+            Some(full)
+        }
+        Some("crate") => Some(expanded),
+        Some(first) if crate_root_modules.contains(first) => {
+            let mut full = vec!["crate".to_string()];
+            full.extend(expanded);
             Some(full)
         }
         _ => Some(expanded),
@@ -124,8 +149,9 @@ fn normalize_after_alias(expanded: Vec<String>, importing_file: &str) -> Option<
 pub(super) fn normalize_alias_expansion(
     expanded: Vec<String>,
     importing_file: &str,
+    crate_root_modules: &HashSet<String>,
 ) -> Option<Vec<String>> {
-    normalize_after_alias(expanded, importing_file)
+    normalize_after_alias(expanded, importing_file, crate_root_modules)
 }
 
 /// Extract a `(name, canonical_type_path)` pair from a `let` statement.
@@ -135,16 +161,29 @@ pub(super) fn extract_let_binding(
     local: &syn::Local,
     alias_map: &HashMap<String, Vec<String>>,
     local_symbols: &HashSet<String>,
+    crate_root_modules: &HashSet<String>,
     importing_file: &str,
 ) -> Option<(String, Vec<String>)> {
     let (name, annotated_ty) = extract_pat_name_and_type(&local.pat)?;
     if let Some(ty) = annotated_ty {
-        if let Some(canonical) = canonical_from_type(ty, alias_map, local_symbols, importing_file) {
+        if let Some(canonical) = canonical_from_type(
+            ty,
+            alias_map,
+            local_symbols,
+            crate_root_modules,
+            importing_file,
+        ) {
             return Some((name, canonical));
         }
     }
     let init = local.init.as_ref()?;
-    let canonical = binding_type_from_init(&init.expr, alias_map, local_symbols, importing_file)?;
+    let canonical = binding_type_from_init(
+        &init.expr,
+        alias_map,
+        local_symbols,
+        crate_root_modules,
+        importing_file,
+    )?;
     Some((name, canonical))
 }
 
@@ -173,6 +212,7 @@ fn binding_type_from_init(
     expr: &syn::Expr,
     alias_map: &HashMap<String, Vec<String>>,
     local_symbols: &HashSet<String>,
+    crate_root_modules: &HashSet<String>,
     importing_file: &str,
 ) -> Option<Vec<String>> {
     let mut cur = expr;
@@ -197,5 +237,11 @@ fn binding_type_from_init(
         return None;
     }
     let type_segments = &segments[..segments.len() - 1];
-    canonicalise_type_segments(type_segments, alias_map, local_symbols, importing_file)
+    canonicalise_type_segments(
+        type_segments,
+        alias_map,
+        local_symbols,
+        crate_root_modules,
+        importing_file,
+    )
 }

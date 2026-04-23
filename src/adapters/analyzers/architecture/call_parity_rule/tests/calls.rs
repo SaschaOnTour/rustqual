@@ -5,7 +5,9 @@
 use crate::adapters::analyzers::architecture::call_parity_rule::calls::{
     collect_canonical_calls, FnContext,
 };
-use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::collect_local_symbols;
+use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::{
+    collect_crate_root_modules, collect_local_symbols,
+};
 use crate::adapters::shared::use_tree::gather_alias_map;
 use std::collections::{HashMap, HashSet};
 
@@ -24,17 +26,39 @@ struct FileCtx {
     file: syn::File,
     alias_map: HashMap<String, Vec<String>>,
     local_symbols: HashSet<String>,
+    crate_root_modules: HashSet<String>,
 }
 
 fn load(src: &str) -> FileCtx {
     let file = parse_file(src);
     let alias_map = gather_alias_map(&file);
     let local_symbols = collect_local_symbols(&file);
+    // For single-file unit tests the root module set is empty — tests
+    // that exercise Rust-2018 absolute imports populate it manually.
+    let crate_root_modules = HashSet::new();
     FileCtx {
         file,
         alias_map,
         local_symbols,
+        crate_root_modules,
     }
+}
+
+fn load_with_roots(src: &str, roots: &[&str]) -> FileCtx {
+    let mut fctx = load(src);
+    fctx.crate_root_modules = roots.iter().map(|s| s.to_string()).collect();
+    fctx
+}
+
+/// Convenience — rebuild crate_root_modules from a slice of pseudo-file
+/// paths (same shape `build_call_graph` sees) so tests match the real
+/// pipeline's derivation.
+fn roots_from_paths(paths: &[&str]) -> HashSet<String> {
+    let fake: Vec<(&str, &syn::File)> = Vec::new();
+    let _ = fake;
+    let dummy = parse_file("");
+    let refs: Vec<(&str, &syn::File)> = paths.iter().map(|p| (*p, &dummy)).collect();
+    collect_crate_root_modules(&refs)
 }
 
 fn find_fn<'a>(file: &'a syn::File, name: &str) -> &'a syn::ItemFn {
@@ -98,6 +122,7 @@ fn ctx_for_fn<'a>(fctx: &'a FileCtx, fn_name: &str, importing_file: &'a str) -> 
         self_type: None,
         alias_map: &fctx.alias_map,
         local_symbols: &fctx.local_symbols,
+        crate_root_modules: &fctx.crate_root_modules,
         importing_file,
     }
 }
@@ -266,6 +291,7 @@ fn test_collect_self_dispatch_in_impl() {
         self_type: self_ty,
         alias_map: &fctx.alias_map,
         local_symbols: &fctx.local_symbols,
+        crate_root_modules: &fctx.crate_root_modules,
         importing_file: "src/application/session.rs",
     };
     let calls = collect_canonical_calls(&ctx);
@@ -606,6 +632,72 @@ fn test_unqualified_local_type_in_signature_resolves() {
 }
 
 #[test]
+fn test_rust2018_absolute_import_resolves_to_crate_rooted() {
+    // Rust 2018+: `use app::foo;` at the top of a non-root file is the
+    // crate-root module `app`, equivalent to `use crate::app::foo;`.
+    // When `app` is a known workspace root module, the alias expansion
+    // must prepend `crate::` so the call graph matches.
+    let fctx = load_with_roots(
+        r#"
+        use app::foo;
+        pub fn cmd_x() {
+            foo();
+        }
+        "#,
+        &["app"],
+    );
+    let ctx = ctx_for_fn(&fctx, "cmd_x", "src/cli/handlers.rs");
+    let calls = collect_canonical_calls(&ctx);
+    assert!(
+        calls.contains("crate::app::foo"),
+        "Rust 2018+ absolute import must normalise to crate::, got {calls:?}"
+    );
+    assert!(
+        !calls.iter().any(|c| c == "app::foo"),
+        "must not leave unprefixed app::foo, got {calls:?}"
+    );
+}
+
+#[test]
+fn test_collect_crate_root_modules_from_paths() {
+    // `src/app/mod.rs`, `src/app/session.rs`, `src/cli/handlers.rs` →
+    // {"app", "cli"}. `src/lib.rs` and `src/main.rs` are excluded.
+    let roots = roots_from_paths(&[
+        "src/app/mod.rs",
+        "src/app/session.rs",
+        "src/cli/handlers.rs",
+        "src/lib.rs",
+        "src/main.rs",
+    ]);
+    assert!(roots.contains("app"));
+    assert!(roots.contains("cli"));
+    assert!(!roots.contains("lib"));
+    assert!(!roots.contains("main"));
+}
+
+#[test]
+fn test_top_level_self_as_alias_maps_to_current_file() {
+    // `use self as fs;` at the top of `src/util/fs_helpers.rs` — `self`
+    // at crate-root-adjacent position means the current file's module.
+    // Downstream normalisation must resolve `fs::something` to
+    // `crate::util::fs_helpers::something`, not leak as a dead-end.
+    let fctx = load(
+        r#"
+        use self as fs;
+        pub fn cmd_x() {
+            fs::something();
+        }
+        "#,
+    );
+    let ctx = ctx_for_fn(&fctx, "cmd_x", "src/util/fs_helpers.rs");
+    let calls = collect_canonical_calls(&ctx);
+    assert!(
+        calls.contains("crate::util::fs_helpers::something"),
+        "top-level self-alias must resolve to the current file's module, got {calls:?}"
+    );
+}
+
+#[test]
 fn test_qualified_impl_path_does_not_double_crate() {
     // `impl crate::app::Session { fn search() }` — the impl header
     // already gives a crate-rooted path. The canonical Self-target must
@@ -628,6 +720,7 @@ fn test_qualified_impl_path_does_not_double_crate() {
         self_type: self_ty,
         alias_map: &fctx.alias_map,
         local_symbols: &fctx.local_symbols,
+        crate_root_modules: &fctx.crate_root_modules,
         importing_file: "src/other_file.rs",
     };
     let calls = collect_canonical_calls(&ctx);

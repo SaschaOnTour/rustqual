@@ -203,4 +203,14 @@ impl<'ast, 'vis> Visit<'ast> for PubFnCollector<'ast, 'vis> {
         }
         syn::visit::visit_impl_item_fn(self, node);
     }
+
+    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+        // Skip inline `#[cfg(test)] mod tests { ... }` blocks so test
+        // helpers can't leak into the pub-fn surface and produce
+        // spurious call_parity findings.
+        if has_cfg_test(&node.attrs) {
+            return;
+        }
+        syn::visit::visit_item_mod(self, node);
+    }
 }

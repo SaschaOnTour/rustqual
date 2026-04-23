@@ -51,6 +51,11 @@ pub struct FnContext<'a> {
     /// this set resolve to `crate::<file_module>::<ident>` so the call
     /// graph sees local delegation chains.
     pub local_symbols: &'a HashSet<String>,
+    /// Set of crate-root module names (first-segment `<name>` for every
+    /// `src/<name>.rs` / `src/<name>/**.rs` in the workspace). Lets the
+    /// Rust 2018+ absolute-import form `use app::foo;` resolve to
+    /// `crate::app::foo` instead of a dead-end `app::foo` canonical.
+    pub crate_root_modules: &'a HashSet<String>,
     /// File path of the fn under analysis. Used to resolve
     /// `crate::` / `self::` / `super::` prefixes and `Self::…`.
     pub importing_file: &'a str,
@@ -73,6 +78,7 @@ pub fn collect_canonical_calls(ctx: &FnContext<'_>) -> HashSet<String> {
 struct CanonicalCallCollector<'a> {
     alias_map: &'a HashMap<String, Vec<String>>,
     local_symbols: &'a HashSet<String>,
+    crate_root_modules: &'a HashSet<String>,
     importing_file: &'a str,
     /// Full canonical path of the enclosing impl's self-type (with
     /// `crate` prefix), if any — used to resolve `Self::method`.
@@ -102,6 +108,7 @@ impl<'a> CanonicalCallCollector<'a> {
         Self {
             alias_map: ctx.alias_map,
             local_symbols: ctx.local_symbols,
+            crate_root_modules: ctx.crate_root_modules,
             importing_file: ctx.importing_file,
             self_type_canonical,
             signature_params: ctx.signature_params.clone(),
@@ -113,9 +120,13 @@ impl<'a> CanonicalCallCollector<'a> {
     fn seed_signature_bindings(&mut self) {
         let params = self.signature_params.clone();
         for (name, ty) in &params {
-            if let Some(canonical) =
-                canonical_from_type(ty, self.alias_map, self.local_symbols, self.importing_file)
-            {
+            if let Some(canonical) = canonical_from_type(
+                ty,
+                self.alias_map,
+                self.local_symbols,
+                self.crate_root_modules,
+                self.importing_file,
+            ) {
                 self.bindings[0].insert(name.clone(), canonical);
             }
         }
@@ -176,11 +187,14 @@ impl<'a> CanonicalCallCollector<'a> {
         }
         // Alias-map hit on first segment → replace prefix, then
         // re-normalise in case the alias itself resolves through
-        // `self::` / `super::` (e.g. `use super::foo::Bar;`).
+        // `self::` / `super::` (e.g. `use super::foo::Bar;`) or uses
+        // the Rust 2018+ absolute form (`use app::foo;`).
         if let Some(alias) = self.alias_map.get(&segments[0]) {
             let mut full = alias.clone();
             full.extend_from_slice(&segments[1..]);
-            if let Some(normalized) = normalize_alias_expansion(full, self.importing_file) {
+            if let Some(normalized) =
+                normalize_alias_expansion(full, self.importing_file, self.crate_root_modules)
+            {
                 return normalized.join("::");
             }
         }
@@ -257,6 +271,7 @@ impl<'a, 'ast> Visit<'ast> for CanonicalCallCollector<'a> {
             local,
             self.alias_map,
             self.local_symbols,
+            self.crate_root_modules,
             self.importing_file,
         ) {
             self.current_scope_mut().insert(name, ty_canonical);
@@ -320,6 +335,7 @@ impl<'a, 'ast> Visit<'ast> for CanonicalCallCollector<'a> {
                         &pt.ty,
                         self.alias_map,
                         self.local_symbols,
+                        self.crate_root_modules,
                         self.importing_file,
                     ) {
                         self.current_scope_mut().insert(name, canonical);

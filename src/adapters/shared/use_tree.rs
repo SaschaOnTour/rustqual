@@ -114,8 +114,15 @@ fn collect_alias_entries(
             // rename: "bar" } — the canonical path is the parent prefix,
             // not prefix + "self". Otherwise downstream alias resolution
             // produces a bogus `foo::self::…` canonical target.
+            //
+            // Top-level `use self as bar;` (empty prefix) refers to the
+            // current file's module; map the alias to `["self"]` so the
+            // downstream normaliser resolves it against the importing
+            // file instead of silently dropping it.
             if r.ident == "self" {
-                if !prefix.is_empty() {
+                if prefix.is_empty() {
+                    out.insert(r.rename.to_string(), vec!["self".to_string()]);
+                } else {
                     out.insert(r.rename.to_string(), prefix.to_vec());
                 }
             } else {
