@@ -110,9 +110,19 @@ fn collect_alias_entries(
             }
         }
         UseTree::Rename(r) => {
-            let mut full = prefix.to_vec();
-            full.push(r.ident.to_string());
-            out.insert(r.rename.to_string(), full);
+            // `use foo::{self as bar};` parses as Rename { ident: "self",
+            // rename: "bar" } — the canonical path is the parent prefix,
+            // not prefix + "self". Otherwise downstream alias resolution
+            // produces a bogus `foo::self::…` canonical target.
+            if r.ident == "self" {
+                if !prefix.is_empty() {
+                    out.insert(r.rename.to_string(), prefix.to_vec());
+                }
+            } else {
+                let mut full = prefix.to_vec();
+                full.push(r.ident.to_string());
+                out.insert(r.rename.to_string(), full);
+            }
         }
         UseTree::Glob(_) => {
             // No bindable identifier introduced — skip.

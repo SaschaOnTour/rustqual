@@ -119,9 +119,6 @@ impl CoverageWalk<'_> {
         };
         let mut state = WalkState::seeded(target, direct);
         while let Some((node, depth)) = state.queue.pop_front() {
-            if !state.visited.insert(node.clone()) {
-                continue;
-            }
             self.record_node_layer(&node, &mut reached);
             if depth < self.call_depth {
                 if let Some(callers) = self.graph.reverse.get(&node) {

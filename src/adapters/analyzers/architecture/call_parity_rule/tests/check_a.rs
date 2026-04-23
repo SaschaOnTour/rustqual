@@ -353,3 +353,45 @@ fn test_finding_line_is_fn_sig_line() {
     );
     assert_eq!(finding.file, "src/cli/handlers.rs");
 }
+
+#[test]
+fn test_convergent_graph_does_not_double_enqueue() {
+    // Regression guard: if `WalkState::enqueue_unvisited` only checks
+    // visited at dequeue (not enqueue), a convergent graph can queue
+    // the same node many times. Here 3 helpers all fan out to both
+    // `app::a` and `app::b`, and the same callees reach `app::common`.
+    // The walk must still terminate (and delegation must resolve)
+    // without blowing up the queue.
+    let ws = build_workspace(&[
+        (
+            "src/application/common.rs",
+            r#"
+            pub fn common() {}
+            pub fn a() { common(); }
+            pub fn b() { common(); }
+            "#,
+        ),
+        (
+            "src/cli/helpers.rs",
+            r#"
+            use crate::application::common::{a, b};
+            pub fn h1() { a(); b(); }
+            pub fn h2() { a(); b(); }
+            pub fn h3() { a(); b(); }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::cli::helpers::{h1, h2, h3};
+            pub fn cmd_x() { h1(); h2(); h3(); }
+            "#,
+        ),
+    ]);
+    let findings = run_check_a(&ws, &three_layer(), &call_parity_config(3), None);
+    let names = assert_no_delegation_fn_names(&findings);
+    assert!(
+        !names.contains(&"cmd_x".to_string()),
+        "convergent delegation must still resolve, got {names:?}"
+    );
+}

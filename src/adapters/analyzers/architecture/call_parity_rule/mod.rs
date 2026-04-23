@@ -67,8 +67,10 @@ pub fn collect_findings(
 
 /// `collect_cfg_test_file_paths` takes an owned-tuple slice — refactoring
 /// it to accept references would ripple across the dry / tq pipelines,
-/// so we absorb the clone here. Cost is one shallow `syn::File` clone
-/// per file per analysis run, bounded by workspace size.
+/// so we absorb the clone here. `syn::File::clone` is a full structural
+/// AST copy, not cheap; amortised over one invocation per analysis run
+/// on workspace-bounded size. Follow-up: thread cfg_test_files through
+/// `AnalysisContext` to eliminate this clone.
 fn clone_ctx_files(ctx: &AnalysisContext<'_>) -> Vec<(String, String, syn::File)> {
     ctx.files
         .iter()

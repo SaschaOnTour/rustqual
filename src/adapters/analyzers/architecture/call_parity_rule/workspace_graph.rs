@@ -111,6 +111,10 @@ pub(crate) fn impl_self_ty_segments(self_ty: &syn::Type) -> Option<Vec<String>> 
 /// Shared BFS scaffold used by both Check A (forward walk, target-layer
 /// probe) and Check B (reverse walk, adapter-layer coverage). Keeps the
 /// queue + visited invariants and the seed semantics in one place.
+///
+/// Marks nodes visited at enqueue time so each node is queued at most
+/// once — in a DAG with many convergent edges, the naive "mark at
+/// dequeue" pattern can queue the same node thousands of times.
 pub(crate) struct WalkState {
     pub queue: VecDeque<(String, usize)>,
     pub visited: HashSet<String>,
@@ -120,15 +124,18 @@ impl WalkState {
     pub fn seeded(start: &str, direct: &HashSet<String>) -> Self {
         let mut visited = HashSet::new();
         visited.insert(start.to_string());
-        Self {
-            queue: direct.iter().map(|c| (c.clone(), 1)).collect(),
-            visited,
+        let mut queue = VecDeque::new();
+        for c in direct {
+            if visited.insert(c.clone()) {
+                queue.push_back((c.clone(), 1));
+            }
         }
+        Self { queue, visited }
     }
 
     pub fn enqueue_unvisited(&mut self, nodes: &HashSet<String>, depth: usize) {
         for c in nodes {
-            if !self.visited.contains(c) {
+            if self.visited.insert(c.clone()) {
                 self.queue.push_back((c.clone(), depth));
             }
         }

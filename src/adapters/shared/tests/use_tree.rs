@@ -64,6 +64,25 @@ fn test_alias_map_self_in_group() {
 }
 
 #[test]
+fn test_alias_map_self_renamed_in_group() {
+    // `use foo::{self as bar};` parses as Rename { ident: "self",
+    // rename: "bar" }. The canonical path must be `[foo]`, not
+    // `[foo, self]`, otherwise downstream alias resolution produces
+    // a bogus `foo::self::…` target.
+    let f = parse("use foo::{self as bar};");
+    let map = gather_alias_map(&f);
+    assert_eq!(
+        map.get("bar"),
+        Some(&vec!["foo".to_string()]),
+        "self-rename must canonicalise to the parent prefix"
+    );
+    assert!(
+        !map.contains_key("foo"),
+        "the renamed binding must not leak the original name"
+    );
+}
+
+#[test]
 fn test_alias_map_crate_prefix() {
     let f = parse("use crate::app::RlmSession;");
     let map = gather_alias_map(&f);

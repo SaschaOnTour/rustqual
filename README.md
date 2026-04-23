@@ -838,7 +838,7 @@ section:
   Catches adapter handlers that inline business logic instead of
   delegating to the shared dispatcher.
 - **`missing_adapter`** — each `pub fn` in the target layer must be
-  reached from every adapter layer. Catches asymmetric ausbau
+  reached from every adapter layer. Catches asymmetric feature coverage
   (e.g. CLI + MCP call `application::do_thing`, REST doesn't).
 
 ```toml

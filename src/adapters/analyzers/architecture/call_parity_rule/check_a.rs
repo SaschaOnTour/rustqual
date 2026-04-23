@@ -1,4 +1,4 @@
-//! Check A — Adapter-muss-delegieren.
+//! Check A — Adapter-must-delegate.
 //!
 //! Every `pub fn` in a configured adapter layer must reach (directly or
 //! transitively, up to `call_depth` hops) at least one fn in the
@@ -92,9 +92,6 @@ impl TargetReachWalk<'_> {
         };
         let mut state = WalkState::seeded(start, direct);
         while let Some((node, depth)) = state.queue.pop_front() {
-            if !state.visited.insert(node.clone()) {
-                continue;
-            }
             if self.layers.layer_of_crate_path(&node) == Some(self.target_layer) {
                 return true;
             }
