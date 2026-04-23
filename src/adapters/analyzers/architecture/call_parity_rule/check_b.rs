@@ -20,11 +20,11 @@
 //!   check doesn't need its own filter.
 
 use super::pub_fns::PubFnInfo;
-use super::workspace_graph::{canonical_name_for_pub_fn, CallGraph};
+use super::workspace_graph::{canonical_name_for_pub_fn, CallGraph, WalkState};
 use crate::adapters::analyzers::architecture::compiled::CompiledCallParity;
 use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
 // qual:api
 /// Emit one `CallParityMissingAdapter` finding per target pub-fn whose
@@ -141,30 +141,6 @@ impl CoverageWalk<'_> {
         };
         if self.adapter_set.contains(layer) {
             reached.insert(layer.to_string());
-        }
-    }
-}
-
-struct WalkState {
-    queue: VecDeque<(String, usize)>,
-    visited: HashSet<String>,
-}
-
-impl WalkState {
-    fn seeded(start: &str, direct: &HashSet<String>) -> Self {
-        let mut visited = HashSet::new();
-        visited.insert(start.to_string());
-        Self {
-            queue: direct.iter().map(|c| (c.clone(), 1)).collect(),
-            visited,
-        }
-    }
-
-    fn enqueue_unvisited(&mut self, callers: &HashSet<String>, depth: usize) {
-        for c in callers {
-            if !self.visited.contains(c) {
-                self.queue.push_back((c.clone(), depth));
-            }
         }
     }
 }

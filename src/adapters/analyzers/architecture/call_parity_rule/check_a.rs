@@ -13,11 +13,11 @@
 //! stance (we can't prove the method resolves into the target layer).
 
 use super::pub_fns::PubFnInfo;
-use super::workspace_graph::{canonical_name_for_pub_fn, CallGraph};
+use super::workspace_graph::{canonical_name_for_pub_fn, CallGraph, WalkState};
 use crate::adapters::analyzers::architecture::compiled::CompiledCallParity;
 use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::HashMap;
 
 // qual:api
 /// Emit one `CallParityNoDelegation` finding per adapter pub-fn that
@@ -105,29 +105,5 @@ impl TargetReachWalk<'_> {
             }
         }
         false
-    }
-}
-
-struct WalkState {
-    queue: VecDeque<(String, usize)>,
-    visited: HashSet<String>,
-}
-
-impl WalkState {
-    fn seeded(start: &str, direct: &HashSet<String>) -> Self {
-        let mut visited = HashSet::new();
-        visited.insert(start.to_string());
-        Self {
-            queue: direct.iter().map(|c| (c.clone(), 1)).collect(),
-            visited,
-        }
-    }
-
-    fn enqueue_unvisited(&mut self, callees: &HashSet<String>, depth: usize) {
-        for c in callees {
-            if !self.visited.contains(c) {
-                self.queue.push_back((c.clone(), depth));
-            }
-        }
     }
 }

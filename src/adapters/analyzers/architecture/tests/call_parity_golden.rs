@@ -13,7 +13,9 @@
 //! that filter; this unit test exercises the raw-finding layer so a
 //! regression in either step is localised.
 
-use crate::adapters::analyzers::architecture::call_parity_rule;
+use crate::adapters::analyzers::architecture::call_parity_rule::{
+    self, RULE_MISSING_ADAPTER, RULE_NO_DELEGATION,
+};
 use crate::adapters::analyzers::architecture::compiled::compile_architecture;
 use crate::config::Config;
 use crate::ports::{AnalysisContext, ParsedFile};
@@ -83,11 +85,11 @@ fn call_parity_golden_example_produces_expected_findings() {
     // in the full pipeline, visible here as an extra raw finding.
     let no_delegation: Vec<_> = findings
         .iter()
-        .filter(|f| f.rule_id == "architecture/call_parity/no_delegation")
+        .filter(|f| f.rule_id == RULE_NO_DELEGATION)
         .collect();
     let missing_adapter: Vec<_> = findings
         .iter()
-        .filter(|f| f.rule_id == "architecture/call_parity/missing_adapter")
+        .filter(|f| f.rule_id == RULE_MISSING_ADAPTER)
         .collect();
 
     let no_delegation_fns: std::collections::HashSet<String> =

@@ -15,7 +15,7 @@
 
 use super::calls::{collect_canonical_calls, FnContext};
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use syn::visit::Visit;
 
 /// Pre-built workspace call graph. Built once per analysis run.
@@ -59,13 +59,80 @@ impl CallGraph {
 /// The format matches what the graph stores as node keys so lookups
 /// via `graph.forward` / `graph.reverse` / `graph.node_file` work.
 pub(crate) fn canonical_name_for_pub_fn(info: &super::pub_fns::PubFnInfo<'_>) -> String {
+    canonical_fn_name(&info.file, info.self_type.as_deref(), &info.fn_name)
+}
+
+/// Lower-level primitive for constructing canonical fn names. Shared
+/// between `canonical_name_for_pub_fn` (which adapts a `PubFnInfo`) and
+/// `FileFnCollector::canonical_name` (which composes segments during
+/// the graph walk).
+fn canonical_fn_name(file: &str, self_type: Option<&[String]>, fn_name: &str) -> String {
     let mut segs: Vec<String> = vec!["crate".to_string()];
-    segs.extend(file_to_module_segments(&info.file));
-    if let Some(impl_segs) = info.self_type.as_ref() {
+    segs.extend(file_to_module_segments(file));
+    if let Some(impl_segs) = self_type {
         segs.extend(impl_segs.iter().cloned());
     }
-    segs.push(info.fn_name.clone());
+    segs.push(fn_name.to_string());
     segs.join("::")
+}
+
+/// Extract `(name, &Type)` pairs for every typed positional parameter
+/// of a fn signature. Shared by pub-fn collection and graph-build since
+/// both need the same `FnContext::signature_params` shape.
+pub(crate) fn extract_signature_params(sig: &syn::Signature) -> Vec<(String, &syn::Type)> {
+    sig.inputs
+        .iter()
+        .filter_map(|arg| match arg {
+            syn::FnArg::Typed(pt) => match pt.pat.as_ref() {
+                syn::Pat::Ident(pi) => Some((pi.ident.to_string(), pt.ty.as_ref())),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect()
+}
+
+/// Flatten a `syn::Type::Path` to its segment identifiers — the shape
+/// the call-parity rule uses to remember which impl block a method
+/// lives in. Non-path types (trait objects, tuples) return `None`.
+pub(crate) fn impl_self_ty_segments(self_ty: &syn::Type) -> Option<Vec<String>> {
+    match self_ty {
+        syn::Type::Path(p) => Some(
+            p.path
+                .segments
+                .iter()
+                .map(|s| s.ident.to_string())
+                .collect(),
+        ),
+        _ => None,
+    }
+}
+
+/// Shared BFS scaffold used by both Check A (forward walk, target-layer
+/// probe) and Check B (reverse walk, adapter-layer coverage). Keeps the
+/// queue + visited invariants and the seed semantics in one place.
+pub(crate) struct WalkState {
+    pub queue: VecDeque<(String, usize)>,
+    pub visited: HashSet<String>,
+}
+
+impl WalkState {
+    pub fn seeded(start: &str, direct: &HashSet<String>) -> Self {
+        let mut visited = HashSet::new();
+        visited.insert(start.to_string());
+        Self {
+            queue: direct.iter().map(|c| (c.clone(), 1)).collect(),
+            visited,
+        }
+    }
+
+    pub fn enqueue_unvisited(&mut self, nodes: &HashSet<String>, depth: usize) {
+        for c in nodes {
+            if !self.visited.contains(c) {
+                self.queue.push_back((c.clone(), depth));
+            }
+        }
+    }
 }
 
 // qual:api
@@ -86,10 +153,8 @@ pub(crate) fn build_call_graph<'ast>(
         let Some(alias_map) = aliases_per_file.get(path) else {
             continue;
         };
-        let file_mod = file_to_module_segments(path);
         let mut collector = FileFnCollector {
             path,
-            file_mod: &file_mod,
             alias_map,
             impl_type_stack: Vec::new(),
             graph: &mut graph,
@@ -101,46 +166,23 @@ pub(crate) fn build_call_graph<'ast>(
 
 struct FileFnCollector<'a> {
     path: &'a str,
-    file_mod: &'a [String],
     alias_map: &'a HashMap<String, Vec<String>>,
     impl_type_stack: Vec<Vec<String>>,
     graph: &'a mut CallGraph,
 }
 
 impl<'a> FileFnCollector<'a> {
-    fn canonical_name(&self, fn_name: &str) -> String {
-        let mut segs: Vec<String> = std::iter::once("crate".to_string())
-            .chain(self.file_mod.iter().cloned())
-            .collect();
-        if let Some(impl_segs) = self.impl_type_stack.last() {
-            segs.extend(impl_segs.iter().cloned());
-        }
-        segs.push(fn_name.to_string());
-        segs.join("::")
-    }
-
     fn record_fn<'ast>(
         &mut self,
         fn_name: &str,
         sig: &'ast syn::Signature,
         body: &'ast syn::Block,
     ) {
-        let canonical = self.canonical_name(fn_name);
         let self_type = self.impl_type_stack.last().cloned();
-        let signature_params = sig
-            .inputs
-            .iter()
-            .filter_map(|arg| match arg {
-                syn::FnArg::Typed(pt) => match pt.pat.as_ref() {
-                    syn::Pat::Ident(pi) => Some((pi.ident.to_string(), pt.ty.as_ref())),
-                    _ => None,
-                },
-                _ => None,
-            })
-            .collect();
+        let canonical = canonical_fn_name(self.path, self_type.as_deref(), fn_name);
         let ctx = FnContext {
             body,
-            signature_params,
+            signature_params: extract_signature_params(sig),
             self_type,
             alias_map: self.alias_map,
             importing_file: self.path,
@@ -150,19 +192,6 @@ impl<'a> FileFnCollector<'a> {
         for callee in calls {
             self.graph.add_edge(&canonical, &callee);
         }
-    }
-}
-
-fn impl_self_ty_segments(self_ty: &syn::Type) -> Option<Vec<String>> {
-    match self_ty {
-        syn::Type::Path(p) => Some(
-            p.path
-                .segments
-                .iter()
-                .map(|s| s.ident.to_string())
-                .collect(),
-        ),
-        _ => None,
     }
 }
 

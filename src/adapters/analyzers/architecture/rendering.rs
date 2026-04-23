@@ -9,6 +9,37 @@
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use crate::config::architecture::SymbolPattern;
 use crate::domain::{Dimension, Finding, Severity};
+use crate::ports::AnalysisContext;
+
+/// Build `(path, &ast)` refs for every parsed file — the shape every
+/// workspace-wide architecture rule expects. Extracting this keeps the
+/// per-rule `collect_findings` functions focused on their actual work.
+pub(crate) fn build_file_refs<'a>(ctx: &'a AnalysisContext<'_>) -> Vec<(String, &'a syn::File)> {
+    ctx.files.iter().map(|f| (f.path.clone(), &f.ast)).collect()
+}
+
+/// Shared Finding-construction for every architecture sub-rule.
+/// Each sub-rule picks its own rule_id scheme + severity but fills the
+/// same cross-dimension `Finding` shape; centralising the construction
+/// keeps them consistent.
+pub(crate) fn build_architecture_finding(
+    hit: MatchLocation,
+    rule_id: String,
+    reason: &str,
+    severity: Severity,
+) -> Finding {
+    let message = format_match_message(&hit.kind, reason);
+    Finding {
+        file: hit.file,
+        line: hit.line,
+        column: hit.column,
+        dimension: Dimension::Architecture,
+        rule_id,
+        message,
+        severity,
+        ..Finding::default()
+    }
+}
 
 /// Project one `MatchLocation` into a `Finding` using the given rule id.
 /// Operation: message formatting + field copy.

@@ -7,8 +7,11 @@
 mod checks;
 mod rendering;
 
+use crate::adapters::analyzers::architecture::rendering::{
+    build_architecture_finding, build_file_refs,
+};
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
-use crate::domain::{Dimension, Finding, Severity};
+use crate::domain::{Finding, Severity};
 use crate::ports::AnalysisContext;
 use checks::{
     check_async, check_error_variants, check_object_safety, check_receiver, check_required_param,
@@ -105,46 +108,27 @@ fn check_trait(
 
 /// Run every trait-contract rule on the workspace and project into Findings.
 /// Integration: delegates refs-build, check call, and per-hit mapping.
-pub fn collect_findings<F>(
+pub fn collect_findings(
     ctx: &AnalysisContext<'_>,
     rules: &[CompiledTraitContract],
-    format_message: F,
-) -> Vec<Finding>
-where
-    F: Fn(&ViolationKind, &str) -> String,
-{
+) -> Vec<Finding> {
     if rules.is_empty() {
         return Vec::new();
     }
-    let refs: Vec<(String, &syn::File)> =
-        ctx.files.iter().map(|f| (f.path.clone(), &f.ast)).collect();
-    check_trait_contracts(&refs, rules)
+    check_trait_contracts(&build_file_refs(ctx), rules)
         .into_iter()
-        .map(|hit| hit_to_finding(hit, &format_message))
+        .map(hit_to_finding)
         .collect()
 }
 
 /// Project a trait-contract hit to a domain `Finding`.
 /// Operation: rule_id selection + field copy.
-fn hit_to_finding<F>(hit: MatchLocation, format_message: &F) -> Finding
-where
-    F: Fn(&ViolationKind, &str) -> String,
-{
+fn hit_to_finding(hit: MatchLocation) -> Finding {
     let rule_id = match &hit.kind {
         ViolationKind::TraitContract { check, .. } => {
             format!("architecture/trait_contract/{check}")
         }
         _ => "architecture/trait_contract".to_string(),
     };
-    let message = format_message(&hit.kind, "trait contract");
-    Finding {
-        file: hit.file,
-        line: hit.line,
-        column: hit.column,
-        dimension: Dimension::Architecture,
-        rule_id,
-        message,
-        severity: Severity::High,
-        ..Finding::default()
-    }
+    build_architecture_finding(hit, rule_id, "trait contract", Severity::High)
 }

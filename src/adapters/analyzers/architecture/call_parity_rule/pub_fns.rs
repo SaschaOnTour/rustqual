@@ -17,6 +17,7 @@
 //!
 //! See Task 2 in the v1.1.0 plan for the full test list.
 
+use super::workspace_graph::{extract_signature_params, impl_self_ty_segments};
 use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
 use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
 use std::collections::{HashMap, HashSet};
@@ -62,8 +63,7 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
             file: path.clone(),
             found: Vec::new(),
             visible_types,
-            impl_type_stack: Vec::new(),
-            impl_is_visible_stack: Vec::new(),
+            impl_stack: Vec::new(),
         };
         collector.visit_file(ast);
         out.entry(layer).or_default().extend(collector.found);
@@ -99,28 +99,18 @@ struct PubFnCollector<'ast> {
     /// pub(in path)). Impl methods on any type not in this set are
     /// skipped — impls on private types aren't reachable from outside.
     visible_types: HashSet<String>,
-    /// Stack of impl-block self-type segment lists (top = current).
-    impl_type_stack: Vec<Vec<String>>,
-    /// Parallel stack of visibility flags: `true` if the enclosing
-    /// `impl Type { ... }`'s Type is publicly reachable.
-    impl_is_visible_stack: Vec<bool>,
+    /// Stack of enclosing `impl` blocks: `(self-type segments, is-visible)`.
+    /// Merged so the two halves can't drift out of sync.
+    impl_stack: Vec<(Vec<String>, bool)>,
 }
 
 impl<'ast> PubFnCollector<'ast> {
-    fn sig_params(sig: &'ast syn::Signature) -> Vec<(String, &'ast syn::Type)> {
-        sig.inputs
-            .iter()
-            .filter_map(|arg| match arg {
-                syn::FnArg::Typed(pt) => {
-                    let name = match pt.pat.as_ref() {
-                        syn::Pat::Ident(pi) => pi.ident.to_string(),
-                        _ => return None,
-                    };
-                    Some((name, pt.ty.as_ref()))
-                }
-                _ => None,
-            })
-            .collect()
+    fn current_self_type(&self) -> Option<Vec<String>> {
+        self.impl_stack.last().map(|(segs, _)| segs.clone())
+    }
+
+    fn current_impl_visible(&self) -> bool {
+        self.impl_stack.last().map(|(_, v)| *v).unwrap_or(false)
     }
 
     fn record_fn(
@@ -135,8 +125,8 @@ impl<'ast> PubFnCollector<'ast> {
             fn_name: name,
             line,
             body,
-            signature_params: Self::sig_params(sig),
-            self_type: self.impl_type_stack.last().cloned(),
+            signature_params: extract_signature_params(sig),
+            self_type: self.current_self_type(),
         });
     }
 }
@@ -154,19 +144,6 @@ fn is_test_fn(attrs: &[syn::Attribute]) -> bool {
     has_test_attr(attrs) || has_cfg_test(attrs)
 }
 
-fn impl_self_ty_segments(self_ty: &syn::Type) -> Option<Vec<String>> {
-    match self_ty {
-        syn::Type::Path(p) => Some(
-            p.path
-                .segments
-                .iter()
-                .map(|s| s.ident.to_string())
-                .collect(),
-        ),
-        _ => None,
-    }
-}
-
 impl<'ast> Visit<'ast> for PubFnCollector<'ast> {
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
         if is_visible(&node.vis) && !is_test_fn(&node.attrs) {
@@ -178,25 +155,22 @@ impl<'ast> Visit<'ast> for PubFnCollector<'ast> {
     }
 
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
-        // Collect impl self-type + visibility for nested method decisions.
-        // An impl whose self-type we can't parse (trait objects, generics)
-        // is treated as invisible → its methods are skipped, consistent
-        // with "can't resolve, don't count" throughout the call-parity code.
+        // Conservative: an impl whose self-type we can't parse (trait
+        // objects, generics) gets empty segs + invisible — its methods
+        // fall out of the check, matching "can't resolve, don't count".
         let self_segs = impl_self_ty_segments(&node.self_ty);
         let visible = self_segs
             .as_ref()
             .and_then(|segs| segs.last())
             .is_some_and(|name| self.visible_types.contains(name));
-        self.impl_type_stack.push(self_segs.unwrap_or_default());
-        self.impl_is_visible_stack.push(visible);
+        self.impl_stack
+            .push((self_segs.unwrap_or_default(), visible));
         syn::visit::visit_item_impl(self, node);
-        self.impl_type_stack.pop();
-        self.impl_is_visible_stack.pop();
+        self.impl_stack.pop();
     }
 
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
-        let parent_visible = self.impl_is_visible_stack.last().copied().unwrap_or(false);
-        if parent_visible && is_visible(&node.vis) && !is_test_fn(&node.attrs) {
+        if self.current_impl_visible() && is_visible(&node.vis) && !is_test_fn(&node.attrs) {
             let line = syn::spanned::Spanned::span(&node.sig.ident).start().line;
             let name = node.sig.ident.to_string();
             self.record_fn(name, line, &node.block, &node.sig);

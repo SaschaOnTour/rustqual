@@ -21,13 +21,16 @@ pub mod pub_fns;
 pub mod workspace_graph;
 
 use crate::adapters::analyzers::architecture::compiled::CompiledArchitecture;
-use crate::adapters::analyzers::architecture::rendering::format_match_message;
+use crate::adapters::analyzers::architecture::rendering::build_architecture_finding;
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths;
 use crate::adapters::shared::use_tree::gather_alias_map;
-use crate::domain::{Dimension, Finding, Severity};
+use crate::domain::{Finding, Severity};
 use crate::ports::AnalysisContext;
 use std::collections::HashMap;
+
+pub(crate) const RULE_NO_DELEGATION: &str = "architecture/call_parity/no_delegation";
+pub(crate) const RULE_MISSING_ADAPTER: &str = "architecture/call_parity/missing_adapter";
 
 /// Top-level entry for the architecture analyzer. Runs Check A + Check B
 /// when `[architecture.call_parity]` is configured and projects raw
@@ -62,10 +65,10 @@ pub fn collect_findings(
     out
 }
 
-/// Clone the parsed ASTs into an owned vec — `collect_cfg_test_file_paths`
-/// takes an owned-tuple slice. The cost is bounded (one shallow clone
-/// per file per analysis run) and scoped to the architecture dimension.
-/// Operation: iterator-chain clone, no own calls.
+/// `collect_cfg_test_file_paths` takes an owned-tuple slice — refactoring
+/// it to accept references would ripple across the dry / tq pipelines,
+/// so we absorb the clone here. Cost is one shallow `syn::File` clone
+/// per file per analysis run, bounded by workspace size.
 fn clone_ctx_files(ctx: &AnalysisContext<'_>) -> Vec<(String, String, syn::File)> {
     ctx.files
         .iter()
@@ -73,28 +76,13 @@ fn clone_ctx_files(ctx: &AnalysisContext<'_>) -> Vec<(String, String, syn::File)
         .collect()
 }
 
-/// Project one call-parity MatchLocation to a `Finding` with the
-/// appropriate rule_id for SARIF / suppression routing.
-/// Operation: kind-to-rule_id dispatch + field copy.
 fn project_call_parity(hit: MatchLocation) -> Finding {
     let rule_id = match &hit.kind {
-        ViolationKind::CallParityNoDelegation { .. } => "architecture/call_parity/no_delegation",
-        ViolationKind::CallParityMissingAdapter { .. } => {
-            "architecture/call_parity/missing_adapter"
-        }
+        ViolationKind::CallParityNoDelegation { .. } => RULE_NO_DELEGATION,
+        ViolationKind::CallParityMissingAdapter { .. } => RULE_MISSING_ADAPTER,
         _ => "architecture/call_parity",
     };
-    let message = format_match_message(&hit.kind, "call parity");
-    Finding {
-        file: hit.file,
-        line: hit.line,
-        column: hit.column,
-        dimension: Dimension::Architecture,
-        rule_id: rule_id.to_string(),
-        message,
-        severity: Severity::Medium,
-        ..Finding::default()
-    }
+    build_architecture_finding(hit, rule_id.to_string(), "call parity", Severity::Medium)
 }
 
 #[cfg(test)]

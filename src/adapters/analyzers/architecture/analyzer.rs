@@ -23,7 +23,9 @@ use crate::adapters::analyzers::architecture::matcher::{
     find_derive_matches, find_function_call_matches, find_glob_imports, find_item_kind_matches,
     find_macro_calls, find_method_call_matches, find_path_prefix_matches,
 };
-use crate::adapters::analyzers::architecture::rendering::{format_match_message, match_to_finding};
+use crate::adapters::analyzers::architecture::rendering::{
+    build_file_refs, format_match_message, match_to_finding,
+};
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use crate::config::architecture::SymbolPattern;
 use crate::domain::{Dimension, Finding, Severity};
@@ -70,7 +72,6 @@ fn collect_all_findings(
         crate::adapters::analyzers::architecture::trait_contract_rule::collect_findings(
             ctx,
             &compiled.trait_contracts,
-            format_match_message,
         ),
     );
     findings.extend(
@@ -276,9 +277,7 @@ fn collect_forbidden_findings(
     if rules.is_empty() {
         return Vec::new();
     }
-    let refs: Vec<(String, &syn::File)> =
-        ctx.files.iter().map(|f| (f.path.clone(), &f.ast)).collect();
-    check_forbidden_rules(&refs, rules)
+    check_forbidden_rules(&build_file_refs(ctx), rules)
         .into_iter()
         .map(forbidden_hit_to_finding)
         .collect()
