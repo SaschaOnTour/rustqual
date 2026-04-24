@@ -92,7 +92,7 @@ impl TargetReachWalk<'_> {
         };
         let mut state = WalkState::seeded(start, direct);
         while let Some((node, depth)) = state.queue.pop_front() {
-            if self.layers.layer_of_crate_path(&node) == Some(self.target_layer) {
+            if self.graph.layer_of(&node) == Some(self.target_layer) {
                 return true;
             }
             if depth < self.call_depth {

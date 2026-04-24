@@ -51,7 +51,7 @@ fn run_check_b(
 ) -> Vec<MatchLocation> {
     let borrowed = borrowed_files(ws);
     let pub_fns = collect_pub_fns_by_layer(&borrowed, layers, cfg_test);
-    let graph = build_call_graph(&borrowed, &ws.aliases_per_file, cfg_test);
+    let graph = build_call_graph(&borrowed, &ws.aliases_per_file, cfg_test, layers);
     check_missing_adapter(&pub_fns, &graph, layers, cp)
 }
 

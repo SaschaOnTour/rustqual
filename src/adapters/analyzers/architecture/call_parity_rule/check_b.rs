@@ -130,10 +130,11 @@ impl CoverageWalk<'_> {
     }
 
     fn record_node_layer(&self, node: &str, reached: &mut HashSet<String>) {
-        let Some(file) = self.graph.node_file.get(node) else {
-            return;
-        };
-        let Some(layer) = self.layers.layer_for_file(file) else {
+        // Look up the cached layer (populated once at graph build
+        // time). The canonical-based cache is deterministic against
+        // collisions (trait-impl vs inherent `Type::method` would
+        // overwrite a per-file mapping) and keeps the BFS O(N).
+        let Some(layer) = self.graph.layer_of(node) else {
             return;
         };
         if self.adapter_set.contains(layer) {

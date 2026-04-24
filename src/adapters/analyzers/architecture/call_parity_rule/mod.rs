@@ -54,7 +54,12 @@ pub fn collect_findings(
         .map(|(p, f)| (p.to_string(), gather_alias_map(f)))
         .collect();
     let pub_fns = pub_fns::collect_pub_fns_by_layer(&refs, &compiled.layers, &cfg_test_files);
-    let graph = workspace_graph::build_call_graph(&refs, &aliases_per_file, &cfg_test_files);
+    let graph = workspace_graph::build_call_graph(
+        &refs,
+        &aliases_per_file,
+        &cfg_test_files,
+        &compiled.layers,
+    );
     let mut out = Vec::new();
     for hit in check_a::check_no_delegation(&pub_fns, &graph, &compiled.layers, cp) {
         out.push(project_call_parity(hit));

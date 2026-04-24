@@ -52,7 +52,7 @@ fn run_check_a(
     let borrowed = borrowed_files(ws);
     let cfg_test = HashSet::new();
     let pub_fns = collect_pub_fns_by_layer(&borrowed, layers, &cfg_test);
-    let graph = build_call_graph(&borrowed, &ws.aliases_per_file, &cfg_test);
+    let graph = build_call_graph(&borrowed, &ws.aliases_per_file, &cfg_test, layers);
     check_no_delegation(&pub_fns, &graph, layers, cp)
 }
 
@@ -302,9 +302,10 @@ fn test_adapter_fn_cfg_test_file_skipped() {
     let borrowed = borrowed_files(&ws);
     let mut cfg_test = HashSet::new();
     cfg_test.insert("src/cli/handlers.rs".to_string());
-    let pub_fns = collect_pub_fns_by_layer(&borrowed, &three_layer(), &cfg_test);
-    let graph = build_call_graph(&borrowed, &ws.aliases_per_file, &cfg_test);
-    let findings = check_no_delegation(&pub_fns, &graph, &three_layer(), &call_parity_config(3));
+    let layers = three_layer();
+    let pub_fns = collect_pub_fns_by_layer(&borrowed, &layers, &cfg_test);
+    let graph = build_call_graph(&borrowed, &ws.aliases_per_file, &cfg_test, &layers);
+    let findings = check_no_delegation(&pub_fns, &graph, &layers, &call_parity_config(3));
     assert!(
         findings.is_empty(),
         "cfg-test adapter file must not produce findings, got {findings:?}"
