@@ -53,7 +53,12 @@ pub fn collect_findings(
         .iter()
         .map(|(p, f)| (p.to_string(), gather_alias_map(f)))
         .collect();
-    let pub_fns = pub_fns::collect_pub_fns_by_layer(&refs, &compiled.layers, &cfg_test_files);
+    let pub_fns = pub_fns::collect_pub_fns_by_layer(
+        &refs,
+        &aliases_per_file,
+        &compiled.layers,
+        &cfg_test_files,
+    );
     let graph = workspace_graph::build_call_graph(
         &refs,
         &aliases_per_file,

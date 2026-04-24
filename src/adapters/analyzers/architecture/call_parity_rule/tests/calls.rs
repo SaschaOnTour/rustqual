@@ -652,6 +652,31 @@ fn test_unqualified_local_type_in_signature_resolves() {
 }
 
 #[test]
+fn test_rust2018_absolute_call_without_use_resolves_to_crate_rooted() {
+    // Regression: `app::foo()` called directly (no `use app::foo;`) is
+    // also a crate-root module call in Rust 2018+. Must resolve to
+    // `crate::app::foo`, mirroring the alias-backed case.
+    let fctx = load_with_roots(
+        r#"
+        pub fn cmd_x() {
+            app::foo();
+        }
+        "#,
+        &["app"],
+    );
+    let ctx = ctx_for_fn(&fctx, "cmd_x", "src/cli/handlers.rs");
+    let calls = collect_canonical_calls(&ctx);
+    assert!(
+        calls.contains("crate::app::foo"),
+        "unaliased Rust 2018+ call must crate-prefix, got {calls:?}"
+    );
+    assert!(
+        !calls.iter().any(|c| c == "<bare>:app::foo"),
+        "must not fall back to bare, got {calls:?}"
+    );
+}
+
+#[test]
 fn test_rust2018_absolute_import_resolves_to_crate_rooted() {
     // Rust 2018+: `use app::foo;` at the top of a non-root file is the
     // crate-root module `app`, equivalent to `use crate::app::foo;`.

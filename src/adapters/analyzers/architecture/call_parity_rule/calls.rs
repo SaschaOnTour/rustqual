@@ -211,6 +211,15 @@ impl<'a> CanonicalCallCollector<'a> {
             full.extend_from_slice(segments);
             return full.join("::");
         }
+        // Rust 2018+ absolute call: `app::foo()` without `use` is the
+        // crate-root `app` module, equivalent to `crate::app::foo()`.
+        // If `app` is a known workspace root module, prepend `crate::`
+        // so the canonical matches graph nodes.
+        if self.crate_root_modules.contains(&segments[0]) {
+            let mut full = vec!["crate".to_string()];
+            full.extend_from_slice(segments);
+            return full.join("::");
+        }
         // Unknown path (external crate, stdlib, or not imported) → bare.
         bare(&segments.join("::"))
     }

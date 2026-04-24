@@ -23,7 +23,6 @@ use super::workspace_graph::{
 };
 use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
 use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
-use crate::adapters::shared::use_tree::gather_alias_map;
 use std::collections::{HashMap, HashSet};
 use syn::visit::Visit;
 use syn::Visibility;
@@ -50,11 +49,13 @@ pub(crate) struct PubFnInfo<'ast> {
 /// Integration: delegates per-file layer lookup + per-file collection.
 pub(crate) fn collect_pub_fns_by_layer<'ast>(
     files: &[(&'ast str, &'ast syn::File)],
+    aliases_per_file: &HashMap<String, HashMap<String, Vec<String>>>,
     layers: &LayerDefinitions,
     cfg_test_files: &HashSet<String>,
 ) -> HashMap<String, Vec<PubFnInfo<'ast>>> {
     let visible_types = collect_visible_type_names_workspace(files, cfg_test_files);
     let crate_root_modules = collect_crate_root_modules(files);
+    let empty_aliases = HashMap::new();
     let mut out: HashMap<String, Vec<PubFnInfo<'ast>>> = HashMap::new();
     for (path, ast) in files {
         if cfg_test_files.contains(*path) {
@@ -64,13 +65,19 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
             continue;
         };
         let layer = layer.to_string();
-        let alias_map = gather_alias_map(ast);
+        // Share the call-parity entrypoint's `aliases_per_file` map so
+        // we don't re-walk the UseTree per file (each walk is a full
+        // `gather_alias_map`). Fall back to an empty map for files not
+        // in the pre-computed set — those files won't have resolvable
+        // impl self-types via `use` anyway, and the local-symbol /
+        // crate-root fallbacks still work.
+        let alias_map = aliases_per_file.get(*path).unwrap_or(&empty_aliases);
         let local_symbols = collect_local_symbols(ast);
         let mut collector = PubFnCollector {
             file: path.to_string(),
             found: Vec::new(),
             visible_types: &visible_types,
-            alias_map: &alias_map,
+            alias_map,
             local_symbols: &local_symbols,
             crate_root_modules: &crate_root_modules,
             impl_stack: Vec::new(),
