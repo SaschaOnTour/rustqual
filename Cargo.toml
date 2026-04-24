@@ -1,6 +1,6 @@
 [package]
 name = "rustqual"
-version = "1.1.0"
+version = "1.2.0"
 edition = "2021"
 description = "Comprehensive Rust code quality analyzer — seven dimensions: IOSP, Complexity, DRY, SRP, Coupling, Test Quality, Architecture"
 license = "MIT"

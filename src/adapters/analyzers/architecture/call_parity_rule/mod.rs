@@ -18,6 +18,7 @@ pub mod calls;
 pub mod check_a;
 pub mod check_b;
 pub mod pub_fns;
+pub mod type_infer;
 pub mod workspace_graph;
 
 use crate::adapters::analyzers::architecture::compiled::CompiledArchitecture;
@@ -64,6 +65,7 @@ pub fn collect_findings(
         &aliases_per_file,
         &cfg_test_files,
         &compiled.layers,
+        &cp.transparent_wrappers,
     );
     let mut out = Vec::new();
     for hit in check_a::check_no_delegation(&pub_fns, &graph, &compiled.layers, cp) {

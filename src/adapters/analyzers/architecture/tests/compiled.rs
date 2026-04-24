@@ -111,6 +111,8 @@ fn minimal_call_parity() -> CallParityConfig {
         target: "application".to_string(),
         call_depth: 3,
         exclude_targets: Vec::new(),
+        transparent_wrappers: Vec::new(),
+        transparent_macros: Vec::new(),
     }
 }
 

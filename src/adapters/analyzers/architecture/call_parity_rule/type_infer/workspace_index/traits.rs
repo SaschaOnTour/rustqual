@@ -1,0 +1,132 @@
+//! Trait-definition + trait-impl collection.
+//!
+//! Populates two maps on `WorkspaceTypeIndex`:
+//!
+//! - `trait_methods`: `trait_canonical → {method_name, …}` — the set
+//!   of methods each trait declares. Used so trait-dispatch resolution
+//!   only fires for methods that actually belong to the trait
+//!   (`dyn Trait.unrelated_method()` stays unresolved).
+//! - `trait_impls`: `trait_canonical → [impl_type_canonical, …]` —
+//!   every workspace-local impl of a trait. Stage 2 trait-dispatch
+//!   over-approximates by recording an edge to every impl's method.
+
+use super::{canonical_type_key, BuildContext, WorkspaceTypeIndex};
+use crate::adapters::analyzers::architecture::call_parity_rule::bindings::canonicalise_type_segments;
+use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::resolve_impl_self_type;
+use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
+use crate::adapters::shared::cfg_test::has_cfg_test;
+use std::collections::HashSet;
+use syn::visit::Visit;
+
+/// Walk `ast` and populate both `trait_methods` and `trait_impls` on
+/// `index`. Integration.
+pub(super) fn collect_from_file(
+    index: &mut WorkspaceTypeIndex,
+    ctx: &BuildContext<'_>,
+    ast: &syn::File,
+) {
+    let mut collector = TraitCollector { index, ctx };
+    collector.visit_file(ast);
+}
+
+struct TraitCollector<'i, 'c> {
+    index: &'i mut WorkspaceTypeIndex,
+    ctx: &'c BuildContext<'c>,
+}
+
+impl<'ast, 'i, 'c> Visit<'ast> for TraitCollector<'i, 'c> {
+    fn visit_item_trait(&mut self, node: &'ast syn::ItemTrait) {
+        record_trait_methods(self.index, self.ctx, node);
+    }
+
+    fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
+        record_trait_impl(self.index, self.ctx, node);
+    }
+
+    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+        if has_cfg_test(&node.attrs) {
+            return;
+        }
+        syn::visit::visit_item_mod(self, node);
+    }
+}
+
+/// For a `trait T { fn m(…); fn n(…); }` record
+/// `trait_methods[canonical_T] = {"m", "n"}`. Operation.
+fn record_trait_methods(
+    index: &mut WorkspaceTypeIndex,
+    ctx: &BuildContext<'_>,
+    node: &syn::ItemTrait,
+) {
+    let canonical = canonical_name(&node.ident.to_string(), ctx);
+    let methods: HashSet<String> = node
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            syn::TraitItem::Fn(f) => Some(f.sig.ident.to_string()),
+            _ => None,
+        })
+        .collect();
+    if !methods.is_empty() {
+        index.trait_methods.insert(canonical, methods);
+    }
+}
+
+/// For `impl Trait for X { … }` record `trait_impls[canonical_Trait]`
+/// gaining `canonical_X`. Inherent impls (without `trait_`) are handled
+/// by `methods.rs`, not here. Operation: delegated canonicalisation.
+fn record_trait_impl(index: &mut WorkspaceTypeIndex, ctx: &BuildContext<'_>, node: &syn::ItemImpl) {
+    let Some((_, trait_path, _)) = &node.trait_ else {
+        return;
+    };
+    let trait_canonical = resolve_trait_path(trait_path, ctx);
+    let Some(trait_canonical) = trait_canonical else {
+        return;
+    };
+    let impl_type_canonical = resolve_impl_self_type(
+        &node.self_ty,
+        ctx.alias_map,
+        ctx.local_symbols,
+        ctx.crate_root_modules,
+        ctx.path,
+    );
+    let Some(impl_segs) = impl_type_canonical else {
+        return;
+    };
+    let impl_canonical = canonical_impl_type(&impl_segs, ctx);
+    index
+        .trait_impls
+        .entry(trait_canonical)
+        .or_default()
+        .push(impl_canonical);
+}
+
+/// Resolve a trait path (the `T` in `impl T for X`) to its canonical
+/// crate-rooted form via the shared canonicalisation pipeline.
+/// Operation: flatten + delegate.
+fn resolve_trait_path(path: &syn::Path, ctx: &BuildContext<'_>) -> Option<String> {
+    let segs: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
+    let resolved = canonicalise_type_segments(
+        &segs,
+        ctx.alias_map,
+        ctx.local_symbols,
+        ctx.crate_root_modules,
+        ctx.path,
+    )?;
+    Some(resolved.join("::"))
+}
+
+/// `crate::<file-module>::<trait_or_type_ident>`. Operation.
+fn canonical_name(ident: &str, ctx: &BuildContext<'_>) -> String {
+    let mut segs: Vec<String> = vec!["crate".to_string()];
+    segs.extend(file_to_module_segments(ctx.path));
+    segs.push(ident.to_string());
+    segs.join("::")
+}
+
+/// Same shape as methods.rs — prefix impl-type segs with `crate::
+/// <file-module>::` unless the impl path is already crate-rooted.
+/// Operation: delegate to the shared `canonical_type_key`.
+fn canonical_impl_type(impl_segs: &[String], ctx: &BuildContext<'_>) -> String {
+    canonical_type_key(impl_segs, ctx)
+}

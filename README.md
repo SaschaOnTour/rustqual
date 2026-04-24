@@ -828,7 +828,7 @@ Checks: `receiver_may_be`, `methods_must_be_async`,
 `required_supertraits_contain`, `must_be_object_safe` (conservative: flags
 `Self` returns and method-level generics), `forbidden_error_variant_contains`.
 
-**5. `[architecture.call_parity]` — cross-adapter delegation drift check (v1.1).**
+**5. `[architecture.call_parity]` — cross-adapter delegation drift check (v1.1, hardened in v1.2).**
 Detects when N peer adapters (CLI + MCP + REST + …) fall out of sync
 with the shared Application layer. Two rules run under one config
 section:
@@ -854,11 +854,51 @@ exclude_targets = ["app::setup::*"]
 ```
 
 Zero per-function annotation: adapter fns are enumerated automatically
-from the layer globs you already have. Receiver-type tracking resolves
-`let s = Session::open(); s.search();` idioms through `let` bindings,
-`fn` signatures, and common wrappers (`Arc<T>`, `Box<T>`, `Rc<T>`,
-`&T`, `&mut T`, `Cow<'_, T>`), so Session/Service/Context-pattern
-architectures aren't 100% false-positive out of the box.
+from the layer globs you already have. Shallow type-inference resolves
+Session/Service/Context-pattern idioms out of the box:
+
+- **Method-chain constructors:** `let s = Session::open().map_err(f)?;
+  s.diff(...)` — the inference walks through `?`, `.unwrap()`, `.expect()`,
+  `.map_err()`, `.or_else()`, `.unwrap_or*()` and back to the
+  constructor to find `Session`.
+- **Field access:** `ctx.session.diff(...)` — looks up `session` in the
+  workspace struct-field index, then resolves `diff` on the resulting type.
+- **Free-fn return types:** `make_session().unwrap().diff()` — the
+  free-fn's declared return type is indexed and flows through the chain.
+- **Result/Option combinators:** full stdlib table for `unwrap`,
+  `expect`, `ok`, `err`, `map_err`, `or_else`, `ok_or`, `filter`,
+  `as_ref` etc. Closure-dependent combinators (`map`, `and_then`)
+  intentionally stay unresolved rather than fabricate an edge.
+- **Wrapper stripping:** `Arc<T>`, `Box<T>`, `Rc<T>`, `Cow<'_, T>`,
+  `RwLock<T>`, `Mutex<T>`, `RefCell<T>`, `Cell<T>`, `&T`, `&mut T` all
+  transparent. `Vec<T>` / `HashMap<_, V>` preserve the element/value type.
+- **`Self::xxx`** in impl-method contexts substitutes to the enclosing
+  type.
+- **`if let Some(s) = opt`** binds `s: T` when `opt: Option<T>`, same
+  for `Ok(x)` / `Err(e)` patterns.
+- **Trait dispatch** (`dyn Trait` / `&dyn Trait` / `Box<dyn Trait>`
+  receivers): fans out to every workspace impl of the trait. Method
+  must be declared on the trait — unrelated methods stay unresolved
+  rather than fabricating edges. Marker traits (`Send`, `Sync`, …)
+  skipped when picking the dispatch-relevant bound.
+- **Turbofish return types**: `get::<Session>()` for generic fns — the
+  turbofish arg is used as the return type when the workspace index has
+  no concrete return for `get`. Only single-ident paths trigger.
+- **Type aliases**: `type Db = Arc<RwLock<Store>>;` is recorded and
+  expanded during receiver resolution, so `fn h(db: Db) { db.read() }`
+  reaches `Store::read`.
+
+For framework codebases you can extend the wrapper and macro lists:
+
+```toml
+[architecture.call_parity]
+# Framework extractor wrappers peeled like Arc / Box:
+transparent_wrappers = ["State", "Extension", "Json", "Data"]
+# Attribute macros that don't affect the call graph (starter pack
+# — tracing::instrument, async_trait, tokio::main/test, rstest,
+# test_case, pyo3, wasm_bindgen — already applied by default):
+transparent_macros = ["my_custom_attr"]
+```
 
 Two escape mechanisms:
 - `exclude_targets` — glob list in config for whole groups of
@@ -867,9 +907,22 @@ Two escape mechanisms:
   exceptions. Counts against `max_suppression_ratio`.
 
 See `examples/architecture/call_parity/` for a runnable 3-adapter
-fixture. Known MVP limitation: factory-helper return types aren't
-inferred — `let s = helpers::open()?;` stays `<method>:search`.
-Workaround: explicit `let s: Session = helpers::open()?;`.
+fixture.
+
+Known limits (documented, with clear workarounds):
+- **Tuple destructuring** `let (a, s) = setup(); s.m()` — `s` stays
+  `<method>:m`. Workaround: separate `let`s.
+- **`for` / `match` pattern bindings** — `for item in xs { item.m() }`
+  and `match res { Ok(s) => s.m(), … }` don't flow pattern bindings
+  into the method-call scope. Workaround: extract into `let` first.
+- **Unannotated generics** `let x = get(); x.m()` where `get<T>() -> T`
+  — use turbofish `get::<T>()` or `let x: T = get();`.
+- **`impl Trait`-returned inherent methods** — only trait methods
+  resolve (via trait-dispatch over-approximation).
+- **Arbitrary proc-macros** not listed in `transparent_macros` —
+  `// qual:allow(architecture)` on the enclosing fn is the escape.
+
+Design reference: `docs/rustqual-design-receiver-type-inference.md`.
 
 **`--explain <FILE>`** diagnostic mode prints the file's layer assignment,
 classified imports, and rule hits — useful for understanding why a rule

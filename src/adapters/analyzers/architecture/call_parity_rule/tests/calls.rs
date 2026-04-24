@@ -124,6 +124,7 @@ fn ctx_for_fn<'a>(fctx: &'a FileCtx, fn_name: &str, importing_file: &'a str) -> 
         local_symbols: &fctx.local_symbols,
         crate_root_modules: &fctx.crate_root_modules,
         importing_file,
+        workspace_index: None,
     }
 }
 
@@ -313,6 +314,7 @@ fn test_collect_self_dispatch_in_impl() {
         local_symbols: &fctx.local_symbols,
         crate_root_modules: &fctx.crate_root_modules,
         importing_file: "src/application/session.rs",
+        workspace_index: None,
     };
     let calls = collect_canonical_calls(&ctx);
     assert!(
@@ -767,6 +769,7 @@ fn test_qualified_impl_path_does_not_double_crate() {
         local_symbols: &fctx.local_symbols,
         crate_root_modules: &fctx.crate_root_modules,
         importing_file: "src/other_file.rs",
+        workspace_index: None,
     };
     let calls = collect_canonical_calls(&ctx);
     assert!(
@@ -777,4 +780,143 @@ fn test_qualified_impl_path_does_not_double_crate() {
         !calls.iter().any(|c| c.contains("crate::crate::")),
         "must not double-crate, got {calls:?}"
     );
+}
+
+// ── Shallow-inference fallback (Task 1.6) ────────────────────────
+
+/// Helper: build a `FnContext` with a pre-populated workspace index.
+fn ctx_with_index<'a>(
+    fctx: &'a FileCtx,
+    fn_name: &str,
+    importing_file: &'a str,
+    index: &'a crate::adapters::analyzers::architecture::call_parity_rule::type_infer::WorkspaceTypeIndex,
+) -> FnContext<'a> {
+    let f = find_fn(&fctx.file, fn_name);
+    FnContext {
+        body: &f.block,
+        signature_params: sig_params(&f.sig),
+        self_type: None,
+        alias_map: &fctx.alias_map,
+        local_symbols: &fctx.local_symbols,
+        crate_root_modules: &fctx.crate_root_modules,
+        importing_file,
+        workspace_index: Some(index),
+    }
+}
+
+#[test]
+fn test_inference_fallback_resolves_rlm_pattern() {
+    // The exact pattern that motivated Task 1.6: method chain on a
+    // constructor + `?` unwrap. Legacy extract_let_binding can't see
+    // through the MethodCall; inference walks the chain and ends at T.
+    use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::{
+        CanonicalType, WorkspaceTypeIndex,
+    };
+    let fctx = load(
+        r#"
+        use crate::app::session::Session;
+        pub fn cmd_diff() {
+            let session = Session::open().map_err(handle_err).unwrap();
+            session.diff();
+        }
+        "#,
+    );
+    let mut index = WorkspaceTypeIndex::new();
+    // `Session::open()` returns Result<Session, _>.
+    index.method_returns.insert(
+        (
+            "crate::app::session::Session".to_string(),
+            "open".to_string(),
+        ),
+        CanonicalType::Result(Box::new(CanonicalType::path([
+            "crate", "app", "session", "Session",
+        ]))),
+    );
+    let ctx = ctx_with_index(&fctx, "cmd_diff", "src/cli/handlers.rs", &index);
+    let calls = collect_canonical_calls(&ctx);
+    assert!(
+        calls.contains("crate::app::session::Session::diff"),
+        "inference fallback should resolve session.diff(), got {calls:?}"
+    );
+}
+
+#[test]
+fn test_inference_fallback_resolves_field_access() {
+    // `ctx.session.diff()` — receiver is Expr::Field, resolved via the
+    // inference layer + workspace struct-field index. Fixture uses
+    // `use crate::app::Ctx` so the signature-param `&Ctx` canonicalises
+    // to `crate::app::Ctx` directly.
+    use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::{
+        CanonicalType, WorkspaceTypeIndex,
+    };
+    let fctx = load(
+        r#"
+        use crate::app::Ctx;
+        pub fn handle_diff(ctx: &Ctx) {
+            ctx.session.diff();
+        }
+        "#,
+    );
+    let mut index = WorkspaceTypeIndex::new();
+    index.struct_fields.insert(
+        ("crate::app::Ctx".to_string(), "session".to_string()),
+        CanonicalType::path(["crate", "app", "Session"]),
+    );
+    let ctx = ctx_with_index(&fctx, "handle_diff", "src/cli/handlers.rs", &index);
+    let calls = collect_canonical_calls(&ctx);
+    assert!(
+        calls.contains("crate::app::Session::diff"),
+        "field-access inference should resolve ctx.session.diff(), got {calls:?}"
+    );
+}
+
+#[test]
+fn test_inference_fallback_on_result_unwrap_chain() {
+    // End-to-end: `session.open().unwrap().diff()` — combinator table
+    // unwraps Result, then method resolution on Session proceeds.
+    use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::{
+        CanonicalType, WorkspaceTypeIndex,
+    };
+    let fctx = load(
+        r#"
+        use crate::app::session::Session;
+        pub fn cmd_direct() {
+            Session::open().unwrap().diff();
+        }
+        "#,
+    );
+    let mut index = WorkspaceTypeIndex::new();
+    index.method_returns.insert(
+        (
+            "crate::app::session::Session".to_string(),
+            "open".to_string(),
+        ),
+        CanonicalType::Result(Box::new(CanonicalType::path([
+            "crate", "app", "session", "Session",
+        ]))),
+    );
+    let ctx = ctx_with_index(&fctx, "cmd_direct", "src/cli/handlers.rs", &index);
+    let calls = collect_canonical_calls(&ctx);
+    assert!(
+        calls.contains("crate::app::session::Session::diff"),
+        "combinator chain should resolve Session::open().unwrap().diff(), got {calls:?}"
+    );
+}
+
+#[test]
+fn test_existing_fast_path_still_works_without_index() {
+    // Regression guard: legacy extract_let_binding keeps working when
+    // workspace_index is None (unit-test fixture shape).
+    let fctx = load(
+        r#"
+        use crate::app::session::RlmSession;
+        pub fn cmd_search(q: u32) {
+            let s = RlmSession::open_cwd();
+            s.search(q);
+        }
+        "#,
+    );
+    let ctx = ctx_for_fn(&fctx, "cmd_search", "src/cli/handlers.rs");
+    let calls = collect_canonical_calls(&ctx);
+    assert!(calls.contains("crate::app::session::RlmSession::search"));
 }

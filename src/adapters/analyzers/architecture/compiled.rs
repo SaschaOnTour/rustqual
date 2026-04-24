@@ -39,6 +39,18 @@ pub struct CompiledCallParity {
     pub target: String,
     pub call_depth: usize,
     pub exclude_targets: GlobSet,
+    /// Stage 3 — last path-segment names of user-defined wrappers whose
+    /// single type parameter is transparent for receiver resolution.
+    /// Built from `[architecture.call_parity]::transparent_wrappers`.
+    pub transparent_wrappers: HashSet<String>,
+    /// Stage 3 — last path-segment names of attribute macros that
+    /// don't affect the call graph. The default set covers common
+    /// framework attributes (`instrument`, `async_trait`, `main`,
+    /// `test`); user config extends it. Consulted today only for
+    /// authorial intent; retained here so future macro-expansion
+    /// enhancements have the list available without a config-schema
+    /// break.
+    pub transparent_macros: HashSet<String>,
 }
 
 /// Compile the raw config into `CompiledArchitecture`.
@@ -110,12 +122,37 @@ fn compile_call_parity(
     }
     let exclude_targets = build_globset(&cp.exclude_targets)
         .map_err(|e| format!("call_parity.exclude_targets: {e}"))?;
+    let transparent_wrappers: HashSet<String> = cp.transparent_wrappers.iter().cloned().collect();
+    let transparent_macros = build_transparent_macros(&cp.transparent_macros);
     Ok(Some(CompiledCallParity {
         adapters: cp.adapters.clone(),
         target: cp.target.clone(),
         call_depth: cp.call_depth,
         exclude_targets,
+        transparent_wrappers,
+        transparent_macros,
     }))
+}
+
+/// Stage 3 starter-pack: prepend these common framework attribute-macro
+/// names so users don't need to list them in every rustqual.toml. The
+/// full set is `defaults ∪ user`. Operation.
+fn build_transparent_macros(user: &[String]) -> HashSet<String> {
+    const DEFAULTS: &[&str] = &[
+        "instrument",   // tracing::instrument
+        "async_trait",  // async_trait::async_trait
+        "main",         // tokio::main, actix::main, async_std::main
+        "test",         // tokio::test, #[test]
+        "rstest",       // rstest::rstest
+        "test_case",    // test_case::test_case
+        "pyfunction",   // pyo3::pyfunction
+        "pymethods",    // pyo3::pymethods
+        "wasm_bindgen", // wasm_bindgen
+        "cfg_attr",     // conditional attribute
+    ];
+    let mut set: HashSet<String> = DEFAULTS.iter().map(|s| (*s).to_string()).collect();
+    set.extend(user.iter().cloned());
+    set
 }
 
 /// Compile `[[architecture.trait_contract]]` entries into runtime rules.

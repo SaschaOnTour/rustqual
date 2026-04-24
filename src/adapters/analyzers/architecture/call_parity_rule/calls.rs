@@ -17,6 +17,10 @@
 //! the binding scan patterns.
 
 use super::bindings::{canonical_from_type, extract_let_binding, normalize_alias_expansion};
+use super::type_infer::resolve::{resolve_type, ResolveContext};
+use super::type_infer::{
+    infer_type, BindingLookup, CanonicalType, InferContext, WorkspaceTypeIndex,
+};
 use crate::adapters::analyzers::architecture::forbidden_rule::{
     file_to_module_segments, resolve_to_crate_absolute,
 };
@@ -59,6 +63,11 @@ pub struct FnContext<'a> {
     /// File path of the fn under analysis. Used to resolve
     /// `crate::` / `self::` / `super::` prefixes and `Self::…`.
     pub importing_file: &'a str,
+    /// Workspace type-index for shallow inference fallback. `None` means
+    /// the collector falls back to `<method>:name` for complex receivers
+    /// (typical in unit-test fixtures that don't build the full graph).
+    /// The full `build_call_graph` pipeline always passes `Some(&index)`.
+    pub workspace_index: Option<&'a WorkspaceTypeIndex>,
 }
 
 // qual:api
@@ -88,7 +97,17 @@ struct CanonicalCallCollector<'a> {
     /// Inner-most scope is at the end; lookup walks from back to front.
     /// Always non-empty while a collection is in flight.
     bindings: Vec<HashMap<String, Vec<String>>>,
+    /// Flat signature-param scope for `dyn Trait` / `&dyn Trait` /
+    /// `Box<dyn Trait>` parameters — Stage 2 trait-dispatch receivers.
+    /// Kept separate because `bindings` stores concrete `Vec<String>`
+    /// paths; trait-bound segments are semantically different (they
+    /// trigger fan-out to every impl instead of a single edge).
+    trait_bindings: HashMap<String, Vec<String>>,
     calls: HashSet<String>,
+    /// Workspace type-index for shallow inference fallback. Mirrored
+    /// from `FnContext` so the visitor doesn't need the full context
+    /// passed through every method.
+    workspace_index: Option<&'a WorkspaceTypeIndex>,
 }
 
 impl<'a> CanonicalCallCollector<'a> {
@@ -113,13 +132,23 @@ impl<'a> CanonicalCallCollector<'a> {
             self_type_canonical,
             signature_params: ctx.signature_params.clone(),
             bindings: vec![HashMap::new()],
+            trait_bindings: HashMap::new(),
             calls: HashSet::new(),
+            workspace_index: ctx.workspace_index,
         }
     }
 
     fn seed_signature_bindings(&mut self) {
         let params = self.signature_params.clone();
         for (name, ty) in &params {
+            // When workspace_index is available, use the full resolver:
+            // it handles Stage-3 type-alias expansion, Stage-2 dyn Trait,
+            // stdlib wrappers, and plain Path in one pass.
+            if self.workspace_index.is_some() {
+                self.seed_param_via_resolver(name, ty);
+                continue;
+            }
+            // Legacy fast-path for unit-test fixtures without an index.
             if let Some(canonical) = canonical_from_type(
                 ty,
                 self.alias_map,
@@ -129,6 +158,32 @@ impl<'a> CanonicalCallCollector<'a> {
             ) {
                 self.bindings[0].insert(name.clone(), canonical);
             }
+        }
+    }
+
+    /// Install a signature-param binding using the full `resolve_type`
+    /// pipeline. `Path` variants go into the legacy `Vec<String>` scope;
+    /// `TraitBound` variants go into the separate `trait_bindings` map
+    /// so trait-dispatch fires at the method-call site. Other variants
+    /// (Opaque, Slice, Map, stdlib wrappers) don't install a binding.
+    /// Operation: resolve + classify.
+    fn seed_param_via_resolver(&mut self, name: &str, ty: &syn::Type) {
+        let rctx = ResolveContext {
+            alias_map: self.alias_map,
+            local_symbols: self.local_symbols,
+            crate_root_modules: self.crate_root_modules,
+            importing_file: self.importing_file,
+            type_aliases: self.workspace_index.map(|w| &w.type_aliases),
+            transparent_wrappers: self.workspace_index.map(|w| &w.transparent_wrappers),
+        };
+        match resolve_type(ty, &rctx) {
+            CanonicalType::Path(segs) => {
+                self.bindings[0].insert(name.to_string(), segs);
+            }
+            CanonicalType::TraitBound(segs) => {
+                self.trait_bindings.insert(name.to_string(), segs);
+            }
+            _ => {}
         }
     }
 
@@ -228,6 +283,96 @@ impl<'a> CanonicalCallCollector<'a> {
         self.calls.insert(target);
     }
 
+    /// Resolve a method call's receiver to the canonical call-graph
+    /// targets. Fast-path returns a single element; trait-dispatch
+    /// inference may return multiple (one per impl of the trait).
+    /// Empty vec means unresolved — caller records `<method>:name`.
+    /// Integration: fast-path first, inference fallback second.
+    fn resolve_method_targets(&self, receiver: &syn::Expr, method_name: &str) -> Vec<String> {
+        if let Some(c) = self.try_fast_path_receiver(receiver, method_name) {
+            return vec![c];
+        }
+        self.try_inferred_targets(receiver, method_name)
+    }
+
+    /// Fast-path: receiver is a bare ident with a concrete binding in
+    /// the legacy scope. Operation.
+    fn try_fast_path_receiver(&self, receiver: &syn::Expr, method_name: &str) -> Option<String> {
+        let syn::Expr::Path(p) = receiver else {
+            return None;
+        };
+        if p.path.segments.len() != 1 {
+            return None;
+        }
+        let ident = p.path.segments[0].ident.to_string();
+        let binding = self.resolve_binding(&ident)?;
+        let mut full = binding.clone();
+        full.push(method_name.to_string());
+        Some(full.join("::"))
+    }
+
+    /// Inference fallback: run shallow type inference over the receiver
+    /// expression, then project the result into one or more canonical
+    /// call-graph targets. Returns `Vec::new()` when the workspace index
+    /// isn't present, inference fails, or the inferred type isn't
+    /// resolvable to a concrete edge. Operation.
+    fn try_inferred_targets(&self, receiver: &syn::Expr, method_name: &str) -> Vec<String> {
+        let Some(workspace) = self.workspace_index else {
+            return Vec::new();
+        };
+        let Some(inferred) = self.infer_receiver_type(receiver) else {
+            return Vec::new();
+        };
+        canonical_edges_for_method(&inferred, method_name, workspace)
+    }
+
+    /// Run `infer_type` over `receiver` with the current collector
+    /// state. Returns the raw `CanonicalType` so `try_inferred_targets`
+    /// can project it to 0/1/N edges. Operation: adapter build +
+    /// delegate.
+    fn infer_receiver_type(&self, expr: &syn::Expr) -> Option<CanonicalType> {
+        let adapter = CollectorBindings {
+            scope: &self.bindings,
+            trait_scope: &self.trait_bindings,
+        };
+        let ctx = InferContext {
+            workspace: self.workspace_index?,
+            alias_map: self.alias_map,
+            local_symbols: self.local_symbols,
+            crate_root_modules: self.crate_root_modules,
+            importing_file: self.importing_file,
+            bindings: &adapter,
+            self_type: self.self_type_canonical.clone(),
+        };
+        infer_type(expr, &ctx)
+    }
+
+    /// Shallow-inference fallback: run `type_infer::infer_type` on an
+    /// expression, returning the canonical-path segments iff the result
+    /// is a concrete `Path`. `Result`/`Option`/`Future`/`Slice`/`Map`/
+    /// `TraitBound`/`Opaque` collapse to `None` — the legacy scope only
+    /// stores concrete type-path bindings. Trait-bound bindings would
+    /// need multi-target dispatch at the method-call site instead.
+    /// Operation: delegate to `infer_receiver_type` + variant probe.
+    fn try_infer_receiver(&self, expr: &syn::Expr) -> Option<Vec<String>> {
+        match self.infer_receiver_type(expr)? {
+            CanonicalType::Path(segs) => Some(segs),
+            _ => None,
+        }
+    }
+
+    /// Extract a `(name, canonical_segments)` pair from a `let`
+    /// statement via shallow inference on its initializer. Only simple
+    /// `Pat::Ident` patterns are handled here; complex destructuring
+    /// (`let Some(x) = opt`) is out of scope for Task 1.6 MVP.
+    /// Operation: delegate to `try_infer_receiver` + pattern probe.
+    fn infer_let_binding(&self, local: &syn::Local) -> Option<(String, Vec<String>)> {
+        let init = local.init.as_ref()?;
+        let name = extract_pat_ident_name(&local.pat)?;
+        let segs = self.try_infer_receiver(&init.expr)?;
+        Some((name, segs))
+    }
+
     fn collect_macro_body(&mut self, mac: &syn::Macro) {
         for expr in parse_macro_tokens(mac.tokens.clone()) {
             self.visit_expr(&expr);
@@ -274,6 +419,87 @@ fn parse_macro_tokens(tokens: proc_macro2::TokenStream) -> Vec<syn::Expr> {
     Vec::new()
 }
 
+/// Project an inferred receiver type to the canonical call-graph
+/// edge(s) for a method call. `Path` yields one edge. `TraitBound`
+/// (Stage 2) yields one edge per workspace impl of the trait,
+/// provided the method is declared on the trait — the over-approximation
+/// that makes call-parity sound for Ports&Adapters architectures.
+/// Wrapper variants (`Result`/`Option`/…) yield no direct edge — the
+/// combinator table already unwrapped them in the method-return lookup.
+/// Operation: variant dispatch.
+fn canonical_edges_for_method(
+    ty: &CanonicalType,
+    method: &str,
+    workspace: &WorkspaceTypeIndex,
+) -> Vec<String> {
+    match ty {
+        CanonicalType::Path(segs) => {
+            let mut full = segs.clone();
+            full.push(method.to_string());
+            vec![full.join("::")]
+        }
+        CanonicalType::TraitBound(segs) => trait_dispatch_edges(segs, method, workspace),
+        _ => Vec::new(),
+    }
+}
+
+/// Enumerate one edge per workspace impl of the trait. Filters on
+/// `trait_has_method` so `dyn Trait.unrelated_method()` still falls
+/// through to `<method>:name`. Operation: index lookup + map.
+fn trait_dispatch_edges(
+    trait_segs: &[String],
+    method: &str,
+    workspace: &WorkspaceTypeIndex,
+) -> Vec<String> {
+    let trait_canonical = trait_segs.join("::");
+    if !workspace.trait_has_method(&trait_canonical, method) {
+        return Vec::new();
+    }
+    workspace
+        .impls_of_trait(&trait_canonical)
+        .iter()
+        .map(|impl_type| format!("{impl_type}::{method}"))
+        .collect()
+}
+
+/// Adapter that exposes the collector's `Vec<HashMap<String, Vec<String>>>`
+/// scope stack as a `BindingLookup` for the inference engine. Bindings
+/// in the old scope are always concrete type paths, so we wrap each as
+/// `CanonicalType::Path(segs)`. Stdlib-wrapper bindings (`Option<T>`,
+/// `Result<T,_>`) are never stored in the old scope — they're either
+/// unwrapped via `?` before `let` binds them, or simply not populated
+/// by the legacy `extract_let_binding`.
+struct CollectorBindings<'a> {
+    scope: &'a [HashMap<String, Vec<String>>],
+    trait_scope: &'a HashMap<String, Vec<String>>,
+}
+
+impl BindingLookup for CollectorBindings<'_> {
+    fn lookup(&self, ident: &str) -> Option<CanonicalType> {
+        for frame in self.scope.iter().rev() {
+            if let Some(segs) = frame.get(ident) {
+                return Some(CanonicalType::Path(segs.clone()));
+            }
+        }
+        self.trait_scope
+            .get(ident)
+            .map(|segs| CanonicalType::TraitBound(segs.clone()))
+    }
+}
+
+/// Peel `Pat::Type` wrappers to reach a `Pat::Ident` and return its
+/// identifier. Returns `None` for destructuring / tuple / struct
+/// patterns — those flow through `patterns::extract_bindings` in a
+/// future Task 1.6 extension. Operation: recursive pattern peel.
+// qual:recursive
+fn extract_pat_ident_name(pat: &syn::Pat) -> Option<String> {
+    match pat {
+        syn::Pat::Ident(pi) => Some(pi.ident.to_string()),
+        syn::Pat::Type(pt) => extract_pat_ident_name(&pt.pat),
+        _ => None,
+    }
+}
+
 /// Prefix an unresolved single-ident or segment path with the layer-unknown
 /// `<bare>:` marker. Centralised so the BP-010 format-repetition detector
 /// sees exactly one format string, and so the marker can evolve together.
@@ -308,6 +534,9 @@ impl<'a, 'ast> Visit<'ast> for CanonicalCallCollector<'a> {
                 self.visit_expr(else_expr);
             }
         }
+        // Fast-path: direct `let s = T::ctor()` / `let s: T = …` —
+        // the legacy prefix-based extractor resolves without needing a
+        // populated workspace index, so unit-test fixtures work.
         if let Some((name, ty_canonical)) = extract_let_binding(
             local,
             self.alias_map,
@@ -316,6 +545,13 @@ impl<'a, 'ast> Visit<'ast> for CanonicalCallCollector<'a> {
             self.importing_file,
         ) {
             self.current_scope_mut().insert(name, ty_canonical);
+            return;
+        }
+        // Inference fallback: method-chained ctors (`T::ctor().map_err()?`),
+        // free-fn returns (`make_session()`), builder patterns, etc.
+        // Requires workspace_index; silently skips when absent.
+        if let Some((name, segs)) = self.infer_let_binding(local) {
+            self.current_scope_mut().insert(name, segs);
         }
     }
 
@@ -344,21 +580,14 @@ impl<'a, 'ast> Visit<'ast> for CanonicalCallCollector<'a> {
             self.visit_expr(arg);
         }
         let method_name = call.method.to_string();
-        let canonical = match call.receiver.as_ref() {
-            syn::Expr::Path(p) if p.path.segments.len() == 1 => {
-                let ident = p.path.segments[0].ident.to_string();
-                match self.resolve_binding(&ident) {
-                    Some(binding) => {
-                        let mut full = binding.clone();
-                        full.push(method_name.clone());
-                        full.join("::")
-                    }
-                    None => method_unknown(&method_name),
-                }
+        let targets = self.resolve_method_targets(&call.receiver, &method_name);
+        if targets.is_empty() {
+            self.record_call(method_unknown(&method_name));
+        } else {
+            for t in targets {
+                self.record_call(t);
             }
-            _ => method_unknown(&method_name),
-        };
-        self.record_call(canonical);
+        }
     }
 
     fn visit_macro(&mut self, mac: &'ast syn::Macro) {

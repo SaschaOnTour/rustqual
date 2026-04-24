@@ -21,6 +21,7 @@
 
 use super::bindings::canonicalise_type_segments;
 use super::calls::{collect_canonical_calls, FnContext};
+use super::type_infer::{build_workspace_type_index, WorkspaceTypeIndex};
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
 use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
 use crate::adapters::shared::cfg_test::has_cfg_test;
@@ -273,8 +274,18 @@ pub(crate) fn build_call_graph<'ast>(
     aliases_per_file: &HashMap<String, HashMap<String, Vec<String>>>,
     cfg_test_files: &HashSet<String>,
     layers: &LayerDefinitions,
+    transparent_wrappers: &HashSet<String>,
 ) -> CallGraph {
     let crate_root_modules = collect_crate_root_modules(files);
+    // Pre-build the workspace type index so `collect_canonical_calls`
+    // can run shallow inference on complex method-call receivers.
+    let type_index = build_workspace_type_index(
+        files,
+        aliases_per_file,
+        cfg_test_files,
+        &crate_root_modules,
+        transparent_wrappers,
+    );
     let mut graph = CallGraph::new();
     for (path, ast) in files {
         if cfg_test_files.contains(*path) {
@@ -289,6 +300,7 @@ pub(crate) fn build_call_graph<'ast>(
             alias_map,
             local_symbols: &local_symbols,
             crate_root_modules: &crate_root_modules,
+            type_index: &type_index,
             impl_type_stack: Vec::new(),
             graph: &mut graph,
         };
@@ -318,6 +330,7 @@ struct FileFnCollector<'a> {
     alias_map: &'a HashMap<String, Vec<String>>,
     local_symbols: &'a HashSet<String>,
     crate_root_modules: &'a HashSet<String>,
+    type_index: &'a WorkspaceTypeIndex,
     /// Stack of enclosing impl blocks' resolved self-types. `None`
     /// marks an unresolved self-type (trait object, `&T`, tuple) whose
     /// methods we must not record — their canonical would collapse to
@@ -351,6 +364,7 @@ impl<'a> FileFnCollector<'a> {
             local_symbols: self.local_symbols,
             crate_root_modules: self.crate_root_modules,
             importing_file: self.path,
+            workspace_index: Some(self.type_index),
         };
         let calls = collect_canonical_calls(&ctx);
         self.graph.add_node(&canonical);

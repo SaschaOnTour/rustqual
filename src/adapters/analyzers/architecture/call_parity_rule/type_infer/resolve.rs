@@ -1,0 +1,247 @@
+//! `syn::Type` → `CanonicalType` conversion.
+//!
+//! Recognises stdlib wrappers (`Result`, `Option`, `Vec`, `HashMap`,
+//! `BTreeMap`, `Arc`, `Box`, `Rc`, `Cow`, `RwLock`, `Mutex`, `RefCell`,
+//! `Cell`) and projects their generic arguments into the matching
+//! `CanonicalType` variant. Unknown-generic paths resolve through the
+//! existing `bindings::canonicalise_type_segments` pipeline (alias map
+//! + local symbols + crate roots).
+//!
+//! Shared between the workspace-index builder (Task 1.2) and the
+//! inference engine (Task 1.3) — both turn `syn::Type`s into
+//! `CanonicalType`s with identical semantics.
+
+use super::super::bindings::canonicalise_type_segments;
+use super::canonical::CanonicalType;
+use std::collections::{HashMap, HashSet};
+
+/// Resolution inputs, bundled so the recursive calls don't drag a long
+/// parameter list around.
+pub(crate) struct ResolveContext<'a> {
+    pub alias_map: &'a HashMap<String, Vec<String>>,
+    pub local_symbols: &'a HashSet<String>,
+    pub crate_root_modules: &'a HashSet<String>,
+    pub importing_file: &'a str,
+    /// Stage 3 workspace-wide type aliases. `None` means the caller
+    /// doesn't need alias expansion (the workspace-index build phase,
+    /// where the alias map is still being populated). Inference paths
+    /// pass `Some(&workspace.type_aliases)`.
+    pub type_aliases: Option<&'a HashMap<String, syn::Type>>,
+    /// Stage 3 user-defined transparent wrappers — the last-ident
+    /// names (e.g. `"State"`, `"Extension"`, `"Data"`) that are peeled
+    /// just like `Arc` / `Box`. `None` means only stdlib wrappers are
+    /// peeled.
+    pub transparent_wrappers: Option<&'a HashSet<String>>,
+}
+
+/// Hard recursion cap for `resolve_type_with_depth`. Guards against
+/// pathological types (`type A = Vec<A>`, deeply nested wrappers, hostile
+/// fixtures). Real-world types bottom out well under 16 levels.
+const MAX_RESOLVE_DEPTH: u8 = 32;
+
+// qual:api
+/// Convert a declared / inferred `syn::Type` into a `CanonicalType`.
+/// References, parens, and the stdlib-wrapper set are peeled; type paths
+/// go through the shared canonicalisation pipeline. Integration.
+pub(crate) fn resolve_type(ty: &syn::Type, ctx: &ResolveContext<'_>) -> CanonicalType {
+    resolve_type_with_depth(ty, ctx, 0)
+}
+
+/// Depth-tracked resolver. Collapses to `Opaque` past
+/// `MAX_RESOLVE_DEPTH` so stack overflow can't be triggered by user
+/// fixtures (defensive: tests build type aliases and wrapper chains
+/// the collector walks unconditionally). Integration: dispatch after a
+/// single depth guard — each arm is one-call delegation, own recursion
+/// hidden behind closures for IOSP leniency.
+// qual:recursive
+fn resolve_type_with_depth(ty: &syn::Type, ctx: &ResolveContext<'_>, depth: u8) -> CanonicalType {
+    depth_guarded(depth, |next| dispatch_type(ty, ctx, next))
+}
+
+/// Run `body` only when the cap isn't exceeded, passing `depth + 1` so
+/// callers don't hand-code the increment. Operation.
+fn depth_guarded<F>(depth: u8, body: F) -> CanonicalType
+where
+    F: FnOnce(u8) -> CanonicalType,
+{
+    if depth >= MAX_RESOLVE_DEPTH {
+        return CanonicalType::Opaque;
+    }
+    body(depth + 1)
+}
+
+/// Pure dispatch over the `syn::Type` variants. Every arm delegates
+/// (closure-hidden own calls keep this classified as an Operation).
+fn dispatch_type(ty: &syn::Type, ctx: &ResolveContext<'_>, next: u8) -> CanonicalType {
+    let recurse = |t: &syn::Type| resolve_type_with_depth(t, ctx, next);
+    let into_slice = |inner: CanonicalType| CanonicalType::Slice(Box::new(inner));
+    match ty {
+        syn::Type::Reference(r) => recurse(&r.elem),
+        syn::Type::Paren(p) => recurse(&p.elem),
+        syn::Type::Path(tp) => resolve_path(&tp.path, ctx, next),
+        syn::Type::Array(a) => into_slice(recurse(&a.elem)),
+        syn::Type::Slice(s) => into_slice(recurse(&s.elem)),
+        syn::Type::TraitObject(tto) => resolve_trait_object(tto, ctx),
+        syn::Type::ImplTrait(_) => CanonicalType::Opaque,
+        _ => CanonicalType::Opaque,
+    }
+}
+
+/// `dyn Trait + Send + 'static` → `TraitBound(["crate", "…", "Trait"])`.
+/// Marker traits (`Send`, `Sync`, `Unpin`, `Copy`, `Clone`, etc.) and
+/// lifetime bounds are skipped; the first non-marker trait wins. Yields
+/// `Opaque` if no resolvable trait bound exists. Operation.
+fn resolve_trait_object(tto: &syn::TypeTraitObject, ctx: &ResolveContext<'_>) -> CanonicalType {
+    for bound in &tto.bounds {
+        let syn::TypeParamBound::Trait(trait_bound) = bound else {
+            continue;
+        };
+        if is_marker_trait(&trait_bound.path) {
+            continue;
+        }
+        let segs: Vec<String> = trait_bound
+            .path
+            .segments
+            .iter()
+            .map(|s| s.ident.to_string())
+            .collect();
+        match canonicalise_type_segments(
+            &segs,
+            ctx.alias_map,
+            ctx.local_symbols,
+            ctx.crate_root_modules,
+            ctx.importing_file,
+        ) {
+            Some(resolved) => return CanonicalType::TraitBound(resolved),
+            None => return CanonicalType::Opaque,
+        }
+    }
+    CanonicalType::Opaque
+}
+
+/// Marker traits (plus common auto-derive names) that are skipped when
+/// picking the dispatch-relevant trait from a `dyn T1 + T2` bound set.
+/// Kept as a const so the list is greppable and easy to extend.
+const MARKER_TRAITS: &[&str] = &[
+    "Send", "Sync", "Unpin", "Copy", "Clone", "Sized", "Debug", "Display",
+];
+
+/// Skip marker traits when picking the dispatch-relevant trait from
+/// `dyn T1 + T2`. Operation: lookup table.
+fn is_marker_trait(path: &syn::Path) -> bool {
+    let Some(last) = path.segments.last() else {
+        return false;
+    };
+    let name = last.ident.to_string();
+    MARKER_TRAITS.contains(&name.as_str())
+}
+
+/// Dispatch on the last path-segment's ident to recognise stdlib
+/// wrappers. Falls through to `resolve_generic_path` for everything
+/// else. Integration: closure-hidden own calls keep IOSP clean.
+fn resolve_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -> CanonicalType {
+    let Some(last) = path.segments.last() else {
+        return CanonicalType::Opaque;
+    };
+    let args = &last.arguments;
+    let wrap = |idx, ctor: fn(Box<CanonicalType>) -> CanonicalType| {
+        wrap_generic(args, idx, ctx, depth, ctor)
+    };
+    let peel = || peel_single_generic(args, ctx, depth);
+    let fallback = || resolve_generic_path(path, ctx, depth);
+    let name = last.ident.to_string();
+    match name.as_str() {
+        "Result" => wrap(0, CanonicalType::Result),
+        "Option" => wrap(0, CanonicalType::Option),
+        "Future" => wrap(0, CanonicalType::Future),
+        "Vec" => wrap(0, CanonicalType::Slice),
+        "HashMap" | "BTreeMap" => wrap(1, CanonicalType::Map),
+        "Arc" | "Box" | "Rc" | "Cow" | "RwLock" | "Mutex" | "RefCell" | "Cell" => peel(),
+        _ if is_user_transparent(&name, ctx) => peel(),
+        _ => fallback(),
+    }
+}
+
+/// Stage 3 — check if `name` is a user-configured transparent wrapper.
+/// Operation: set lookup with optional presence.
+fn is_user_transparent(name: &str, ctx: &ResolveContext<'_>) -> bool {
+    ctx.transparent_wrappers
+        .is_some_and(|set| set.contains(name))
+}
+
+/// Build a wrapper variant from a recognized generic type at position
+/// `idx`. If the argument is absent, returns `Opaque`. Operation:
+/// closure-hidden recursion for IOSP leniency.
+fn wrap_generic<F>(
+    args: &syn::PathArguments,
+    idx: usize,
+    ctx: &ResolveContext<'_>,
+    depth: u8,
+    constructor: F,
+) -> CanonicalType
+where
+    F: FnOnce(Box<CanonicalType>) -> CanonicalType,
+{
+    let recurse = |t: &syn::Type| resolve_type_with_depth(t, ctx, depth + 1);
+    match generic_type_arg(args, idx) {
+        Some(inner) => constructor(Box::new(recurse(inner))),
+        None => CanonicalType::Opaque,
+    }
+}
+
+/// Peel a transparent single-type-param wrapper (Arc / Box / Rc / Cow /
+/// RwLock / Mutex / RefCell / Cell) by recursing into its first generic
+/// argument. Operation.
+fn peel_single_generic(
+    args: &syn::PathArguments,
+    ctx: &ResolveContext<'_>,
+    depth: u8,
+) -> CanonicalType {
+    let recurse = |t: &syn::Type| resolve_type_with_depth(t, ctx, depth + 1);
+    match generic_type_arg(args, 0) {
+        Some(inner) => recurse(inner),
+        None => CanonicalType::Opaque,
+    }
+}
+
+/// Resolve a non-wrapper path through the shared canonicalisation
+/// pipeline (alias map / local symbols / crate roots). Returns `Opaque`
+/// for unresolvable names (external, generic parameter, unknown). If
+/// the canonicalised name matches a recorded workspace type-alias, the
+/// alias target is recursively resolved. Operation: closure-hidden calls.
+fn resolve_generic_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -> CanonicalType {
+    let recurse = |t: &syn::Type| resolve_type_with_depth(t, ctx, depth + 1);
+    let canonicalise = |segs: &[String]| {
+        canonicalise_type_segments(
+            segs,
+            ctx.alias_map,
+            ctx.local_symbols,
+            ctx.crate_root_modules,
+            ctx.importing_file,
+        )
+    };
+    let segments: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
+    let Some(resolved) = canonicalise(&segments) else {
+        return CanonicalType::Opaque;
+    };
+    let key = resolved.join("::");
+    if let Some(aliased) = ctx.type_aliases.and_then(|m| m.get(&key)) {
+        return recurse(aliased);
+    }
+    CanonicalType::Path(resolved)
+}
+
+/// Extract the type at position `idx` from angle-bracketed generic args.
+/// Lifetimes / const args are skipped; only type args count.
+fn generic_type_arg(args: &syn::PathArguments, idx: usize) -> Option<&syn::Type> {
+    let syn::PathArguments::AngleBracketed(ab) = args else {
+        return None;
+    };
+    ab.args
+        .iter()
+        .filter_map(|a| match a {
+            syn::GenericArgument::Type(t) => Some(t),
+            _ => None,
+        })
+        .nth(idx)
+}

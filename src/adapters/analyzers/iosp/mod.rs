@@ -149,11 +149,16 @@ impl<'a> Analyzer<'a> {
                     .into_iter()
                     .collect::<Vec<_>>(),
                 Item::Impl(i) => {
-                    let test = crate::adapters::shared::cfg_test::has_cfg_test(&i.attrs);
+                    let test =
+                        file_in_test || crate::adapters::shared::cfg_test::has_cfg_test(&i.attrs);
                     self.analyze_impl(i, file_path, test)
                 }
-                Item::Trait(t) => self.analyze_trait(t, file_path, false),
-                Item::Mod(m) => self.analyze_mod(m, file_path, false),
+                Item::Trait(t) => {
+                    let test =
+                        file_in_test || crate::adapters::shared::cfg_test::has_cfg_test(&t.attrs);
+                    self.analyze_trait(t, file_path, test)
+                }
+                Item::Mod(m) => self.analyze_mod(m, file_path, file_in_test),
                 _ => vec![],
             })
             .collect()
