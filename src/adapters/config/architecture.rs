@@ -257,8 +257,17 @@ pub struct CallParityConfig {
     #[serde(default = "default_call_depth")]
     pub call_depth: usize,
 
-    /// Glob patterns (matched against canonical `<layer>::<path>::<fn>`)
-    /// that silence Check-B (missing-adapter) for matching target fns.
+    /// Glob patterns that silence Check-B (missing-adapter) for matching
+    /// target fns.
+    ///
+    /// Matched against the canonical call target with the leading
+    /// `crate::` stripped — i.e. the **module path**, not the layer
+    /// name. For `pub fn run()` in `src/app/setup.rs`, the pattern is
+    /// `app::setup::run`, independent of whether the owning layer is
+    /// called `application`, `app`, or anything else. When the layer
+    /// globs happen to mirror the layer name (e.g. layer `application`
+    /// mapped to `src/application/**`) the two coincide, but in general
+    /// always use the on-disk module path.
     #[serde(default)]
     pub exclude_targets: Vec<String>,
 }

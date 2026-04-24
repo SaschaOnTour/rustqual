@@ -846,7 +846,11 @@ section:
 adapters = ["cli", "mcp", "rest"]   # layer names from [architecture.layers]
 target   = "application"
 call_depth = 3                       # transitive BFS depth (default 3)
-exclude_targets = ["application::setup::*"]  # glob escape for legit asymmetry
+# exclude_targets matches on the canonical MODULE path (the crate::
+# path with `crate::` stripped), NOT on the layer name. If layer
+# `application` is mapped to `src/app/**`, the pattern would be
+# `app::setup::*`, not `application::setup::*`.
+exclude_targets = ["app::setup::*"]
 ```
 
 Zero per-function annotation: adapter fns are enumerated automatically
