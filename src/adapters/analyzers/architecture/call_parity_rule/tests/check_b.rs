@@ -444,3 +444,54 @@ fn test_exclude_targets_uses_canonical_without_crate_prefix() {
     let findings = run_check_b(&ws, &three_layer(), &cp, &empty_cfg_test());
     assert!(missing_pairs(&findings).is_empty());
 }
+
+#[test]
+fn test_impl_in_separate_file_matches_receiver_tracked_calls() {
+    // Regression: `use crate::application::session::Session; impl Session
+    // { pub fn search() }` in a different file from the type declaration.
+    // Without alias-map-based canonicalisation of the impl self-type,
+    // Check B's node for `search` would be
+    // `crate::application::session_impls::Session::search` while the
+    // caller's receiver-tracked canonical is
+    // `crate::application::session::Session::search` — the two never
+    // match and every adapter looks like it's missing.
+    let ws = build_workspace(&[
+        ("src/application/session.rs", "pub struct Session;"),
+        (
+            "src/application/session_impls.rs",
+            r#"
+            use crate::application::session::Session;
+            impl Session {
+                pub fn open() -> Self { Session }
+                pub fn search(&self) {}
+            }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::session::Session;
+            pub fn cmd_search() {
+                let s = Session::open();
+                s.search();
+            }
+            "#,
+        ),
+        (
+            "src/mcp/handlers.rs",
+            r#"
+            use crate::application::session::Session;
+            pub fn handle_search() {
+                let s = Session::open();
+                s.search();
+            }
+            "#,
+        ),
+    ]);
+    let cp = make_config(3, &["cli", "mcp"], &[]);
+    let findings = run_check_b(&ws, &three_layer(), &cp, &empty_cfg_test());
+    assert!(
+        missing_pairs(&findings).is_empty(),
+        "cross-file impl via use should match receiver-tracked calls, got {findings:?}"
+    );
+}

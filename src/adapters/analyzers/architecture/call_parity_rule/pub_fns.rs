@@ -17,9 +17,13 @@
 //!
 //! See Task 2 in the v1.1.0 plan for the full test list.
 
-use super::workspace_graph::{extract_signature_params, impl_self_ty_segments};
+use super::workspace_graph::{
+    collect_crate_root_modules, collect_local_symbols, extract_signature_params,
+    impl_self_ty_segments, resolve_impl_self_type,
+};
 use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
 use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
+use crate::adapters::shared::use_tree::gather_alias_map;
 use std::collections::{HashMap, HashSet};
 use syn::visit::Visit;
 use syn::Visibility;
@@ -50,6 +54,7 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
     cfg_test_files: &HashSet<String>,
 ) -> HashMap<String, Vec<PubFnInfo<'ast>>> {
     let visible_types = collect_visible_type_names_workspace(files, cfg_test_files);
+    let crate_root_modules = collect_crate_root_modules(files);
     let mut out: HashMap<String, Vec<PubFnInfo<'ast>>> = HashMap::new();
     for (path, ast) in files {
         if cfg_test_files.contains(*path) {
@@ -59,10 +64,15 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
             continue;
         };
         let layer = layer.to_string();
+        let alias_map = gather_alias_map(ast);
+        let local_symbols = collect_local_symbols(ast);
         let mut collector = PubFnCollector {
             file: path.to_string(),
             found: Vec::new(),
             visible_types: &visible_types,
+            alias_map: &alias_map,
+            local_symbols: &local_symbols,
+            crate_root_modules: &crate_root_modules,
             impl_stack: Vec::new(),
         };
         collector.visit_file(ast);
@@ -125,6 +135,14 @@ struct PubFnCollector<'ast, 'vis> {
     /// their declaring file. Shared across files so cross-file impls
     /// on a `pub struct` are correctly recognised.
     visible_types: &'vis HashSet<String>,
+    /// File's import aliases — used to canonicalise impl self-types so
+    /// `use crate::app::Session; impl Session { ... }` and the call
+    /// collector's receiver-tracked canonical agree on the same path.
+    alias_map: &'vis HashMap<String, Vec<String>>,
+    /// Same-file top-level item names for the local-symbol fallback.
+    local_symbols: &'vis HashSet<String>,
+    /// Workspace crate-root module names for Rust 2018+ absolute imports.
+    crate_root_modules: &'vis HashSet<String>,
     /// Stack of enclosing `impl` blocks: `(self-type segments, is-visible)`.
     /// Merged so the two halves can't drift out of sync.
     impl_stack: Vec<(Vec<String>, bool)>,
@@ -181,16 +199,27 @@ impl<'ast, 'vis> Visit<'ast> for PubFnCollector<'ast, 'vis> {
     }
 
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
-        // Conservative: an impl whose self-type we can't parse (trait
-        // objects, generics) gets empty segs + invisible — its methods
-        // fall out of the check, matching "can't resolve, don't count".
-        let self_segs = impl_self_ty_segments(&node.self_ty);
-        let visible = self_segs
+        // Visibility is still name-based (last segment of the raw impl
+        // header), but the self-type we store runs through the same
+        // canonicalisation pipeline as receiver-tracked method calls
+        // — otherwise `use crate::app::Session; impl Session { ... }`
+        // would produce `crate::<file_mod>::Session::method` for
+        // Check B while the call collector resolves caller sites to
+        // `crate::app::Session::method`, and every method on an
+        // imported type would be silently "unreached".
+        let raw_segs = impl_self_ty_segments(&node.self_ty);
+        let visible = raw_segs
             .as_ref()
             .and_then(|segs| segs.last())
             .is_some_and(|name| self.visible_types.contains(name));
-        self.impl_stack
-            .push((self_segs.unwrap_or_default(), visible));
+        let canonical_segs = resolve_impl_self_type(
+            &node.self_ty,
+            self.alias_map,
+            self.local_symbols,
+            self.crate_root_modules,
+            &self.file,
+        );
+        self.impl_stack.push((canonical_segs, visible));
         syn::visit::visit_item_impl(self, node);
         self.impl_stack.pop();
     }

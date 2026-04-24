@@ -13,6 +13,7 @@
 //! file-local helpers — walking only pub fns would under-count delegation
 //! chains and trigger false positives in Check A.
 
+use super::bindings::canonicalise_type_segments;
 use super::calls::{collect_canonical_calls, FnContext};
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
 use crate::adapters::shared::cfg_test::has_cfg_test;
@@ -160,6 +161,32 @@ pub(crate) fn extract_signature_params(sig: &syn::Signature) -> Vec<(String, &sy
         .collect()
 }
 
+/// Canonicalise an impl block's self-type through the same alias /
+/// local-symbol / crate-root pipeline the call collector uses for type
+/// bindings. Returns a crate-rooted segment list when the type resolves
+/// (via `use`, same-file declaration, or absolute workspace module);
+/// falls back to the raw identifiers for unresolved types so the
+/// canonical builder can still prepend the file module as a last resort.
+pub(crate) fn resolve_impl_self_type(
+    self_ty: &syn::Type,
+    alias_map: &HashMap<String, Vec<String>>,
+    local_symbols: &HashSet<String>,
+    crate_root_modules: &HashSet<String>,
+    importing_file: &str,
+) -> Vec<String> {
+    let Some(raw) = impl_self_ty_segments(self_ty) else {
+        return Vec::new();
+    };
+    canonicalise_type_segments(
+        &raw,
+        alias_map,
+        local_symbols,
+        crate_root_modules,
+        importing_file,
+    )
+    .unwrap_or(raw)
+}
+
 /// Flatten a `syn::Type::Path` to its segment identifiers — the shape
 /// the call-parity rule uses to remember which impl block a method
 /// lives in. Non-path types (trait objects, tuples) return `None`.
@@ -289,7 +316,20 @@ impl<'a, 'ast> Visit<'ast> for FileFnCollector<'a> {
     }
 
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
-        let segs = impl_self_ty_segments(&node.self_ty).unwrap_or_default();
+        // Canonicalise the impl's self-type through the file's alias
+        // map so `use crate::app::Session; impl Session { ... }` and
+        // `impl Session { ... }` in `src/app/session.rs` both produce
+        // the same `crate::app::Session` prefix the call collector sees
+        // from receiver-tracked method calls. Without this, graph nodes
+        // and call targets diverge and Check B misses every reached
+        // method on an imported type.
+        let segs = resolve_impl_self_type(
+            &node.self_ty,
+            self.alias_map,
+            self.local_symbols,
+            self.crate_root_modules,
+            self.path,
+        );
         self.impl_type_stack.push(segs);
         syn::visit::visit_item_impl(self, node);
         self.impl_type_stack.pop();
