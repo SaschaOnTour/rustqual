@@ -353,6 +353,39 @@ fn test_finding_line_is_fn_sig_line() {
 }
 
 #[test]
+fn test_unparseable_impl_self_type_does_not_collapse_with_free_fns() {
+    // Regression: `impl Trait for &dyn Something { fn search() }`'s
+    // self-type can't be canonicalised. Previously it was pushed as
+    // `Vec::new()`, which made `search` canonicalise to
+    // `crate::<file>::search` — colliding with a same-named free fn
+    // in the same file and silently polluting the graph. The skip
+    // must leave the free fn's node intact.
+    let ws = build_workspace(&[
+        ("src/application/stats.rs", "pub fn get_stats() {}"),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::stats::get_stats;
+            pub fn search() { get_stats(); }
+            impl dyn std::fmt::Debug {
+                // Not a real impl this analyser understands — self-type
+                // isn't a plain path, so every method inside must be
+                // skipped, not recorded as `crate::cli::handlers::*`.
+                pub fn search(&self) {}
+            }
+            pub fn cmd_x() { search(); }
+            "#,
+        ),
+    ]);
+    let findings = run_check_a(&ws, &three_layer(), &call_parity_config(3));
+    let names = assert_no_delegation_fn_names(&findings);
+    assert!(
+        !names.contains(&"cmd_x".to_string()),
+        "free-fn `search` must remain the node `cmd_x` reaches via delegation, got {names:?}"
+    );
+}
+
+#[test]
 fn test_convergent_graph_does_not_double_enqueue() {
     // Regression guard: if `WalkState::enqueue_unvisited` only checks
     // visited at dequeue (not enqueue), a convergent graph can queue

@@ -212,13 +212,20 @@ impl<'ast, 'vis> Visit<'ast> for PubFnCollector<'ast, 'vis> {
             .as_ref()
             .and_then(|segs| segs.last())
             .is_some_and(|name| self.visible_types.contains(name));
+        // `visible` already gates on the raw-segments path (last segment
+        // in the workspace-wide visible-types set), so unresolved
+        // self-types (trait objects, references) bring `visible=false`
+        // with them and the method is skipped regardless. Coalescing
+        // `None` to an empty segment list here is safe because it's
+        // never read under that flag.
         let canonical_segs = resolve_impl_self_type(
             &node.self_ty,
             self.alias_map,
             self.local_symbols,
             self.crate_root_modules,
             &self.file,
-        );
+        )
+        .unwrap_or_default();
         self.impl_stack.push((canonical_segs, visible));
         syn::visit::visit_item_impl(self, node);
         self.impl_stack.pop();

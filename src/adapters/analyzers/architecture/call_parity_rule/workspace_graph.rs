@@ -165,26 +165,31 @@ pub(crate) fn extract_signature_params(sig: &syn::Signature) -> Vec<(String, &sy
 /// local-symbol / crate-root pipeline the call collector uses for type
 /// bindings. Returns a crate-rooted segment list when the type resolves
 /// (via `use`, same-file declaration, or absolute workspace module);
-/// falls back to the raw identifiers for unresolved types so the
-/// canonical builder can still prepend the file module as a last resort.
+/// falls back to the raw identifiers only when the type path exists
+/// but can't be canonicalised further.
+///
+/// Returns `None` for self-types we can't parse at all (trait objects,
+/// references, tuples). Callers must skip method recording in that
+/// case — pushing an empty segment list would cause `canonical_fn_name`
+/// to drop the type segment entirely and collide with free fns.
 pub(crate) fn resolve_impl_self_type(
     self_ty: &syn::Type,
     alias_map: &HashMap<String, Vec<String>>,
     local_symbols: &HashSet<String>,
     crate_root_modules: &HashSet<String>,
     importing_file: &str,
-) -> Vec<String> {
-    let Some(raw) = impl_self_ty_segments(self_ty) else {
-        return Vec::new();
-    };
-    canonicalise_type_segments(
-        &raw,
-        alias_map,
-        local_symbols,
-        crate_root_modules,
-        importing_file,
+) -> Option<Vec<String>> {
+    let raw = impl_self_ty_segments(self_ty)?;
+    Some(
+        canonicalise_type_segments(
+            &raw,
+            alias_map,
+            local_symbols,
+            crate_root_modules,
+            importing_file,
+        )
+        .unwrap_or(raw),
     )
-    .unwrap_or(raw)
 }
 
 /// Flatten a `syn::Type::Path` to its segment identifiers — the shape
@@ -275,7 +280,11 @@ struct FileFnCollector<'a> {
     alias_map: &'a HashMap<String, Vec<String>>,
     local_symbols: &'a HashSet<String>,
     crate_root_modules: &'a HashSet<String>,
-    impl_type_stack: Vec<Vec<String>>,
+    /// Stack of enclosing impl blocks' resolved self-types. `None`
+    /// marks an unresolved self-type (trait object, `&T`, tuple) whose
+    /// methods we must not record — their canonical would collapse to
+    /// `crate::<file>::method` and collide with free fns.
+    impl_type_stack: Vec<Option<Vec<String>>>,
     graph: &'a mut CallGraph,
 }
 
@@ -286,7 +295,15 @@ impl<'a> FileFnCollector<'a> {
         sig: &'ast syn::Signature,
         body: &'ast syn::Block,
     ) {
-        let self_type = self.impl_type_stack.last().cloned();
+        let self_type = match self.impl_type_stack.last() {
+            // Free fn (no enclosing impl).
+            None => None,
+            // Resolved impl — use its canonical self-type.
+            Some(Some(segs)) => Some(segs.clone()),
+            // Unresolved impl (trait object / reference receiver) —
+            // don't record; see `resolve_impl_self_type`'s doc.
+            Some(None) => return,
+        };
         let canonical = canonical_fn_name(self.path, self_type.as_deref(), fn_name);
         let ctx = FnContext {
             body,
@@ -320,17 +337,17 @@ impl<'a, 'ast> Visit<'ast> for FileFnCollector<'a> {
         // map so `use crate::app::Session; impl Session { ... }` and
         // `impl Session { ... }` in `src/app/session.rs` both produce
         // the same `crate::app::Session` prefix the call collector sees
-        // from receiver-tracked method calls. Without this, graph nodes
-        // and call targets diverge and Check B misses every reached
-        // method on an imported type.
-        let segs = resolve_impl_self_type(
+        // from receiver-tracked method calls. `None` means the
+        // self-type isn't a plain path (trait object, `&T`, tuple) —
+        // `record_fn` skips method recording for those impls.
+        let resolved = resolve_impl_self_type(
             &node.self_ty,
             self.alias_map,
             self.local_symbols,
             self.crate_root_modules,
             self.path,
         );
-        self.impl_type_stack.push(segs);
+        self.impl_type_stack.push(resolved);
         syn::visit::visit_item_impl(self, node);
         self.impl_type_stack.pop();
     }
