@@ -255,3 +255,67 @@ fn test_reexport_points_custom_paths() {
         .iter()
         .any(|p| p == "src/prelude.rs"));
 }
+
+// ── Call-Parity (Task 0) ──────────────────────────────────────
+
+#[test]
+fn test_call_parity_section_omitted_is_noop() {
+    let c = ArchitectureConfig::default();
+    assert!(c.call_parity.is_none());
+}
+
+#[test]
+fn test_call_parity_minimal_parse() {
+    let toml_str = r#"
+        [call_parity]
+        adapters = ["cli", "mcp"]
+        target = "application"
+    "#;
+    let c: ArchitectureConfig = toml::from_str(toml_str).unwrap();
+    let cp = c.call_parity.expect("call_parity should be Some");
+    assert_eq!(cp.adapters, vec!["cli", "mcp"]);
+    assert_eq!(cp.target, "application");
+    assert_eq!(cp.call_depth, 3);
+    assert!(cp.exclude_targets.is_empty());
+}
+
+#[test]
+fn test_call_parity_with_exclude_targets() {
+    let toml_str = r#"
+        [call_parity]
+        adapters = ["cli", "mcp", "rest"]
+        target = "application"
+        call_depth = 4
+        exclude_targets = ["application::setup::*", "application::mcp::*"]
+    "#;
+    let c: ArchitectureConfig = toml::from_str(toml_str).unwrap();
+    let cp = c.call_parity.unwrap();
+    assert_eq!(cp.call_depth, 4);
+    assert_eq!(
+        cp.exclude_targets,
+        vec!["application::setup::*", "application::mcp::*"]
+    );
+}
+
+#[test]
+fn test_call_parity_rejects_unknown_field() {
+    let toml_str = r#"
+        [call_parity]
+        adapters = ["cli"]
+        target = "application"
+        wrong_field = "x"
+    "#;
+    let result: Result<ArchitectureConfig, _> = toml::from_str(toml_str);
+    assert!(
+        result.is_err(),
+        "unknown fields in call_parity must be rejected"
+    );
+}
+
+#[test]
+fn test_call_parity_default_call_depth_is_3() {
+    // Serde dispatches `#[serde(default = "default_call_depth")]` via dynamic
+    // string lookup, so the call-graph-based untested check can't see the
+    // connection. Direct test pins the value.
+    assert_eq!(default_call_depth(), 3);
+}

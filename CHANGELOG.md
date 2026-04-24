@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-04-24
+
+Minor release: zero-annotation cross-adapter delegation check for
+N-peer-adapter architectures (CLI + MCP + REST + …). No breaking
+changes; the new check only fires when `[architecture.call_parity]`
+is explicitly configured, and inert otherwise.
+
+### Added
+- **`[architecture.call_parity]`** — cross-adapter delegation drift
+  check driven entirely by the existing `[architecture.layers]`
+  configuration. No per-function annotation required: every `pub fn`
+  in a configured adapter layer is checked automatically, and every
+  new adapter handler participates in the check from its first commit.
+  Two complementary rules run under one config section:
+  - `architecture/call_parity/no_delegation` — each `pub fn` in an
+    adapter layer must transitively (up to `call_depth` hops) call
+    into the configured target layer. Catches inlined business logic.
+  - `architecture/call_parity/missing_adapter` — each `pub fn` in
+    the target layer must be transitively reached from every
+    adapter layer. Catches asymmetric feature coverage (e.g. CLI
+    + MCP both call `application::do_thing`, REST doesn't).
+- **Receiver-type tracking** (`session.search(…)` resolution) — the
+  call collector walks `let` bindings, signature parameters, and
+  constructor returns to resolve method calls on Session / Service /
+  Context objects. `Arc<T>`, `Box<T>`, `Rc<T>`, `&T`, `&mut T`,
+  `Cow<'_, T>` wrappers are stripped. Critical for Session-pattern
+  architectures, where method calls would otherwise stay
+  `<method>:name` and the check would 100% false-positive.
+- **`exclude_targets` glob escape** — legitimate asymmetric target
+  fns (setup routines, debug-only endpoints) can be grouped under a
+  glob pattern in the config, keeping the escape in one place instead
+  of scattering `qual:allow(architecture)` markers across files.
+- **`// qual:allow(architecture)`** as the secondary escape for
+  individual fn-level asymmetries. Counts against
+  `max_suppression_ratio` — overuse surfaces in the report.
+- **`LayerDefinitions::layer_of_crate_path`** — resolves canonical
+  call targets (`crate::a::b::c`) back to layer names. Internal API,
+  reusable across future workspace-wide architecture rules.
+
+### Infrastructure
+- New `#[ignore]`-gated `benchmark_call_parity_on_self_analysis` test.
+  Runs the full pipeline against rustqual's own ~200-file source tree
+  and asserts the pass stays under a 3-second wall-time ceiling.
+  Execute via `cargo test -- --ignored` before release.
+
 ## [1.0.1] - 2026-04-20
 
 Patch release addressing five bugs reported against v0.5.6 (verified

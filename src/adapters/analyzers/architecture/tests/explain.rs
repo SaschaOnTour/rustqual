@@ -46,6 +46,7 @@ fn minimal_compiled() -> CompiledArchitecture {
         external_glob: Vec::new(),
         forbidden: Vec::new(),
         trait_contracts: Vec::new(),
+        call_parity: None,
     }
 }
 

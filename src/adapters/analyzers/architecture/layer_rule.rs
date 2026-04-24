@@ -86,6 +86,58 @@ impl LayerDefinitions {
             .iter()
             .find_map(|c| self.layer_for_file(c))
     }
+
+    // qual:api
+    /// Resolve a canonical call-target string (`crate::a::b::c`) to its
+    /// layer. Non-crate prefixes (`<method>:`, `<bare>:`, `std::`, empty,
+    /// etc.) yield `None` by design — only workspace-local targets carry
+    /// layer meaning.
+    ///
+    /// For a path `crate::a::b::c`, every ancestor of the leaf is tried
+    /// as a candidate file (`src/a/b/c.rs`, `src/a/b/c/mod.rs`,
+    /// `src/a/b.rs`, …) in decreasing specificity. The first candidate
+    /// that matches a layer's glob set wins — same greedy semantics
+    /// as `layer_for_file`.
+    /// Integration: delegates path splitting + per-candidate probe.
+    pub fn layer_of_crate_path(&self, canonical: &str) -> Option<&str> {
+        let inner = canonical.strip_prefix("crate::").or_else(|| {
+            if canonical == "crate" {
+                Some("")
+            } else {
+                None
+            }
+        })?;
+        let segments: Vec<&str> = if inner.is_empty() {
+            Vec::new()
+        } else {
+            inner.split("::").collect()
+        };
+        if segments.is_empty() {
+            // Bare `crate` (module root) → treat as `src/lib.rs` / `src/main.rs`.
+            return ["src/lib.rs", "src/main.rs"]
+                .iter()
+                .find_map(|c| self.layer_for_file(c));
+        }
+        for len in (1..=segments.len()).rev() {
+            let head = &segments[..len];
+            let joined = head.join("/");
+            for candidate in [format!("src/{joined}.rs"), format!("src/{joined}/mod.rs")] {
+                if let Some(layer) = self.layer_for_file(&candidate) {
+                    return Some(layer);
+                }
+            }
+        }
+        // Single-segment path (`crate::run`) may target an item declared
+        // directly in the crate root — probe `src/lib.rs` / `src/main.rs`
+        // last, after the per-segment candidates. Ordering keeps
+        // `crate::foo` preferring `src/foo.rs` when both exist.
+        if segments.len() == 1 {
+            return ["src/lib.rs", "src/main.rs"]
+                .iter()
+                .find_map(|c| self.layer_for_file(c));
+        }
+        None
+    }
 }
 
 /// Input bundle for `check_layer_rule`.

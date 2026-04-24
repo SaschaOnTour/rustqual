@@ -91,6 +91,33 @@ pub enum ViolationKind {
         /// Human-readable detail for the report.
         detail: String,
     },
+    /// `[architecture.call_parity]` Check A: a `pub fn` in an adapter layer
+    /// does not transitively (up to `call_depth`) delegate to any fn in
+    /// the target layer. Almost always the sign of inlined business logic.
+    CallParityNoDelegation {
+        /// Name of the offending adapter fn.
+        fn_name: String,
+        /// Layer name the fn belongs to (one of the configured adapters).
+        adapter_layer: String,
+        /// Target-layer name the fn should delegate into.
+        target_layer: String,
+        /// Effective call-depth the check was run with.
+        call_depth: usize,
+    },
+    /// `[architecture.call_parity]` Check B: a `pub fn` in the target
+    /// layer is not reached from every adapter layer — one or more
+    /// adapters are missing a delegation path into it.
+    CallParityMissingAdapter {
+        /// Canonical path of the offending target fn.
+        target_fn: String,
+        /// Layer name the fn belongs to (the configured target).
+        target_layer: String,
+        /// Adapter layers that HAVE a path to this fn.
+        reached_adapters: Vec<String>,
+        /// Adapter layers that are missing — the non-empty set that
+        /// makes this a finding.
+        missing_adapters: Vec<String>,
+    },
 }
 
 /// One concrete occurrence of a matcher hit.

@@ -1,0 +1,38 @@
+# Golden-example for [architecture.call_parity].
+#
+# Demonstrates a 3-way adapter setup (CLI + MCP + REST) over a shared
+# Application layer. Running rustqual on this directory should produce
+# exactly two findings:
+#
+# - `architecture/call_parity/no_delegation` on post_list in the REST
+#   adapter — it implements the list operation inline instead of
+#   delegating into application::list_items.
+# - `architecture/call_parity/missing_adapter` on application::list_items
+#   — called only from CLI and MCP, not REST (because REST went inline).
+#
+# cmd_debug in the CLI adapter carries `// qual:allow(architecture)`
+# and therefore produces no finding despite having no peer and no
+# delegation. This is the intentional escape for legitimate asymmetric
+# features.
+
+[architecture]
+enabled = true
+
+[architecture.layers]
+order = ["application", "cli", "mcp", "rest"]
+
+[architecture.layers.application]
+paths = ["src/application/**"]
+
+[architecture.layers.cli]
+paths = ["src/cli/**"]
+
+[architecture.layers.mcp]
+paths = ["src/mcp/**"]
+
+[architecture.layers.rest]
+paths = ["src/rest/**"]
+
+[architecture.call_parity]
+adapters = ["cli", "mcp", "rest"]
+target = "application"

@@ -23,6 +23,9 @@ use crate::adapters::analyzers::architecture::matcher::{
     find_derive_matches, find_function_call_matches, find_glob_imports, find_item_kind_matches,
     find_macro_calls, find_method_call_matches, find_path_prefix_matches,
 };
+use crate::adapters::analyzers::architecture::rendering::{
+    build_file_refs, format_match_message, match_to_finding,
+};
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use crate::config::architecture::SymbolPattern;
 use crate::domain::{Dimension, Finding, Severity};
@@ -69,8 +72,10 @@ fn collect_all_findings(
         crate::adapters::analyzers::architecture::trait_contract_rule::collect_findings(
             ctx,
             &compiled.trait_contracts,
-            format_match_message,
         ),
+    );
+    findings.extend(
+        crate::adapters::analyzers::architecture::call_parity_rule::collect_findings(ctx, compiled),
     );
     findings
 }
@@ -219,69 +224,6 @@ fn run_pattern_matchers(file: &crate::ports::ParsedFile, pattern: &SymbolPattern
     out
 }
 
-/// Project one `MatchLocation` into a `Finding` using the given rule id.
-/// Operation: message formatting + field copy.
-fn match_to_finding(hit: MatchLocation, rule_id: &str, pattern: &SymbolPattern) -> Finding {
-    Finding {
-        file: hit.file,
-        line: hit.line,
-        column: hit.column,
-        dimension: Dimension::Architecture,
-        rule_id: rule_id.to_string(),
-        message: format_match_message(&hit.kind, &pattern.reason),
-        severity: Severity::Medium,
-        ..Finding::default()
-    }
-}
-
-/// Render a concise message from a `ViolationKind` plus the rule reason.
-/// Integration: match-dispatch delegation to per-variant formatters.
-fn format_match_message(kind: &ViolationKind, reason: &str) -> String {
-    let head = render_violation_head(kind);
-    format!("{head}: {reason}")
-}
-
-/// Variant-specific head text for a `ViolationKind`.
-/// Integration: match-dispatch delegation per variant kind.
-fn render_violation_head(kind: &ViolationKind) -> String {
-    match kind {
-        ViolationKind::PathPrefix { rendered_path, .. } => format!("path \"{rendered_path}\""),
-        ViolationKind::GlobImport { base_path } => format!("glob import {base_path}::*"),
-        ViolationKind::MethodCall { name, syntax } => format!("{syntax} method call {name}"),
-        ViolationKind::MacroCall { name } => format!("macro {name}!"),
-        ViolationKind::FunctionCall { rendered_path } => format!("call {rendered_path}"),
-        ViolationKind::LayerViolation {
-            from_layer,
-            to_layer,
-            imported_path,
-        } => format!("layer {from_layer} ↛ {to_layer} via {imported_path}"),
-        ViolationKind::UnmatchedLayer { file } => format!("unmatched file {file}"),
-        ViolationKind::ForbiddenEdge { imported_path, .. } => {
-            format!("forbidden import {imported_path}")
-        }
-        ViolationKind::ItemKind { kind, name } => render_item_kind_head(kind, name),
-        ViolationKind::Derive {
-            trait_name,
-            item_name,
-        } => format!("derive({trait_name}) on {item_name}"),
-        ViolationKind::TraitContract {
-            trait_name,
-            check,
-            detail,
-        } => format!("trait {trait_name} [{check}]: {detail}"),
-    }
-}
-
-/// Head text for an `ItemKind` violation (anonymous items omit the name).
-/// Operation: conditional formatting.
-fn render_item_kind_head(kind: &str, name: &str) -> String {
-    if name.is_empty() {
-        kind.to_string()
-    } else {
-        format!("{kind} {name}")
-    }
-}
-
 // ── layer rule ─────────────────────────────────────────────────────────
 
 /// Run the layer rule against the whole parsed workspace.
@@ -335,9 +277,7 @@ fn collect_forbidden_findings(
     if rules.is_empty() {
         return Vec::new();
     }
-    let refs: Vec<(String, &syn::File)> =
-        ctx.files.iter().map(|f| (f.path.clone(), &f.ast)).collect();
-    check_forbidden_rules(&refs, rules)
+    check_forbidden_rules(&build_file_refs(ctx), rules)
         .into_iter()
         .map(forbidden_hit_to_finding)
         .collect()
