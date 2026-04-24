@@ -5,17 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.0] - 2026-04-23
+## [1.1.0] - 2026-04-24
 
 Minor release: zero-annotation cross-adapter delegation check for
 N-peer-adapter architectures (CLI + MCP + REST + …). No breaking
 changes; the new check only fires when `[architecture.call_parity]`
 is explicitly configured, and inert otherwise.
-
-Self-analysis: `cargo run -- . --fail-on-warnings --coverage
-coverage.lcov` reports 2122 functions, 100.0% quality score across all
-7 dimensions, 0 findings. 1280 tests pass (104 new: Task 0–5
-TDD + golden-example end-to-end).
 
 ### Added
 - **`[architecture.call_parity]`** — cross-adapter delegation drift
