@@ -220,17 +220,49 @@ impl<'a> CanonicalCallCollector<'a> {
     }
 
     fn collect_macro_body(&mut self, mac: &syn::Macro) {
-        use syn::parse::Parser;
-        use syn::punctuated::Punctuated;
-        use syn::Token;
-        let tokens = mac.tokens.clone();
-        let parser = Punctuated::<syn::Expr, Token![,]>::parse_terminated;
-        if let Ok(exprs) = parser.parse2(tokens) {
-            for e in exprs.into_iter() {
-                self.visit_expr(&e);
-            }
+        for expr in parse_macro_tokens(mac.tokens.clone()) {
+            self.visit_expr(&expr);
         }
     }
+}
+
+/// Best-effort extraction of expressions from a macro token stream.
+/// Most macros accept comma-separated exprs (`assert!(a, b)`,
+/// `format!("{}", x)`), but block-like bodies (`tokio::select! { ... }`)
+/// and separator-`;` variants (`vec![x; n]`) don't. We try three
+/// strategies in order:
+/// 1. Comma-separated `syn::Expr` list (covers ~90% of macro calls).
+/// 2. Brace-wrapped parse as a `syn::Block` — extracts every statement
+///    expression, covering block-bodied and `;`-separated forms.
+/// 3. Single `syn::Expr` — for macros whose argument is one expression.
+///
+/// Still silent-skips on total parse failure (extern-DSL macros, custom
+/// grammar) — a documented limitation of syntax-level call-graph
+/// construction.
+fn parse_macro_tokens(tokens: proc_macro2::TokenStream) -> Vec<syn::Expr> {
+    use syn::parse::Parser;
+    use syn::punctuated::Punctuated;
+    use syn::Token;
+    let parser = Punctuated::<syn::Expr, Token![,]>::parse_terminated;
+    if let Ok(exprs) = parser.parse2(tokens.clone()) {
+        return exprs.into_iter().collect();
+    }
+    let braced = quote::quote! { { #tokens } };
+    if let Ok(block) = syn::parse2::<syn::Block>(braced) {
+        return block
+            .stmts
+            .into_iter()
+            .filter_map(|stmt| match stmt {
+                syn::Stmt::Expr(e, _) => Some(e),
+                syn::Stmt::Local(l) => l.init.map(|init| *init.expr),
+                _ => None,
+            })
+            .collect();
+    }
+    if let Ok(expr) = syn::parse2::<syn::Expr>(tokens) {
+        return vec![expr];
+    }
+    Vec::new()
 }
 
 /// Prefix an unresolved single-ident or segment path with the layer-unknown

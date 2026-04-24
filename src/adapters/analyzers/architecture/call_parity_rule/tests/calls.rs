@@ -187,6 +187,26 @@ fn test_collect_unqualified_no_alias_is_bare() {
 }
 
 #[test]
+fn test_collect_in_semicolon_separated_macro_descends() {
+    // Regression: `vec![expr; n]`-style macros have tokens `expr ; n`
+    // which fails the comma-list parser. The block fallback wraps them
+    // in braces and extracts stmt-level expressions.
+    let fctx = load(
+        r#"
+        pub fn cmd_search() {
+            let _v = vec![compute(x); 3];
+        }
+        "#,
+    );
+    let ctx = ctx_for_fn(&fctx, "cmd_search", "src/cli/handlers.rs");
+    let calls = collect_canonical_calls(&ctx);
+    assert!(
+        calls.contains("<bare>:compute"),
+        "`;`-separated macro body must still descend, got {calls:?}"
+    );
+}
+
+#[test]
 fn test_collect_in_macro_descends() {
     let fctx = load(
         r#"

@@ -42,36 +42,40 @@ fn load_rust_files(root: &Path) -> Vec<ParsedFile> {
 /// `.rs` file into a `ParsedFile` with the project-root-relative path.
 // qual:recursive
 fn collect_rs_paths(current: &Path, out: &mut Vec<ParsedFile>) {
-    let Ok(iter) = fs::read_dir(current) else {
-        return;
-    };
-    for entry in iter.flatten() {
+    let dir = fs::read_dir(current)
+        .unwrap_or_else(|e| panic!("failed to read dir {}: {e}", current.display()));
+    for entry in dir {
+        let entry =
+            entry.unwrap_or_else(|e| panic!("failed to read entry in {}: {e}", current.display()));
         let path = entry.path();
         if path.is_dir() {
             collect_rs_paths(&path, out);
         } else if path.extension().and_then(|s| s.to_str()) == Some("rs") {
-            if let Some(pf) = parse_one(&path) {
-                out.push(pf);
-            }
+            out.push(parse_one(&path));
         }
     }
 }
 
-fn parse_one(abs: &Path) -> Option<ParsedFile> {
-    let content = fs::read_to_string(abs).ok()?;
-    let ast: syn::File = syn::parse_str(&content).ok()?;
-    // Use `src/<rel>` paths so the architecture layer globs match.
+/// Read + parse a single `.rs` file into a `ParsedFile`. The benchmark
+/// is meant as a regression guard over rustqual's own source — silent
+/// skips would under-measure the real call_parity cost, so any I/O or
+/// parse failure panics with the offending path rather than hiding.
+fn parse_one(abs: &Path) -> ParsedFile {
+    let content =
+        fs::read_to_string(abs).unwrap_or_else(|e| panic!("failed to read {}: {e}", abs.display()));
+    let ast: syn::File = syn::parse_str(&content)
+        .unwrap_or_else(|e| panic!("failed to parse {}: {e}", abs.display()));
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let rel = abs
         .strip_prefix(manifest)
-        .ok()?
+        .unwrap_or_else(|e| panic!("{} is not under {}: {e}", abs.display(), manifest.display()))
         .to_string_lossy()
         .replace('\\', "/");
-    Some(ParsedFile {
+    ParsedFile {
         path: rel,
         content,
         ast,
-    })
+    }
 }
 
 fn bench_config() -> Config {
