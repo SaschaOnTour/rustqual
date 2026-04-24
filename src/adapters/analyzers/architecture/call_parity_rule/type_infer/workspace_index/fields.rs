@@ -32,6 +32,9 @@ struct FieldCollector<'i, 'c> {
 
 impl<'ast, 'i, 'c> Visit<'ast> for FieldCollector<'i, 'c> {
     fn visit_item_struct(&mut self, node: &'ast syn::ItemStruct) {
+        if has_cfg_test(&node.attrs) {
+            return;
+        }
         record_struct(self.index, self.ctx, node);
     }
 

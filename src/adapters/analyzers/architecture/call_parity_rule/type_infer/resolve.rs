@@ -11,6 +11,7 @@
 //! inference engine (Task 1.3) — both turn `syn::Type`s into
 //! `CanonicalType`s with identical semantics.
 
+use super::alias_substitution::substitute_alias_args;
 use super::super::bindings::canonicalise_type_segments;
 use super::canonical::CanonicalType;
 use std::collections::{HashMap, HashSet};
@@ -25,8 +26,10 @@ pub(crate) struct ResolveContext<'a> {
     /// Stage 3 workspace-wide type aliases. `None` means the caller
     /// doesn't need alias expansion (the workspace-index build phase,
     /// where the alias map is still being populated). Inference paths
-    /// pass `Some(&workspace.type_aliases)`.
-    pub type_aliases: Option<&'a HashMap<String, syn::Type>>,
+    /// pass `Some(&workspace.type_aliases)`. The stored tuple carries
+    /// the alias's generic-param names plus its target — use-site args
+    /// are substituted into the target before recursion.
+    pub type_aliases: Option<&'a HashMap<String, (Vec<String>, syn::Type)>>,
     /// Stage 3 user-defined transparent wrappers — the last-ident
     /// names (e.g. `"State"`, `"Extension"`, `"Data"`) that are peeled
     /// just like `Arc` / `Box`. `None` means only stdlib wrappers are
@@ -239,10 +242,10 @@ fn peel_single_generic(
 }
 
 /// Resolve a non-wrapper path through the shared canonicalisation
-/// pipeline (alias map / local symbols / crate roots). Returns `Opaque`
-/// for unresolvable names (external, generic parameter, unknown). If
-/// the canonicalised name matches a recorded workspace type-alias, the
-/// alias target is recursively resolved. Operation: closure-hidden calls.
+/// pipeline (alias map / local symbols / crate roots). If the canonical
+/// matches a recorded workspace type-alias, the alias target is
+/// substituted with use-site generic args and recursively resolved.
+/// Operation: closure-hidden calls + alias dispatch.
 fn resolve_generic_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -> CanonicalType {
     let recurse = |t: &syn::Type| resolve_type_with_depth(t, ctx, depth);
     let canonicalise = |segs: &[String]| {
@@ -259,8 +262,9 @@ fn resolve_generic_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -
         return CanonicalType::Opaque;
     };
     let key = resolved.join("::");
-    if let Some(aliased) = ctx.type_aliases.and_then(|m| m.get(&key)) {
-        return recurse(aliased);
+    if let Some((params, target)) = ctx.type_aliases.and_then(|m| m.get(&key)) {
+        let expanded = substitute_alias_args(target, params, path);
+        return recurse(&expanded);
     }
     CanonicalType::Path(resolved)
 }

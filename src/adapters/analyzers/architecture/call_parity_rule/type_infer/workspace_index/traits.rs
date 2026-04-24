@@ -36,10 +36,16 @@ struct TraitCollector<'i, 'c> {
 
 impl<'ast, 'i, 'c> Visit<'ast> for TraitCollector<'i, 'c> {
     fn visit_item_trait(&mut self, node: &'ast syn::ItemTrait) {
+        if has_cfg_test(&node.attrs) {
+            return;
+        }
         record_trait_methods(self.index, self.ctx, node);
     }
 
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
+        if has_cfg_test(&node.attrs) {
+            return;
+        }
         record_trait_impl(self.index, self.ctx, node);
     }
 

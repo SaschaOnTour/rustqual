@@ -71,13 +71,12 @@ pub(super) fn run_check(
 ) -> Vec<MatchLocation> {
     let borrowed = borrowed_files(ws);
     let pub_fns = collect_pub_fns_by_layer(&borrowed, &ws.aliases_per_file, layers, cfg_test);
-    let empty_wrappers = HashSet::new();
     let graph = build_call_graph(
         &borrowed,
         &ws.aliases_per_file,
         cfg_test,
         layers,
-        &empty_wrappers,
+        &cp.transparent_wrappers,
     );
     match which {
         Check::A => check_no_delegation(&pub_fns, &graph, layers, cp),

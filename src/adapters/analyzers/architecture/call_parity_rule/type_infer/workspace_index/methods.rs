@@ -45,6 +45,9 @@ struct MethodCollector<'i, 'c> {
 
 impl<'ast, 'i, 'c> Visit<'ast> for MethodCollector<'i, 'c> {
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
+        if has_cfg_test(&node.attrs) {
+            return;
+        }
         let resolved = resolve_impl_self_type(
             &node.self_ty,
             self.ctx.alias_map,
@@ -73,7 +76,9 @@ impl<'ast, 'i, 'c> Visit<'ast> for MethodCollector<'i, 'c> {
 }
 
 /// Record a single method's return type, keyed on the enclosing impl's
-/// canonical self-type. Operation. Own calls hidden in closures.
+/// canonical self-type. `async fn m() -> T` is treated as returning
+/// `Future<Output = T>` to match rustc's desugaring.
+/// Operation. Own calls hidden in closures.
 fn record_method(
     index: &mut WorkspaceTypeIndex,
     ctx: &BuildContext<'_>,
@@ -88,10 +93,15 @@ fn record_method(
     let syn::ReturnType::Type(_, ret_ty) = &node.sig.output else {
         return;
     };
-    let ret = resolve(ret_ty);
-    if matches!(ret, CanonicalType::Opaque) {
+    let inner = resolve(ret_ty);
+    if matches!(inner, CanonicalType::Opaque) {
         return;
     }
+    let ret = if node.sig.asyncness.is_some() {
+        CanonicalType::Future(Box::new(inner))
+    } else {
+        inner
+    };
     let receiver_canonical = canon(impl_segs);
     let method_name = node.sig.ident.to_string();
     index

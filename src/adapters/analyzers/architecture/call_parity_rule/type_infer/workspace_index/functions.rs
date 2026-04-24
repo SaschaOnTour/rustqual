@@ -48,16 +48,23 @@ impl<'ast, 'i, 'c> Visit<'ast> for FnCollector<'i, 'c> {
     }
 }
 
-/// Record one free fn's return type. Operation. Own calls hidden.
+/// Record one free fn's return type. `async fn foo() -> T` is treated
+/// as returning `Future<Output = T>` to match rustc's desugaring so
+/// downstream `.await` unwraps correctly. Operation.
 fn record_fn(index: &mut WorkspaceTypeIndex, ctx: &BuildContext<'_>, node: &syn::ItemFn) {
     let resolve = |ty: &syn::Type| resolve_type(ty, &resolve_ctx_from_build(ctx));
     let syn::ReturnType::Type(_, ret_ty) = &node.sig.output else {
         return;
     };
-    let ret = resolve(ret_ty);
-    if matches!(ret, CanonicalType::Opaque) {
+    let inner = resolve(ret_ty);
+    if matches!(inner, CanonicalType::Opaque) {
         return;
     }
+    let ret = if node.sig.asyncness.is_some() {
+        CanonicalType::Future(Box::new(inner))
+    } else {
+        inner
+    };
     let canonical = canonical_fn_name(&node.sig.ident.to_string(), ctx);
     index.fn_returns.insert(canonical, ret);
 }

@@ -35,7 +35,7 @@ pub(super) struct BuildContext<'a> {
     /// pass 2 so fields/methods/functions/traits that reference an
     /// alias are resolved through the alias target instead of caching
     /// the raw alias name.
-    pub type_aliases: Option<&'a HashMap<String, syn::Type>>,
+    pub type_aliases: Option<&'a HashMap<String, (Vec<String>, syn::Type)>>,
 }
 
 /// Build a canonical type-path key by prefixing the impl/trait segments
@@ -89,10 +89,11 @@ pub struct WorkspaceTypeIndex {
     /// trait-dispatch so `dyn Trait.unrelated_method()` stays
     /// unresolved.
     pub trait_methods: HashMap<String, std::collections::HashSet<String>>,
-    /// Stage 3 — `alias_canonical → target syn::Type`. Expanded on
-    /// the fly during inference; the clone here is cheap (typical
-    /// aliases are small trees).
-    pub type_aliases: HashMap<String, syn::Type>,
+    /// Stage 3 — `alias_canonical → (generic_param_names, target)`.
+    /// Params are captured so use-sites like `Alias<ArgA>` can
+    /// substitute the params' idents in `target` before resolution.
+    /// Aliases without generics just have an empty `Vec`.
+    pub type_aliases: HashMap<String, (Vec<String>, syn::Type)>,
     /// Stage 3 — user-configured last-ident names to treat as
     /// transparent single-type-param wrappers (framework extractors
     /// like `State<T>` / `Data<T>`). Mirrored from the
@@ -203,7 +204,7 @@ struct WalkInputs<'a> {
     cfg_test_files: &'a HashSet<String>,
     crate_root_modules: &'a HashSet<String>,
     transparent_wrappers: &'a HashSet<String>,
-    type_aliases: Option<&'a HashMap<String, syn::Type>>,
+    type_aliases: Option<&'a HashMap<String, (Vec<String>, syn::Type)>>,
 }
 
 /// Shared file-walk scaffold for both index build passes. Skips

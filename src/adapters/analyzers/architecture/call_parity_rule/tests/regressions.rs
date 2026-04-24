@@ -648,9 +648,10 @@ fn type_alias_expands_to_target_via_signature_param() {
     // Pre-populate the alias: `crate::cli::handlers::DbRef` → syn::Type
     // for `std::sync::Arc<Store>`.
     let aliased: syn::Type = syn::parse_str("std::sync::Arc<Store>").expect("parse alias target");
+    // Non-generic alias — no params to substitute.
     index
         .type_aliases
-        .insert("crate::cli::handlers::DbRef".to_string(), aliased);
+        .insert("crate::cli::handlers::DbRef".to_string(), (Vec::new(), aliased));
     // Store::read() method.
     index.method_returns.insert(
         (

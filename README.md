@@ -910,11 +910,9 @@ See `examples/architecture/call_parity/` for a runnable 3-adapter
 fixture.
 
 Known limits (documented, with clear workarounds):
-- **Tuple destructuring** `let (a, s) = setup(); s.m()` — `s` stays
-  `<method>:m`. Workaround: separate `let`s.
-- **`for` / `match` pattern bindings** — `for item in xs { item.m() }`
-  and `match res { Ok(s) => s.m(), … }` don't flow pattern bindings
-  into the method-call scope. Workaround: extract into `let` first.
+- **Closure-body arg types** `Session::open().map(|r| r.m())` — the
+  closure arg's type isn't inferred. Inner method call stays
+  `<method>:m`. Workaround: pull the method call out of the closure.
 - **Unannotated generics** `let x = get(); x.m()` where `get<T>() -> T`
   — use turbofish `get::<T>()` or `let x: T = get();`.
 - **`impl Trait`-returned inherent methods** — only trait methods

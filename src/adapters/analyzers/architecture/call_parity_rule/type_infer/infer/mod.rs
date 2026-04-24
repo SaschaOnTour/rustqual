@@ -1,20 +1,17 @@
-//! Shallow type-inference engine — Task 1.3.
+//! Shallow type-inference engine.
 //!
 //! Public API: `infer_type(expr, ctx) -> Option<CanonicalType>`.
 //!
 //! Dispatches over `syn::Expr` variants (see
 //! `docs/rustqual-design-receiver-type-inference.md` §3). Each variant
 //! delegates to `call` or `access` modules; transparent wrappers
-//! (`Paren`, `Reference`, `Group`) recurse directly.
+//! (`Paren`, `Reference`, `Group`) recurse directly. Stdlib
+//! Result/Option/Future combinators (`.unwrap()`, `.map_err()`, `.await`,
+//! …) are handled via the `combinators` table.
 //!
-//! What's NOT in Task 1.3:
-//! - Stdlib Result/Option/Future combinators (`.unwrap()`, `.map_err()`,
-//!   …) — those arrive in Task 1.5. Until then, `.unwrap()` on a
-//!   `Result<T,_>` resolves to `Opaque` because `Result::unwrap` isn't
-//!   in the workspace index.
-//! - Pattern-binding scope construction — Task 1.4. The engine here
-//!   consumes bindings through the `BindingLookup` trait; callers are
-//!   responsible for populating them.
+//! The engine consumes bindings through the `BindingLookup` trait —
+//! callers (the call-graph collector, pattern-binding helpers) are
+//! responsible for populating the scope before delegating here.
 
 pub mod access;
 pub mod call;
@@ -25,10 +22,10 @@ use super::workspace_index::WorkspaceTypeIndex;
 use std::collections::{HashMap, HashSet};
 
 /// Look up a scoped variable name → inferred type. Implementations may
-/// back this by a flat map (tests), a stack of maps (Task 1.4's
-/// `BindingScope`), or an adapter over the collector's existing scope.
-/// Returns an owned value so adapters can synthesize `CanonicalType`s
-/// on the fly without lifetime gymnastics.
+/// back this by a flat map (tests), a stack of maps, or an adapter over
+/// the collector's existing scope. Returns an owned value so adapters
+/// can synthesize `CanonicalType`s on the fly without lifetime
+/// gymnastics.
 pub trait BindingLookup {
     fn lookup(&self, ident: &str) -> Option<CanonicalType>;
 }

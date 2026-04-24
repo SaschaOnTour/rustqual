@@ -122,7 +122,11 @@ fn compile_call_parity(
     }
     let exclude_targets = build_globset(&cp.exclude_targets)
         .map_err(|e| format!("call_parity.exclude_targets: {e}"))?;
-    let transparent_wrappers: HashSet<String> = cp.transparent_wrappers.iter().cloned().collect();
+    let transparent_wrappers: HashSet<String> = cp
+        .transparent_wrappers
+        .iter()
+        .map(|w| last_path_segment(w).to_string())
+        .collect();
     let transparent_macros = build_transparent_macros(&cp.transparent_macros);
     Ok(Some(CompiledCallParity {
         adapters: cp.adapters.clone(),
@@ -132,6 +136,13 @@ fn compile_call_parity(
         transparent_wrappers,
         transparent_macros,
     }))
+}
+
+/// Return the last `::`-separated segment of a path-like wrapper entry
+/// so users can write `axum::extract::State` or just `State` and both
+/// match resolver lookups keyed on the type's last ident. Operation.
+fn last_path_segment(path: &str) -> &str {
+    path.rsplit("::").next().unwrap_or(path)
 }
 
 /// Stage 3 starter-pack: prepend these common framework attribute-macro

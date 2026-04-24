@@ -161,13 +161,6 @@ additive and the legacy fast-path stays intact as a safety net.
 ### Known Limits
 Patterns that intentionally stay unresolved and produce `<method>:name`
 fallback markers rather than fabricate edges:
-- `let (a, s) = make_pair(); s.m()` — tuple destructuring. Tuple
-  element types aren't tracked.
-- `for item in xs { item.m() }` — for-loop pattern binding doesn't
-  flow into the method-call collector yet. `item` stays unbound.
-- `match res { Ok(s) => s.m(), … }` — `match`-arm pattern bindings
-  aren't wired into the scope stack. Use `let` or `if let` as
-  workarounds.
 - `Session::open().map(|r| r.m())` — closure-body argument type is
   unknown. Inner method call stays `<method>:m`.
 - `fn get<T>() -> T { … }; let x = get(); x.m()` without annotation

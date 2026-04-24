@@ -98,15 +98,15 @@ struct CanonicalCallCollector<'a> {
     /// Inner-most scope is at the end; lookup walks from back to front.
     /// Always non-empty while a collection is in flight.
     bindings: Vec<HashMap<String, Vec<String>>>,
-    /// Flat signature-param scope for bindings whose inferred type
-    /// isn't a simple `Path` — trait bounds (`dyn Trait`) and stdlib
-    /// wrappers (`Result<T, _>`, `Option<T>`, `Future<T>`, `Vec<T>`,
-    /// `HashMap<_, V>`). Kept separate because the legacy `bindings`
-    /// stack stores concrete `Vec<String>` paths; wrapper-typed
-    /// bindings carry enough structure that we need the full
-    /// `CanonicalType` (so `.unwrap()` / `.await` / `?` on signature
-    /// params can unwrap them correctly).
-    non_path_bindings: HashMap<String, CanonicalType>,
+    /// Parallel scope stack for bindings whose inferred type isn't a
+    /// simple `Path` — trait bounds (`dyn Trait`) and stdlib wrappers
+    /// (`Result<T, _>`, `Option<T>`, `Future<T>`, `Vec<T>`,
+    /// `HashMap<_, V>`). Pushed/popped in lockstep with `bindings` so
+    /// non-path bindings respect lexical scope just like path ones.
+    /// Kept parallel (not merged into a single `CanonicalType` stack)
+    /// because the legacy fast-path reads from `bindings` by segment
+    /// vector directly — migrating that is a separate refactor.
+    non_path_bindings: Vec<HashMap<String, CanonicalType>>,
     calls: HashSet<String>,
     /// Workspace type-index for shallow inference fallback. Mirrored
     /// from `FnContext` so the visitor doesn't need the full context
@@ -136,7 +136,7 @@ impl<'a> CanonicalCallCollector<'a> {
             self_type_canonical,
             signature_params: ctx.signature_params.clone(),
             bindings: vec![HashMap::new()],
-            non_path_bindings: HashMap::new(),
+            non_path_bindings: vec![HashMap::new()],
             calls: HashSet::new(),
             workspace_index: ctx.workspace_index,
         }
@@ -186,17 +186,20 @@ impl<'a> CanonicalCallCollector<'a> {
             }
             CanonicalType::Opaque => {}
             other => {
-                self.non_path_bindings.insert(name.to_string(), other);
+                // Signature params always seed the outermost scope (frame 0).
+                self.non_path_bindings[0].insert(name.to_string(), other);
             }
         }
     }
 
     fn enter_scope(&mut self) {
         self.bindings.push(HashMap::new());
+        self.non_path_bindings.push(HashMap::new());
     }
 
     fn exit_scope(&mut self) {
         self.bindings.pop();
+        self.non_path_bindings.pop();
     }
 
     /// Return the innermost binding scope. The stack is seeded non-empty
@@ -209,6 +212,33 @@ impl<'a> CanonicalCallCollector<'a> {
         }
         let last = self.bindings.len() - 1;
         &mut self.bindings[last]
+    }
+
+    /// Parallel accessor for the non-path scope stack. Same invariants
+    /// and fallback semantics as `current_scope_mut`.
+    fn current_non_path_scope_mut(&mut self) -> &mut HashMap<String, CanonicalType> {
+        if self.non_path_bindings.is_empty() {
+            self.non_path_bindings.push(HashMap::new());
+        }
+        let last = self.non_path_bindings.len() - 1;
+        &mut self.non_path_bindings[last]
+    }
+
+    /// Install a binding in the path-scope and evict any stale entry
+    /// for the same name in the non-path scope (a `let` that shadows a
+    /// previous wrapper-typed binding with a plain Path binding).
+    /// Operation.
+    fn install_path_binding(&mut self, name: String, segs: Vec<String>) {
+        self.current_non_path_scope_mut().remove(&name);
+        self.current_scope_mut().insert(name, segs);
+    }
+
+    /// Install a wrapper / trait-bound binding in the non-path scope
+    /// and evict any stale Path binding for the same name (shadowing
+    /// the other way). Operation.
+    fn install_non_path_binding(&mut self, name: String, ty: CanonicalType) {
+        self.current_scope_mut().remove(&name);
+        self.current_non_path_scope_mut().insert(name, ty);
     }
 
     fn resolve_binding(&self, ident: &str) -> Option<&Vec<String>> {
@@ -356,8 +386,8 @@ impl<'a> CanonicalCallCollector<'a> {
     /// results (wrappers, trait bounds) into `non_path_bindings` so
     /// downstream `?` / `.await` / trait-dispatch on `x` resolve
     /// correctly. Only simple `Pat::Ident` patterns are handled here;
-    /// destructuring goes through Task 1.4's `patterns::extract_bindings`
-    /// which is wired up separately. Operation.
+    /// destructuring is handled separately via `patterns::extract_bindings`.
+    /// Operation.
     fn install_inferred_let_binding(&mut self, local: &syn::Local) {
         let Some(init) = local.init.as_ref() else {
             return;
@@ -369,13 +399,9 @@ impl<'a> CanonicalCallCollector<'a> {
             return;
         };
         match inferred {
-            CanonicalType::Path(segs) => {
-                self.current_scope_mut().insert(name, segs);
-            }
+            CanonicalType::Path(segs) => self.install_path_binding(name, segs),
             CanonicalType::Opaque => {}
-            other => {
-                self.non_path_bindings.insert(name, other);
-            }
+            other => self.install_non_path_binding(name, other),
         }
     }
 
@@ -443,13 +469,9 @@ impl<'a> CanonicalCallCollector<'a> {
     fn install_binding_pairs(&mut self, pairs: Vec<(String, CanonicalType)>) {
         for (name, ty) in pairs {
             match ty {
-                CanonicalType::Path(segs) => {
-                    self.current_scope_mut().insert(name, segs);
-                }
+                CanonicalType::Path(segs) => self.install_path_binding(name, segs),
                 CanonicalType::Opaque => {}
-                other => {
-                    self.non_path_bindings.insert(name, other);
-                }
+                other => self.install_non_path_binding(name, other),
             }
         }
     }
@@ -553,24 +575,34 @@ fn trait_dispatch_edges(
 /// by the legacy `extract_let_binding`.
 struct CollectorBindings<'a> {
     scope: &'a [HashMap<String, Vec<String>>],
-    non_path_scope: &'a HashMap<String, CanonicalType>,
+    non_path_scope: &'a [HashMap<String, CanonicalType>],
 }
 
 impl BindingLookup for CollectorBindings<'_> {
     fn lookup(&self, ident: &str) -> Option<CanonicalType> {
-        for frame in self.scope.iter().rev() {
-            if let Some(segs) = frame.get(ident) {
+        // Walk both stacks in lockstep from innermost to outermost so
+        // shadowing works across kinds (a wrapper-typed `let` hides an
+        // outer path-typed `let` with the same name and vice versa).
+        // Install helpers evict the sibling entry at the same level, so
+        // at most one map hits per frame.
+        for (path_frame, non_path_frame) in
+            self.scope.iter().rev().zip(self.non_path_scope.iter().rev())
+        {
+            if let Some(ty) = non_path_frame.get(ident) {
+                return Some(ty.clone());
+            }
+            if let Some(segs) = path_frame.get(ident) {
                 return Some(CanonicalType::Path(segs.clone()));
             }
         }
-        self.non_path_scope.get(ident).cloned()
+        None
     }
 }
 
 /// Peel `Pat::Type` wrappers to reach a `Pat::Ident` and return its
 /// identifier. Returns `None` for destructuring / tuple / struct
-/// patterns — those flow through `patterns::extract_bindings` in a
-/// future Task 1.6 extension. Operation: recursive pattern peel.
+/// patterns — those flow through `patterns::extract_bindings`.
+/// Operation: recursive pattern peel.
 // qual:recursive
 fn extract_pat_ident_name(pat: &syn::Pat) -> Option<String> {
     match pat {

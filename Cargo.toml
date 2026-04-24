@@ -15,7 +15,7 @@ default-run = "rustqual"
 exclude = ["docs/*", "prd-*.md", ".github/*", ".claude/*"]
 
 [dependencies]
-syn = { version = "2", features = ["full", "parsing", "visit"] }
+syn = { version = "2", features = ["full", "parsing", "visit", "visit-mut"] }
 quote = "1"
 proc-macro2 = { version = "1", features = ["span-locations"] }
 walkdir = "2"

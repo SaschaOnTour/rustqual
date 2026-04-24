@@ -8,6 +8,7 @@
 //! Design reference: `docs/rustqual-design-receiver-type-inference.md`.
 //! Plan: `~/.claude/plans/cached-noodling-frog.md`.
 
+pub(crate) mod alias_substitution;
 pub mod canonical;
 pub mod combinators;
 pub mod infer;
