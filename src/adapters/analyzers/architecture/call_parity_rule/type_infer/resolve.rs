@@ -150,16 +150,48 @@ fn resolve_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -> Canoni
     let peel = || peel_single_generic(args, ctx, depth);
     let fallback = || resolve_generic_path(path, ctx, depth);
     let name = last.ident.to_string();
+    let wrap_future = || wrap_future_output(args, ctx, depth);
     match name.as_str() {
         "Result" => wrap(0, CanonicalType::Result),
         "Option" => wrap(0, CanonicalType::Option),
-        "Future" => wrap(0, CanonicalType::Future),
+        // Future uses `Output = T` associated-type syntax, not a
+        // positional generic. Handle both forms in the dedicated helper.
+        "Future" => wrap_future(),
         "Vec" => wrap(0, CanonicalType::Slice),
         "HashMap" | "BTreeMap" => wrap(1, CanonicalType::Map),
         "Arc" | "Box" | "Rc" | "Cow" | "RwLock" | "Mutex" | "RefCell" | "Cell" => peel(),
         _ if is_user_transparent(&name, ctx) => peel(),
         _ => fallback(),
     }
+}
+
+/// Future-specific wrapper: `std::future::Future<Output = T>` uses the
+/// `Output = T` associated-type syntax. Accepts the positional form
+/// `Future<T>` too as a secondary fallback. Operation.
+fn wrap_future_output(
+    args: &syn::PathArguments,
+    ctx: &ResolveContext<'_>,
+    depth: u8,
+) -> CanonicalType {
+    let recurse = |t: &syn::Type| resolve_type_with_depth(t, ctx, depth);
+    match future_output_type(args) {
+        Some(inner) => CanonicalType::Future(Box::new(recurse(inner))),
+        None => CanonicalType::Opaque,
+    }
+}
+
+/// Extract the `Output` type from `Future<Output = T>`; fall back to
+/// the first positional generic arg for the rarer `Future<T>` form.
+/// Operation.
+fn future_output_type(args: &syn::PathArguments) -> Option<&syn::Type> {
+    let syn::PathArguments::AngleBracketed(ab) = args else {
+        return None;
+    };
+    let assoc = ab.args.iter().find_map(|arg| match arg {
+        syn::GenericArgument::AssocType(a) if a.ident == "Output" => Some(&a.ty),
+        _ => None,
+    });
+    assoc.or_else(|| generic_type_arg(args, 0))
 }
 
 /// Stage 3 — check if `name` is a user-configured transparent wrapper.
@@ -182,7 +214,9 @@ fn wrap_generic<F>(
 where
     F: FnOnce(Box<CanonicalType>) -> CanonicalType,
 {
-    let recurse = |t: &syn::Type| resolve_type_with_depth(t, ctx, depth + 1);
+    // `depth` already carries the +1 from `dispatch_type`'s guard —
+    // `resolve_type_with_depth` re-applies the guard, so pass through.
+    let recurse = |t: &syn::Type| resolve_type_with_depth(t, ctx, depth);
     match generic_type_arg(args, idx) {
         Some(inner) => constructor(Box::new(recurse(inner))),
         None => CanonicalType::Opaque,
@@ -197,7 +231,7 @@ fn peel_single_generic(
     ctx: &ResolveContext<'_>,
     depth: u8,
 ) -> CanonicalType {
-    let recurse = |t: &syn::Type| resolve_type_with_depth(t, ctx, depth + 1);
+    let recurse = |t: &syn::Type| resolve_type_with_depth(t, ctx, depth);
     match generic_type_arg(args, 0) {
         Some(inner) => recurse(inner),
         None => CanonicalType::Opaque,
@@ -210,7 +244,7 @@ fn peel_single_generic(
 /// the canonicalised name matches a recorded workspace type-alias, the
 /// alias target is recursively resolved. Operation: closure-hidden calls.
 fn resolve_generic_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -> CanonicalType {
-    let recurse = |t: &syn::Type| resolve_type_with_depth(t, ctx, depth + 1);
+    let recurse = |t: &syn::Type| resolve_type_with_depth(t, ctx, depth);
     let canonicalise = |segs: &[String]| {
         canonicalise_type_segments(
             segs,

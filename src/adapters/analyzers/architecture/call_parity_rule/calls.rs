@@ -19,7 +19,8 @@
 use super::bindings::{canonical_from_type, extract_let_binding, normalize_alias_expansion};
 use super::type_infer::resolve::{resolve_type, ResolveContext};
 use super::type_infer::{
-    infer_type, BindingLookup, CanonicalType, InferContext, WorkspaceTypeIndex,
+    extract_bindings, extract_for_bindings, infer_type, BindingLookup, CanonicalType, InferContext,
+    WorkspaceTypeIndex,
 };
 use crate::adapters::analyzers::architecture::forbidden_rule::{
     file_to_module_segments, resolve_to_crate_absolute,
@@ -97,12 +98,15 @@ struct CanonicalCallCollector<'a> {
     /// Inner-most scope is at the end; lookup walks from back to front.
     /// Always non-empty while a collection is in flight.
     bindings: Vec<HashMap<String, Vec<String>>>,
-    /// Flat signature-param scope for `dyn Trait` / `&dyn Trait` /
-    /// `Box<dyn Trait>` parameters — Stage 2 trait-dispatch receivers.
-    /// Kept separate because `bindings` stores concrete `Vec<String>`
-    /// paths; trait-bound segments are semantically different (they
-    /// trigger fan-out to every impl instead of a single edge).
-    trait_bindings: HashMap<String, Vec<String>>,
+    /// Flat signature-param scope for bindings whose inferred type
+    /// isn't a simple `Path` — trait bounds (`dyn Trait`) and stdlib
+    /// wrappers (`Result<T, _>`, `Option<T>`, `Future<T>`, `Vec<T>`,
+    /// `HashMap<_, V>`). Kept separate because the legacy `bindings`
+    /// stack stores concrete `Vec<String>` paths; wrapper-typed
+    /// bindings carry enough structure that we need the full
+    /// `CanonicalType` (so `.unwrap()` / `.await` / `?` on signature
+    /// params can unwrap them correctly).
+    non_path_bindings: HashMap<String, CanonicalType>,
     calls: HashSet<String>,
     /// Workspace type-index for shallow inference fallback. Mirrored
     /// from `FnContext` so the visitor doesn't need the full context
@@ -132,7 +136,7 @@ impl<'a> CanonicalCallCollector<'a> {
             self_type_canonical,
             signature_params: ctx.signature_params.clone(),
             bindings: vec![HashMap::new()],
-            trait_bindings: HashMap::new(),
+            non_path_bindings: HashMap::new(),
             calls: HashSet::new(),
             workspace_index: ctx.workspace_index,
         }
@@ -162,11 +166,11 @@ impl<'a> CanonicalCallCollector<'a> {
     }
 
     /// Install a signature-param binding using the full `resolve_type`
-    /// pipeline. `Path` variants go into the legacy `Vec<String>` scope;
-    /// `TraitBound` variants go into the separate `trait_bindings` map
-    /// so trait-dispatch fires at the method-call site. Other variants
-    /// (Opaque, Slice, Map, stdlib wrappers) don't install a binding.
-    /// Operation: resolve + classify.
+    /// pipeline. `Path` → legacy `Vec<String>` scope (simple and cheap
+    /// to look up). `Opaque` is dropped. Everything else — `TraitBound`,
+    /// `Result`/`Option`/`Future` wrappers, `Slice`/`Map` — lands in
+    /// `non_path_bindings` so `?` / `.await` / trait-dispatch fire
+    /// correctly on method-call sites. Operation.
     fn seed_param_via_resolver(&mut self, name: &str, ty: &syn::Type) {
         let rctx = ResolveContext {
             alias_map: self.alias_map,
@@ -180,10 +184,10 @@ impl<'a> CanonicalCallCollector<'a> {
             CanonicalType::Path(segs) => {
                 self.bindings[0].insert(name.to_string(), segs);
             }
-            CanonicalType::TraitBound(segs) => {
-                self.trait_bindings.insert(name.to_string(), segs);
+            CanonicalType::Opaque => {}
+            other => {
+                self.non_path_bindings.insert(name.to_string(), other);
             }
-            _ => {}
         }
     }
 
@@ -333,7 +337,7 @@ impl<'a> CanonicalCallCollector<'a> {
     fn infer_receiver_type(&self, expr: &syn::Expr) -> Option<CanonicalType> {
         let adapter = CollectorBindings {
             scope: &self.bindings,
-            trait_scope: &self.trait_bindings,
+            non_path_scope: &self.non_path_bindings,
         };
         let ctx = InferContext {
             workspace: self.workspace_index?,
@@ -347,30 +351,32 @@ impl<'a> CanonicalCallCollector<'a> {
         infer_type(expr, &ctx)
     }
 
-    /// Shallow-inference fallback: run `type_infer::infer_type` on an
-    /// expression, returning the canonical-path segments iff the result
-    /// is a concrete `Path`. `Result`/`Option`/`Future`/`Slice`/`Map`/
-    /// `TraitBound`/`Opaque` collapse to `None` — the legacy scope only
-    /// stores concrete type-path bindings. Trait-bound bindings would
-    /// need multi-target dispatch at the method-call site instead.
-    /// Operation: delegate to `infer_receiver_type` + variant probe.
-    fn try_infer_receiver(&self, expr: &syn::Expr) -> Option<Vec<String>> {
-        match self.infer_receiver_type(expr)? {
-            CanonicalType::Path(segs) => Some(segs),
-            _ => None,
+    /// Install a `let x = expr` binding via shallow inference on the
+    /// initializer. `Path` results go into the legacy scope, non-Path
+    /// results (wrappers, trait bounds) into `non_path_bindings` so
+    /// downstream `?` / `.await` / trait-dispatch on `x` resolve
+    /// correctly. Only simple `Pat::Ident` patterns are handled here;
+    /// destructuring goes through Task 1.4's `patterns::extract_bindings`
+    /// which is wired up separately. Operation.
+    fn install_inferred_let_binding(&mut self, local: &syn::Local) {
+        let Some(init) = local.init.as_ref() else {
+            return;
+        };
+        let Some(name) = extract_pat_ident_name(&local.pat) else {
+            return;
+        };
+        let Some(inferred) = self.infer_receiver_type(&init.expr) else {
+            return;
+        };
+        match inferred {
+            CanonicalType::Path(segs) => {
+                self.current_scope_mut().insert(name, segs);
+            }
+            CanonicalType::Opaque => {}
+            other => {
+                self.non_path_bindings.insert(name, other);
+            }
         }
-    }
-
-    /// Extract a `(name, canonical_segments)` pair from a `let`
-    /// statement via shallow inference on its initializer. Only simple
-    /// `Pat::Ident` patterns are handled here; complex destructuring
-    /// (`let Some(x) = opt`) is out of scope for Task 1.6 MVP.
-    /// Operation: delegate to `try_infer_receiver` + pattern probe.
-    fn infer_let_binding(&self, local: &syn::Local) -> Option<(String, Vec<String>)> {
-        let init = local.init.as_ref()?;
-        let name = extract_pat_ident_name(&local.pat)?;
-        let segs = self.try_infer_receiver(&init.expr)?;
-        Some((name, segs))
     }
 
     fn collect_macro_body(&mut self, mac: &syn::Macro) {
@@ -378,6 +384,82 @@ impl<'a> CanonicalCallCollector<'a> {
             self.visit_expr(&expr);
         }
     }
+
+    /// Extract pattern bindings from `pat` against a matched-type from
+    /// `matched_expr`, installing them into the current scope. Path
+    /// bindings go into the legacy scope, wrapper/trait-bound bindings
+    /// into `non_path_bindings`. Used by `let`-destructuring, `if let`,
+    /// `while let`, `match` arms. Integration.
+    fn install_destructure_bindings(&mut self, pat: &syn::Pat, matched_expr: &syn::Expr) {
+        let Some(matched) = self.infer_receiver_type(matched_expr) else {
+            return;
+        };
+        let pairs = self.extract_pattern_pairs(pat, &matched, PatKind::Value);
+        self.install_binding_pairs(pairs);
+    }
+
+    /// Extract for-loop element-type bindings from `pat` against
+    /// `iter_expr` (the thing being iterated over). Integration.
+    fn install_for_bindings(&mut self, pat: &syn::Pat, iter_expr: &syn::Expr) {
+        let Some(iter_type) = self.infer_receiver_type(iter_expr) else {
+            return;
+        };
+        let pairs = self.extract_pattern_pairs(pat, &iter_type, PatKind::Iterator);
+        self.install_binding_pairs(pairs);
+    }
+
+    /// Wrapper around `patterns::extract_bindings` / `extract_for_bindings`
+    /// that builds a fresh `InferContext`. Operation.
+    fn extract_pattern_pairs(
+        &self,
+        pat: &syn::Pat,
+        matched: &CanonicalType,
+        kind: PatKind,
+    ) -> Vec<(String, CanonicalType)> {
+        let Some(workspace) = self.workspace_index else {
+            return Vec::new();
+        };
+        let adapter = CollectorBindings {
+            scope: &self.bindings,
+            non_path_scope: &self.non_path_bindings,
+        };
+        let ictx = InferContext {
+            workspace,
+            alias_map: self.alias_map,
+            local_symbols: self.local_symbols,
+            crate_root_modules: self.crate_root_modules,
+            importing_file: self.importing_file,
+            bindings: &adapter,
+            self_type: self.self_type_canonical.clone(),
+        };
+        match kind {
+            PatKind::Value => extract_bindings(pat, matched, &ictx),
+            PatKind::Iterator => extract_for_bindings(pat, matched, &ictx),
+        }
+    }
+
+    /// Dispatch each `(name, type)` pair into the right scope map.
+    /// Operation.
+    fn install_binding_pairs(&mut self, pairs: Vec<(String, CanonicalType)>) {
+        for (name, ty) in pairs {
+            match ty {
+                CanonicalType::Path(segs) => {
+                    self.current_scope_mut().insert(name, segs);
+                }
+                CanonicalType::Opaque => {}
+                other => {
+                    self.non_path_bindings.insert(name, other);
+                }
+            }
+        }
+    }
+}
+
+/// Whether `extract_pattern_pairs` should use value-pattern
+/// (`let` / `if let` / `match`) or for-loop element-type extraction.
+enum PatKind {
+    Value,
+    Iterator,
 }
 
 /// Best-effort extraction of expressions from a macro token stream.
@@ -471,7 +553,7 @@ fn trait_dispatch_edges(
 /// by the legacy `extract_let_binding`.
 struct CollectorBindings<'a> {
     scope: &'a [HashMap<String, Vec<String>>],
-    trait_scope: &'a HashMap<String, Vec<String>>,
+    non_path_scope: &'a HashMap<String, CanonicalType>,
 }
 
 impl BindingLookup for CollectorBindings<'_> {
@@ -481,9 +563,7 @@ impl BindingLookup for CollectorBindings<'_> {
                 return Some(CanonicalType::Path(segs.clone()));
             }
         }
-        self.trait_scope
-            .get(ident)
-            .map(|segs| CanonicalType::TraitBound(segs.clone()))
+        self.non_path_scope.get(ident).cloned()
     }
 }
 
@@ -547,12 +627,68 @@ impl<'a, 'ast> Visit<'ast> for CanonicalCallCollector<'a> {
             self.current_scope_mut().insert(name, ty_canonical);
             return;
         }
-        // Inference fallback: method-chained ctors (`T::ctor().map_err()?`),
-        // free-fn returns (`make_session()`), builder patterns, etc.
-        // Requires workspace_index; silently skips when absent.
-        if let Some((name, segs)) = self.infer_let_binding(local) {
-            self.current_scope_mut().insert(name, segs);
+        // Simple-ident inference fallback (handles method chains + wrapper types).
+        if extract_pat_ident_name(&local.pat).is_some() {
+            self.install_inferred_let_binding(local);
+            return;
         }
+        // Destructuring: `let Some(x) = opt`, `let Ctx { field } = …`,
+        // `let (a, b) = …`, `let Pat = expr else { return; }`. Install
+        // all pattern-extracted bindings into the current scope.
+        if let Some(init) = local.init.as_ref() {
+            self.install_destructure_bindings(&local.pat, &init.expr);
+        }
+    }
+
+    fn visit_expr_if(&mut self, expr_if: &'ast syn::ExprIf) {
+        self.enter_scope();
+        // `if let PAT = SCRUTINEE { THEN }` — extract bindings visible
+        // in the then-block only. Non-let conditions are visited via
+        // the default walker and don't introduce bindings.
+        if let syn::Expr::Let(let_expr) = expr_if.cond.as_ref() {
+            self.visit_expr(&let_expr.expr);
+            self.install_destructure_bindings(&let_expr.pat, &let_expr.expr);
+        } else {
+            self.visit_expr(&expr_if.cond);
+        }
+        self.visit_block(&expr_if.then_branch);
+        self.exit_scope();
+        if let Some((_, else_branch)) = &expr_if.else_branch {
+            self.visit_expr(else_branch);
+        }
+    }
+
+    fn visit_expr_while(&mut self, expr_while: &'ast syn::ExprWhile) {
+        self.enter_scope();
+        if let syn::Expr::Let(let_expr) = expr_while.cond.as_ref() {
+            self.visit_expr(&let_expr.expr);
+            self.install_destructure_bindings(&let_expr.pat, &let_expr.expr);
+        } else {
+            self.visit_expr(&expr_while.cond);
+        }
+        self.visit_block(&expr_while.body);
+        self.exit_scope();
+    }
+
+    fn visit_expr_match(&mut self, expr_match: &'ast syn::ExprMatch) {
+        self.visit_expr(&expr_match.expr);
+        for arm in &expr_match.arms {
+            self.enter_scope();
+            self.install_destructure_bindings(&arm.pat, &expr_match.expr);
+            if let Some((_, guard)) = &arm.guard {
+                self.visit_expr(guard);
+            }
+            self.visit_expr(&arm.body);
+            self.exit_scope();
+        }
+    }
+
+    fn visit_expr_for_loop(&mut self, for_loop: &'ast syn::ExprForLoop) {
+        self.visit_expr(&for_loop.expr);
+        self.enter_scope();
+        self.install_for_bindings(&for_loop.pat, &for_loop.expr);
+        self.visit_block(&for_loop.body);
+        self.exit_scope();
     }
 
     fn visit_expr_call(&mut self, call: &'ast syn::ExprCall) {

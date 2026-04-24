@@ -119,15 +119,17 @@ impl<'a> ChildPathResolver<'a> {
         } else {
             parent.with_extension("")
         };
+        // Normalize backslashes to forward slashes on Windows so the
+        // candidates match `known_paths` (which always store /).
         let candidate_file = child_dir
             .join(format!("{mod_name}.rs"))
             .to_string_lossy()
-            .into_owned();
+            .replace('\\', "/");
         let candidate_dir = child_dir
             .join(mod_name)
             .join("mod.rs")
             .to_string_lossy()
-            .into_owned();
+            .replace('\\', "/");
         if self.known_paths.contains(candidate_file.as_str()) {
             Some(candidate_file)
         } else if self.known_paths.contains(candidate_dir.as_str()) {

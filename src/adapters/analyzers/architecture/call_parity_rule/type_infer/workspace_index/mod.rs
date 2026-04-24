@@ -30,6 +30,12 @@ pub(super) struct BuildContext<'a> {
     /// Stage 3 — user-wrapper names peeled during resolution. Shared
     /// across the whole build.
     pub transparent_wrappers: &'a HashSet<String>,
+    /// Stage 3 — type aliases already collected across the workspace.
+    /// `None` in pass 1 (the alias collector itself); `Some(&…)` in
+    /// pass 2 so fields/methods/functions/traits that reference an
+    /// alias are resolved through the alias target instead of caching
+    /// the raw alias name.
+    pub type_aliases: Option<&'a HashMap<String, syn::Type>>,
 }
 
 /// Build a canonical type-path key by prefixing the impl/trait segments
@@ -49,9 +55,9 @@ pub(super) fn canonical_type_key(segs: &[String], ctx: &BuildContext<'_>) -> Str
 
 /// Build a `ResolveContext` from the shared `BuildContext` inputs —
 /// extracted so the per-field / per-method / per-free-fn collectors
-/// don't each repeat the same 7-line construction. Inference-time
-/// aliases aren't available during build (the alias map is itself
-/// being built), so `type_aliases` is `None` here.
+/// don't each repeat the same construction. `type_aliases` propagates
+/// through so pass-2 collectors (running after the alias-collector
+/// populated them) resolve aliased types transparently.
 /// Operation.
 pub(super) fn resolve_ctx_from_build<'a>(
     ctx: &'a BuildContext<'a>,
@@ -61,7 +67,7 @@ pub(super) fn resolve_ctx_from_build<'a>(
         local_symbols: ctx.local_symbols,
         crate_root_modules: ctx.crate_root_modules,
         importing_file: ctx.path,
-        type_aliases: None,
+        type_aliases: ctx.type_aliases,
         transparent_wrappers: Some(ctx.transparent_wrappers),
     }
 }
@@ -144,7 +150,12 @@ impl WorkspaceTypeIndex {
 /// alias maps. Skips cfg-test files wholesale. `transparent_wrappers`
 /// seeds the user-configured Stage-3 wrapper list onto the index so
 /// downstream inference peels them just like `Arc` / `Box`.
-/// Integration: orchestrates per-file walks across the collectors.
+///
+/// Runs in two passes: first collects type aliases across every file,
+/// then collects fields/methods/functions/traits with the alias map
+/// populated so aliased return types (`fn foo() -> AppResult<T>`)
+/// resolve through to their targets instead of caching the raw alias
+/// path. Integration.
 pub fn build_workspace_type_index(
     files: &[(&str, &syn::File)],
     aliases_per_file: &HashMap<String, HashMap<String, Vec<String>>>,
@@ -154,11 +165,59 @@ pub fn build_workspace_type_index(
 ) -> WorkspaceTypeIndex {
     let mut index = WorkspaceTypeIndex::new();
     index.transparent_wrappers = transparent_wrappers.clone();
-    for (path, ast) in files {
-        if cfg_test_files.contains(*path) {
+    let shared = |type_aliases| WalkInputs {
+        files,
+        aliases_per_file,
+        cfg_test_files,
+        crate_root_modules,
+        transparent_wrappers,
+        type_aliases,
+    };
+    // Pass 1: aliases across all files (no alias map yet).
+    walk_files(&shared(None), &mut index, |index, ctx, ast| {
+        aliases::collect_from_file(index, ctx, ast)
+    });
+    // Pass 2: fields/methods/functions/traits with alias map visible.
+    // `mem::take` lets us borrow the alias map immutably while still
+    // mutating other fields of `index`; we restore at the end.
+    let collected_aliases = std::mem::take(&mut index.type_aliases);
+    walk_files(
+        &shared(Some(&collected_aliases)),
+        &mut index,
+        |index, ctx, ast| {
+            fields::collect_from_file(index, ctx, ast);
+            methods::collect_from_file(index, ctx, ast);
+            functions::collect_from_file(index, ctx, ast);
+            traits::collect_from_file(index, ctx, ast);
+        },
+    );
+    index.type_aliases = collected_aliases;
+    index
+}
+
+/// Inputs common to both index-build passes. Bundled so `walk_files`
+/// doesn't exceed the SRP parameter count.
+struct WalkInputs<'a> {
+    files: &'a [(&'a str, &'a syn::File)],
+    aliases_per_file: &'a HashMap<String, HashMap<String, Vec<String>>>,
+    cfg_test_files: &'a HashSet<String>,
+    crate_root_modules: &'a HashSet<String>,
+    transparent_wrappers: &'a HashSet<String>,
+    type_aliases: Option<&'a HashMap<String, syn::Type>>,
+}
+
+/// Shared file-walk scaffold for both index build passes. Skips
+/// cfg-test files and files without a pre-computed alias map; hands
+/// the per-file `BuildContext` to `visit`. Integration.
+fn walk_files<F>(inputs: &WalkInputs<'_>, index: &mut WorkspaceTypeIndex, mut visit: F)
+where
+    F: FnMut(&mut WorkspaceTypeIndex, &BuildContext<'_>, &syn::File),
+{
+    for (path, ast) in inputs.files {
+        if inputs.cfg_test_files.contains(*path) {
             continue;
         }
-        let Some(alias_map) = aliases_per_file.get(*path) else {
+        let Some(alias_map) = inputs.aliases_per_file.get(*path) else {
             continue;
         };
         let local_symbols = collect_local_symbols(ast);
@@ -166,14 +225,10 @@ pub fn build_workspace_type_index(
             path,
             alias_map,
             local_symbols: &local_symbols,
-            crate_root_modules,
-            transparent_wrappers,
+            crate_root_modules: inputs.crate_root_modules,
+            transparent_wrappers: inputs.transparent_wrappers,
+            type_aliases: inputs.type_aliases,
         };
-        fields::collect_from_file(&mut index, &ctx, ast);
-        methods::collect_from_file(&mut index, &ctx, ast);
-        functions::collect_from_file(&mut index, &ctx, ast);
-        traits::collect_from_file(&mut index, &ctx, ast);
-        aliases::collect_from_file(&mut index, &ctx, ast);
+        visit(index, &ctx, ast);
     }
-    index
 }
