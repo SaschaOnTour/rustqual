@@ -585,8 +585,11 @@ impl BindingLookup for CollectorBindings<'_> {
         // outer path-typed `let` with the same name and vice versa).
         // Install helpers evict the sibling entry at the same level, so
         // at most one map hits per frame.
-        for (path_frame, non_path_frame) in
-            self.scope.iter().rev().zip(self.non_path_scope.iter().rev())
+        for (path_frame, non_path_frame) in self
+            .scope
+            .iter()
+            .rev()
+            .zip(self.non_path_scope.iter().rev())
         {
             if let Some(ty) = non_path_frame.get(ident) {
                 return Some(ty.clone());

@@ -11,8 +11,8 @@
 //! inference engine (Task 1.3) — both turn `syn::Type`s into
 //! `CanonicalType`s with identical semantics.
 
-use super::alias_substitution::substitute_alias_args;
 use super::super::bindings::canonicalise_type_segments;
+use super::alias_substitution::substitute_alias_args;
 use super::canonical::CanonicalType;
 use std::collections::{HashMap, HashSet};
 

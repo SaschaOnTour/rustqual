@@ -31,11 +31,7 @@ pub(super) fn substitute_alias_args(
     if args.len() != params.len() {
         return expanded;
     }
-    let subs: HashMap<&str, &syn::Type> = params
-        .iter()
-        .map(String::as_str)
-        .zip(args)
-        .collect();
+    let subs: HashMap<&str, &syn::Type> = params.iter().map(String::as_str).zip(args).collect();
     AliasSubstitutor { subs: &subs }.visit_type_mut(&mut expanded);
     expanded
 }
