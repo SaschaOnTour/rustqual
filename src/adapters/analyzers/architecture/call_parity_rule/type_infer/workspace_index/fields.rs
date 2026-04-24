@@ -21,13 +21,18 @@ pub(super) fn collect_from_file(
     ctx: &BuildContext<'_>,
     ast: &syn::File,
 ) {
-    let mut collector = FieldCollector { index, ctx };
+    let mut collector = FieldCollector {
+        index,
+        ctx,
+        mod_stack: Vec::new(),
+    };
     collector.visit_file(ast);
 }
 
 struct FieldCollector<'i, 'c> {
     index: &'i mut WorkspaceTypeIndex,
     ctx: &'c BuildContext<'c>,
+    mod_stack: Vec<String>,
 }
 
 impl<'ast, 'i, 'c> Visit<'ast> for FieldCollector<'i, 'c> {
@@ -35,14 +40,16 @@ impl<'ast, 'i, 'c> Visit<'ast> for FieldCollector<'i, 'c> {
         if has_cfg_test(&node.attrs) {
             return;
         }
-        record_struct(self.index, self.ctx, node);
+        record_struct(self.index, self.ctx, &self.mod_stack, node);
     }
 
     fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
         if has_cfg_test(&node.attrs) {
             return;
         }
+        self.mod_stack.push(node.ident.to_string());
         syn::visit::visit_item_mod(self, node);
+        self.mod_stack.pop();
     }
 
     fn visit_item_impl(&mut self, _: &'ast syn::ItemImpl) {
@@ -53,8 +60,13 @@ impl<'ast, 'i, 'c> Visit<'ast> for FieldCollector<'i, 'c> {
 
 /// Record every named field of `item`. Integration: canonicalisation +
 /// per-field delegation.
-fn record_struct(index: &mut WorkspaceTypeIndex, ctx: &BuildContext<'_>, item: &syn::ItemStruct) {
-    let canon = |name: &str| canonical_struct_name(name, ctx);
+fn record_struct(
+    index: &mut WorkspaceTypeIndex,
+    ctx: &BuildContext<'_>,
+    mod_stack: &[String],
+    item: &syn::ItemStruct,
+) {
+    let canon = |name: &str| canonical_struct_name(name, ctx, mod_stack);
     let canonical = canon(&item.ident.to_string());
     let syn::Fields::Named(named) = &item.fields else {
         return;
@@ -85,11 +97,16 @@ fn record_field(
         .insert((canonical.to_string(), ident.to_string()), field_type);
 }
 
-/// Build `crate::<file-module>::<StructIdent>` from a file path + ident.
-/// Operation: pure string construction.
-fn canonical_struct_name(struct_ident: &str, ctx: &BuildContext<'_>) -> String {
+/// Build `crate::<file-module>::<inline-mods>::<StructIdent>` from a
+/// file path, mod stack, and ident. Operation: pure string construction.
+fn canonical_struct_name(
+    struct_ident: &str,
+    ctx: &BuildContext<'_>,
+    mod_stack: &[String],
+) -> String {
     let mut segs: Vec<String> = vec!["crate".to_string()];
     segs.extend(file_to_module_segments(ctx.path));
+    segs.extend(mod_stack.iter().cloned());
     segs.push(struct_ident.to_string());
     segs.join("::")
 }

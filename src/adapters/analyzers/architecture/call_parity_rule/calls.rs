@@ -241,15 +241,6 @@ impl<'a> CanonicalCallCollector<'a> {
         self.current_non_path_scope_mut().insert(name, ty);
     }
 
-    fn resolve_binding(&self, ident: &str) -> Option<&Vec<String>> {
-        for scope in self.bindings.iter().rev() {
-            if let Some(v) = scope.get(ident) {
-                return Some(v);
-            }
-        }
-        None
-    }
-
     /// Turn a path-segment list into the canonical String used for all
     /// call-target comparisons in the call-parity check.
     fn canonicalise_path(&self, segments: &[String]) -> String {
@@ -330,7 +321,11 @@ impl<'a> CanonicalCallCollector<'a> {
     }
 
     /// Fast-path: receiver is a bare ident with a concrete binding in
-    /// the legacy scope. Operation.
+    /// the legacy path scope. Walks both scope stacks from innermost to
+    /// outermost so a non-path shadow (`let r: Result<_,_> = …`
+    /// shadowing an outer `let r: Session = …`) aborts the fast-path
+    /// and hands off to inference, instead of producing a stale concrete
+    /// edge. Operation.
     fn try_fast_path_receiver(&self, receiver: &syn::Expr, method_name: &str) -> Option<String> {
         let syn::Expr::Path(p) = receiver else {
             return None;
@@ -339,10 +334,22 @@ impl<'a> CanonicalCallCollector<'a> {
             return None;
         }
         let ident = p.path.segments[0].ident.to_string();
-        let binding = self.resolve_binding(&ident)?;
-        let mut full = binding.clone();
-        full.push(method_name.to_string());
-        Some(full.join("::"))
+        for (path_scope, non_path_scope) in self
+            .bindings
+            .iter()
+            .rev()
+            .zip(self.non_path_bindings.iter().rev())
+        {
+            if non_path_scope.contains_key(&ident) {
+                return None;
+            }
+            if let Some(binding) = path_scope.get(&ident) {
+                let mut full = binding.clone();
+                full.push(method_name.to_string());
+                return Some(full.join("::"));
+            }
+        }
+        None
     }
 
     /// Inference fallback: run shallow type inference over the receiver
@@ -384,10 +391,11 @@ impl<'a> CanonicalCallCollector<'a> {
     /// `let x: T = …` — route the annotation through the full resolver
     /// when a workspace index is available so alias expansion + wrapper
     /// peeling + trait-bound extraction all apply. Returns `true` when
-    /// a binding was installed (or the annotation resolved to `Opaque`
-    /// and should be dropped entirely). Returns `false` when there's no
-    /// annotation or no workspace index, handing off to the legacy
-    /// fast-path. Operation: closure-hidden resolution.
+    /// a binding was actually installed. Returns `false` when there's
+    /// no annotation, no workspace index, or the annotation resolves to
+    /// `Opaque` (e.g. `let s: _ = …` where `_` is the inference
+    /// placeholder) — the caller then falls through to initializer-
+    /// based inference. Operation: closure-hidden resolution.
     fn try_install_annotated_binding(&mut self, local: &syn::Local) -> bool {
         let Some(wi) = self.workspace_index else {
             return false;
@@ -409,7 +417,7 @@ impl<'a> CanonicalCallCollector<'a> {
         let name = pi.ident.to_string();
         match resolve_type(pt.ty.as_ref(), &rctx) {
             CanonicalType::Path(segs) => self.install_path_binding(name, segs),
-            CanonicalType::Opaque => {}
+            CanonicalType::Opaque => return false,
             other => self.install_non_path_binding(name, other),
         }
         true

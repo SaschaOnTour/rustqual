@@ -30,6 +30,7 @@ pub(super) fn collect_from_file(
         index,
         ctx,
         impl_stack: Vec::new(),
+        mod_stack: Vec::new(),
     };
     collector.visit_file(ast);
 }
@@ -41,6 +42,10 @@ struct MethodCollector<'i, 'c> {
     /// unresolved (trait object, tuple receiver) — methods under those
     /// impls aren't indexed because the receiver type can't be named.
     impl_stack: Vec<Option<Vec<String>>>,
+    /// Stack of enclosing inline `mod inner { ... }` block names so
+    /// methods declared inside them key as
+    /// `crate::<file>::inner::Type::method`.
+    mod_stack: Vec<String>,
 }
 
 impl<'ast, 'i, 'c> Visit<'ast> for MethodCollector<'i, 'c> {
@@ -64,14 +69,22 @@ impl<'ast, 'i, 'c> Visit<'ast> for MethodCollector<'i, 'c> {
         if has_cfg_test(&node.attrs) {
             return;
         }
-        record_method(self.index, self.ctx, &self.impl_stack, node);
+        record_method(
+            self.index,
+            self.ctx,
+            &self.impl_stack,
+            &self.mod_stack,
+            node,
+        );
     }
 
     fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
         if has_cfg_test(&node.attrs) {
             return;
         }
+        self.mod_stack.push(node.ident.to_string());
         syn::visit::visit_item_mod(self, node);
+        self.mod_stack.pop();
     }
 }
 
@@ -83,10 +96,11 @@ fn record_method(
     index: &mut WorkspaceTypeIndex,
     ctx: &BuildContext<'_>,
     impl_stack: &[Option<Vec<String>>],
+    mod_stack: &[String],
     node: &syn::ImplItemFn,
 ) {
     let resolve = |ty: &syn::Type| resolve_type(ty, &resolve_ctx_from_build(ctx));
-    let canon = |segs: &[String]| canonical_type_key(segs, ctx);
+    let canon = |segs: &[String]| canonical_type_key(segs, ctx, mod_stack);
     let Some(Some(impl_segs)) = impl_stack.last() else {
         return;
     };

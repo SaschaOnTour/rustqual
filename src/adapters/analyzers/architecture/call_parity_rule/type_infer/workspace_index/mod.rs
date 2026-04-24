@@ -39,16 +39,23 @@ pub(super) struct BuildContext<'a> {
 }
 
 /// Build a canonical type-path key by prefixing the impl/trait segments
-/// with `crate::<file-module>::` unless they're already crate-rooted.
-/// Shared by `methods` and `traits` collectors so they produce keys in
-/// the same shape the call-graph (`canonical_fn_name`) uses.
+/// with `crate::<file-module>::<inline-mods>::` unless they're already
+/// crate-rooted. `mod_stack` carries the names of enclosing inline
+/// `mod inner { ... }` blocks so items declared inside them key as
+/// `crate::<file>::inner::X`, matching the path a call-site like
+/// `inner::X` canonicalises to.
 /// Operation.
-pub(super) fn canonical_type_key(segs: &[String], ctx: &BuildContext<'_>) -> String {
+pub(super) fn canonical_type_key(
+    segs: &[String],
+    ctx: &BuildContext<'_>,
+    mod_stack: &[String],
+) -> String {
     if segs.first().map(String::as_str) == Some("crate") {
         return segs.join("::");
     }
     let mut out: Vec<String> = vec!["crate".to_string()];
     out.extend(file_to_module_segments(ctx.path));
+    out.extend(mod_stack.iter().cloned());
     out.extend(segs.iter().cloned());
     out.join("::")
 }

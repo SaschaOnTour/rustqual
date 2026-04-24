@@ -125,7 +125,8 @@ fn compile_call_parity(
     let transparent_wrappers: HashSet<String> = cp
         .transparent_wrappers
         .iter()
-        .map(|w| last_path_segment(w).to_string())
+        .map(|w| last_path_segment(w.trim()).to_string())
+        .filter(|s| !s.is_empty())
         .collect();
     let transparent_macros = build_transparent_macros(&cp.transparent_macros);
     Ok(Some(CompiledCallParity {

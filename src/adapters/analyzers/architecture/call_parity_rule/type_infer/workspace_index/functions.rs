@@ -19,13 +19,18 @@ pub(super) fn collect_from_file(
     ctx: &BuildContext<'_>,
     ast: &syn::File,
 ) {
-    let mut collector = FnCollector { index, ctx };
+    let mut collector = FnCollector {
+        index,
+        ctx,
+        mod_stack: Vec::new(),
+    };
     collector.visit_file(ast);
 }
 
 struct FnCollector<'i, 'c> {
     index: &'i mut WorkspaceTypeIndex,
     ctx: &'c BuildContext<'c>,
+    mod_stack: Vec<String>,
 }
 
 impl<'ast, 'i, 'c> Visit<'ast> for FnCollector<'i, 'c> {
@@ -33,14 +38,16 @@ impl<'ast, 'i, 'c> Visit<'ast> for FnCollector<'i, 'c> {
         if has_cfg_test(&node.attrs) {
             return;
         }
-        record_fn(self.index, self.ctx, node);
+        record_fn(self.index, self.ctx, &self.mod_stack, node);
     }
 
     fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
         if has_cfg_test(&node.attrs) {
             return;
         }
+        self.mod_stack.push(node.ident.to_string());
         syn::visit::visit_item_mod(self, node);
+        self.mod_stack.pop();
     }
 
     fn visit_item_impl(&mut self, _: &'ast syn::ItemImpl) {
@@ -51,7 +58,12 @@ impl<'ast, 'i, 'c> Visit<'ast> for FnCollector<'i, 'c> {
 /// Record one free fn's return type. `async fn foo() -> T` is treated
 /// as returning `Future<Output = T>` to match rustc's desugaring so
 /// downstream `.await` unwraps correctly. Operation.
-fn record_fn(index: &mut WorkspaceTypeIndex, ctx: &BuildContext<'_>, node: &syn::ItemFn) {
+fn record_fn(
+    index: &mut WorkspaceTypeIndex,
+    ctx: &BuildContext<'_>,
+    mod_stack: &[String],
+    node: &syn::ItemFn,
+) {
     let resolve = |ty: &syn::Type| resolve_type(ty, &resolve_ctx_from_build(ctx));
     let syn::ReturnType::Type(_, ret_ty) = &node.sig.output else {
         return;
@@ -65,14 +77,16 @@ fn record_fn(index: &mut WorkspaceTypeIndex, ctx: &BuildContext<'_>, node: &syn:
     } else {
         inner
     };
-    let canonical = canonical_fn_name(&node.sig.ident.to_string(), ctx);
+    let canonical = canonical_fn_name(&node.sig.ident.to_string(), ctx, mod_stack);
     index.fn_returns.insert(canonical, ret);
 }
 
-/// Build `crate::<file-module>::<fn_ident>`. Operation: string construction.
-fn canonical_fn_name(fn_ident: &str, ctx: &BuildContext<'_>) -> String {
+/// Build `crate::<file-module>::<inline-mods>::<fn_ident>`. Operation:
+/// string construction.
+fn canonical_fn_name(fn_ident: &str, ctx: &BuildContext<'_>, mod_stack: &[String]) -> String {
     let mut segs: Vec<String> = vec!["crate".to_string()];
     segs.extend(file_to_module_segments(ctx.path));
+    segs.extend(mod_stack.iter().cloned());
     segs.push(fn_ident.to_string());
     segs.join("::")
 }

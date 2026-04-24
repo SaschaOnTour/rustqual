@@ -94,11 +94,13 @@ fn dispatch_type(ty: &syn::Type, ctx: &ResolveContext<'_>, next: u8) -> Canonica
     }
 }
 
-/// Extract the first non-marker trait bound from a `dyn T1 + T2` or
-/// `impl T1 + T2` bound list and canonicalise it to `TraitBound(path)`.
-/// Marker traits (`Send`, `Sync`, `Unpin`, `Copy`, `Clone`, etc.) and
-/// lifetime bounds are skipped. Yields `Opaque` if no resolvable trait
-/// bound exists. Operation.
+/// Extract the first resolvable non-marker trait bound from a
+/// `dyn T1 + T2` or `impl T1 + T2` list and canonicalise it to
+/// `TraitBound(path)`. Marker traits (`Send`, `Sync`, `Unpin`, `Copy`,
+/// `Clone`, etc.) and lifetime bounds are skipped, as are bounds that
+/// can't be canonicalised (external crates not in the workspace) — so
+/// `dyn ExternalTrait + LocalTrait` still dispatches via `LocalTrait`.
+/// Yields `Opaque` if no resolvable trait bound exists. Operation.
 fn resolve_bound_list(
     bounds: &syn::punctuated::Punctuated<syn::TypeParamBound, syn::Token![+]>,
     ctx: &ResolveContext<'_>,
@@ -116,15 +118,14 @@ fn resolve_bound_list(
             .iter()
             .map(|s| s.ident.to_string())
             .collect();
-        match canonicalise_type_segments(
+        if let Some(resolved) = canonicalise_type_segments(
             &segs,
             ctx.alias_map,
             ctx.local_symbols,
             ctx.crate_root_modules,
             ctx.importing_file,
         ) {
-            Some(resolved) => return CanonicalType::TraitBound(resolved),
-            None => return CanonicalType::Opaque,
+            return CanonicalType::TraitBound(resolved);
         }
     }
     CanonicalType::Opaque
@@ -170,7 +171,14 @@ fn resolve_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -> Canoni
         "Future" => wrap_future(),
         "Vec" => wrap(0, CanonicalType::Slice),
         "HashMap" | "BTreeMap" => wrap(1, CanonicalType::Map),
-        "Arc" | "Box" | "Rc" | "Cow" | "RwLock" | "Mutex" | "RefCell" | "Cell" => peel(),
+        // Only peel smart pointers whose `Deref` makes inner methods
+        // reachable directly on the wrapper. `RwLock` / `Mutex` /
+        // `RefCell` / `Cell` intentionally do NOT deref to their inner
+        // value — `db.read()` is `RwLock::read`, not `Inner::read` —
+        // so peeling them would synthesize bogus edges to the inner
+        // type. Users can opt back in via `transparent_wrappers` for
+        // domain-specific deref-like wrappers.
+        "Arc" | "Box" | "Rc" | "Cow" => peel(),
         _ if is_user_transparent(&name, ctx) => peel(),
         _ => fallback(),
     }

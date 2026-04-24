@@ -102,17 +102,32 @@ fn test_arc_is_stripped() {
 }
 
 #[test]
-fn test_nested_wrappers_strip_to_inner() {
+fn test_nested_smart_pointers_strip_to_inner() {
     let alias_map = HashMap::new();
     let mut local = HashSet::new();
     local.insert("Session".to_string());
     let roots = HashSet::new();
-    let ty = parse_type("Arc<RwLock<Session>>");
+    // Only smart-pointer wrappers (`Arc` / `Box` / `Rc` / `Cow`) are
+    // Deref-transparent, so nesting them still reaches the inner type.
+    let ty = parse_type("Arc<Box<Session>>");
     let resolved = resolve_type(&ty, &ctx(&alias_map, &local, &roots, "src/app/session.rs"));
     assert_eq!(
         resolved,
         CanonicalType::path(["crate", "app", "session", "Session"])
     );
+}
+
+#[test]
+fn test_rwlock_is_not_peeled() {
+    let alias_map = HashMap::new();
+    let mut local = HashSet::new();
+    local.insert("Session".to_string());
+    let roots = HashSet::new();
+    // `RwLock::read()` returns a guard, not the inner value — peeling
+    // it would synthesize bogus `Session::read` edges. Stays `Opaque`.
+    let ty = parse_type("Arc<RwLock<Session>>");
+    let resolved = resolve_type(&ty, &ctx(&alias_map, &local, &roots, "src/app/session.rs"));
+    assert_eq!(resolved, CanonicalType::Opaque);
 }
 
 #[test]

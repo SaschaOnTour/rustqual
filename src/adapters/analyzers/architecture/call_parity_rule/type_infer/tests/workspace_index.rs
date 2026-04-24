@@ -320,6 +320,64 @@ fn test_generic_return_type_is_opaque_and_not_indexed() {
 }
 
 #[test]
+fn test_fn_inside_inline_mod_keys_include_mod_name() {
+    let fix = fixture(&[(
+        "src/app/mod.rs",
+        r#"
+        pub struct Session;
+        pub mod inner {
+            use super::Session;
+            pub fn make_session() -> Session { Session }
+        }
+        "#,
+    )]);
+    let index = build_workspace_type_index(
+        &borrowed(&fix),
+        &fix.aliases,
+        &HashSet::new(),
+        &crate_roots(&["src/app/mod.rs"]),
+        &HashSet::new(),
+    );
+    // With inline-mod tracking the key is `crate::app::inner::make_session`,
+    // matching how `inner::make_session()` canonicalises at a call site.
+    assert!(
+        index.fn_return("crate::app::inner::make_session").is_some(),
+        "fn_returns = {:?}",
+        index.fn_returns.keys().collect::<Vec<_>>()
+    );
+    // And the pre-fix key is absent — no duplicate shadow-registration.
+    assert!(index.fn_return("crate::app::make_session").is_none());
+}
+
+#[test]
+fn test_struct_field_inside_inline_mod_keys_include_mod_name() {
+    let fix = fixture(&[(
+        "src/app/mod.rs",
+        r#"
+        pub struct Session;
+        pub mod inner {
+            use super::Session;
+            pub struct Ctx { pub session: Session }
+        }
+        "#,
+    )]);
+    let index = build_workspace_type_index(
+        &borrowed(&fix),
+        &fix.aliases,
+        &HashSet::new(),
+        &crate_roots(&["src/app/mod.rs"]),
+        &HashSet::new(),
+    );
+    assert!(
+        index
+            .struct_field("crate::app::inner::Ctx", "session")
+            .is_some(),
+        "struct_fields = {:?}",
+        index.struct_fields.keys().collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn test_fn_with_unit_return_is_not_indexed() {
     let fix = fixture(&[("src/app/foo.rs", "pub fn bump() {}")]);
     let index = build_workspace_type_index(
