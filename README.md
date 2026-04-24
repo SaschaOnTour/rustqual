@@ -915,8 +915,7 @@ Known limits (documented, with clear workarounds):
   `<method>:m`. Workaround: pull the method call out of the closure.
 - **Unannotated generics** `let x = get(); x.m()` where `get<T>() -> T`
   — use turbofish `get::<T>()` or `let x: T = get();`.
-- **`impl Trait`-returned inherent methods** — only trait methods
-  resolve (via trait-dispatch over-approximation).
+- **`impl Trait` inherent methods** — `fn make() -> impl Handler; make().trait_method()` resolves to every workspace impl of `Handler::trait_method` via over-approximation, but an inherent method not declared on `Handler` can't be reached (the concrete type is hidden by design).
 - **Arbitrary proc-macros** not listed in `transparent_macros` —
   `// qual:allow(architecture)` on the enclosing fn is the escape.
 

@@ -166,8 +166,9 @@ fallback markers rather than fabricate edges:
 - `fn get<T>() -> T { … }; let x = get(); x.m()` without annotation
   or turbofish. Use `let x: T = get();` or `get::<T>()`.
 - `fn make() -> impl Trait { … }; make().inherent_method()` —
-  `impl Trait` hides the concrete type by design. Only trait methods
-  are resolvable (via trait-dispatch over-approximation).
+  `impl Trait` hides the concrete type by design. Methods declared on
+  the trait resolve via trait-dispatch over-approximation; inherent
+  methods stay `<method>:name`.
 - Arbitrary proc-macros that alter the call graph without being in
   `transparent_macros` config. User-annotate via
   `// qual:allow(architecture)` on the enclosing fn.

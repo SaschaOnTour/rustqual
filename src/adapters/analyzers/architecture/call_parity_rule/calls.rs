@@ -381,6 +381,40 @@ impl<'a> CanonicalCallCollector<'a> {
         infer_type(expr, &ctx)
     }
 
+    /// `let x: T = …` — route the annotation through the full resolver
+    /// when a workspace index is available so alias expansion + wrapper
+    /// peeling + trait-bound extraction all apply. Returns `true` when
+    /// a binding was installed (or the annotation resolved to `Opaque`
+    /// and should be dropped entirely). Returns `false` when there's no
+    /// annotation or no workspace index, handing off to the legacy
+    /// fast-path. Operation: closure-hidden resolution.
+    fn try_install_annotated_binding(&mut self, local: &syn::Local) -> bool {
+        let Some(wi) = self.workspace_index else {
+            return false;
+        };
+        let syn::Pat::Type(pt) = &local.pat else {
+            return false;
+        };
+        let syn::Pat::Ident(pi) = pt.pat.as_ref() else {
+            return false;
+        };
+        let rctx = ResolveContext {
+            alias_map: self.alias_map,
+            local_symbols: self.local_symbols,
+            crate_root_modules: self.crate_root_modules,
+            importing_file: self.importing_file,
+            type_aliases: Some(&wi.type_aliases),
+            transparent_wrappers: Some(&wi.transparent_wrappers),
+        };
+        let name = pi.ident.to_string();
+        match resolve_type(pt.ty.as_ref(), &rctx) {
+            CanonicalType::Path(segs) => self.install_path_binding(name, segs),
+            CanonicalType::Opaque => {}
+            other => self.install_non_path_binding(name, other),
+        }
+        true
+    }
+
     /// Install a `let x = expr` binding via shallow inference on the
     /// initializer. `Path` results go into the legacy scope, non-Path
     /// results (wrappers, trait bounds) into `non_path_bindings` so
@@ -649,9 +683,17 @@ impl<'a, 'ast> Visit<'ast> for CanonicalCallCollector<'a> {
                 self.visit_expr(else_expr);
             }
         }
-        // Fast-path: direct `let s = T::ctor()` / `let s: T = …` —
-        // the legacy prefix-based extractor resolves without needing a
-        // populated workspace index, so unit-test fixtures work.
+        // `let x: T = …` with a workspace index — route the annotation
+        // through the full resolver so Stage-3 alias expansion + wrapper
+        // peeling + trait-bound extraction apply. Without this, `let r:
+        // AppResult<Session> = …` would cache the raw alias path and
+        // later `r.unwrap().m()` would miss the method-return edge.
+        if self.try_install_annotated_binding(local) {
+            return;
+        }
+        // Fast-path: direct `let s = T::ctor()` — the legacy prefix-based
+        // extractor resolves without needing a populated workspace index,
+        // so unit-test fixtures work.
         if let Some((name, ty_canonical)) = extract_let_binding(
             local,
             self.alias_map,
@@ -659,7 +701,7 @@ impl<'a, 'ast> Visit<'ast> for CanonicalCallCollector<'a> {
             self.crate_root_modules,
             self.importing_file,
         ) {
-            self.current_scope_mut().insert(name, ty_canonical);
+            self.install_path_binding(name, ty_canonical);
             return;
         }
         // Simple-ident inference fallback (handles method chains + wrapper types).

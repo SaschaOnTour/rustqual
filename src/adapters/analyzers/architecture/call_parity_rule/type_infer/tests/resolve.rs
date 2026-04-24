@@ -165,24 +165,64 @@ fn test_slice_type_becomes_slice() {
 }
 
 #[test]
-fn test_trait_object_is_opaque() {
+fn test_trait_object_unresolved_is_opaque() {
     let alias_map = HashMap::new();
     let local = HashSet::new();
     let roots = HashSet::new();
     let ty = parse_type("Box<dyn Handler>");
     let resolved = resolve_type(&ty, &ctx(&alias_map, &local, &roots, "src/foo.rs"));
-    // Box<dyn T> → strip Box → dyn T → Opaque
+    // Box<dyn T> → strip Box → dyn T — when T isn't resolvable (not in
+    // local symbols / alias map / crate roots), stays Opaque.
     assert_eq!(resolved, CanonicalType::Opaque);
 }
 
 #[test]
-fn test_impl_trait_is_opaque() {
+fn test_trait_object_resolves_via_local_symbols() {
+    let alias_map = HashMap::new();
+    let mut local = HashSet::new();
+    local.insert("Handler".to_string());
+    let roots = HashSet::new();
+    let ty = parse_type("Box<dyn Handler>");
+    let resolved = resolve_type(&ty, &ctx(&alias_map, &local, &roots, "src/app/mod.rs"));
+    assert_eq!(
+        resolved,
+        CanonicalType::TraitBound(vec![
+            "crate".to_string(),
+            "app".to_string(),
+            "Handler".to_string(),
+        ])
+    );
+}
+
+#[test]
+fn test_impl_trait_unresolved_is_opaque() {
     let alias_map = HashMap::new();
     let local = HashSet::new();
     let roots = HashSet::new();
+    // `Iterator` isn't in local symbols / alias map — stays Opaque.
     let ty = parse_type("impl Iterator<Item = u8>");
     let resolved = resolve_type(&ty, &ctx(&alias_map, &local, &roots, "src/foo.rs"));
     assert_eq!(resolved, CanonicalType::Opaque);
+}
+
+#[test]
+fn test_impl_trait_resolves_to_trait_bound() {
+    let alias_map = HashMap::new();
+    let mut local = HashSet::new();
+    local.insert("Handler".to_string());
+    let roots = HashSet::new();
+    // `impl Handler` return-type resolves to `TraitBound(Handler)` so
+    // trait-dispatch over-approximation can fire on the method call.
+    let ty = parse_type("impl Handler + Send");
+    let resolved = resolve_type(&ty, &ctx(&alias_map, &local, &roots, "src/app/mod.rs"));
+    assert_eq!(
+        resolved,
+        CanonicalType::TraitBound(vec![
+            "crate".to_string(),
+            "app".to_string(),
+            "Handler".to_string(),
+        ])
+    );
 }
 
 #[test]

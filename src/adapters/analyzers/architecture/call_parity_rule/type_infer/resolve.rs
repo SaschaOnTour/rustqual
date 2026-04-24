@@ -84,18 +84,26 @@ fn dispatch_type(ty: &syn::Type, ctx: &ResolveContext<'_>, next: u8) -> Canonica
         syn::Type::Path(tp) => resolve_path(&tp.path, ctx, next),
         syn::Type::Array(a) => into_slice(recurse(&a.elem)),
         syn::Type::Slice(s) => into_slice(recurse(&s.elem)),
-        syn::Type::TraitObject(tto) => resolve_trait_object(tto, ctx),
-        syn::Type::ImplTrait(_) => CanonicalType::Opaque,
+        syn::Type::TraitObject(tto) => resolve_bound_list(&tto.bounds, ctx),
+        // `impl Trait` return type — the concrete type is hidden by the
+        // compiler, but we can still extract the first non-marker trait
+        // bound and treat the result like `dyn Trait` so trait-dispatch
+        // over-approximation fires on the method call.
+        syn::Type::ImplTrait(iti) => resolve_bound_list(&iti.bounds, ctx),
         _ => CanonicalType::Opaque,
     }
 }
 
-/// `dyn Trait + Send + 'static` → `TraitBound(["crate", "…", "Trait"])`.
+/// Extract the first non-marker trait bound from a `dyn T1 + T2` or
+/// `impl T1 + T2` bound list and canonicalise it to `TraitBound(path)`.
 /// Marker traits (`Send`, `Sync`, `Unpin`, `Copy`, `Clone`, etc.) and
-/// lifetime bounds are skipped; the first non-marker trait wins. Yields
-/// `Opaque` if no resolvable trait bound exists. Operation.
-fn resolve_trait_object(tto: &syn::TypeTraitObject, ctx: &ResolveContext<'_>) -> CanonicalType {
-    for bound in &tto.bounds {
+/// lifetime bounds are skipped. Yields `Opaque` if no resolvable trait
+/// bound exists. Operation.
+fn resolve_bound_list(
+    bounds: &syn::punctuated::Punctuated<syn::TypeParamBound, syn::Token![+]>,
+    ctx: &ResolveContext<'_>,
+) -> CanonicalType {
+    for bound in bounds {
         let syn::TypeParamBound::Trait(trait_bound) = bound else {
             continue;
         };
