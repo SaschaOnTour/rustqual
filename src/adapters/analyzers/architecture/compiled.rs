@@ -139,13 +139,17 @@ fn compile_call_parity(
     }))
 }
 
-/// Return the last `::`-separated segment of a path-like wrapper entry
-/// with any generic-arg suffix stripped, so users can write
-/// `axum::extract::State`, plain `State`, or even `State<T>` and all
-/// match resolver lookups keyed on the type's bare ident. Operation.
+/// Return the bare ident from a path-like wrapper entry: strip any
+/// generic-arg suffix first (so a path-qualified arg like
+/// `axum::extract::State<crate::app::Db>` doesn't break the
+/// segment split on the inner `::`), then take the last
+/// `::`-separated segment. Operation.
 fn last_path_segment(path: &str) -> &str {
-    let after_path = path.rsplit("::").next().unwrap_or(path);
-    after_path.split('<').next().unwrap_or(after_path)
+    let without_generics = path.split('<').next().unwrap_or(path);
+    without_generics
+        .rsplit("::")
+        .next()
+        .unwrap_or(without_generics)
 }
 
 /// Stage 3 starter-pack: prepend these common framework attribute-macro

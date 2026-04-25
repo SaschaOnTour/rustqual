@@ -95,11 +95,21 @@ pub(crate) fn build_workspace_files_map<'a>(
 }
 
 // qual:api
-/// Flat top-level + nested name set. Backward-compatible shape for
-/// callers that don't track mod scope. Operation: project flat view.
+/// Top-level-only name set for callers that don't track mod scope.
+/// Names declared exclusively inside nested inline `mod`s are
+/// reachable through `collect_local_symbols_scoped` only — exposing
+/// them flat would let the legacy resolution path (which falls back
+/// to "treat any hit as top-level" when `local_decl_scopes` is empty)
+/// produce bogus `crate::<file>::Inner` paths for inner-module-only
+/// names. Operation: project the names with at least one top-level
+/// declaration scope.
 pub(crate) fn collect_local_symbols(ast: &syn::File) -> HashSet<String> {
     let scoped = collect_local_symbols_scoped(ast);
-    scoped.flat
+    scoped
+        .by_name
+        .into_iter()
+        .filter_map(|(name, scopes)| scopes.iter().any(|p| p.is_empty()).then_some(name))
+        .collect()
 }
 
 // qual:api

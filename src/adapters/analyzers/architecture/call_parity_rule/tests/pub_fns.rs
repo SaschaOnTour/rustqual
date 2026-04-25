@@ -155,12 +155,14 @@ fn test_collect_pub_fns_collects_pub_impl_methods_for_pub_type() {
 #[test]
 fn test_collect_pub_fns_recognises_impl_across_files() {
     // Regression: `pub struct Session` in one file, `impl Session { pub
-    // fn search() }` in another — the workspace-wide visible-type set
-    // must let the impl methods through, otherwise Check B misses
-    // legitimate target-layer API.
+    // fn search() }` in another — both sides resolve to the same
+    // canonical via the impl-file's `use` statement, so Check B sees
+    // the impl methods as adapter surface. (Without the `use`, the
+    // impl wouldn't compile in real Rust either.)
     let decl_file = parse("pub struct Session;");
     let impl_file = parse(
         r#"
+        use crate::application::session::Session;
         impl Session {
             pub fn search(&self) {}
         }
@@ -370,18 +372,76 @@ fn test_collect_pub_fns_skips_impl_method_on_type_in_private_inline_mod() {
 }
 
 #[test]
+fn test_collect_pub_fns_records_impl_in_private_mod_for_public_type() {
+    // `pub struct Session` at file level, but its `impl` block lives
+    // inside a private inline mod via `super::Session`. Rust treats
+    // `s.diff()` as callable from any caller that can name `Session`,
+    // so the public type's pub inherent methods must be recorded as
+    // adapter surface — even though the impl block itself sits in a
+    // private mod.
+    let file = parse(
+        r#"
+        pub struct Session;
+        mod methods {
+            impl super::Session {
+                pub fn diff(&self) {}
+            }
+        }
+        "#,
+    );
+    let files = vec![("src/application/session.rs", &file)];
+    let by_layer = {
+        let aliases = aliases_from_files(&files);
+        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+    };
+    let app = names_for_layer(&by_layer, "application");
+    assert!(
+        app.contains("diff"),
+        "impl in private mod for public type must be recorded, got {app:?}"
+    );
+}
+
+#[test]
+fn test_collect_pub_fns_records_renamed_reexport_impl_methods() {
+    // `pub use private::Hidden as PublicHidden;` re-exports the
+    // source type under a new name. The impl uses the original
+    // `Hidden`, so visibility must resolve through the re-export
+    // path — short-name matching against `PublicHidden` would miss
+    // the impl. Recording must work via the source-canonical path
+    // that both sides agree on.
+    let file = parse(
+        r#"
+        mod private {
+            pub struct Hidden;
+        }
+        impl private::Hidden {
+            pub fn op(&self) {}
+        }
+        pub use private::Hidden as PublicHidden;
+        "#,
+    );
+    let files = vec![("src/cli/handlers.rs", &file)];
+    let by_layer = {
+        let aliases = aliases_from_files(&files);
+        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+    };
+    let cli = names_for_layer(&by_layer, "cli");
+    assert!(
+        cli.contains("op"),
+        "renamed re-export must still expose impl method, got {cli:?}"
+    );
+}
+
+#[test]
 fn test_collect_pub_fns_records_pub_use_reexport_with_qualified_impl() {
     // `pub use private::Hidden;` with the impl at file level
-    // (qualified `impl private::Hidden { … }`) — the re-export adds
-    // `Hidden` to the workspace-visible-types set, and the impl
-    // itself is OUTSIDE the private mod, so its methods get recorded.
-    //
-    // Limit (not covered): `impl Hidden { … }` *inside* `mod
-    // private { … }` stays out — the enclosing-mod visibility gate
-    // (which prevents short-name collisions with public siblings)
-    // takes precedence. Document at call-site rather than special-
-    // case the resolver. Workaround: lift the impl out of the
-    // private mod or make the mod itself `pub`.
+    // (qualified `impl private::Hidden { … }`) — the re-export
+    // resolves to the source-canonical `crate::file::private::Hidden`
+    // and registers in `visible_canonicals`. The impl resolves to
+    // the same canonical, so the methods record. With canonical-path
+    // matching, impls *inside* `mod private` for the same re-exported
+    // type also record correctly (the mod's own visibility no longer
+    // gates impl methods).
     let file = parse(
         r#"
         mod private {
@@ -407,13 +467,13 @@ fn test_collect_pub_fns_records_pub_use_reexport_with_qualified_impl() {
 
 #[test]
 fn test_collect_pub_fns_skips_impl_methods_under_short_name_collision() {
-    // The visible-types set is keyed by short ident, so two distinct
-    // types named `Session` (one public, one in a private inline mod)
-    // collide. Without enclosing-mod gating on impl methods, the
-    // private one's impl method would still register because the
-    // short name "Session" lives in visible_types via the public
-    // sibling. Gate on enclosing-mod visibility to keep the private
-    // method out.
+    // Two distinct types named `Session` (one public, one in a
+    // private inline mod) must NOT collide. The canonical-path-based
+    // `visible_canonicals` set keys on full paths, so
+    // `crate::cli::handlers::api::Session` and
+    // `crate::cli::handlers::internal::Session` are distinct entries
+    // — only the former is recorded (private mod's recursion is
+    // skipped during the collection pass).
     let file = parse(
         r#"
         pub mod api {

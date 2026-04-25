@@ -258,6 +258,10 @@ fn compile_call_parity_normalises_transparent_wrappers() {
         "axum::extract::Extension".to_string(),
         "Json<T>".to_string(),
         "actix_web::web::Data<DbPool>".to_string(),
+        // Path-qualified generic arg: the `::` lives inside the
+        // generic, so naive last-`::`-split picks `Db>` instead of
+        // `State`. Must strip `<…>` before splitting.
+        "axum::extract::State<crate::app::Db>".to_string(),
     ];
     cfg.call_parity = Some(cp);
     let c = compile_architecture(&cfg).expect("compile");
