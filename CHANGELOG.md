@@ -211,6 +211,16 @@ fallback markers rather than fabricate edges:
   re-export and its impl methods get recorded as adapter surface.
   Workaround: rename to avoid the collision, or
   `qual:allow(architecture)` on the affected impl.
+- `pub type Public = private::Hidden; impl Public { pub fn op() }` —
+  the impl method is indexed under `crate::…::Public::op` (impl
+  self-type via path canonicaliser), but a caller `fn h(x: Public)
+  { x.op() }` resolves `x` via type-alias expansion to
+  `crate::…::private::Hidden` and emits a `Hidden::op` edge.
+  Visibility sees `Public`, but the edges disagree so Check B
+  flags `Public::op` as unreached. Workaround: write `impl
+  private::Hidden { … }` directly so impl-canonical and
+  caller-canonical agree, or `qual:allow(architecture)` on the
+  affected impl.
 - Arbitrary proc-macros that alter the call graph without being in
   `transparent_macros` config. User-annotate via
   `// qual:allow(architecture)` on the enclosing fn.

@@ -58,6 +58,7 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
     aliases_per_file: &HashMap<String, HashMap<String, Vec<String>>>,
     layers: &LayerDefinitions,
     cfg_test_files: &HashSet<String>,
+    transparent_wrappers: &HashSet<String>,
 ) -> HashMap<String, Vec<PubFnInfo<'ast>>> {
     let crate_root_modules = collect_crate_root_modules(files);
     let visible_canonicals = collect_visible_type_canonicals_workspace(
@@ -65,6 +66,7 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
         cfg_test_files,
         aliases_per_file,
         &crate_root_modules,
+        transparent_wrappers,
     );
     let empty_aliases = HashMap::new();
     let mut out: HashMap<String, Vec<PubFnInfo<'ast>>> = HashMap::new();

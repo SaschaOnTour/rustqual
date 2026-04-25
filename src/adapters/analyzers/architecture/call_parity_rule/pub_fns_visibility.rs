@@ -9,6 +9,9 @@
 
 use super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
 use super::local_symbols::{collect_local_symbols_scoped, FileScope, LocalSymbols};
+use super::pub_fns_alias_chain::{
+    chase_alias_chain, collect_alias_chain, resolve_alias_target_canonical,
+};
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
 use crate::adapters::shared::cfg_test::has_cfg_test;
 use crate::adapters::shared::use_tree::gather_alias_map_scoped;
@@ -32,17 +35,64 @@ fn is_self_restricted(path: &syn::Path) -> bool {
     path.leading_colon.is_none() && path.segments.len() == 1 && path.segments[0].ident == "self"
 }
 
+/// Workspace-wide context shared across both passes (alias-chain
+/// pre-pass and visible-canonicals collection). Bundles the user
+/// transparent-wrapper set and the alias-chain map so functions that
+/// need both don't end up with sprawling parameter lists.
+struct WalkCtx<'a> {
+    transparent_wrappers: &'a HashSet<String>,
+    alias_chain: &'a HashMap<String, String>,
+}
+
 // qual:api
 /// Collect every publicly named type's canonical path across the
-/// whole non-test workspace. Integration: per-file delegate to
-/// recursive collector.
+/// whole non-test workspace. Integration: pre-builds the
+/// alias-chain map, then per-file delegates to the recursive
+/// collector.
 pub(super) fn collect_visible_type_canonicals_workspace(
     files: &[(&str, &syn::File)],
     cfg_test_files: &HashSet<String>,
     aliases_per_file: &HashMap<String, HashMap<String, Vec<String>>>,
     crate_root_modules: &HashSet<String>,
+    transparent_wrappers: &HashSet<String>,
 ) -> HashSet<String> {
+    let alias_chain = collect_alias_chain(
+        files,
+        cfg_test_files,
+        aliases_per_file,
+        crate_root_modules,
+        transparent_wrappers,
+    );
+    let ctx = WalkCtx {
+        transparent_wrappers,
+        alias_chain: &alias_chain,
+    };
     let mut out = HashSet::new();
+    for_each_file_scope(
+        files,
+        cfg_test_files,
+        aliases_per_file,
+        crate_root_modules,
+        |file_scope, ast| {
+            collect_in_items(&ast.items, &[], file_scope, &ctx, &mut out);
+        },
+    );
+    out
+}
+
+/// Build a `FileScope` for each non-cfg-test workspace file and call
+/// `body` with it plus the AST. Centralises the per-file construction
+/// boilerplate the visibility pass and (via `pub_fns_alias_chain`)
+/// the alias-chain pre-pass share. Operation.
+fn for_each_file_scope<F>(
+    files: &[(&str, &syn::File)],
+    cfg_test_files: &HashSet<String>,
+    aliases_per_file: &HashMap<String, HashMap<String, Vec<String>>>,
+    crate_root_modules: &HashSet<String>,
+    mut body: F,
+) where
+    F: FnMut(&FileScope<'_>, &syn::File),
+{
     let empty_aliases = HashMap::new();
     for (path, ast) in files {
         if cfg_test_files.contains(*path) {
@@ -59,9 +109,8 @@ pub(super) fn collect_visible_type_canonicals_workspace(
             local_decl_scopes: &by_name,
             crate_root_modules,
         };
-        collect_in_items(&ast.items, &[], &file_scope, &mut out);
+        body(&file_scope, ast);
     }
-    out
 }
 
 /// Walk a slice of items, inserting publicly named types' canonical
@@ -77,10 +126,11 @@ fn collect_in_items(
     items: &[syn::Item],
     mod_stack: &[String],
     file_scope: &FileScope<'_>,
+    ctx: &WalkCtx<'_>,
     out: &mut HashSet<String>,
 ) {
     let recurse = |inner: &[syn::Item], next: &[String], out: &mut HashSet<String>| {
-        collect_in_items(inner, next, file_scope, out);
+        collect_in_items(inner, next, file_scope, ctx, out);
     };
     let add_decl = |ident: &syn::Ident, out: &mut HashSet<String>| {
         out.insert(canonical_for_decl(
@@ -93,7 +143,7 @@ fn collect_in_items(
         walk_use_tree(tree, &mut Vec::new(), file_scope, mod_stack, out);
     };
     let add_alias_target = |ty: &syn::Type, out: &mut HashSet<String>| {
-        register_alias_target(ty, file_scope, mod_stack, out);
+        register_alias_target(ty, file_scope, mod_stack, ctx, out);
     };
     for item in items {
         match item {
@@ -120,35 +170,23 @@ fn collect_in_items(
 
 /// `pub type Public = private::Hidden;` (or `Box<private::Hidden>`,
 /// `Arc<…>`, etc.) — a public alias can expose methods declared on
-/// a hidden source type. Peel any transparent stdlib wrapper
-/// (`Box` / `Arc` / `Rc` / `Cow`), `&` references, and parens to
-/// reach the inner type-path, then resolve through the workspace
-/// canonicaliser and add the result. Mirrors the receiver-type
-/// resolver, so impls keyed on the source type are recognised
-/// regardless of whether the alias is a bare path or a wrapper-
-/// wrapped one. Operation.
+/// a hidden source type. Resolve the alias's immediate target through
+/// the peel-and-canonicalise pipeline, then chase any further chain
+/// entries. Operation.
 fn register_alias_target(
     ty: &syn::Type,
     file_scope: &FileScope<'_>,
     mod_stack: &[String],
+    ctx: &WalkCtx<'_>,
     out: &mut HashSet<String>,
 ) {
-    let Some(p) = peel_to_inner_path(ty) else {
+    let Some(immediate) =
+        resolve_alias_target_canonical(ty, file_scope, mod_stack, ctx.transparent_wrappers)
+    else {
         return;
     };
-    let segs: Vec<String> = p
-        .path
-        .segments
-        .iter()
-        .map(|s| s.ident.to_string())
-        .collect();
-    let scope = CanonScope {
-        file: file_scope,
-        mod_stack,
-    };
-    if let Some(canonical) = canonicalise_type_segments_in_scope(&segs, &scope) {
-        out.insert(canonical.join("::"));
-    }
+    out.insert(immediate.clone());
+    chase_alias_chain(&immediate, ctx.alias_chain, out);
 }
 
 /// Recursively peel transparent wrappers + references to reach the
@@ -156,27 +194,37 @@ fn register_alias_target(
 /// (`RwLock`, `Mutex`, `dyn Trait`, tuples, …) — those don't expose
 /// inner methods through Deref.
 // qual:recursive
-fn peel_to_inner_path(ty: &syn::Type) -> Option<&syn::TypePath> {
+pub(super) fn peel_to_inner_path<'a>(
+    ty: &'a syn::Type,
+    transparent_wrappers: &HashSet<String>,
+) -> Option<&'a syn::TypePath> {
     match ty {
-        syn::Type::Reference(r) => peel_to_inner_path(&r.elem),
-        syn::Type::Paren(p) => peel_to_inner_path(&p.elem),
-        syn::Type::Path(p) => match transparent_wrapper_inner(p) {
-            Some(inner) => peel_to_inner_path(inner),
+        syn::Type::Reference(r) => peel_to_inner_path(&r.elem, transparent_wrappers),
+        syn::Type::Paren(p) => peel_to_inner_path(&p.elem, transparent_wrappers),
+        syn::Type::Path(p) => match transparent_wrapper_inner(p, transparent_wrappers) {
+            Some(inner) => peel_to_inner_path(inner, transparent_wrappers),
             None => Some(p),
         },
         _ => None,
     }
 }
 
-/// If `tp`'s last segment is a Deref-transparent stdlib wrapper
-/// (`Box`/`Arc`/`Rc`/`Cow`), return its first generic type arg so the
+/// If `tp`'s last segment is a Deref-transparent wrapper — either a
+/// stdlib one (`Box`/`Arc`/`Rc`/`Cow`) or a user-configured entry in
+/// `[architecture.call_parity]::transparent_wrappers` (e.g. axum
+/// `State`, actix `Data`) — return its first generic type arg so the
 /// caller can peel further. Returns `None` for non-wrapper paths or
 /// wrappers without a positional type arg. Operation.
-fn transparent_wrapper_inner(tp: &syn::TypePath) -> Option<&syn::Type> {
+fn transparent_wrapper_inner<'a>(
+    tp: &'a syn::TypePath,
+    transparent_wrappers: &HashSet<String>,
+) -> Option<&'a syn::Type> {
     const STDLIB_TRANSPARENT: &[&str] = &["Box", "Arc", "Rc", "Cow"];
     let last = tp.path.segments.last()?;
     let name = last.ident.to_string();
-    if !STDLIB_TRANSPARENT.contains(&name.as_str()) {
+    let is_transparent =
+        STDLIB_TRANSPARENT.contains(&name.as_str()) || transparent_wrappers.contains(&name);
+    if !is_transparent {
         return None;
     }
     let syn::PathArguments::AngleBracketed(ab) = &last.arguments else {

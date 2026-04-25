@@ -70,7 +70,13 @@ pub(super) fn run_check(
     cfg_test: &HashSet<String>,
 ) -> Vec<MatchLocation> {
     let borrowed = borrowed_files(ws);
-    let pub_fns = collect_pub_fns_by_layer(&borrowed, &ws.aliases_per_file, layers, cfg_test);
+    let pub_fns = collect_pub_fns_by_layer(
+        &borrowed,
+        &ws.aliases_per_file,
+        layers,
+        cfg_test,
+        &cp.transparent_wrappers,
+    );
     let graph = build_call_graph(
         &borrowed,
         &ws.aliases_per_file,

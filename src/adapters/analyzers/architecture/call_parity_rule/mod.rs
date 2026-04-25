@@ -19,6 +19,7 @@ pub mod check_a;
 pub mod check_b;
 pub(crate) mod local_symbols;
 pub mod pub_fns;
+mod pub_fns_alias_chain;
 mod pub_fns_visibility;
 pub(crate) mod signature_params;
 pub mod type_infer;
@@ -62,6 +63,7 @@ pub fn collect_findings(
         &aliases_per_file,
         &compiled.layers,
         &cfg_test_files,
+        &cp.transparent_wrappers,
     );
     let graph = workspace_graph::build_call_graph(
         &refs,

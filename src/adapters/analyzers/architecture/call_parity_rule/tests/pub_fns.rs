@@ -67,7 +67,13 @@ fn test_collect_pub_fns_in_layer_free_fn() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(cli.contains("cmd_stats"), "cli = {cli:?}");
@@ -84,7 +90,13 @@ fn test_collect_pub_fns_skips_private_fns() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(cli.contains("cmd_stats"));
@@ -104,7 +116,13 @@ fn test_pub_crate_is_treated_as_public_for_intra_crate_layers() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(cli.contains("cmd_stats"), "pub(crate) must be collected");
@@ -121,7 +139,13 @@ fn test_pub_super_and_pub_in_path_treated_as_public() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(cli.contains("cmd_a"));
@@ -142,7 +166,13 @@ fn test_collect_pub_fns_collects_pub_impl_methods_for_pub_type() {
     let files = vec![("src/application/session.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
     };
     let app = names_for_layer(&by_layer, "application");
     assert!(app.contains("search"), "pub impl method must be collected");
@@ -174,7 +204,13 @@ fn test_collect_pub_fns_recognises_impl_across_files() {
     ];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
     };
     let app = names_for_layer(&by_layer, "application");
     assert!(
@@ -199,7 +235,13 @@ fn test_collect_pub_fns_skips_impl_methods_on_private_type() {
     let files = vec![("src/application/session.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
     };
     let app = names_for_layer(&by_layer, "application");
     assert!(
@@ -220,7 +262,13 @@ fn test_collect_pub_fns_groups_by_layer() {
     ];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
     };
     assert_eq!(
         names_for_layer(&by_layer, "cli"),
@@ -243,7 +291,13 @@ fn test_collect_pub_fns_skips_cfg_test_files() {
     let mut cfg_test = HashSet::new();
     cfg_test.insert("src/cli/handlers.rs".to_string());
     let aliases = aliases_from_files(&files);
-    let by_layer = collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &cfg_test);
+    let by_layer = collect_pub_fns_by_layer(
+        &files,
+        &aliases,
+        &adapter_layers(),
+        &cfg_test,
+        &HashSet::new(),
+    );
     assert!(
         names_for_layer(&by_layer, "cli").is_empty(),
         "cfg-test file must be skipped wholesale"
@@ -262,7 +316,13 @@ fn test_collect_pub_fns_skips_test_attr_fns() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(cli.contains("cmd_stats"));
@@ -277,7 +337,13 @@ fn test_collect_pub_fns_skips_unmatched_files() {
     let files = vec![("src/utils/misc.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
     };
     for layer in ["application", "cli", "mcp"] {
         assert!(
@@ -304,7 +370,13 @@ fn test_collect_pub_fns_skips_pub_fn_inside_private_inline_mod() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
@@ -330,7 +402,13 @@ fn test_collect_pub_fns_treats_pub_self_as_private() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
@@ -362,7 +440,13 @@ fn test_collect_pub_fns_skips_impl_method_on_type_in_private_inline_mod() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
@@ -392,7 +476,13 @@ fn test_collect_pub_fns_records_impl_in_private_mod_for_public_type() {
     let files = vec![("src/application/session.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
     };
     let app = names_for_layer(&by_layer, "application");
     assert!(
@@ -424,12 +514,91 @@ fn test_collect_pub_fns_records_impl_via_nested_pub_use_export_path() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
         cli.contains("op"),
         "impl on nested-mod re-export path must be recorded, got {cli:?}"
+    );
+}
+
+#[test]
+fn test_collect_pub_fns_records_impl_via_chained_type_alias() {
+    // `type Inner = private::Hidden; pub type Public = Inner;` —
+    // the alias chain must be followed to the source type, otherwise
+    // visible_canonicals only contains `Inner` and the impl on
+    // `Hidden` stays out of scope.
+    let file = parse(
+        r#"
+        mod private {
+            pub struct Hidden;
+            impl Hidden {
+                pub fn op(&self) {}
+            }
+        }
+        type Inner = private::Hidden;
+        pub type Public = Inner;
+        "#,
+    );
+    let files = vec![("src/cli/handlers.rs", &file)];
+    let by_layer = {
+        let aliases = aliases_from_files(&files);
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
+    };
+    let cli = names_for_layer(&by_layer, "cli");
+    assert!(
+        cli.contains("op"),
+        "alias chain target's impl method must be recorded, got {cli:?}"
+    );
+}
+
+#[test]
+fn test_collect_pub_fns_records_impl_via_pub_type_alias_through_user_wrapper() {
+    // `pub type Public = State<private::Hidden>;` with a
+    // user-configured transparent wrapper `State`. The visibility
+    // pass must consult the same wrapper set the receiver resolver
+    // uses, otherwise Check B drops the public target.
+    let file = parse(
+        r#"
+        mod private {
+            pub struct Hidden;
+            impl Hidden {
+                pub fn op(&self) {}
+            }
+        }
+        pub type Public = State<private::Hidden>;
+        "#,
+    );
+    let files = vec![("src/cli/handlers.rs", &file)];
+    let mut wrappers = HashSet::new();
+    wrappers.insert("State".to_string());
+    let by_layer = {
+        let aliases = aliases_from_files(&files);
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &wrappers,
+        )
+    };
+    let cli = names_for_layer(&by_layer, "cli");
+    assert!(
+        cli.contains("op"),
+        "user-wrapper alias target's impl method must be recorded, got {cli:?}"
     );
 }
 
@@ -454,7 +623,13 @@ fn test_collect_pub_fns_records_impl_via_pub_type_alias_through_wrapper() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
@@ -484,7 +659,13 @@ fn test_collect_pub_fns_records_impl_via_pub_type_alias() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
@@ -515,7 +696,13 @@ fn test_collect_pub_fns_records_renamed_reexport_impl_methods() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
@@ -548,7 +735,13 @@ fn test_collect_pub_fns_records_pub_use_reexport_with_qualified_impl() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
@@ -585,7 +778,13 @@ fn test_collect_pub_fns_skips_impl_methods_under_short_name_collision() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
