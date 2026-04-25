@@ -139,8 +139,13 @@ fn collect_visible_type_names_workspace(
 /// recursing into non-cfg-test inline mods. Recursion is gated on the
 /// inline mod's own visibility — `mod private { pub struct X; }`
 /// keeps `X` out of the workspace-visible set so its impl methods
-/// don't leak into Check A/B as adapter surface. Operation:
-/// closure-hidden recursion through nested `mod` blocks.
+/// don't leak into Check A/B as adapter surface. `pub use` items
+/// register their leaf names so re-exported types
+/// (`pub use private::Hidden;`) still count as workspace-visible
+/// surface even when the source module is private. Glob re-exports
+/// (`pub use foo::*`) are intentionally skipped — without expanding
+/// the source module we can't statically tell which idents leak.
+/// Operation: closure-hidden recursion through nested `mod` blocks.
 // qual:recursive
 fn collect_visible_type_names_in_items(items: &[syn::Item], out: &mut HashSet<String>) {
     let recurse = |inner: &[syn::Item], out: &mut HashSet<String>| {
@@ -163,6 +168,9 @@ fn collect_visible_type_names_in_items(items: &[syn::Item], out: &mut HashSet<St
             syn::Item::Type(t) if is_visible(&t.vis) => {
                 out.insert(t.ident.to_string());
             }
+            syn::Item::Use(u) if is_visible(&u.vis) => {
+                collect_use_tree_names(&u.tree, out);
+            }
             syn::Item::Mod(m) if is_visible(&m.vis) && !has_cfg_test(&m.attrs) => {
                 if let Some((_, inner)) = m.content.as_ref() {
                     recurse(inner, out);
@@ -170,6 +178,29 @@ fn collect_visible_type_names_in_items(items: &[syn::Item], out: &mut HashSet<St
             }
             _ => {}
         }
+    }
+}
+
+/// Walk a `pub use` tree, inserting each leaf name (or rename) into
+/// `out`. Globs are skipped — `pub use foo::*` doesn't pin a finite
+/// set of names without expanding the source module. Operation:
+/// closure-hidden walk over nested `Group`s.
+// qual:recursive
+fn collect_use_tree_names(tree: &syn::UseTree, out: &mut HashSet<String>) {
+    match tree {
+        syn::UseTree::Path(p) => collect_use_tree_names(&p.tree, out),
+        syn::UseTree::Name(n) => {
+            out.insert(n.ident.to_string());
+        }
+        syn::UseTree::Rename(r) => {
+            out.insert(r.rename.to_string());
+        }
+        syn::UseTree::Group(g) => {
+            for sub in &g.items {
+                collect_use_tree_names(sub, out);
+            }
+        }
+        syn::UseTree::Glob(_) => {}
     }
 }
 
@@ -227,10 +258,23 @@ impl<'ast, 'vis> PubFnCollector<'ast, 'vis> {
 }
 
 /// Visibility modifier counts as "visible for the check" iff it's
-/// anything other than the implicit (no-modifier) case. See D-5 for
-/// the rationale.
+/// `pub`, `pub(crate)`, `pub(super)`, or `pub(in <path>)` for any
+/// non-`self` path. `Inherited` and `pub(self)` / `pub(in self)`
+/// (which Rust treats as equivalent to inherited visibility) both
+/// stay out of scope. See D-5 for the rationale.
 fn is_visible(vis: &Visibility) -> bool {
-    !matches!(vis, Visibility::Inherited)
+    match vis {
+        Visibility::Inherited => false,
+        Visibility::Restricted(r) => !is_self_restricted(&r.path),
+        _ => true,
+    }
+}
+
+/// True when a `pub(in path)` restriction targets `self` — i.e.
+/// `pub(self)` or `pub(in self)`. Both compile to a single-segment
+/// path of `self`. Operation.
+fn is_self_restricted(path: &syn::Path) -> bool {
+    path.leading_colon.is_none() && path.segments.len() == 1 && path.segments[0].ident == "self"
 }
 
 /// True iff the `#[test]` / `#[cfg(test)]` attribute set would make
@@ -283,7 +327,16 @@ impl<'ast, 'vis> Visit<'ast> for PubFnCollector<'ast, 'vis> {
     }
 
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
-        if self.current_impl_visible() && is_visible(&node.vis) && !is_test_fn(&node.attrs) {
+        // Gate on enclosing-mod visibility too: `visible_types` keys on
+        // bare type idents, so a name collision with a public sibling
+        // would otherwise leak `mod private { impl Session { … } }`'s
+        // methods into the surface. The mod-stack flag fixes that
+        // without restructuring `visible_types` to canonical paths.
+        let visible = self.enclosing_mod_visible
+            && self.current_impl_visible()
+            && is_visible(&node.vis)
+            && !is_test_fn(&node.attrs);
+        if visible {
             let line = syn::spanned::Spanned::span(&node.sig.ident).start().line;
             let name = node.sig.ident.to_string();
             self.record_fn(name, line, &node.block, &node.sig);

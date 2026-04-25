@@ -316,6 +316,32 @@ fn test_collect_pub_fns_skips_pub_fn_inside_private_inline_mod() {
 }
 
 #[test]
+fn test_collect_pub_fns_treats_pub_self_as_private() {
+    // `pub(self) fn helper()` is semantically private — equivalent to
+    // inherited visibility. Must not be recorded.
+    let file = parse(
+        r#"
+        pub(self) fn helper() {}
+        pub fn visible() {}
+        "#,
+    );
+    let files = vec![("src/cli/handlers.rs", &file)];
+    let by_layer = {
+        let aliases = aliases_from_files(&files);
+        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+    };
+    let cli = names_for_layer(&by_layer, "cli");
+    assert!(
+        cli.contains("visible"),
+        "plain `pub fn` must be recorded, got {cli:?}"
+    );
+    assert!(
+        !cli.contains("helper"),
+        "`pub(self) fn` is private-equivalent and must be skipped, got {cli:?}"
+    );
+}
+
+#[test]
 fn test_collect_pub_fns_skips_impl_method_on_type_in_private_inline_mod() {
     // `mod private { pub struct Hidden; impl Hidden { pub fn op() {} } }`
     // — `Hidden` is pub but only inside a private mod, so its
@@ -340,5 +366,82 @@ fn test_collect_pub_fns_skips_impl_method_on_type_in_private_inline_mod() {
     assert!(
         !cli.contains("op"),
         "impl method on type in private mod must be skipped, got {cli:?}"
+    );
+}
+
+#[test]
+fn test_collect_pub_fns_records_pub_use_reexport_with_qualified_impl() {
+    // `pub use private::Hidden;` with the impl at file level
+    // (qualified `impl private::Hidden { … }`) — the re-export adds
+    // `Hidden` to the workspace-visible-types set, and the impl
+    // itself is OUTSIDE the private mod, so its methods get recorded.
+    //
+    // Limit (not covered): `impl Hidden { … }` *inside* `mod
+    // private { … }` stays out — the enclosing-mod visibility gate
+    // (which prevents short-name collisions with public siblings)
+    // takes precedence. Document at call-site rather than special-
+    // case the resolver. Workaround: lift the impl out of the
+    // private mod or make the mod itself `pub`.
+    let file = parse(
+        r#"
+        mod private {
+            pub struct Hidden;
+        }
+        impl private::Hidden {
+            pub fn op(&self) {}
+        }
+        pub use private::Hidden;
+        "#,
+    );
+    let files = vec![("src/cli/handlers.rs", &file)];
+    let by_layer = {
+        let aliases = aliases_from_files(&files);
+        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+    };
+    let cli = names_for_layer(&by_layer, "cli");
+    assert!(
+        cli.contains("op"),
+        "re-exported type with file-level impl must be recorded, got {cli:?}"
+    );
+}
+
+#[test]
+fn test_collect_pub_fns_skips_impl_methods_under_short_name_collision() {
+    // The visible-types set is keyed by short ident, so two distinct
+    // types named `Session` (one public, one in a private inline mod)
+    // collide. Without enclosing-mod gating on impl methods, the
+    // private one's impl method would still register because the
+    // short name "Session" lives in visible_types via the public
+    // sibling. Gate on enclosing-mod visibility to keep the private
+    // method out.
+    let file = parse(
+        r#"
+        pub mod api {
+            pub struct Session;
+            impl Session {
+                pub fn run(&self) {}
+            }
+        }
+        mod internal {
+            pub struct Session;
+            impl Session {
+                pub fn cleanup(&self) {}
+            }
+        }
+        "#,
+    );
+    let files = vec![("src/cli/handlers.rs", &file)];
+    let by_layer = {
+        let aliases = aliases_from_files(&files);
+        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+    };
+    let cli = names_for_layer(&by_layer, "cli");
+    assert!(
+        cli.contains("run"),
+        "public-mod impl method must be recorded, got {cli:?}"
+    );
+    assert!(
+        !cli.contains("cleanup"),
+        "private-mod impl method must not leak via short-name collision, got {cli:?}"
     );
 }

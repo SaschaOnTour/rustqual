@@ -140,10 +140,12 @@ fn compile_call_parity(
 }
 
 /// Return the last `::`-separated segment of a path-like wrapper entry
-/// so users can write `axum::extract::State` or just `State` and both
-/// match resolver lookups keyed on the type's last ident. Operation.
+/// with any generic-arg suffix stripped, so users can write
+/// `axum::extract::State`, plain `State`, or even `State<T>` and all
+/// match resolver lookups keyed on the type's bare ident. Operation.
 fn last_path_segment(path: &str) -> &str {
-    path.rsplit("::").next().unwrap_or(path)
+    let after_path = path.rsplit("::").next().unwrap_or(path);
+    after_path.split('<').next().unwrap_or(after_path)
 }
 
 /// Stage 3 starter-pack: prepend these common framework attribute-macro

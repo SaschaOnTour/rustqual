@@ -246,6 +246,35 @@ fn compile_call_parity_rejects_invalid_exclude_glob() {
     );
 }
 
+#[test]
+fn compile_call_parity_normalises_transparent_wrappers() {
+    // Resolver lookups are keyed on the bare type ident, so config
+    // values may include path prefixes (`axum::extract::State`) and
+    // generic suffixes (`State<T>`); both must reduce to `State`.
+    let mut cfg = call_parity_cfg();
+    let mut cp = minimal_call_parity();
+    cp.transparent_wrappers = vec![
+        "  State  ".to_string(),
+        "axum::extract::Extension".to_string(),
+        "Json<T>".to_string(),
+        "actix_web::web::Data<DbPool>".to_string(),
+    ];
+    cfg.call_parity = Some(cp);
+    let c = compile_architecture(&cfg).expect("compile");
+    let wrappers = c.call_parity.unwrap().transparent_wrappers;
+    assert!(wrappers.contains("State"), "wrappers = {wrappers:?}");
+    assert!(wrappers.contains("Extension"), "wrappers = {wrappers:?}");
+    assert!(wrappers.contains("Json"), "wrappers = {wrappers:?}");
+    assert!(wrappers.contains("Data"), "wrappers = {wrappers:?}");
+    // No leftover entries with `<` or whitespace.
+    for w in &wrappers {
+        assert!(
+            !w.contains('<') && w == w.trim(),
+            "wrapper key not normalised: {w:?}"
+        );
+    }
+}
+
 // ── LayerDefinitions::layer_of_crate_path (Task 2) ──────────────
 
 fn layers_for_crate_path() -> LayerDefinitions {

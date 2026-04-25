@@ -274,10 +274,16 @@ pub struct CallParityConfig {
     /// Stage 3 — user-defined transparent wrapper types. These are
     /// peeled during receiver-type resolution just like `Arc`, `Box`,
     /// `Rc`, `Cow`. Typical candidates are framework extractor types:
-    /// Axum's `State<T>` / `Extension<T>` / `Json<T>`, Actix's
-    /// `Data<T>`, tower's `Router<T>`. Without an entry here,
+    /// Axum's `State` / `Extension` / `Json`, Actix's `Data`, tower's
+    /// `Router`. Without an entry here,
     /// `fn h(State(db): State<Db>) { db.query() }` leaves `db`
     /// unresolved.
+    ///
+    /// Entries are matched on the bare type ident — both path prefixes
+    /// (`axum::extract::State`) and generic suffixes (`State<T>`) are
+    /// stripped during compile, so `"State"`, `"axum::extract::State"`,
+    /// and `"State<T>"` all key on `State` at lookup time. Prefer the
+    /// bare-ident form for clarity.
     #[serde(default)]
     pub transparent_wrappers: Vec<String>,
 
