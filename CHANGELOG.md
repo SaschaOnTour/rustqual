@@ -47,6 +47,14 @@ additive and the legacy fast-path stays intact as a safety net.
   ```
   was reported as "not delegating to application" even though it
   obviously did.
+- **`self` receiver resolution inside impl methods.** Signature seeding
+  only iterated typed `FnArg::Typed` params, never the `self` receiver.
+  As a result `self.helper()` and `self.field.method()` fell through to
+  `<method>:…` even when the enclosing impl's canonical type was known
+  via `self_type`. The collector now binds `self` to the impl's
+  canonical segments alongside the typed params, so ordinary
+  method-internal delegation routes through `method_returns` /
+  `struct_fields` like any other receiver.
 
 ### Added
 - **`call_parity_rule::type_infer`** — new module implementing shallow
@@ -174,6 +182,13 @@ fallback markers rather than fabricate edges:
   `impl Trait` hides the concrete type by design. Methods declared on
   the trait resolve via trait-dispatch over-approximation; inherent
   methods stay `<method>:name`.
+- `fn make() -> impl Future<Output = T> + Handler { … }` — multi-bound
+  intersection returns. `CanonicalType` carries one type per receiver,
+  so `resolve_bound_list` keeps the first non-marker bound only;
+  `.await` propagation *or* trait-dispatch fires, never both. Marker
+  traits (`Send` / `Sync` / `Unpin` / `Copy` / `Clone` / `Sized` /
+  `Debug` / `Display`) are filtered first, so the common
+  `impl Future<Output = T> + Send` shape is unaffected.
 - Arbitrary proc-macros that alter the call graph without being in
   `transparent_macros` config. User-annotate via
   `// qual:allow(architecture)` on the enclosing fn.

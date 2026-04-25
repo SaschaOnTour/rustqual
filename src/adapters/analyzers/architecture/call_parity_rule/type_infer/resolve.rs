@@ -130,6 +130,13 @@ fn dispatch_type(ty: &syn::Type, ctx: &ResolveContext<'_>, next: u8) -> Canonica
 /// can't be canonicalised (external crates not in the workspace) — so
 /// `dyn ExternalTrait + LocalTrait` still dispatches via `LocalTrait`.
 /// Yields `Opaque` if no resolvable trait bound exists. Operation.
+///
+/// **Limit:** when multiple non-marker bounds resolve (e.g.
+/// `impl Future<Output = Session> + Handler`), only the first one
+/// shapes the result. `CanonicalType` carries one type per receiver,
+/// so callers see either `Future<Session>` *or* `TraitBound(Handler)`
+/// but not both. Workaround: split the return into two methods, or
+/// suppress the resulting Check A/B finding with `qual:allow`.
 fn resolve_bound_list(
     bounds: &syn::punctuated::Punctuated<syn::TypeParamBound, syn::Token![+]>,
     ctx: &ResolveContext<'_>,

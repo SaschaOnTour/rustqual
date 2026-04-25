@@ -121,6 +121,32 @@ fn sig_params(sig: &syn::Signature) -> Vec<(String, &syn::Type)> {
 /// workspace index. Returns the set of canonical call targets.
 fn run(fx: &RegFixture, index: &WorkspaceTypeIndex, fn_name: &str) -> HashSet<String> {
     let f = find_fn(&fx.file, fn_name);
+    run_with_self(fx, index, &f.sig, &f.block, None)
+}
+
+/// Run an `impl Type { fn name(&self, …) { … } }` body through the
+/// collector with `self_type` set to crate-rooted segments. The
+/// caller passes the canonical path so the test can bind to whichever
+/// module the workspace index models for `Type` (e.g. Session lives
+/// under `crate::app::session::*` in `rlm_index()`).
+fn run_impl_method(
+    fx: &RegFixture,
+    index: &WorkspaceTypeIndex,
+    type_name: &str,
+    fn_name: &str,
+    self_segs: Vec<String>,
+) -> HashSet<String> {
+    let (_, f) = find_impl_method(&fx.file, type_name, fn_name);
+    run_with_self(fx, index, &f.sig, &f.block, Some(self_segs))
+}
+
+fn run_with_self(
+    fx: &RegFixture,
+    index: &WorkspaceTypeIndex,
+    sig: &syn::Signature,
+    body: &syn::Block,
+    self_type: Option<Vec<String>>,
+) -> HashSet<String> {
     let ctx = FnContext {
         file: &FileScope {
             path: "src/cli/handlers.rs",
@@ -131,13 +157,50 @@ fn run(fx: &RegFixture, index: &WorkspaceTypeIndex, fn_name: &str) -> HashSet<St
             crate_root_modules: &fx.crate_roots,
         },
         mod_stack: &[],
-        body: &f.block,
-        signature_params: sig_params(&f.sig),
-        self_type: None,
+        body,
+        signature_params: sig_params(sig),
+        self_type,
         workspace_index: Some(index),
         workspace_files: None,
     };
     collect_canonical_calls(&ctx)
+}
+
+fn find_impl_method<'a>(
+    file: &'a syn::File,
+    type_name: &str,
+    fn_name: &str,
+) -> (Vec<String>, &'a syn::ImplItemFn) {
+    file.items
+        .iter()
+        .filter_map(|item| match item {
+            syn::Item::Impl(i) => Some(i),
+            _ => None,
+        })
+        .find_map(|item_impl| {
+            let segs = impl_self_segments(item_impl)?;
+            if segs.last().map(String::as_str) != Some(type_name) {
+                return None;
+            }
+            item_impl.items.iter().find_map(|it| match it {
+                syn::ImplItem::Fn(f) if f.sig.ident == fn_name => Some((segs.clone(), f)),
+                _ => None,
+            })
+        })
+        .unwrap_or_else(|| panic!("impl {type_name}::{fn_name} not in fixture"))
+}
+
+fn impl_self_segments(item: &syn::ItemImpl) -> Option<Vec<String>> {
+    let syn::Type::Path(p) = item.self_ty.as_ref() else {
+        return None;
+    };
+    Some(
+        p.path
+            .segments
+            .iter()
+            .map(|s| s.ident.to_string())
+            .collect(),
+    )
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -290,6 +353,60 @@ fn rlm_group3_ctx_field_access_via_let() {
     let calls = run(&fx, &rlm_index(), "handle");
     // `&ctx.session` inferred as Session (Reference is transparent).
     assert!(calls.contains("crate::app::session::Session::diff"));
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Positive: self receiver inside impl methods
+// ═══════════════════════════════════════════════════════════════════
+
+#[test]
+fn self_method_call_resolves_via_impl_type() {
+    // `impl Session { fn run(&self) { self.diff() } }` — `self` must
+    // bind to the enclosing impl's canonical type so `self.diff()`
+    // routes through `method_returns[Session::diff]` instead of
+    // collapsing to `<method>:diff`.
+    let fx = parse(
+        r#"
+        impl Session {
+            pub fn run(&self) {
+                self.diff();
+            }
+        }
+        "#,
+    );
+    let self_segs = vec![
+        "crate".to_string(),
+        "app".to_string(),
+        "session".to_string(),
+        "Session".to_string(),
+    ];
+    let calls = run_impl_method(&fx, &rlm_index(), "Session", "run", self_segs);
+    assert!(
+        calls.contains("crate::app::session::Session::diff"),
+        "self.diff() must route through workspace_index, got {calls:?}"
+    );
+}
+
+#[test]
+fn self_field_access_resolves_via_impl_type() {
+    // `self.session.diff()` — Self::session field, then Session::diff.
+    // Needs both the Self → Ctx binding and the field-type lookup
+    // chain to fire.
+    let fx = parse(
+        r#"
+        impl Ctx {
+            pub fn run(&self) {
+                self.session.diff();
+            }
+        }
+        "#,
+    );
+    let self_segs = vec!["crate".to_string(), "app".to_string(), "Ctx".to_string()];
+    let calls = run_impl_method(&fx, &rlm_index(), "Ctx", "run", self_segs);
+    assert!(
+        calls.contains("crate::app::session::Session::diff"),
+        "self.session.diff() must chain through field type, got {calls:?}"
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════

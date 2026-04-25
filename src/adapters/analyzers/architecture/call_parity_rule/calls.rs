@@ -123,6 +123,13 @@ impl<'a> CanonicalCallCollector<'a> {
     }
 
     fn seed_signature_bindings(&mut self) {
+        // `self` is `FnArg::Receiver` and never appears in
+        // `signature_params`. Seed it explicitly so `self.helper()` and
+        // `self.field.method()` route through `method_returns` /
+        // `struct_fields` instead of collapsing to `<method>:…`.
+        if let Some(self_canonical) = self.self_type_canonical.clone() {
+            self.bindings[0].insert("self".to_string(), self_canonical);
+        }
         let params = self.signature_params.clone();
         for (name, ty) in &params {
             // When workspace_index is available, use the full resolver:

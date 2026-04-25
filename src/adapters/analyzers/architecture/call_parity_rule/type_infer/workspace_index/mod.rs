@@ -17,11 +17,7 @@ pub mod traits;
 
 use super::canonical::CanonicalType;
 use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::FileScope;
-use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::{
-    collect_local_symbols_scoped, LocalSymbols,
-};
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
-use crate::adapters::shared::use_tree::ScopedAliasMap;
 use std::collections::{HashMap, HashSet};
 
 /// Per-file resolution context passed to every collector. Owned by the
