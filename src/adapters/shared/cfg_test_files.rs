@@ -122,9 +122,19 @@ impl<'a> ChildPathResolver<'a> {
         // Normalize backslashes to forward slashes on Windows so the
         // candidates match `known_paths` (which always store /). The
         // `normalize_sep` helper is a no-op on Unix builds.
-        let candidate_file = normalize_sep(child_dir.join(format!("{mod_name}.rs")).to_string_lossy().as_ref());
-        let candidate_dir =
-            normalize_sep(child_dir.join(mod_name).join("mod.rs").to_string_lossy().as_ref());
+        let candidate_file = normalize_sep(
+            child_dir
+                .join(format!("{mod_name}.rs"))
+                .to_string_lossy()
+                .as_ref(),
+        );
+        let candidate_dir = normalize_sep(
+            child_dir
+                .join(mod_name)
+                .join("mod.rs")
+                .to_string_lossy()
+                .as_ref(),
+        );
         if self.known_paths.contains(candidate_file.as_str()) {
             Some(candidate_file)
         } else if self.known_paths.contains(candidate_dir.as_str()) {

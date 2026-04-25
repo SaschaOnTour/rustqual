@@ -19,7 +19,8 @@
 
 use super::signature_params::extract_signature_params;
 use super::workspace_graph::{
-    collect_crate_root_modules, collect_local_symbols, impl_self_ty_segments, resolve_impl_self_type,
+    collect_crate_root_modules, collect_local_symbols, impl_self_ty_segments,
+    resolve_impl_self_type,
 };
 use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
 use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
