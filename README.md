@@ -924,6 +924,7 @@ Known limits (documented, with clear workarounds):
 - **Unannotated generics** `let x = get(); x.m()` where `get<T>() -> T`
   — use turbofish `get::<T>()` or `let x: T = get();`.
 - **`impl Trait` inherent methods** — `fn make() -> impl Handler; make().trait_method()` resolves to every workspace impl of `Handler::trait_method` via over-approximation, but an inherent method not declared on `Handler` can't be reached (the concrete type is hidden by design).
+- **Multi-bound `impl Trait` / `dyn Trait` returns** — `fn make() -> impl Future<Output = T> + Handler` keeps only the first non-marker bound, so `.await` propagation *or* trait-dispatch fires, never both. Marker traits (`Send`/`Sync`/`Unpin`/`Copy`/`Clone`/`Sized`/`Debug`/`Display`) are filtered first, so `impl Future<Output = T> + Send` is unaffected. Workaround: split the return into two methods, or `qual:allow(architecture)` on the call-site.
 - **Arbitrary proc-macros** not listed in `transparent_macros` —
   `// qual:allow(architecture)` on the enclosing fn is the escape.
 

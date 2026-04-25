@@ -71,6 +71,17 @@ fn test_result_or_else_preserves_ok_type() {
 }
 
 #[test]
+fn test_result_inspect_variants_preserve_wrapper() {
+    // `.inspect(|t| …)` and `.inspect_err(|e| …)` are observers — they
+    // hand the closure a borrow and return the *same* `Result<T, E>`,
+    // independent of the closure's return type. Stays resolved.
+    let res = CanonicalType::Result(Box::new(t()));
+    let expected = Some(CanonicalType::Result(Box::new(t())));
+    assert_eq!(combinator_return(&res, "inspect"), expected);
+    assert_eq!(combinator_return(&res, "inspect_err"), expected);
+}
+
+#[test]
 fn test_result_map_is_unresolved() {
     // `.map(|x| ...)` depends on the closure — unresolved by design.
     let res = CanonicalType::Result(Box::new(t()));
@@ -123,6 +134,7 @@ fn test_option_preserve_wrapper_methods() {
     let opt = CanonicalType::Option(Box::new(t()));
     for method in [
         "or", "or_else", "filter", "take", "replace", "as_ref", "as_mut", "cloned", "copied",
+        "inspect",
     ] {
         assert_eq!(
             combinator_return(&opt, method),

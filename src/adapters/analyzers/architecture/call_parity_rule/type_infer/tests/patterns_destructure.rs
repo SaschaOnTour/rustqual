@@ -204,6 +204,20 @@ fn test_slice_pattern_skips_rest() {
     assert_eq!(b[0].0, "first");
 }
 
+#[test]
+fn test_slice_pattern_skips_named_rest_binding() {
+    // `rest @ ..` parses as `Pat::Ident { subpat: Some(Pat::Rest) }`.
+    // It must not bind `rest` to the element type — the correct type
+    // would be `Slice(T)`, which is out of Stage 1 scope. Skip
+    // entirely so a downstream `rest.method()` falls through to
+    // `<method>:name` instead of resolving against `T`.
+    let f = TypeInferFixture::new();
+    let vec_type = CanonicalType::Slice(Box::new(CanonicalType::path(["crate", "T"])));
+    let b = bindings(&f, "[first, rest @ ..]", vec_type);
+    assert_eq!(b.len(), 1, "expected only `first`, got {b:?}");
+    assert_eq!(b[0].0, "first");
+}
+
 // ── Pat::Or ──────────────────────────────────────────────────────
 
 #[test]

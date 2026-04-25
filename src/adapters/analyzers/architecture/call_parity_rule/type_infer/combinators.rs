@@ -38,14 +38,19 @@ fn result_combinator(method: &str, inner: &CanonicalType) -> Option<CanonicalTyp
         "unwrap" | "expect" | "unwrap_or" | "unwrap_or_else" | "unwrap_or_default" | "into_ok" => {
             Some(inner.clone())
         }
-        // Transformations that preserve Ok-type
-        "map_err" | "or_else" => Some(CanonicalType::Result(Box::new(inner.clone()))),
+        // Transformations + observers that preserve Result<T, E>.
+        // `inspect` / `inspect_err` hand the closure a borrow and
+        // return self — the closure's body type doesn't change the
+        // wrapper, so they stay resolved.
+        "map_err" | "or_else" | "inspect" | "inspect_err" => {
+            Some(CanonicalType::Result(Box::new(inner.clone())))
+        }
         // Extract the Ok-side as Option<T>
         "ok" => Some(CanonicalType::Option(Box::new(inner.clone()))),
         // Extract the Err-side — E is opaque, so Option<Opaque>.
         "err" => Some(CanonicalType::Option(Box::new(CanonicalType::Opaque))),
-        // Closure-dependent (change T or E via user closure) → unresolved.
-        "map" | "and_then" | "inspect" | "inspect_err" => None,
+        // Closure-dependent (change T via user closure) → unresolved.
+        "map" | "and_then" => None,
         _ => None,
     }
 }
@@ -59,11 +64,13 @@ fn option_combinator(method: &str, inner: &CanonicalType) -> Option<CanonicalTyp
         }
         // Conversions to Result<T, _>
         "ok_or" | "ok_or_else" => Some(CanonicalType::Result(Box::new(inner.clone()))),
-        // Preserve Option<T>
+        // Preserve Option<T>. `inspect` is an observer — closure type
+        // doesn't change the wrapper, so it stays resolved alongside
+        // the structural preservers.
         "or" | "or_else" | "filter" | "take" | "replace" | "as_ref" | "as_mut" | "cloned"
-        | "copied" => Some(CanonicalType::Option(Box::new(inner.clone()))),
+        | "copied" | "inspect" => Some(CanonicalType::Option(Box::new(inner.clone()))),
         // Closure-dependent → unresolved.
-        "map" | "and_then" | "inspect" | "map_or" | "map_or_else" => None,
+        "map" | "and_then" | "map_or" | "map_or_else" => None,
         _ => None,
     }
 }

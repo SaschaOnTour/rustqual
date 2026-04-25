@@ -184,11 +184,28 @@ fn bind_slice(
         _ => CanonicalType::Opaque,
     };
     for elem in &s.elems {
-        if matches!(elem, syn::Pat::Rest(_)) {
+        if is_rest_binding(elem) {
             continue;
         }
         collect(elem, &elem_type, ctx, out);
     }
+}
+
+/// `..` and `rest @ ..` both denote the slice-tail; neither binds an
+/// element. `syn` parses the named form as `Pat::Ident` with a
+/// `subpat` of `Pat::Rest`, which the surrounding walk would
+/// otherwise treat as a regular ident binding to the element type.
+fn is_rest_binding(pat: &syn::Pat) -> bool {
+    if matches!(pat, syn::Pat::Rest(_)) {
+        return true;
+    }
+    let syn::Pat::Ident(pi) = pat else {
+        return false;
+    };
+    let Some((_, sub)) = pi.subpat.as_ref() else {
+        return false;
+    };
+    matches!(sub.as_ref(), syn::Pat::Rest(_))
 }
 
 /// `Pat::Or(a | b | c)` — in valid Rust all branches bind the same

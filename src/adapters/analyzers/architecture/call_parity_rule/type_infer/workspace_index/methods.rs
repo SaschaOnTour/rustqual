@@ -19,6 +19,7 @@ use crate::adapters::analyzers::architecture::call_parity_rule::bindings::CanonS
 use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::resolve_impl_self_type;
 use crate::adapters::shared::cfg_test::has_cfg_test;
 use syn::visit::Visit;
+use syn::visit_mut::VisitMut;
 
 /// Walk `ast` and populate `index.method_returns`. Integration: delegates
 /// to the nested visitor.
@@ -122,20 +123,65 @@ fn record_method(
         .insert((receiver_canonical, method_name), ret);
 }
 
-/// Resolve a method's return type, substituting bare `Self` (and
-/// `Self::Inner` paths) with the enclosing impl's canonical self-type.
-/// Without this, `pub fn open() -> Self` on `impl Session` would index
-/// as `Opaque` because the resolver doesn't know what `Self` refers to.
+/// Resolve a method's return type, substituting bare `Self` with the
+/// enclosing impl's canonical self-type. The walk is recursive so
+/// wrapper return types (`Result<Self, E>`, `Option<Self>`,
+/// `Vec<Self>`) project the inner `Self` correctly — without it the
+/// resolver yields `Result<Opaque>` and downstream chains like
+/// `Session::open().unwrap().diff()` lose their receiver type.
+/// Multi-segment paths (`Self::Output`, `Self::Inner`) keep the raw
+/// segments and resolve as before — associated-type resolution stays
+/// out of scope.
 fn resolve_method_return(
     ret_ty: &syn::Type,
     impl_segs: &[String],
     ctx: &BuildContext<'_>,
     mod_stack: &[String],
 ) -> CanonicalType {
-    if let syn::Type::Path(p) = ret_ty {
-        if p.qself.is_none() && p.path.segments.len() == 1 && p.path.segments[0].ident == "Self" {
-            return CanonicalType::Path(impl_segs.to_vec());
+    let substituted = substitute_bare_self(ret_ty, impl_segs);
+    resolve_type(&substituted, &resolve_ctx_from_build(ctx, mod_stack))
+}
+
+/// Clone `ret_ty` and rewrite every bare `Self` ident path to the
+/// impl's canonical segments. Operation: clone + visit-mut walk.
+fn substitute_bare_self(ret_ty: &syn::Type, impl_segs: &[String]) -> syn::Type {
+    let mut out = ret_ty.clone();
+    let Ok(replacement) = syn::parse_str::<syn::Path>(&impl_segs.join("::")) else {
+        return out;
+    };
+    SelfPathRewriter { replacement }.visit_type_mut(&mut out);
+    out
+}
+
+/// `VisitMut` adapter that replaces each `Type::Path` whose path is a
+/// single bare `Self` with the impl's canonical path. Multi-segment
+/// `Self::Output` is intentionally left alone.
+struct SelfPathRewriter {
+    replacement: syn::Path,
+}
+
+impl VisitMut for SelfPathRewriter {
+    fn visit_type_mut(&mut self, ty: &mut syn::Type) {
+        if let syn::Type::Path(tp) = ty {
+            if is_bare_self_path(tp) {
+                *ty = syn::Type::Path(syn::TypePath {
+                    qself: None,
+                    path: self.replacement.clone(),
+                });
+                return;
+            }
         }
+        syn::visit_mut::visit_type_mut(self, ty);
     }
-    resolve_type(ret_ty, &resolve_ctx_from_build(ctx, mod_stack))
+}
+
+/// True when `tp` is `Self` with no qself, no further segments, and
+/// no path arguments — the only shape that maps unambiguously to the
+/// enclosing impl's self-type. Operation.
+fn is_bare_self_path(tp: &syn::TypePath) -> bool {
+    if tp.qself.is_some() || tp.path.segments.len() != 1 {
+        return false;
+    }
+    let seg = &tp.path.segments[0];
+    seg.ident == "Self" && matches!(seg.arguments, syn::PathArguments::None)
 }

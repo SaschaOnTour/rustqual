@@ -319,6 +319,54 @@ fn test_method_returning_result_wraps() {
 }
 
 #[test]
+fn test_method_returning_result_self_substitutes_inner() {
+    // `Session::open() -> Result<Self, Error>` must store
+    // `Result<Session>`, not `Result<Opaque>`. Without nested-Self
+    // substitution, downstream chains like
+    // `Session::open().unwrap().diff()` lose the receiver type at
+    // `.unwrap()` and fall back to `<method>:diff`.
+    let fix = fixture(&[(
+        "src/app/session.rs",
+        r#"
+        pub struct Session;
+        pub struct Error;
+        impl Session {
+            pub fn open() -> Result<Self, Error> { unimplemented!() }
+        }
+        "#,
+    )]);
+    let borrowed_files = borrowed(&fix);
+    let index = {
+        let cfg_test = &HashSet::new();
+        let roots = &crate_roots(&["src/app/session.rs"]);
+        let wraps = &HashSet::new();
+        let workspace_files = build_workspace_files_map(WorkspaceFilesInputs {
+            files: &borrowed_files,
+            cfg_test_files: cfg_test,
+            aliases_per_file: &fix.aliases,
+            aliases_scoped_per_file: &fix.aliases_scoped,
+            local_symbols_per_file: &fix.local_symbols,
+            crate_root_modules: roots,
+        });
+        build_workspace_type_index(&WorkspaceIndexInputs {
+            files: &borrowed_files,
+            workspace_files: &workspace_files,
+            cfg_test_files: cfg_test,
+            transparent_wrappers: wraps,
+        })
+    };
+    let ret = index
+        .method_return("crate::app::session::Session", "open")
+        .expect("method indexed");
+    let session = CanonicalType::path(["crate", "app", "session", "Session"]);
+    assert_eq!(
+        ret,
+        &CanonicalType::Result(Box::new(session)),
+        "Result<Self, _> must store Result<Session>, got {ret:?}"
+    );
+}
+
+#[test]
 fn test_method_with_unit_return_is_not_indexed() {
     let fix = fixture(&[(
         "src/app/foo.rs",
