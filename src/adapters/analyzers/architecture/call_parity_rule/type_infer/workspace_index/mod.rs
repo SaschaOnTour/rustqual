@@ -90,6 +90,7 @@ pub(super) fn resolve_ctx_from_build<'a>(
         type_aliases: ctx.type_aliases,
         transparent_wrappers: Some(ctx.transparent_wrappers),
         workspace_files: Some(ctx.workspace_files),
+        alias_param_subs: None,
     }
 }
 

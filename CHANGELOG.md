@@ -185,7 +185,7 @@ fallback markers rather than fabricate edges:
   findings** (the 5 legitimate asymmetries / dead-code items). Any
   drift in this count is a clear regression signal.
 - **`tests/regressions.rs`** — unit-level tests covering every rlm
-  Gruppe-2 / Gruppe-3 pattern plus Stage-2 trait-dispatch /
+  Group-2 / Group-3 pattern plus Stage-2 trait-dispatch /
   turbofish cases and Stage-3 type-alias / user-wrapper cases.
   Negative tests pin documented limits in place.
 - **~160 new unit tests** across `type_infer/tests/` covering

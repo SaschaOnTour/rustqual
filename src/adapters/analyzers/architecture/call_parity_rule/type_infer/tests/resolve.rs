@@ -22,6 +22,7 @@ fn ctx<'a>(file: &'a FileScope<'a>) -> ResolveContext<'a> {
         type_aliases: None,
         transparent_wrappers: None,
         workspace_files: None,
+        alias_param_subs: None,
     }
 }
 
@@ -457,4 +458,95 @@ fn test_future_wraps_output() {
         }),
     );
     assert!(matches!(resolved, CanonicalType::Future(_)));
+}
+
+/// Per-file scope inputs the cross-module alias test owns. `FileScope`
+/// holds borrows, so the owning storage stays here and `as_scope`
+/// produces a fresh borrow at call sites.
+struct ScopeInputs {
+    path: String,
+    alias_map: HashMap<String, Vec<String>>,
+    aliases_per_scope: ScopedAliasMap,
+    local_symbols: HashSet<String>,
+    local_decl_scopes: HashMap<String, Vec<Vec<String>>>,
+    crate_root_modules: HashSet<String>,
+}
+
+impl ScopeInputs {
+    fn new(path: &str) -> Self {
+        Self {
+            path: path.to_string(),
+            alias_map: HashMap::new(),
+            aliases_per_scope: ScopedAliasMap::new(),
+            local_symbols: HashSet::new(),
+            local_decl_scopes: HashMap::new(),
+            crate_root_modules: HashSet::new(),
+        }
+    }
+
+    fn as_scope(&self) -> FileScope<'_> {
+        FileScope {
+            path: &self.path,
+            alias_map: &self.alias_map,
+            aliases_per_scope: &self.aliases_per_scope,
+            local_symbols: &self.local_symbols,
+            local_decl_scopes: &self.local_decl_scopes,
+            crate_root_modules: &self.crate_root_modules,
+        }
+    }
+}
+
+#[test]
+fn test_alias_generic_arg_resolves_at_use_site() {
+    // `domain::type Wrap<T> = Arc<T>` consumed from `app` as
+    // `Wrap<Session>`: the use-site arg `Session` must canonicalise
+    // against `app`'s symbols, not against `domain`'s decl-site
+    // scope, which doesn't know `Session`.
+    use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::workspace_index::AliasDef;
+
+    let domain = ScopeInputs::new("src/domain.rs");
+    let mut app = ScopeInputs::new("src/app.rs");
+    app.alias_map.insert(
+        "Wrap".to_string(),
+        vec![
+            "crate".to_string(),
+            "domain".to_string(),
+            "Wrap".to_string(),
+        ],
+    );
+    app.local_symbols.insert("Session".to_string());
+
+    let mut workspace_files: HashMap<String, FileScope<'_>> = HashMap::new();
+    workspace_files.insert("src/domain.rs".to_string(), domain.as_scope());
+
+    let alias_target: syn::Type = syn::parse_str("Arc<T>").expect("parse alias target");
+    let mut type_aliases: HashMap<String, AliasDef> = HashMap::new();
+    type_aliases.insert(
+        "crate::domain::Wrap".to_string(),
+        AliasDef {
+            params: vec!["T".to_string()],
+            target: alias_target,
+            decl_file: "src/domain.rs".to_string(),
+            decl_mod_stack: Vec::new(),
+        },
+    );
+
+    let app_scope = app.as_scope();
+    let ty = parse_type("Wrap<Session>");
+    let resolved = resolve_type(
+        &ty,
+        &ResolveContext {
+            file: &app_scope,
+            mod_stack: &[],
+            type_aliases: Some(&type_aliases),
+            transparent_wrappers: None,
+            workspace_files: Some(&workspace_files),
+            alias_param_subs: None,
+        },
+    );
+    assert_eq!(
+        resolved,
+        CanonicalType::path(["crate", "app", "Session"]),
+        "alias generic args must resolve at the use-site, got {resolved:?}"
+    );
 }

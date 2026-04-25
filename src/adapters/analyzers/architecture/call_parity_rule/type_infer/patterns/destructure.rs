@@ -92,6 +92,7 @@ fn bind_annotated(
             type_aliases: Some(&ctx.workspace.type_aliases),
             transparent_wrappers: Some(&ctx.workspace.transparent_wrappers),
             workspace_files: ctx.workspace_files,
+            alias_param_subs: None,
         };
         resolve_type(ty, &rctx)
     };

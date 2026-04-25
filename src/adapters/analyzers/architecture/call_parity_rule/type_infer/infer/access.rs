@@ -63,6 +63,7 @@ pub(super) fn infer_cast(c: &syn::ExprCast, ctx: &InferContext<'_>) -> Option<Ca
         type_aliases: Some(&ctx.workspace.type_aliases),
         transparent_wrappers: Some(&ctx.workspace.transparent_wrappers),
         workspace_files: ctx.workspace_files,
+        alias_param_subs: None,
     };
     let ty = resolve_type(&c.ty, &rctx);
     if ty.is_opaque() {

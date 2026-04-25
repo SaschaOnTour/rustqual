@@ -37,6 +37,7 @@ pub(super) fn turbofish_return_type(
         type_aliases: Some(&ctx.workspace.type_aliases),
         transparent_wrappers: Some(&ctx.workspace.transparent_wrappers),
         workspace_files: ctx.workspace_files,
+        alias_param_subs: None,
     };
     let resolved = resolve_type(first_ty, &rctx);
     if matches!(resolved, CanonicalType::Opaque) {

@@ -9,7 +9,7 @@
 //! instead of producing a spurious edge.
 //!
 //! Coverage targets the rlm classification published in the Task 1.6
-//! brief: Gruppe-2 (method-chain ctors) and Gruppe-3 (cascading struct
+//! brief: Group-2 (method-chain ctors) and Group-3 (cascading struct
 //! field access), plus the fast-path patterns that must stay green.
 
 use crate::adapters::analyzers::architecture::call_parity_rule::calls::{
@@ -141,7 +141,7 @@ fn run(fx: &RegFixture, index: &WorkspaceTypeIndex, fn_name: &str) -> HashSet<St
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Positive: rlm Gruppe-2 patterns (method-chain ctors)
+// Positive: rlm Group-2 patterns (method-chain ctors)
 // ═══════════════════════════════════════════════════════════════════
 
 #[test]
@@ -259,7 +259,7 @@ fn rlm_group2_insert_returns_result_chained() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Positive: rlm Gruppe-3 patterns (struct-field access)
+// Positive: rlm Group-3 patterns (struct-field access)
 // ═══════════════════════════════════════════════════════════════════
 
 #[test]

@@ -172,6 +172,7 @@ impl<'a> CanonicalCallCollector<'a> {
             type_aliases: self.workspace_index.map(|w| &w.type_aliases),
             transparent_wrappers: self.workspace_index.map(|w| &w.transparent_wrappers),
             workspace_files: self.workspace_files,
+            alias_param_subs: None,
         };
         resolve_type(ty, &rctx)
     }
@@ -457,6 +458,7 @@ impl<'a> CanonicalCallCollector<'a> {
             type_aliases: Some(&wi.type_aliases),
             transparent_wrappers: Some(&wi.transparent_wrappers),
             workspace_files: self.workspace_files,
+            alias_param_subs: None,
         };
         let name = pi.ident.to_string();
         match resolve_type(pt.ty.as_ref(), &rctx) {

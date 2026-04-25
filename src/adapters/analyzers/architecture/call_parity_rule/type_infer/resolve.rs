@@ -20,8 +20,8 @@
 
 use super::super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
 use super::super::local_symbols::FileScope;
-use super::alias_substitution::substitute_alias_args;
 use super::canonical::CanonicalType;
+use super::resolve_alias::{expand_alias, lookup_alias_param};
 use std::collections::{HashMap, HashSet};
 
 /// Resolution inputs. Per-file lookup tables live in `file`; the
@@ -42,6 +42,11 @@ pub(crate) struct ResolveContext<'a> {
     /// `app`'s scope and fail. `None` falls back to using the
     /// use-site's scope (legacy / unit-test path).
     pub workspace_files: Option<&'a HashMap<String, FileScope<'a>>>,
+    /// Active inside an alias body: param-name → canonical type
+    /// pre-resolved in the *use-site* scope. Without this, the body
+    /// resolves naked `T` against the alias's decl-site, which can't
+    /// see the use-site's symbols. `None` outside alias expansion.
+    pub alias_param_subs: Option<&'a HashMap<String, CanonicalType>>,
 }
 
 /// Hard recursion cap for `resolve_type_with_depth`. Guards against
@@ -74,7 +79,11 @@ pub(crate) fn resolve_type(ty: &syn::Type, ctx: &ResolveContext<'_>) -> Canonica
 /// single depth guard — each arm is one-call delegation, own recursion
 /// hidden behind closures for IOSP leniency.
 // qual:recursive
-fn resolve_type_with_depth(ty: &syn::Type, ctx: &ResolveContext<'_>, depth: u8) -> CanonicalType {
+pub(super) fn resolve_type_with_depth(
+    ty: &syn::Type,
+    ctx: &ResolveContext<'_>,
+    depth: u8,
+) -> CanonicalType {
     depth_guarded(depth, |next| dispatch_type(ty, ctx, next))
 }
 
@@ -95,18 +104,21 @@ where
 fn dispatch_type(ty: &syn::Type, ctx: &ResolveContext<'_>, next: u8) -> CanonicalType {
     let recurse = |t: &syn::Type| resolve_type_with_depth(t, ctx, next);
     let into_slice = |inner: CanonicalType| CanonicalType::Slice(Box::new(inner));
+    let path = |tp: &syn::TypePath| {
+        lookup_alias_param(tp, ctx).unwrap_or_else(|| resolve_path(&tp.path, ctx, next))
+    };
     match ty {
         syn::Type::Reference(r) => recurse(&r.elem),
         syn::Type::Paren(p) => recurse(&p.elem),
-        syn::Type::Path(tp) => resolve_path(&tp.path, ctx, next),
+        syn::Type::Path(tp) => path(tp),
         syn::Type::Array(a) => into_slice(recurse(&a.elem)),
         syn::Type::Slice(s) => into_slice(recurse(&s.elem)),
-        syn::Type::TraitObject(tto) => resolve_bound_list(&tto.bounds, ctx),
+        syn::Type::TraitObject(tto) => resolve_bound_list(&tto.bounds, ctx, next),
         // `impl Trait` return type — the concrete type is hidden by the
         // compiler, but we can still extract the first non-marker trait
         // bound and treat the result like `dyn Trait` so trait-dispatch
         // over-approximation fires on the method call.
-        syn::Type::ImplTrait(iti) => resolve_bound_list(&iti.bounds, ctx),
+        syn::Type::ImplTrait(iti) => resolve_bound_list(&iti.bounds, ctx, next),
         _ => CanonicalType::Opaque,
     }
 }
@@ -121,6 +133,7 @@ fn dispatch_type(ty: &syn::Type, ctx: &ResolveContext<'_>, next: u8) -> Canonica
 fn resolve_bound_list(
     bounds: &syn::punctuated::Punctuated<syn::TypeParamBound, syn::Token![+]>,
     ctx: &ResolveContext<'_>,
+    depth: u8,
 ) -> CanonicalType {
     for bound in bounds {
         let syn::TypeParamBound::Trait(trait_bound) = bound else {
@@ -133,7 +146,7 @@ fn resolve_bound_list(
         // the path-form `Future<Output = T>` produces, so `.await` on
         // the result resolves through the combinator table.
         if let Some(args) = future_args(&trait_bound.path) {
-            return wrap_future_output(args, ctx, 0);
+            return wrap_future_output(args, ctx, depth);
         }
         let segs: Vec<String> = trait_bound
             .path
@@ -238,7 +251,7 @@ fn future_output_type(args: &syn::PathArguments) -> Option<&syn::Type> {
     assoc.or_else(|| generic_type_arg(args, 0))
 }
 
-/// check if `name` is a user-configured transparent wrapper.
+/// Check if `name` is a user-configured transparent wrapper.
 /// Operation: set lookup with optional presence.
 fn is_user_transparent(name: &str, ctx: &ResolveContext<'_>) -> bool {
     ctx.transparent_wrappers
@@ -258,8 +271,6 @@ fn wrap_generic<F>(
 where
     F: FnOnce(Box<CanonicalType>) -> CanonicalType,
 {
-    // `depth` already carries the +1 from `dispatch_type`'s guard —
-    // `resolve_type_with_depth` re-applies the guard, so pass through.
     let recurse = |t: &syn::Type| resolve_type_with_depth(t, ctx, depth);
     match generic_type_arg(args, idx) {
         Some(inner) => constructor(Box::new(recurse(inner))),
@@ -283,11 +294,8 @@ fn peel_single_generic(
 }
 
 /// Resolve a non-wrapper path through the shared canonicalisation
-/// pipeline. On an alias hit, substitute use-site generic args into
-/// the alias target and recursively resolve it against the alias's
-/// *own* declaring scope — without that, an imported alias like
-/// `type Repo = Arc<Store>` would try to resolve `Store` in the
-/// use-site's scope, where it isn't necessarily known.
+/// pipeline. On an alias hit, delegate to `resolve_alias::expand_alias`
+/// to handle param substitution + decl-site scope swap.
 fn resolve_generic_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -> CanonicalType {
     let canonicalise =
         |segs: &[String]| canonicalise_type_segments_in_scope(segs, &canon_scope(ctx));
@@ -297,41 +305,14 @@ fn resolve_generic_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -
     };
     let key = resolved.join("::");
     if let Some(alias) = ctx.type_aliases.and_then(|m| m.get(&key)) {
-        let expanded = substitute_alias_args(&alias.target, &alias.params, path);
-        return resolve_in_alias_scope(&expanded, alias, ctx, depth);
+        return expand_alias(alias, path, ctx, depth);
     }
     CanonicalType::Path(resolved)
 }
 
-/// Resolve `target` (an alias body, post-substitution) against the
-/// alias's declaring scope. Falls back to the use-site scope when
-/// `workspace_files` lacks an entry for `decl_file` (legacy / unit-
-/// test paths). Operation: scope swap + recurse.
-fn resolve_in_alias_scope(
-    target: &syn::Type,
-    alias: &super::workspace_index::AliasDef,
-    ctx: &ResolveContext<'_>,
-    depth: u8,
-) -> CanonicalType {
-    let decl_file = ctx
-        .workspace_files
-        .and_then(|files| files.get(&alias.decl_file));
-    let Some(decl_file) = decl_file else {
-        return resolve_type_with_depth(target, ctx, depth);
-    };
-    let decl_ctx = ResolveContext {
-        file: decl_file,
-        mod_stack: &alias.decl_mod_stack,
-        type_aliases: ctx.type_aliases,
-        transparent_wrappers: ctx.transparent_wrappers,
-        workspace_files: ctx.workspace_files,
-    };
-    resolve_type_with_depth(target, &decl_ctx, depth)
-}
-
 /// Extract the type at position `idx` from angle-bracketed generic args.
 /// Lifetimes / const args are skipped; only type args count.
-fn generic_type_arg(args: &syn::PathArguments, idx: usize) -> Option<&syn::Type> {
+pub(super) fn generic_type_arg(args: &syn::PathArguments, idx: usize) -> Option<&syn::Type> {
     let syn::PathArguments::AngleBracketed(ab) = args else {
         return None;
     };

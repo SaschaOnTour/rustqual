@@ -10,12 +10,12 @@
 //!
 //! Design reference: `docs/rustqual-design-receiver-type-inference.md`.
 
-pub(crate) mod alias_substitution;
 pub mod canonical;
 pub mod combinators;
 pub mod infer;
 pub mod patterns;
 pub mod resolve;
+mod resolve_alias;
 pub mod workspace_index;
 
 // qual:api
