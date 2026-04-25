@@ -72,7 +72,7 @@ fn record_struct(
         return;
     };
     for field in &named.named {
-        record_field(index, &canonical, ctx, field);
+        record_field(index, &canonical, ctx, mod_stack, field);
     }
 }
 
@@ -82,9 +82,10 @@ fn record_field(
     index: &mut WorkspaceTypeIndex,
     canonical: &str,
     ctx: &BuildContext<'_>,
+    mod_stack: &[String],
     field: &syn::Field,
 ) {
-    let resolve = |ty: &syn::Type| resolve_type(ty, &resolve_ctx_from_build(ctx));
+    let resolve = |ty: &syn::Type| resolve_type(ty, &resolve_ctx_from_build(ctx, mod_stack));
     let Some(ident) = field.ident.as_ref() else {
         return;
     };

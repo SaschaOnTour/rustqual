@@ -4,8 +4,11 @@
 //! across single- and multi-file workspaces plus the cfg-test skip
 //! behaviour.
 
+use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::{
+    collect_local_symbols_scoped, LocalSymbols,
+};
 use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::{
-    build_workspace_type_index, CanonicalType,
+    build_workspace_type_index, CanonicalType, WorkspaceIndexInputs,
 };
 use crate::adapters::shared::use_tree::gather_alias_map;
 use std::collections::{HashMap, HashSet};
@@ -17,17 +20,24 @@ fn parse_file(src: &str) -> syn::File {
 struct WsFixture {
     parsed: Vec<(String, syn::File)>,
     aliases: HashMap<String, HashMap<String, Vec<String>>>,
+    local_symbols: HashMap<String, LocalSymbols>,
 }
 
 fn fixture(entries: &[(&str, &str)]) -> WsFixture {
     let mut parsed = Vec::new();
     let mut aliases = HashMap::new();
+    let mut local_symbols = HashMap::new();
     for (path, src) in entries {
         let ast = parse_file(src);
         aliases.insert(path.to_string(), gather_alias_map(&ast));
+        local_symbols.insert(path.to_string(), collect_local_symbols_scoped(&ast));
         parsed.push((path.to_string(), ast));
     }
-    WsFixture { parsed, aliases }
+    WsFixture {
+        parsed,
+        aliases,
+        local_symbols,
+    }
 }
 
 fn borrowed(f: &WsFixture) -> Vec<(&str, &syn::File)> {
@@ -55,13 +65,14 @@ fn crate_roots(paths: &[&str]) -> HashSet<String> {
 #[test]
 fn test_empty_workspace_produces_empty_index() {
     let fix = fixture(&[]);
-    let index = build_workspace_type_index(
-        &borrowed(&fix),
-        &fix.aliases,
-        &HashSet::new(),
-        &HashSet::new(),
-        &HashSet::new(),
-    );
+    let index = build_workspace_type_index(&WorkspaceIndexInputs {
+        files: &borrowed(&fix),
+        aliases_per_file: &fix.aliases,
+        local_symbols_per_file: &fix.local_symbols,
+        cfg_test_files: &HashSet::new(),
+        crate_root_modules: &HashSet::new(),
+        transparent_wrappers: &HashSet::new(),
+    });
     assert!(index.struct_fields.is_empty());
     assert!(index.method_returns.is_empty());
     assert!(index.fn_returns.is_empty());
@@ -81,13 +92,14 @@ fn test_struct_with_named_field_is_indexed() {
         pub struct Session { pub id: Id }
         "#,
     )]);
-    let index = build_workspace_type_index(
-        &borrowed(&fix),
-        &fix.aliases,
-        &HashSet::new(),
-        &crate_roots(&["src/app/session.rs"]),
-        &HashSet::new(),
-    );
+    let index = build_workspace_type_index(&WorkspaceIndexInputs {
+        files: &borrowed(&fix),
+        aliases_per_file: &fix.aliases,
+        local_symbols_per_file: &fix.local_symbols,
+        cfg_test_files: &HashSet::new(),
+        crate_root_modules: &crate_roots(&["src/app/session.rs"]),
+        transparent_wrappers: &HashSet::new(),
+    });
     let field = index.struct_field("crate::app::session::Session", "id");
     assert_eq!(
         field,
@@ -104,13 +116,14 @@ fn test_struct_field_with_arc_is_stripped() {
         pub struct Ctx { pub inner: std::sync::Arc<Inner> }
         "#,
     )]);
-    let index = build_workspace_type_index(
-        &borrowed(&fix),
-        &fix.aliases,
-        &HashSet::new(),
-        &crate_roots(&["src/app/context.rs"]),
-        &HashSet::new(),
-    );
+    let index = build_workspace_type_index(&WorkspaceIndexInputs {
+        files: &borrowed(&fix),
+        aliases_per_file: &fix.aliases,
+        local_symbols_per_file: &fix.local_symbols,
+        cfg_test_files: &HashSet::new(),
+        crate_root_modules: &crate_roots(&["src/app/context.rs"]),
+        transparent_wrappers: &HashSet::new(),
+    });
     let field = index.struct_field("crate::app::context::Ctx", "inner");
     assert_eq!(
         field,
@@ -121,13 +134,14 @@ fn test_struct_field_with_arc_is_stripped() {
 #[test]
 fn test_tuple_struct_is_not_indexed() {
     let fix = fixture(&[("src/app/foo.rs", "pub struct Id(pub String);")]);
-    let index = build_workspace_type_index(
-        &borrowed(&fix),
-        &fix.aliases,
-        &HashSet::new(),
-        &crate_roots(&["src/app/foo.rs"]),
-        &HashSet::new(),
-    );
+    let index = build_workspace_type_index(&WorkspaceIndexInputs {
+        files: &borrowed(&fix),
+        aliases_per_file: &fix.aliases,
+        local_symbols_per_file: &fix.local_symbols,
+        cfg_test_files: &HashSet::new(),
+        crate_root_modules: &crate_roots(&["src/app/foo.rs"]),
+        transparent_wrappers: &HashSet::new(),
+    });
     assert!(index.struct_fields.is_empty());
 }
 
@@ -139,13 +153,14 @@ fn test_struct_field_with_opaque_type_is_skipped() {
         pub struct Ctx { pub x: external_crate::Unknown }
         "#,
     )]);
-    let index = build_workspace_type_index(
-        &borrowed(&fix),
-        &fix.aliases,
-        &HashSet::new(),
-        &crate_roots(&["src/app/foo.rs"]),
-        &HashSet::new(),
-    );
+    let index = build_workspace_type_index(&WorkspaceIndexInputs {
+        files: &borrowed(&fix),
+        aliases_per_file: &fix.aliases,
+        local_symbols_per_file: &fix.local_symbols,
+        cfg_test_files: &HashSet::new(),
+        crate_root_modules: &crate_roots(&["src/app/foo.rs"]),
+        transparent_wrappers: &HashSet::new(),
+    });
     assert!(index.struct_fields.is_empty());
 }
 
@@ -163,13 +178,14 @@ fn test_inherent_method_with_concrete_return() {
         }
         "#,
     )]);
-    let index = build_workspace_type_index(
-        &borrowed(&fix),
-        &fix.aliases,
-        &HashSet::new(),
-        &crate_roots(&["src/app/session.rs"]),
-        &HashSet::new(),
-    );
+    let index = build_workspace_type_index(&WorkspaceIndexInputs {
+        files: &borrowed(&fix),
+        aliases_per_file: &fix.aliases,
+        local_symbols_per_file: &fix.local_symbols,
+        cfg_test_files: &HashSet::new(),
+        crate_root_modules: &crate_roots(&["src/app/session.rs"]),
+        transparent_wrappers: &HashSet::new(),
+    });
     let ret = index.method_return("crate::app::session::Session", "diff");
     assert_eq!(
         ret,
@@ -192,13 +208,14 @@ fn test_method_returning_result_wraps() {
         }
         "#,
     )]);
-    let index = build_workspace_type_index(
-        &borrowed(&fix),
-        &fix.aliases,
-        &HashSet::new(),
-        &crate_roots(&["src/app/session.rs"]),
-        &HashSet::new(),
-    );
+    let index = build_workspace_type_index(&WorkspaceIndexInputs {
+        files: &borrowed(&fix),
+        aliases_per_file: &fix.aliases,
+        local_symbols_per_file: &fix.local_symbols,
+        cfg_test_files: &HashSet::new(),
+        crate_root_modules: &crate_roots(&["src/app/session.rs"]),
+        transparent_wrappers: &HashSet::new(),
+    });
     let ret = index
         .method_return("crate::app::session::Session", "diff")
         .expect("method indexed");
@@ -220,13 +237,14 @@ fn test_method_with_unit_return_is_not_indexed() {
         impl S { pub fn bump(&self) {} }
         "#,
     )]);
-    let index = build_workspace_type_index(
-        &borrowed(&fix),
-        &fix.aliases,
-        &HashSet::new(),
-        &crate_roots(&["src/app/foo.rs"]),
-        &HashSet::new(),
-    );
+    let index = build_workspace_type_index(&WorkspaceIndexInputs {
+        files: &borrowed(&fix),
+        aliases_per_file: &fix.aliases,
+        local_symbols_per_file: &fix.local_symbols,
+        cfg_test_files: &HashSet::new(),
+        crate_root_modules: &crate_roots(&["src/app/foo.rs"]),
+        transparent_wrappers: &HashSet::new(),
+    });
     assert!(index.method_returns.is_empty());
 }
 
@@ -239,13 +257,14 @@ fn test_method_with_impl_trait_return_is_not_indexed() {
         impl S { pub fn iter(&self) -> impl Iterator<Item = u8> { std::iter::empty() } }
         "#,
     )]);
-    let index = build_workspace_type_index(
-        &borrowed(&fix),
-        &fix.aliases,
-        &HashSet::new(),
-        &crate_roots(&["src/app/foo.rs"]),
-        &HashSet::new(),
-    );
+    let index = build_workspace_type_index(&WorkspaceIndexInputs {
+        files: &borrowed(&fix),
+        aliases_per_file: &fix.aliases,
+        local_symbols_per_file: &fix.local_symbols,
+        cfg_test_files: &HashSet::new(),
+        crate_root_modules: &crate_roots(&["src/app/foo.rs"]),
+        transparent_wrappers: &HashSet::new(),
+    });
     assert!(index.method_returns.is_empty());
 }
 
@@ -260,13 +279,14 @@ fn test_trait_impl_method_is_indexed_by_receiver_type() {
         impl Convert for S { fn to(&self) -> T { T } }
         "#,
     )]);
-    let index = build_workspace_type_index(
-        &borrowed(&fix),
-        &fix.aliases,
-        &HashSet::new(),
-        &crate_roots(&["src/app/foo.rs"]),
-        &HashSet::new(),
-    );
+    let index = build_workspace_type_index(&WorkspaceIndexInputs {
+        files: &borrowed(&fix),
+        aliases_per_file: &fix.aliases,
+        local_symbols_per_file: &fix.local_symbols,
+        cfg_test_files: &HashSet::new(),
+        crate_root_modules: &crate_roots(&["src/app/foo.rs"]),
+        transparent_wrappers: &HashSet::new(),
+    });
     // Keyed by the concrete receiver type S, NOT by the trait.
     let ret = index.method_return("crate::app::foo::S", "to");
     assert_eq!(
@@ -286,13 +306,14 @@ fn test_free_fn_return_is_indexed() {
         pub fn make_session() -> Session { Session }
         "#,
     )]);
-    let index = build_workspace_type_index(
-        &borrowed(&fix),
-        &fix.aliases,
-        &HashSet::new(),
-        &crate_roots(&["src/app/make.rs"]),
-        &HashSet::new(),
-    );
+    let index = build_workspace_type_index(&WorkspaceIndexInputs {
+        files: &borrowed(&fix),
+        aliases_per_file: &fix.aliases,
+        local_symbols_per_file: &fix.local_symbols,
+        cfg_test_files: &HashSet::new(),
+        crate_root_modules: &crate_roots(&["src/app/make.rs"]),
+        transparent_wrappers: &HashSet::new(),
+    });
     let ret = index.fn_return("crate::app::make::make_session");
     assert_eq!(
         ret,
@@ -308,13 +329,14 @@ fn test_generic_return_type_is_opaque_and_not_indexed() {
         pub fn get<T>() -> T { unimplemented!() }
         "#,
     )]);
-    let index = build_workspace_type_index(
-        &borrowed(&fix),
-        &fix.aliases,
-        &HashSet::new(),
-        &crate_roots(&["src/app/make.rs"]),
-        &HashSet::new(),
-    );
+    let index = build_workspace_type_index(&WorkspaceIndexInputs {
+        files: &borrowed(&fix),
+        aliases_per_file: &fix.aliases,
+        local_symbols_per_file: &fix.local_symbols,
+        cfg_test_files: &HashSet::new(),
+        crate_root_modules: &crate_roots(&["src/app/make.rs"]),
+        transparent_wrappers: &HashSet::new(),
+    });
     // Generic T has no alias/local-symbol entry → Opaque → skipped.
     assert!(index.fn_returns.is_empty());
 }
@@ -331,13 +353,14 @@ fn test_fn_inside_inline_mod_keys_include_mod_name() {
         }
         "#,
     )]);
-    let index = build_workspace_type_index(
-        &borrowed(&fix),
-        &fix.aliases,
-        &HashSet::new(),
-        &crate_roots(&["src/app/mod.rs"]),
-        &HashSet::new(),
-    );
+    let index = build_workspace_type_index(&WorkspaceIndexInputs {
+        files: &borrowed(&fix),
+        aliases_per_file: &fix.aliases,
+        local_symbols_per_file: &fix.local_symbols,
+        cfg_test_files: &HashSet::new(),
+        crate_root_modules: &crate_roots(&["src/app/mod.rs"]),
+        transparent_wrappers: &HashSet::new(),
+    });
     // With inline-mod tracking the key is `crate::app::inner::make_session`,
     // matching how `inner::make_session()` canonicalises at a call site.
     assert!(
@@ -347,6 +370,38 @@ fn test_fn_inside_inline_mod_keys_include_mod_name() {
     );
     // And the pre-fix key is absent — no duplicate shadow-registration.
     assert!(index.fn_return("crate::app::make_session").is_none());
+}
+
+#[test]
+fn test_fn_inside_inline_mod_resolves_inner_return_type() {
+    let fix = fixture(&[(
+        "src/app/mod.rs",
+        r#"
+        pub mod inner {
+            pub struct Session;
+            pub fn make() -> Session { Session }
+        }
+        "#,
+    )]);
+    let index = build_workspace_type_index(&WorkspaceIndexInputs {
+        files: &borrowed(&fix),
+        aliases_per_file: &fix.aliases,
+        local_symbols_per_file: &fix.local_symbols,
+        cfg_test_files: &HashSet::new(),
+        crate_root_modules: &crate_roots(&["src/app/mod.rs"]),
+        transparent_wrappers: &HashSet::new(),
+    });
+    // Pre-fix: `Session` was looked up against the file's top-level
+    // local symbols (which only contained `inner`), so the return type
+    // resolved to `Opaque` and `make` was dropped from the index.
+    // With per-mod-scope resolution `Session` is found at scope `[inner]`
+    // and the return canonical is `crate::app::inner::Session`.
+    assert_eq!(
+        index.fn_return("crate::app::inner::make"),
+        Some(&CanonicalType::path([
+            "crate", "app", "inner", "Session"
+        ]))
+    );
 }
 
 #[test]
@@ -361,13 +416,14 @@ fn test_struct_field_inside_inline_mod_keys_include_mod_name() {
         }
         "#,
     )]);
-    let index = build_workspace_type_index(
-        &borrowed(&fix),
-        &fix.aliases,
-        &HashSet::new(),
-        &crate_roots(&["src/app/mod.rs"]),
-        &HashSet::new(),
-    );
+    let index = build_workspace_type_index(&WorkspaceIndexInputs {
+        files: &borrowed(&fix),
+        aliases_per_file: &fix.aliases,
+        local_symbols_per_file: &fix.local_symbols,
+        cfg_test_files: &HashSet::new(),
+        crate_root_modules: &crate_roots(&["src/app/mod.rs"]),
+        transparent_wrappers: &HashSet::new(),
+    });
     assert!(
         index
             .struct_field("crate::app::inner::Ctx", "session")
@@ -380,13 +436,14 @@ fn test_struct_field_inside_inline_mod_keys_include_mod_name() {
 #[test]
 fn test_fn_with_unit_return_is_not_indexed() {
     let fix = fixture(&[("src/app/foo.rs", "pub fn bump() {}")]);
-    let index = build_workspace_type_index(
-        &borrowed(&fix),
-        &fix.aliases,
-        &HashSet::new(),
-        &crate_roots(&["src/app/foo.rs"]),
-        &HashSet::new(),
-    );
+    let index = build_workspace_type_index(&WorkspaceIndexInputs {
+        files: &borrowed(&fix),
+        aliases_per_file: &fix.aliases,
+        local_symbols_per_file: &fix.local_symbols,
+        cfg_test_files: &HashSet::new(),
+        crate_root_modules: &crate_roots(&["src/app/foo.rs"]),
+        transparent_wrappers: &HashSet::new(),
+    });
     assert!(index.fn_returns.is_empty());
 }
 
@@ -404,13 +461,14 @@ fn test_cfg_test_file_is_skipped() {
     )]);
     let mut cfg_test = HashSet::new();
     cfg_test.insert("src/app/foo.rs".to_string());
-    let index = build_workspace_type_index(
-        &borrowed(&fix),
-        &fix.aliases,
-        &cfg_test,
-        &crate_roots(&["src/app/foo.rs"]),
-        &HashSet::new(),
-    );
+    let index = build_workspace_type_index(&WorkspaceIndexInputs {
+        files: &borrowed(&fix),
+        aliases_per_file: &fix.aliases,
+        local_symbols_per_file: &fix.local_symbols,
+        cfg_test_files: &cfg_test,
+        crate_root_modules: &crate_roots(&["src/app/foo.rs"]),
+        transparent_wrappers: &HashSet::new(),
+    });
     assert!(index.struct_fields.is_empty());
     assert!(index.method_returns.is_empty());
     assert!(index.fn_returns.is_empty());
@@ -431,13 +489,14 @@ fn test_trait_declaration_methods_are_indexed() {
         }
         "#,
     )]);
-    let index = build_workspace_type_index(
-        &borrowed(&fix),
-        &fix.aliases,
-        &HashSet::new(),
-        &crate_roots(&["src/app/ports.rs"]),
-        &HashSet::new(),
-    );
+    let index = build_workspace_type_index(&WorkspaceIndexInputs {
+        files: &borrowed(&fix),
+        aliases_per_file: &fix.aliases,
+        local_symbols_per_file: &fix.local_symbols,
+        cfg_test_files: &HashSet::new(),
+        crate_root_modules: &crate_roots(&["src/app/ports.rs"]),
+        transparent_wrappers: &HashSet::new(),
+    });
     assert!(index.trait_has_method("crate::app::ports::Handler", "handle"));
     assert!(index.trait_has_method("crate::app::ports::Handler", "can_handle"));
     assert!(!index.trait_has_method("crate::app::ports::Handler", "missing"));
@@ -453,13 +512,14 @@ fn test_trait_impl_is_indexed() {
         impl Handler for MyImpl { fn handle(&self) {} }
         "#,
     )]);
-    let index = build_workspace_type_index(
-        &borrowed(&fix),
-        &fix.aliases,
-        &HashSet::new(),
-        &crate_roots(&["src/app/foo.rs"]),
-        &HashSet::new(),
-    );
+    let index = build_workspace_type_index(&WorkspaceIndexInputs {
+        files: &borrowed(&fix),
+        aliases_per_file: &fix.aliases,
+        local_symbols_per_file: &fix.local_symbols,
+        cfg_test_files: &HashSet::new(),
+        crate_root_modules: &crate_roots(&["src/app/foo.rs"]),
+        transparent_wrappers: &HashSet::new(),
+    });
     let impls = index.impls_of_trait("crate::app::foo::Handler");
     assert!(impls.contains(&"crate::app::foo::MyImpl".to_string()));
 }
@@ -478,13 +538,14 @@ fn test_multiple_impls_of_same_trait_all_indexed() {
         impl Handler for C { fn handle(&self) {} }
         "#,
     )]);
-    let index = build_workspace_type_index(
-        &borrowed(&fix),
-        &fix.aliases,
-        &HashSet::new(),
-        &crate_roots(&["src/app/foo.rs"]),
-        &HashSet::new(),
-    );
+    let index = build_workspace_type_index(&WorkspaceIndexInputs {
+        files: &borrowed(&fix),
+        aliases_per_file: &fix.aliases,
+        local_symbols_per_file: &fix.local_symbols,
+        cfg_test_files: &HashSet::new(),
+        crate_root_modules: &crate_roots(&["src/app/foo.rs"]),
+        transparent_wrappers: &HashSet::new(),
+    });
     let impls = index.impls_of_trait("crate::app::foo::Handler");
     assert_eq!(impls.len(), 3);
 }
@@ -498,13 +559,14 @@ fn test_inherent_impl_does_not_populate_trait_impls() {
         impl S { pub fn method(&self) {} }
         "#,
     )]);
-    let index = build_workspace_type_index(
-        &borrowed(&fix),
-        &fix.aliases,
-        &HashSet::new(),
-        &crate_roots(&["src/app/foo.rs"]),
-        &HashSet::new(),
-    );
+    let index = build_workspace_type_index(&WorkspaceIndexInputs {
+        files: &borrowed(&fix),
+        aliases_per_file: &fix.aliases,
+        local_symbols_per_file: &fix.local_symbols,
+        cfg_test_files: &HashSet::new(),
+        crate_root_modules: &crate_roots(&["src/app/foo.rs"]),
+        transparent_wrappers: &HashSet::new(),
+    });
     // Inherent impl has no trait reference, so trait_impls stays empty.
     assert!(index.trait_impls.is_empty());
 }
@@ -525,13 +587,14 @@ fn test_trait_in_one_file_impl_in_another() {
             "#,
         ),
     ]);
-    let index = build_workspace_type_index(
-        &borrowed(&fix),
-        &fix.aliases,
-        &HashSet::new(),
-        &crate_roots(&["src/ports/handler.rs", "src/app/session.rs"]),
-        &HashSet::new(),
-    );
+    let index = build_workspace_type_index(&WorkspaceIndexInputs {
+        files: &borrowed(&fix),
+        aliases_per_file: &fix.aliases,
+        local_symbols_per_file: &fix.local_symbols,
+        cfg_test_files: &HashSet::new(),
+        crate_root_modules: &crate_roots(&["src/ports/handler.rs", "src/app/session.rs"]),
+        transparent_wrappers: &HashSet::new(),
+    });
     // Trait resolved via import alias.
     let impls = index.impls_of_trait("crate::ports::handler::Handler");
     assert!(impls.contains(&"crate::app::session::Session".to_string()));
@@ -557,13 +620,14 @@ fn test_struct_in_one_file_impl_in_another() {
             "#,
         ),
     ]);
-    let index = build_workspace_type_index(
-        &borrowed(&fix),
-        &fix.aliases,
-        &HashSet::new(),
-        &crate_roots(&["src/app/session.rs", "src/app/impls.rs"]),
-        &HashSet::new(),
-    );
+    let index = build_workspace_type_index(&WorkspaceIndexInputs {
+        files: &borrowed(&fix),
+        aliases_per_file: &fix.aliases,
+        local_symbols_per_file: &fix.local_symbols,
+        cfg_test_files: &HashSet::new(),
+        crate_root_modules: &crate_roots(&["src/app/session.rs", "src/app/impls.rs"]),
+        transparent_wrappers: &HashSet::new(),
+    });
     // Struct indexed from its declaration file.
     assert!(index
         .struct_field("crate::app::session::Session", "id")

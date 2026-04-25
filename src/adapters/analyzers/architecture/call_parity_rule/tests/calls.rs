@@ -125,6 +125,8 @@ fn ctx_for_fn<'a>(fctx: &'a FileCtx, fn_name: &str, importing_file: &'a str) -> 
         crate_root_modules: &fctx.crate_root_modules,
         importing_file,
         workspace_index: None,
+        mod_stack: &[],
+        local_decl_scopes: None,
     }
 }
 
@@ -315,6 +317,8 @@ fn test_collect_self_dispatch_in_impl() {
         crate_root_modules: &fctx.crate_root_modules,
         importing_file: "src/application/session.rs",
         workspace_index: None,
+        mod_stack: &[],
+        local_decl_scopes: None,
     };
     let calls = collect_canonical_calls(&ctx);
     assert!(
@@ -770,6 +774,8 @@ fn test_qualified_impl_path_does_not_double_crate() {
         crate_root_modules: &fctx.crate_root_modules,
         importing_file: "src/other_file.rs",
         workspace_index: None,
+        mod_stack: &[],
+        local_decl_scopes: None,
     };
     let calls = collect_canonical_calls(&ctx);
     assert!(
@@ -801,6 +807,8 @@ fn ctx_with_index<'a>(
         crate_root_modules: &fctx.crate_root_modules,
         importing_file,
         workspace_index: Some(index),
+        mod_stack: &[],
+        local_decl_scopes: None,
     }
 }
 

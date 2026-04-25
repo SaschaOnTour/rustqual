@@ -94,16 +94,22 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
     out
 }
 
-/// Collect every visible (non-inherited-visibility) top-level type name
-/// across the whole non-test workspace. Impls on the same type name get
-/// counted as visible regardless of which file the impl lives in — so
-/// `pub struct Session` in `src/app/session.rs` and its `impl Session`
-/// in a companion file both contribute to the check.
+/// Collect every visible (non-inherited-visibility) type name across
+/// the whole non-test workspace. Recurses into non-test inline `mod`
+/// blocks so types declared inside `pub mod inner { pub struct S; }`
+/// are recognised — without that, impls on `S` would be dropped as
+/// "private" by Check B's visibility filter.
+///
+/// Impls on the same type name get counted as visible regardless of
+/// which file the impl lives in — so `pub struct Session` in
+/// `src/app/session.rs` and its `impl Session` in a companion file
+/// both contribute to the check.
 ///
 /// The matching is string-equality on the last segment of the impl's
 /// self-type path. Two distinct types with the same name in different
-/// files both match; that's MVP-level imprecision — false positives
-/// (over-counting) rather than false negatives.
+/// files / mods both match; that's MVP-level imprecision — false
+/// positives (over-counting) rather than false negatives.
+/// Integration: per-file delegate to recursive collector.
 fn collect_visible_type_names_workspace(
     files: &[(&str, &syn::File)],
     cfg_test_files: &HashSet<String>,
@@ -113,28 +119,44 @@ fn collect_visible_type_names_workspace(
         if cfg_test_files.contains(*path) {
             continue;
         }
-        for item in &ast.items {
-            match item {
-                syn::Item::Struct(s) if is_visible(&s.vis) => {
-                    out.insert(s.ident.to_string());
-                }
-                syn::Item::Enum(e) if is_visible(&e.vis) => {
-                    out.insert(e.ident.to_string());
-                }
-                syn::Item::Union(u) if is_visible(&u.vis) => {
-                    out.insert(u.ident.to_string());
-                }
-                syn::Item::Trait(t) if is_visible(&t.vis) => {
-                    out.insert(t.ident.to_string());
-                }
-                syn::Item::Type(t) if is_visible(&t.vis) => {
-                    out.insert(t.ident.to_string());
-                }
-                _ => {}
-            }
-        }
+        collect_visible_type_names_in_items(&ast.items, &mut out);
     }
     out
+}
+
+/// Walk a slice of items, inserting visible type-name idents and
+/// recursing into non-cfg-test inline mods. Operation: closure-hidden
+/// recursion through nested `mod` blocks.
+// qual:recursive
+fn collect_visible_type_names_in_items(items: &[syn::Item], out: &mut HashSet<String>) {
+    let recurse = |inner: &[syn::Item], out: &mut HashSet<String>| {
+        collect_visible_type_names_in_items(inner, out);
+    };
+    for item in items {
+        match item {
+            syn::Item::Struct(s) if is_visible(&s.vis) => {
+                out.insert(s.ident.to_string());
+            }
+            syn::Item::Enum(e) if is_visible(&e.vis) => {
+                out.insert(e.ident.to_string());
+            }
+            syn::Item::Union(u) if is_visible(&u.vis) => {
+                out.insert(u.ident.to_string());
+            }
+            syn::Item::Trait(t) if is_visible(&t.vis) => {
+                out.insert(t.ident.to_string());
+            }
+            syn::Item::Type(t) if is_visible(&t.vis) => {
+                out.insert(t.ident.to_string());
+            }
+            syn::Item::Mod(m) if !has_cfg_test(&m.attrs) => {
+                if let Some((_, inner)) = m.content.as_ref() {
+                    recurse(inner, out);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Workspace-walker — visits items, tracks impl-type visibility

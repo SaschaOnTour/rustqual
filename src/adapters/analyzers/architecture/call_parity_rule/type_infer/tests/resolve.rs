@@ -26,6 +26,8 @@ fn ctx<'a>(
         importing_file,
         type_aliases: None,
         transparent_wrappers: None,
+        local_decl_scopes: None,
+        mod_stack: &[],
     }
 }
 

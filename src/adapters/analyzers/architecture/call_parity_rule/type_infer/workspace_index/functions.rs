@@ -64,7 +64,7 @@ fn record_fn(
     mod_stack: &[String],
     node: &syn::ItemFn,
 ) {
-    let resolve = |ty: &syn::Type| resolve_type(ty, &resolve_ctx_from_build(ctx));
+    let resolve = |ty: &syn::Type| resolve_type(ty, &resolve_ctx_from_build(ctx, mod_stack));
     let syn::ReturnType::Type(_, ret_ty) = &node.sig.output else {
         return;
     };

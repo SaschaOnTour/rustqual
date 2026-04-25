@@ -18,7 +18,7 @@
 //! — both turn `syn::Type`s into `CanonicalType`s with identical
 //! semantics.
 
-use super::super::bindings::canonicalise_type_segments;
+use super::super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
 use super::alias_substitution::substitute_alias_args;
 use super::canonical::CanonicalType;
 use std::collections::{HashMap, HashSet};
@@ -30,24 +30,49 @@ pub(crate) struct ResolveContext<'a> {
     pub local_symbols: &'a HashSet<String>,
     pub crate_root_modules: &'a HashSet<String>,
     pub importing_file: &'a str,
-    /// Stage 3 workspace-wide type aliases. `None` means the caller
+    /// workspace-wide type aliases. `None` means the caller
     /// doesn't need alias expansion (the workspace-index build phase,
     /// where the alias map is still being populated). Inference paths
     /// pass `Some(&workspace.type_aliases)`. The stored tuple carries
     /// the alias's generic-param names plus its target — use-site args
     /// are substituted into the target before recursion.
     pub type_aliases: Option<&'a HashMap<String, (Vec<String>, syn::Type)>>,
-    /// Stage 3 user-defined transparent wrappers — the last-ident
+    /// user-defined transparent wrappers — the last-ident
     /// names (e.g. `"State"`, `"Extension"`, `"Data"`) that are peeled
     /// just like `Arc` / `Box`. `None` means only stdlib wrappers are
     /// peeled.
     pub transparent_wrappers: Option<&'a HashSet<String>>,
+    /// Per-name list of mod-paths-within-file where the name is
+    /// declared. `None` falls back to flat top-level prepend so legacy
+    /// callers behave as before. Inline-mod-aware callers pass
+    /// `Some(&workspace.local_decl_scopes_per_file[file])` (or the
+    /// build-time equivalent).
+    pub local_decl_scopes: Option<&'a HashMap<String, Vec<Vec<String>>>>,
+    /// Mod-path inside `importing_file` of the type / fn being resolved.
+    /// Empty when the caller is at file-top-level or doesn't track mod
+    /// scope. Used together with `local_decl_scopes` to pick the
+    /// closest-enclosing declaration of a single-ident type name.
+    pub mod_stack: &'a [String],
 }
 
 /// Hard recursion cap for `resolve_type_with_depth`. Guards against
 /// pathological types (`type A = Vec<A>`, deeply nested wrappers, hostile
 /// fixtures). Real-world types bottom out well under 16 levels.
 const MAX_RESOLVE_DEPTH: u8 = 32;
+
+/// Build a `CanonScope` view over the resolver's context — DRY helper
+/// shared by `resolve_bound_list` and `resolve_generic_path`. Operation:
+/// pure field projection.
+fn canon_scope<'a>(ctx: &'a ResolveContext<'a>) -> CanonScope<'a> {
+    CanonScope {
+        alias_map: ctx.alias_map,
+        local_symbols: ctx.local_symbols,
+        crate_root_modules: ctx.crate_root_modules,
+        importing_file: ctx.importing_file,
+        local_decl_scopes: ctx.local_decl_scopes,
+        mod_stack: ctx.mod_stack,
+    }
+}
 
 // qual:api
 /// Convert a declared / inferred `syn::Type` into a `CanonicalType`.
@@ -125,13 +150,7 @@ fn resolve_bound_list(
             .iter()
             .map(|s| s.ident.to_string())
             .collect();
-        if let Some(resolved) = canonicalise_type_segments(
-            &segs,
-            ctx.alias_map,
-            ctx.local_symbols,
-            ctx.crate_root_modules,
-            ctx.importing_file,
-        ) {
+        if let Some(resolved) = canonicalise_type_segments_in_scope(&segs, &canon_scope(ctx)) {
             return CanonicalType::TraitBound(resolved);
         }
     }
@@ -220,7 +239,7 @@ fn future_output_type(args: &syn::PathArguments) -> Option<&syn::Type> {
     assoc.or_else(|| generic_type_arg(args, 0))
 }
 
-/// Stage 3 — check if `name` is a user-configured transparent wrapper.
+/// check if `name` is a user-configured transparent wrapper.
 /// Operation: set lookup with optional presence.
 fn is_user_transparent(name: &str, ctx: &ResolveContext<'_>) -> bool {
     ctx.transparent_wrappers
@@ -271,15 +290,8 @@ fn peel_single_generic(
 /// Operation: closure-hidden calls + alias dispatch.
 fn resolve_generic_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -> CanonicalType {
     let recurse = |t: &syn::Type| resolve_type_with_depth(t, ctx, depth);
-    let canonicalise = |segs: &[String]| {
-        canonicalise_type_segments(
-            segs,
-            ctx.alias_map,
-            ctx.local_symbols,
-            ctx.crate_root_modules,
-            ctx.importing_file,
-        )
-    };
+    let canonicalise =
+        |segs: &[String]| canonicalise_type_segments_in_scope(segs, &canon_scope(ctx));
     let segments: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
     let Some(resolved) = canonicalise(&segments) else {
         return CanonicalType::Opaque;

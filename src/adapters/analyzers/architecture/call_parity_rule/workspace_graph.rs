@@ -22,7 +22,7 @@
 use super::bindings::canonicalise_type_segments;
 use super::calls::{collect_canonical_calls, FnContext};
 use super::signature_params::extract_signature_params;
-use super::type_infer::{build_workspace_type_index, WorkspaceTypeIndex};
+use super::type_infer::{build_workspace_type_index, WorkspaceIndexInputs, WorkspaceTypeIndex};
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
 use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
 use crate::adapters::shared::cfg_test::has_cfg_test;
@@ -155,28 +155,9 @@ fn crate_root_module_of(path: &str) -> Option<String> {
     Some(name.to_string())
 }
 
-/// Collect the names of top-level items declared in this file — fns,
-/// mods, types, consts, statics. The call collector uses this set to
-/// resolve unqualified calls like `helper()` (without a `use`
-/// statement) into `crate::<file_module>::helper`, instead of bare-name
-/// dead-ends that disconnect local delegation chains.
-pub(crate) fn collect_local_symbols(ast: &syn::File) -> HashSet<String> {
-    ast.items
-        .iter()
-        .filter_map(|item| match item {
-            syn::Item::Fn(f) => Some(f.sig.ident.to_string()),
-            syn::Item::Mod(m) => Some(m.ident.to_string()),
-            syn::Item::Struct(s) => Some(s.ident.to_string()),
-            syn::Item::Enum(e) => Some(e.ident.to_string()),
-            syn::Item::Union(u) => Some(u.ident.to_string()),
-            syn::Item::Trait(t) => Some(t.ident.to_string()),
-            syn::Item::Type(t) => Some(t.ident.to_string()),
-            syn::Item::Const(c) => Some(c.ident.to_string()),
-            syn::Item::Static(s) => Some(s.ident.to_string()),
-            _ => None,
-        })
-        .collect()
-}
+pub(crate) use super::local_symbols::{
+    collect_local_symbols, collect_local_symbols_scoped, LocalSymbols,
+};
 
 /// Canonicalise an impl block's self-type through the same alias /
 /// local-symbol / crate-root pipeline the call collector uses for type
@@ -274,15 +255,22 @@ pub(crate) fn build_call_graph<'ast>(
     transparent_wrappers: &HashSet<String>,
 ) -> CallGraph {
     let crate_root_modules = collect_crate_root_modules(files);
-    // Pre-build the workspace type index so `collect_canonical_calls`
-    // can run shallow inference on complex method-call receivers.
-    let type_index = build_workspace_type_index(
+    // Pre-compute `LocalSymbols` per file once and reuse across the
+    // type-index passes + the graph collector. Without this, every file
+    // would walk its AST three times just to rebuild the same maps.
+    let local_symbols_per_file: HashMap<String, LocalSymbols> = files
+        .iter()
+        .filter(|(p, _)| !cfg_test_files.contains(*p))
+        .map(|(path, ast)| (path.to_string(), collect_local_symbols_scoped(ast)))
+        .collect();
+    let type_index = build_workspace_type_index(&WorkspaceIndexInputs {
         files,
         aliases_per_file,
+        local_symbols_per_file: &local_symbols_per_file,
         cfg_test_files,
-        &crate_root_modules,
+        crate_root_modules: &crate_root_modules,
         transparent_wrappers,
-    );
+    });
     let mut graph = CallGraph::new();
     for (path, ast) in files {
         if cfg_test_files.contains(*path) {
@@ -291,11 +279,14 @@ pub(crate) fn build_call_graph<'ast>(
         let Some(alias_map) = aliases_per_file.get(*path) else {
             continue;
         };
-        let local_symbols = collect_local_symbols(ast);
+        let Some(local) = local_symbols_per_file.get(*path) else {
+            continue;
+        };
         let mut collector = FileFnCollector {
             path,
             alias_map,
-            local_symbols: &local_symbols,
+            local_symbols: &local.flat,
+            local_decl_scopes: &local.by_name,
             crate_root_modules: &crate_root_modules,
             type_index: &type_index,
             impl_type_stack: Vec::new(),
@@ -327,6 +318,11 @@ struct FileFnCollector<'a> {
     path: &'a str,
     alias_map: &'a HashMap<String, Vec<String>>,
     local_symbols: &'a HashSet<String>,
+    /// Per-name list of mod-paths-within-file where the name is
+    /// declared. Threaded through `FnContext` so the call collector
+    /// resolves `Self::xxx` and unqualified local calls inside inline
+    /// mods to the correct `crate::<file>::<mod>::…` canonical.
+    local_decl_scopes: &'a HashMap<String, Vec<Vec<String>>>,
     crate_root_modules: &'a HashSet<String>,
     type_index: &'a WorkspaceTypeIndex,
     /// `None` marks an unresolved self-type (trait object, `&T`, tuple)
@@ -366,6 +362,8 @@ impl<'a> FileFnCollector<'a> {
             crate_root_modules: self.crate_root_modules,
             importing_file: self.path,
             workspace_index: Some(self.type_index),
+            mod_stack: &self.mod_stack,
+            local_decl_scopes: Some(self.local_decl_scopes),
         };
         let calls = collect_canonical_calls(&ctx);
         self.graph.add_node(&canonical);

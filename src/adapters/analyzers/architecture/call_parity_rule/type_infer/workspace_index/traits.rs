@@ -11,7 +11,9 @@
 //!   over-approximates by recording an edge to every impl's method.
 
 use super::{canonical_type_key, BuildContext, WorkspaceTypeIndex};
-use crate::adapters::analyzers::architecture::call_parity_rule::bindings::canonicalise_type_segments;
+use crate::adapters::analyzers::architecture::call_parity_rule::bindings::{
+    canonicalise_type_segments_in_scope, CanonScope,
+};
 use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::resolve_impl_self_type;
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
 use crate::adapters::shared::cfg_test::has_cfg_test;
@@ -98,7 +100,7 @@ fn record_trait_impl(
     let Some((_, trait_path, _)) = &node.trait_ else {
         return;
     };
-    let trait_canonical = resolve_trait_path(trait_path, ctx);
+    let trait_canonical = resolve_trait_path(trait_path, ctx, mod_stack);
     let Some(trait_canonical) = trait_canonical else {
         return;
     };
@@ -121,16 +123,26 @@ fn record_trait_impl(
 }
 
 /// Resolve a trait path (the `T` in `impl T for X`) to its canonical
-/// crate-rooted form via the shared canonicalisation pipeline.
+/// crate-rooted form via the shared canonicalisation pipeline. Mod
+/// scope is honoured so a single-ident trait declared inside an inline
+/// mod resolves to `crate::<file>::<mod>::Trait`.
 /// Operation: flatten + delegate.
-fn resolve_trait_path(path: &syn::Path, ctx: &BuildContext<'_>) -> Option<String> {
+fn resolve_trait_path(
+    path: &syn::Path,
+    ctx: &BuildContext<'_>,
+    mod_stack: &[String],
+) -> Option<String> {
     let segs: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
-    let resolved = canonicalise_type_segments(
+    let resolved = canonicalise_type_segments_in_scope(
         &segs,
-        ctx.alias_map,
-        ctx.local_symbols,
-        ctx.crate_root_modules,
-        ctx.path,
+        &CanonScope {
+            alias_map: ctx.alias_map,
+            local_symbols: ctx.local_symbols,
+            crate_root_modules: ctx.crate_root_modules,
+            importing_file: ctx.path,
+            local_decl_scopes: Some(ctx.local_decl_scopes),
+            mod_stack,
+        },
     )?;
     Some(resolved.join("::"))
 }

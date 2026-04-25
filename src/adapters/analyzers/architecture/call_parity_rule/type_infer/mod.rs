@@ -1,12 +1,14 @@
 //! Shallow type-inference for call_parity receiver resolution.
 //!
-//! Stage 1 (v1.2.0) provides the workspace type index used by the
-//! inference engine. The engine itself lands in Task 1.3; for now this
-//! module exposes `WorkspaceTypeIndex` + its builder and the
-//! `CanonicalType` vocabulary.
+//! Public surface, in resolution order:
+//! - `canonical::CanonicalType` — the inference vocabulary
+//! - `resolve` — `syn::Type` → `CanonicalType` conversion
+//! - `combinators` — stdlib `Result`/`Option`/`Future` return-type table
+//! - `infer` — shallow inference engine over `syn::Expr`
+//! - `patterns` — pattern-binding extraction for destructuring
+//! - `workspace_index` — per-workspace type/method/field/trait/alias index
 //!
 //! Design reference: `docs/rustqual-design-receiver-type-inference.md`.
-//! Plan: `~/.claude/plans/cached-noodling-frog.md`.
 
 pub(crate) mod alias_substitution;
 pub mod canonical;
@@ -29,7 +31,7 @@ pub use infer::{infer_type, BindingLookup, FlatBindings, InferContext};
 pub use patterns::{extract_bindings, extract_for_bindings};
 
 // qual:api
-pub use workspace_index::{build_workspace_type_index, WorkspaceTypeIndex};
+pub use workspace_index::{build_workspace_type_index, WorkspaceIndexInputs, WorkspaceTypeIndex};
 
 #[cfg(test)]
 mod tests;

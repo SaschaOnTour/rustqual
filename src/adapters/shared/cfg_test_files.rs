@@ -145,12 +145,10 @@ impl<'a> ChildPathResolver<'a> {
     }
 }
 
-/// Extract the string value of a `#[path = "..."]` attribute if present.
-/// Operation: attribute lookup + literal parsing, no own calls.
 /// Convert OS-native path separators into the forward-slash form used
 /// by `known_paths`. On Unix this is the identity (no allocation); on
 /// Windows we only scan+replace when a backslash is actually present.
-/// Operation.
+/// Operation: pure string normalization.
 #[cfg(windows)]
 fn normalize_sep(path: &str) -> String {
     if path.contains('\\') {
@@ -165,6 +163,8 @@ fn normalize_sep(path: &str) -> String {
     path.to_string()
 }
 
+/// Extract the string value of a `#[path = "..."]` attribute if present.
+/// Operation: attribute lookup + literal parsing, no own calls.
 fn path_attribute(attrs: &[syn::Attribute]) -> Option<String> {
     attrs.iter().find_map(|attr| {
         if !attr.path().is_ident("path") {

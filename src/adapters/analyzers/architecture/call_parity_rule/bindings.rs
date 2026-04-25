@@ -7,6 +7,7 @@
 //! `(name, canonical)` pair, preferring an explicit `let s: T =` annotation
 //! over constructor-inference from `let s = T::new()`.
 
+use super::local_symbols::scope_for_local;
 use crate::adapters::analyzers::architecture::forbidden_rule::{
     file_to_module_segments, resolve_to_crate_absolute,
 };
@@ -74,10 +75,26 @@ fn strip_wrappers(ty: &syn::Type) -> &syn::Type {
     }
 }
 
-/// Resolve a type-path segment list into a canonical `[crate, …]` path,
-/// applying `crate/self/super` module normalisation, alias-map lookup,
-/// and same-file fallback for types declared locally.
-/// Returns `None` for unresolvable paths (external crates, unknown idents).
+/// Bundled inputs for canonical-type-path resolution. Same-file fallback
+/// walks `mod_stack` outward against `local_decl_scopes` to pick the
+/// closest enclosing declaration of a single-ident type name.
+pub(super) struct CanonScope<'a> {
+    pub alias_map: &'a HashMap<String, Vec<String>>,
+    pub local_symbols: &'a HashSet<String>,
+    pub crate_root_modules: &'a HashSet<String>,
+    pub importing_file: &'a str,
+    /// `name → list of mod-paths-within-file where this name is
+    /// declared`. `None` means flat top-level prepend (legacy path).
+    pub local_decl_scopes: Option<&'a HashMap<String, Vec<Vec<String>>>>,
+    /// Mod-path of the calling site within `importing_file`. Empty for
+    /// top-level callers or legacy code paths.
+    pub mod_stack: &'a [String],
+}
+
+/// Legacy helper for callers that don't track mod scope (call collector,
+/// the `bindings::canonical_from_type` adapter, tests). Delegates to the
+/// scope-aware variant with empty `mod_stack` + `None` decl scopes —
+/// behaviour unchanged. Operation: thin wrapper.
 pub(super) fn canonicalise_type_segments(
     segments: &[String],
     alias_map: &HashMap<String, Vec<String>>,
@@ -85,39 +102,61 @@ pub(super) fn canonicalise_type_segments(
     crate_root_modules: &HashSet<String>,
     importing_file: &str,
 ) -> Option<Vec<String>> {
+    canonicalise_type_segments_in_scope(
+        segments,
+        &CanonScope {
+            alias_map,
+            local_symbols,
+            crate_root_modules,
+            importing_file,
+            local_decl_scopes: None,
+            mod_stack: &[],
+        },
+    )
+}
+
+/// Resolve a type-path segment list into a canonical `[crate, …]` path,
+/// applying `crate/self/super` module normalisation, alias-map lookup,
+/// and same-file fallback (mod-scope-aware when `scope.mod_stack` /
+/// `scope.local_decl_scopes` are populated). Returns `None` for
+/// unresolvable paths (external crates, unknown idents).
+/// Operation: closure-hidden own calls keep IOSP clean.
+pub(super) fn canonicalise_type_segments_in_scope(
+    segments: &[String],
+    scope: &CanonScope<'_>,
+) -> Option<Vec<String>> {
     if segments.is_empty() {
         return None;
     }
+    let normalize =
+        |full| normalize_after_alias(full, scope.importing_file, scope.crate_root_modules);
     if matches!(segments[0].as_str(), "crate" | "self" | "super") {
-        let resolved = resolve_to_crate_absolute(importing_file, segments)?;
+        let resolved = resolve_to_crate_absolute(scope.importing_file, segments)?;
         let mut full = vec!["crate".to_string()];
         full.extend(resolved);
         return Some(full);
     }
-    if let Some(alias) = alias_map.get(&segments[0]) {
+    if let Some(alias) = scope.alias_map.get(&segments[0]) {
         let mut full = alias.clone();
         full.extend_from_slice(&segments[1..]);
-        return normalize_after_alias(full, importing_file, crate_root_modules);
+        return normalize(full);
     }
-    // Same-file fallback: `fn f(s: Session)` or `let s = Session::open()`
-    // where `Session` is declared in this file (no `use` needed in Rust).
-    // Resolve to `crate::<file_module>::Session` so receiver-tracked method
-    // calls match the corresponding graph nodes.
-    if local_symbols.contains(&segments[0]) {
+    if scope.local_symbols.contains(&segments[0]) {
+        let mod_path = scope_for_local(scope.local_decl_scopes, &segments[0], scope.mod_stack);
         let mut full = vec!["crate".to_string()];
-        full.extend(file_to_module_segments(importing_file));
+        full.extend(file_to_module_segments(scope.importing_file));
+        full.extend(mod_path.iter().cloned());
         full.extend_from_slice(segments);
         return Some(full);
     }
-    // Rust 2018+ absolute import: `let s: app::Session = ...` where
-    // `app` is a workspace crate-root module → prepend `crate`.
-    if crate_root_modules.contains(&segments[0]) {
+    if scope.crate_root_modules.contains(&segments[0]) {
         let mut full = vec!["crate".to_string()];
         full.extend_from_slice(segments);
         return Some(full);
     }
     None
 }
+
 
 /// After alias-map substitution, re-run `self` / `super` normalisation
 /// and prepend `crate` for Rust 2018+ absolute imports that resolve

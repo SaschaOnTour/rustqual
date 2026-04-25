@@ -129,6 +129,8 @@ fn run(fx: &RegFixture, index: &WorkspaceTypeIndex, fn_name: &str) -> HashSet<St
         crate_root_modules: &fx.crate_roots,
         importing_file: "src/cli/handlers.rs",
         workspace_index: Some(index),
+        mod_stack: &[],
+        local_decl_scopes: None,
     };
     collect_canonical_calls(&ctx)
 }

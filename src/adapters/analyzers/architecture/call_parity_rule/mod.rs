@@ -17,6 +17,7 @@ mod bindings;
 pub mod calls;
 pub mod check_a;
 pub mod check_b;
+pub(crate) mod local_symbols;
 pub mod pub_fns;
 pub(crate) mod signature_params;
 pub mod type_infer;

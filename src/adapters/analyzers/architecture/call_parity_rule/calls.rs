@@ -17,6 +17,7 @@
 //! the binding scan patterns.
 
 use super::bindings::{canonical_from_type, extract_let_binding, normalize_alias_expansion};
+use super::local_symbols::scope_for_local;
 use super::type_infer::resolve::{resolve_type, ResolveContext};
 use super::type_infer::{
     extract_bindings, extract_for_bindings, infer_type, BindingLookup, CanonicalType, InferContext,
@@ -51,10 +52,9 @@ pub struct FnContext<'a> {
     pub self_type: Option<Vec<String>>,
     /// File-level import alias map (output of `gather_alias_map`).
     pub alias_map: &'a HashMap<String, Vec<String>>,
-    /// Set of top-level item names declared in the same file. Unqualified
-    /// calls (`helper()`, no `use` statement) whose first segment is in
-    /// this set resolve to `crate::<file_module>::<ident>` so the call
-    /// graph sees local delegation chains.
+    /// Set of top-level + nested item names declared in the same file.
+    /// Unqualified calls (`helper()`, no `use` statement) whose first
+    /// segment is in this set resolve to `crate::<file_module>::<...>`.
     pub local_symbols: &'a HashSet<String>,
     /// Set of crate-root module names (first-segment `<name>` for every
     /// `src/<name>.rs` / `src/<name>/**.rs` in the workspace). Lets the
@@ -69,6 +69,15 @@ pub struct FnContext<'a> {
     /// (typical in unit-test fixtures that don't build the full graph).
     /// The full `build_call_graph` pipeline always passes `Some(&index)`.
     pub workspace_index: Option<&'a WorkspaceTypeIndex>,
+    /// Mod-path of the fn declaration inside `importing_file`. Empty
+    /// for top-level fns. Used together with `local_decl_scopes` so a
+    /// fn `crate::file::inner::make` references its sibling type
+    /// `Session` and resolves to `crate::file::inner::Session`.
+    pub mod_stack: &'a [String],
+    /// Per-name list of declaring mod-paths within `importing_file`.
+    /// `None` for legacy / test callers — the resolver falls back to
+    /// flat top-level prepend behaviour.
+    pub local_decl_scopes: Option<&'a HashMap<String, Vec<Vec<String>>>>,
 }
 
 // qual:api
@@ -94,6 +103,15 @@ struct CanonicalCallCollector<'a> {
     /// `crate` prefix), if any — used to resolve `Self::method`.
     self_type_canonical: Option<Vec<String>>,
     signature_params: Vec<(String, &'a syn::Type)>,
+    /// Mod-path inside `importing_file` of the fn under analysis.
+    /// Borrowed from `FnContext.mod_stack` — Rust doesn't let inner
+    /// `mod` items shadow outer resolution, so the path is read-only
+    /// for the duration of the body walk.
+    mod_stack: &'a [String],
+    /// Per-name declaring mod-paths within `importing_file`. Mirrors
+    /// `FnContext.local_decl_scopes` and feeds the scope-aware
+    /// `canonicalise_path` branch.
+    local_decl_scopes: Option<&'a HashMap<String, Vec<Vec<String>>>>,
     /// Scope stack of variable-name → canonical-type-path bindings.
     /// Inner-most scope is at the end; lookup walks from back to front.
     /// Always non-empty while a collection is in flight.
@@ -123,8 +141,13 @@ impl<'a> CanonicalCallCollector<'a> {
             if segs.first().map(|s| s.as_str()) == Some("crate") {
                 return segs.clone();
             }
+            // Insert `mod_stack` between file segments and impl segments so
+            // an `impl Session { ... }` declared inside `mod inner` resolves
+            // `Self::method` to `crate::<file>::inner::Session::method` —
+            // matching the path the graph node + type-index keys use.
             let mut full = vec!["crate".to_string()];
             full.extend(file_to_module_segments(ctx.importing_file));
+            full.extend(ctx.mod_stack.iter().cloned());
             full.extend_from_slice(segs);
             full
         });
@@ -135,6 +158,8 @@ impl<'a> CanonicalCallCollector<'a> {
             importing_file: ctx.importing_file,
             self_type_canonical,
             signature_params: ctx.signature_params.clone(),
+            mod_stack: ctx.mod_stack,
+            local_decl_scopes: ctx.local_decl_scopes,
             bindings: vec![HashMap::new()],
             non_path_bindings: vec![HashMap::new()],
             calls: HashSet::new(),
@@ -179,6 +204,8 @@ impl<'a> CanonicalCallCollector<'a> {
             importing_file: self.importing_file,
             type_aliases: self.workspace_index.map(|w| &w.type_aliases),
             transparent_wrappers: self.workspace_index.map(|w| &w.transparent_wrappers),
+            local_decl_scopes: self.local_decl_scopes,
+            mod_stack: self.mod_stack,
         };
         match resolve_type(ty, &rctx) {
             CanonicalType::Path(segs) => {
@@ -242,54 +269,23 @@ impl<'a> CanonicalCallCollector<'a> {
     }
 
     /// Turn a path-segment list into the canonical String used for all
-    /// call-target comparisons in the call-parity check.
+    /// call-target comparisons in the call-parity check. Integration:
+    /// each branch delegates to a dedicated helper.
     fn canonicalise_path(&self, segments: &[String]) -> String {
         if segments.is_empty() {
             return String::new();
         }
-        // Self::method
         if segments[0] == "Self" {
-            if let Some(self_canonical) = &self.self_type_canonical {
-                let mut full = self_canonical.clone();
-                full.extend_from_slice(&segments[1..]);
-                return full.join("::");
-            }
-            return bare(&segments.join("::"));
+            return self.canonicalise_self_path(segments);
         }
-        // crate / self / super — resolve to crate-absolute
         if matches!(segments[0].as_str(), "crate" | "self" | "super") {
-            if let Some(resolved) = resolve_to_crate_absolute(self.importing_file, segments) {
-                let mut full = vec!["crate".to_string()];
-                full.extend(resolved);
-                return full.join("::");
-            }
-            return bare(&segments.join("::"));
+            return self.canonicalise_keyword_path(segments);
         }
-        // Alias-map hit on first segment → replace prefix, then
-        // re-normalise in case the alias itself resolves through
-        // `self::` / `super::` (e.g. `use super::foo::Bar;`) or uses
-        // the Rust 2018+ absolute form (`use app::foo;`).
-        if let Some(alias) = self.alias_map.get(&segments[0]) {
-            let mut full = alias.clone();
-            full.extend_from_slice(&segments[1..]);
-            if let Some(normalized) =
-                normalize_alias_expansion(full, self.importing_file, self.crate_root_modules)
-            {
-                return normalized.join("::");
-            }
+        if let Some(canonical) = self.canonicalise_alias_path(segments) {
+            return canonical;
         }
-        // Same-module fallback: unqualified call whose first segment is
-        // a top-level item in the same file resolves to
-        // `crate::<file_module>::<segments>`. Without this, idiomatic
-        // Rust like `fn helper() {}` + `pub fn cmd() { helper(); }`
-        // leaves `cmd → <bare>:helper` as a dead-end edge, and Check A
-        // can falsely report "no delegation" when the actual delegation
-        // flows through the local helper.
         if self.local_symbols.contains(&segments[0]) {
-            let mut full = vec!["crate".to_string()];
-            full.extend(file_to_module_segments(self.importing_file));
-            full.extend_from_slice(segments);
-            return full.join("::");
+            return self.canonicalise_local_symbol_path(segments);
         }
         // Rust 2018+ absolute call: `app::foo()` without `use` is the
         // crate-root `app` module, equivalent to `crate::app::foo()`.
@@ -302,6 +298,57 @@ impl<'a> CanonicalCallCollector<'a> {
         }
         // Unknown path (external crate, stdlib, or not imported) → bare.
         bare(&segments.join("::"))
+    }
+
+    /// `Self::method` — substitute the enclosing impl's canonical
+    /// self-type for `Self`. Falls back to `<bare>:` when we're not
+    /// inside an impl. Operation.
+    fn canonicalise_self_path(&self, segments: &[String]) -> String {
+        if let Some(self_canonical) = &self.self_type_canonical {
+            let mut full = self_canonical.clone();
+            full.extend_from_slice(&segments[1..]);
+            return full.join("::");
+        }
+        bare(&segments.join("::"))
+    }
+
+    /// `crate` / `self` / `super` — resolve through the file-relative
+    /// module path. Falls back to `<bare>:` if `resolve_to_crate_absolute`
+    /// can't make sense of the path. Operation.
+    fn canonicalise_keyword_path(&self, segments: &[String]) -> String {
+        if let Some(resolved) = resolve_to_crate_absolute(self.importing_file, segments) {
+            let mut full = vec!["crate".to_string()];
+            full.extend(resolved);
+            return full.join("::");
+        }
+        bare(&segments.join("::"))
+    }
+
+    /// First segment hits the file's import-alias map → replace the
+    /// prefix and re-normalise (alias may itself reference `self::` or
+    /// a Rust-2018 crate-root module). Returns `None` when no alias
+    /// matches. Operation.
+    fn canonicalise_alias_path(&self, segments: &[String]) -> Option<String> {
+        let alias = self.alias_map.get(&segments[0])?;
+        let mut full = alias.clone();
+        full.extend_from_slice(&segments[1..]);
+        let normalized =
+            normalize_alias_expansion(full, self.importing_file, self.crate_root_modules)?;
+        Some(normalized.join("::"))
+    }
+
+    /// Same-file fallback: first segment is declared in this file, so
+    /// resolve to `crate::<file_module>::<mod_path>::<segments>`. The
+    /// mod-path walk picks the closest enclosing scope so a call inside
+    /// `mod inner` to a sibling `helper()` reaches
+    /// `crate::<file>::inner::helper`. Operation.
+    fn canonicalise_local_symbol_path(&self, segments: &[String]) -> String {
+        let mod_path = scope_for_local(self.local_decl_scopes, &segments[0], self.mod_stack);
+        let mut full = vec!["crate".to_string()];
+        full.extend(file_to_module_segments(self.importing_file));
+        full.extend(mod_path.iter().cloned());
+        full.extend_from_slice(segments);
+        full.join("::")
     }
 
     fn record_call(&mut self, target: String) {
@@ -418,6 +465,8 @@ impl<'a> CanonicalCallCollector<'a> {
             importing_file: self.importing_file,
             type_aliases: Some(&wi.type_aliases),
             transparent_wrappers: Some(&wi.transparent_wrappers),
+            local_decl_scopes: self.local_decl_scopes,
+            mod_stack: self.mod_stack,
         };
         let name = pi.ident.to_string();
         match resolve_type(pt.ty.as_ref(), &rctx) {
@@ -731,6 +780,7 @@ fn bare(path: &str) -> String {
 fn method_unknown(method: &str) -> String {
     format!("{METHOD_UNKNOWN_PREFIX}{method}")
 }
+
 
 // The Visit impl uses an independent `'ast` lifetime so the same
 // collector can walk both the main fn body (long-lived) and macro

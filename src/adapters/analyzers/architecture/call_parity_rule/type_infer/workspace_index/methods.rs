@@ -99,7 +99,7 @@ fn record_method(
     mod_stack: &[String],
     node: &syn::ImplItemFn,
 ) {
-    let resolve = |ty: &syn::Type| resolve_type(ty, &resolve_ctx_from_build(ctx));
+    let resolve = |ty: &syn::Type| resolve_type(ty, &resolve_ctx_from_build(ctx, mod_stack));
     let canon = |segs: &[String]| canonical_type_key(segs, ctx, mod_stack);
     let Some(Some(impl_segs)) = impl_stack.last() else {
         return;
