@@ -19,6 +19,7 @@ pub mod check_a;
 pub mod check_b;
 pub(crate) mod local_symbols;
 pub mod pub_fns;
+mod pub_fns_visibility;
 pub(crate) mod signature_params;
 pub mod type_infer;
 pub mod workspace_graph;

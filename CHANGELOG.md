@@ -189,6 +189,16 @@ fallback markers rather than fabricate edges:
   traits (`Send` / `Sync` / `Unpin` / `Copy` / `Clone` / `Sized` /
   `Debug` / `Display`) are filtered first, so the common
   `impl Future<Output = T> + Send` shape is unaffected.
+- `pub mod outer { … pub use self::private::Hidden; }` followed by
+  `fn h(x: outer::Hidden) { x.op() }` — the receiver-type resolver
+  doesn't follow workspace-wide `pub use` re-exports inside nested
+  modules, so the parameter resolves to `crate::…::outer::Hidden`
+  while methods on the impl (inside `mod private`) are indexed under
+  `crate::…::outer::private::Hidden`. Visibility recognises both
+  paths, but the call-graph edge collapses to `<method>:op`.
+  Workaround: write the impl at the file-level qualified path
+  (`impl outer::Hidden { … }`) so impl-canonical and caller-canonical
+  agree, or `qual:allow(architecture)` at the call-site.
 - Arbitrary proc-macros that alter the call graph without being in
   `transparent_macros` config. User-annotate via
   `// qual:allow(architecture)` on the enclosing fn.

@@ -262,6 +262,8 @@ fn compile_call_parity_normalises_transparent_wrappers() {
         // generic, so naive last-`::`-split picks `Db>` instead of
         // `State`. Must strip `<…>` before splitting.
         "axum::extract::State<crate::app::Db>".to_string(),
+        // Whitespace before `<` survives the split; must trim again.
+        "Json <Body>".to_string(),
     ];
     cfg.call_parity = Some(cp);
     let c = compile_architecture(&cfg).expect("compile");

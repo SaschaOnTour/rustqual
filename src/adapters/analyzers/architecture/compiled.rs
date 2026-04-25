@@ -143,13 +143,16 @@ fn compile_call_parity(
 /// generic-arg suffix first (so a path-qualified arg like
 /// `axum::extract::State<crate::app::Db>` doesn't break the
 /// segment split on the inner `::`), then take the last
-/// `::`-separated segment. Operation.
+/// `::`-separated segment, trimming whitespace at each step so
+/// stylistic spaces (`"State <Db>"`) don't survive into the lookup
+/// key. Operation.
 fn last_path_segment(path: &str) -> &str {
-    let without_generics = path.split('<').next().unwrap_or(path);
+    let without_generics = path.split('<').next().unwrap_or(path).trim();
     without_generics
         .rsplit("::")
         .next()
         .unwrap_or(without_generics)
+        .trim()
 }
 
 /// Stage 3 starter-pack: prepend these common framework attribute-macro

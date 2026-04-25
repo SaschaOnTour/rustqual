@@ -402,6 +402,68 @@ fn test_collect_pub_fns_records_impl_in_private_mod_for_public_type() {
 }
 
 #[test]
+fn test_collect_pub_fns_records_impl_via_nested_pub_use_export_path() {
+    // `pub mod outer { pub use self::private::Hidden; }` re-exports
+    // `Hidden` at `crate::file::outer::Hidden`. An impl written
+    // against the export path must be recognised — visible_canonicals
+    // needs both the source path *and* the export path so impl
+    // resolution doesn't miss it.
+    let file = parse(
+        r#"
+        pub mod outer {
+            mod private {
+                pub struct Hidden;
+            }
+            pub use self::private::Hidden;
+        }
+        impl outer::Hidden {
+            pub fn op(&self) {}
+        }
+        "#,
+    );
+    let files = vec![("src/cli/handlers.rs", &file)];
+    let by_layer = {
+        let aliases = aliases_from_files(&files);
+        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+    };
+    let cli = names_for_layer(&by_layer, "cli");
+    assert!(
+        cli.contains("op"),
+        "impl on nested-mod re-export path must be recorded, got {cli:?}"
+    );
+}
+
+#[test]
+fn test_collect_pub_fns_records_impl_via_pub_type_alias() {
+    // `pub type Public = private::Hidden;` exposes a hidden source
+    // type's methods through the alias. Receiver-type inference
+    // already resolves `Public` to its target, so the only piece
+    // missing for Check B was visibility — register the target's
+    // canonical alongside the alias path.
+    let file = parse(
+        r#"
+        mod private {
+            pub struct Hidden;
+            impl Hidden {
+                pub fn op(&self) {}
+            }
+        }
+        pub type Public = private::Hidden;
+        "#,
+    );
+    let files = vec![("src/cli/handlers.rs", &file)];
+    let by_layer = {
+        let aliases = aliases_from_files(&files);
+        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+    };
+    let cli = names_for_layer(&by_layer, "cli");
+    assert!(
+        cli.contains("op"),
+        "impl on pub-type-alias target must be recorded, got {cli:?}"
+    );
+}
+
+#[test]
 fn test_collect_pub_fns_records_renamed_reexport_impl_methods() {
     // `pub use private::Hidden as PublicHidden;` re-exports the
     // source type under a new name. The impl uses the original
