@@ -566,6 +566,42 @@ fn test_collect_pub_fns_records_impl_via_chained_type_alias() {
 }
 
 #[test]
+fn test_collect_pub_fns_records_impl_via_renamed_stdlib_wrapper() {
+    // `use std::sync::Arc as Shared; pub type Public = Shared<private::Hidden>;`
+    // — the visibility pass must follow the import alias when peeling
+    // wrappers, otherwise `Shared` is treated as a non-wrapper and
+    // `private::Hidden` never enters `visible_canonicals`.
+    let file = parse(
+        r#"
+        use std::sync::Arc as Shared;
+        mod private {
+            pub struct Hidden;
+            impl Hidden {
+                pub fn op(&self) {}
+            }
+        }
+        pub type Public = Shared<private::Hidden>;
+        "#,
+    );
+    let files = vec![("src/cli/handlers.rs", &file)];
+    let by_layer = {
+        let aliases = aliases_from_files(&files);
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
+    };
+    let cli = names_for_layer(&by_layer, "cli");
+    assert!(
+        cli.contains("op"),
+        "renamed stdlib wrapper alias must peel in visibility pass, got {cli:?}"
+    );
+}
+
+#[test]
 fn test_collect_pub_fns_records_impl_via_pub_type_alias_through_user_wrapper() {
     // `pub type Public = State<private::Hidden>;` with a
     // user-configured transparent wrapper `State`. The visibility

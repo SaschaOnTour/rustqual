@@ -192,19 +192,28 @@ fn register_alias_target(
 /// Recursively peel transparent wrappers + references to reach the
 /// inner `TypePath`. Returns `None` for types we can't reduce
 /// (`RwLock`, `Mutex`, `dyn Trait`, tuples, …) — those don't expose
-/// inner methods through Deref.
+/// inner methods through Deref. `file_scope` + `mod_stack` are
+/// threaded so renamed-import wrappers (`use std::sync::Arc as
+/// Shared;`) get recognised through the scope-aware alias resolver.
 // qual:recursive
 pub(super) fn peel_to_inner_path<'a>(
     ty: &'a syn::Type,
     transparent_wrappers: &HashSet<String>,
+    file_scope: &FileScope<'_>,
+    mod_stack: &[String],
 ) -> Option<&'a syn::TypePath> {
+    let recurse = |inner: &'a syn::Type| {
+        peel_to_inner_path(inner, transparent_wrappers, file_scope, mod_stack)
+    };
     match ty {
-        syn::Type::Reference(r) => peel_to_inner_path(&r.elem, transparent_wrappers),
-        syn::Type::Paren(p) => peel_to_inner_path(&p.elem, transparent_wrappers),
-        syn::Type::Path(p) => match transparent_wrapper_inner(p, transparent_wrappers) {
-            Some(inner) => peel_to_inner_path(inner, transparent_wrappers),
-            None => Some(p),
-        },
+        syn::Type::Reference(r) => recurse(&r.elem),
+        syn::Type::Paren(p) => recurse(&p.elem),
+        syn::Type::Path(p) => {
+            match transparent_wrapper_inner(p, transparent_wrappers, file_scope, mod_stack) {
+                Some(inner) => recurse(inner),
+                None => Some(p),
+            }
+        }
         _ => None,
     }
 }
@@ -213,18 +222,37 @@ pub(super) fn peel_to_inner_path<'a>(
 /// stdlib one (`Box`/`Arc`/`Rc`/`Cow`) or a user-configured entry in
 /// `[architecture.call_parity]::transparent_wrappers` (e.g. axum
 /// `State`, actix `Data`) — return its first generic type arg so the
-/// caller can peel further. Returns `None` for non-wrapper paths or
-/// wrappers without a positional type arg. Operation.
+/// caller can peel further. Renamed imports
+/// (`use std::sync::Arc as Shared;`) are followed through the
+/// scope-aware canonicaliser so `Shared<T>` peels just like
+/// `Arc<T>`. Returns `None` for non-wrapper paths or wrappers
+/// without a positional type arg. Operation.
 fn transparent_wrapper_inner<'a>(
     tp: &'a syn::TypePath,
     transparent_wrappers: &HashSet<String>,
+    file_scope: &FileScope<'_>,
+    mod_stack: &[String],
 ) -> Option<&'a syn::Type> {
     const STDLIB_TRANSPARENT: &[&str] = &["Box", "Arc", "Rc", "Cow"];
+    let is_transparent_name = |name: &str| -> bool {
+        STDLIB_TRANSPARENT.contains(&name) || transparent_wrappers.contains(name)
+    };
     let last = tp.path.segments.last()?;
-    let name = last.ident.to_string();
-    let is_transparent =
-        STDLIB_TRANSPARENT.contains(&name.as_str()) || transparent_wrappers.contains(&name);
-    if !is_transparent {
+    let raw_name = last.ident.to_string();
+    let direct = is_transparent_name(&raw_name);
+    let aliased = !direct
+        && canonicalise_type_segments_in_scope(
+            std::slice::from_ref(&raw_name),
+            &CanonScope {
+                file: file_scope,
+                mod_stack,
+            },
+        )
+        .as_ref()
+        .and_then(|p| p.last())
+        .map(|seg| is_transparent_name(seg))
+        .unwrap_or(false);
+    if !direct && !aliased {
         return None;
     }
     let syn::PathArguments::AngleBracketed(ab) = &last.arguments else {

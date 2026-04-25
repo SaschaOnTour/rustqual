@@ -220,12 +220,17 @@ fn resolve_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -> Canoni
     let raw_name = last.ident.to_string();
     // Promote `use std::sync::Arc as Shared`-style import aliases to
     // their canonical wrapper name so `Shared<T>` matches the same
-    // arms as `Arc<T>`. Direct-name hits and unrelated paths skip
-    // the alias lookup.
-    let alias_target = (!WRAPPER_NAMES.contains(&raw_name.as_str())
+    // arms as `Arc<T>`. Uses the scope-aware canonicaliser so
+    // imports inside inline mods (`mod inner { use … as Shared; }`)
+    // resolve too. Direct-name hits and unrelated paths skip the
+    // alias lookup.
+    let alias_resolved = (!WRAPPER_NAMES.contains(&raw_name.as_str())
         && !is_user_transparent(&raw_name, ctx))
-    .then(|| ctx.file.alias_map.get(&raw_name).and_then(|p| p.last()))
+    .then(|| {
+        canonicalise_type_segments_in_scope(std::slice::from_ref(&raw_name), &canon_scope(ctx))
+    })
     .flatten();
+    let alias_target = alias_resolved.as_ref().and_then(|p| p.last());
     let name = match alias_target {
         Some(seg) if WRAPPER_NAMES.contains(&seg.as_str()) || is_user_transparent(seg, ctx) => {
             seg.as_str()

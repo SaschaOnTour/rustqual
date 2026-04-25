@@ -102,7 +102,7 @@ pub(super) fn resolve_alias_target_canonical(
     mod_stack: &[String],
     transparent_wrappers: &HashSet<String>,
 ) -> Option<String> {
-    let p = peel_to_inner_path(ty, transparent_wrappers)?;
+    let p = peel_to_inner_path(ty, transparent_wrappers, file_scope, mod_stack)?;
     let segs: Vec<String> = p
         .path
         .segments

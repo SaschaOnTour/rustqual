@@ -20,7 +20,9 @@ use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::{
     CanonicalType, WorkspaceTypeIndex,
 };
 use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::collect_local_symbols;
-use crate::adapters::shared::use_tree::{gather_alias_map, ScopedAliasMap};
+use crate::adapters::shared::use_tree::{
+    gather_alias_map, gather_alias_map_scoped, ScopedAliasMap,
+};
 use std::collections::{HashMap, HashSet};
 
 const SESSION_PATH: &str = "crate::app::session::Session";
@@ -539,6 +541,63 @@ fn cast_as_self_resolves() {
         calls.contains("crate::app::session::Session::diff"),
         "`as Self` cast must resolve to Session, got {calls:?}"
     );
+}
+
+#[test]
+fn aliased_stdlib_wrapper_inside_inline_mod_peels_to_inner() {
+    // Same renamed-Arc test, but the `use` statement lives inside an
+    // inline mod. Top-level `alias_map` doesn't see it; the scoped
+    // overlay does. Receiver resolution must consult the scoped
+    // overlay for wrapper-name promotion.
+    let fx = parse(
+        r#"
+        mod inner {
+            use std::sync::Arc as Shared;
+            use crate::app::session::Session;
+            pub fn handle(s: Shared<Session>) {
+                s.diff();
+            }
+        }
+        "#,
+    );
+    let f = find_fn_in_mod(&fx.file, "inner", "handle");
+    let ctx = FnContext {
+        file: &FileScope {
+            path: "src/cli/handlers.rs",
+            alias_map: &fx.alias_map,
+            aliases_per_scope: &gather_alias_map_scoped(&fx.file),
+            local_symbols: &fx.local_symbols,
+            local_decl_scopes: &HashMap::new(),
+            crate_root_modules: &fx.crate_roots,
+        },
+        mod_stack: &["inner".to_string()],
+        body: &f.block,
+        signature_params: sig_params(&f.sig),
+        self_type: None,
+        workspace_index: Some(&rlm_index()),
+        workspace_files: None,
+    };
+    let calls = collect_canonical_calls(&ctx);
+    assert!(
+        calls.contains("crate::app::session::Session::diff"),
+        "scoped Arc-alias inside inline mod must peel to Session, got {calls:?}"
+    );
+}
+
+fn find_fn_in_mod<'a>(file: &'a syn::File, mod_name: &str, fn_name: &str) -> &'a syn::ItemFn {
+    file.items
+        .iter()
+        .find_map(|item| match item {
+            syn::Item::Mod(m) if m.ident == mod_name => m.content.as_ref(),
+            _ => None,
+        })
+        .and_then(|(_, items)| {
+            items.iter().find_map(|i| match i {
+                syn::Item::Fn(f) if f.sig.ident == fn_name => Some(f),
+                _ => None,
+            })
+        })
+        .unwrap_or_else(|| panic!("fn {mod_name}::{fn_name} not found"))
 }
 
 #[test]
