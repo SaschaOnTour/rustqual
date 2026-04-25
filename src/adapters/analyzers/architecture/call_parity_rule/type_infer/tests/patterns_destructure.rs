@@ -31,6 +31,23 @@ fn test_wildcard_binds_nothing() {
     assert!(bindings(&f, "_", CanonicalType::path(["crate", "T"])).is_empty());
 }
 
+#[test]
+fn test_at_subpattern_walks_inner_pattern() {
+    // `whole @ Some(s)` against `Option<Session>` must bind both
+    // `whole` (full Option<Session>) and `s` (the unwrapped Session).
+    // Without recursion into the subpattern, `s` would be lost or
+    // tombstoned later as Opaque.
+    let f = TypeInferFixture::new();
+    let session = CanonicalType::path(["crate", "app", "Session"]);
+    let opt = CanonicalType::Option(Box::new(session.clone()));
+    let b = bindings(&f, "whole @ Some(s)", opt.clone());
+    assert_eq!(b.len(), 2, "expected `whole` + `s`, got {b:?}");
+    assert_eq!(b[0].0, "whole");
+    assert_eq!(b[0].1, opt);
+    assert_eq!(b[1].0, "s");
+    assert_eq!(b[1].1, session);
+}
+
 // ── Pat::Type (explicit annotation) ──────────────────────────────
 
 #[test]

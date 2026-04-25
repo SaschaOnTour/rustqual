@@ -146,12 +146,6 @@ pub(crate) fn canonicalise_type_segments_in_scope(
             full.extend_from_slice(segments);
             return Some(full);
         }
-        if file.local_decl_scopes.is_empty() {
-            let mut full = vec!["crate".to_string()];
-            full.extend(file_to_module_segments(file.path));
-            full.extend_from_slice(segments);
-            return Some(full);
-        }
     }
     if file.crate_root_modules.contains(&segments[0]) {
         let mut full = vec!["crate".to_string()];

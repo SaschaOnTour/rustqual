@@ -41,8 +41,11 @@ fn result_combinator(method: &str, inner: &CanonicalType) -> Option<CanonicalTyp
         // Transformations + observers that preserve Result<T, E>.
         // `inspect` / `inspect_err` hand the closure a borrow and
         // return self — the closure's body type doesn't change the
-        // wrapper, so they stay resolved.
-        "map_err" | "or_else" | "inspect" | "inspect_err" => {
+        // wrapper, so they stay resolved. `as_ref` / `as_mut` return
+        // `Result<&T, &E>` / `Result<&mut T, &mut E>`; since
+        // `resolve_type` strips references, they reduce to the same
+        // `Result<T>` shape.
+        "map_err" | "or_else" | "inspect" | "inspect_err" | "as_ref" | "as_mut" => {
             Some(CanonicalType::Result(Box::new(inner.clone())))
         }
         // Extract the Ok-side as Option<T>

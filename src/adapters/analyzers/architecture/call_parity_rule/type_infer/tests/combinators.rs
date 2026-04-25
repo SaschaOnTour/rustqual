@@ -82,6 +82,18 @@ fn test_result_inspect_variants_preserve_wrapper() {
 }
 
 #[test]
+fn test_result_as_ref_as_mut_preserve_wrapper() {
+    // `Result::as_ref()` returns `Result<&T, &E>` and `Result::as_mut`
+    // returns `Result<&mut T, &mut E>`. The resolver strips references,
+    // so for inference purposes both keep the receiver's `Result<T>`
+    // shape — `open().as_ref().unwrap().diff()` must stay resolvable.
+    let res = CanonicalType::Result(Box::new(t()));
+    let expected = Some(CanonicalType::Result(Box::new(t())));
+    assert_eq!(combinator_return(&res, "as_ref"), expected);
+    assert_eq!(combinator_return(&res, "as_mut"), expected);
+}
+
+#[test]
 fn test_result_map_is_unresolved() {
     // `.map(|x| ...)` depends on the closure — unresolved by design.
     let res = CanonicalType::Result(Box::new(t()));

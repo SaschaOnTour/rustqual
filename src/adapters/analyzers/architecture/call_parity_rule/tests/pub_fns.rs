@@ -284,3 +284,61 @@ fn test_collect_pub_fns_skips_unmatched_files() {
         );
     }
 }
+
+#[test]
+fn test_collect_pub_fns_skips_pub_fn_inside_private_inline_mod() {
+    // `mod private { pub fn helper() {} }` — `helper` is `pub` but
+    // its parent `mod private` has inherited visibility, so the fn
+    // isn't reachable from outside the parent module. Must not be
+    // recorded as adapter / target surface.
+    let file = parse(
+        r#"
+        mod private {
+            pub fn helper() {}
+        }
+        pub fn visible_top() {}
+        "#,
+    );
+    let files = vec![("src/cli/handlers.rs", &file)];
+    let by_layer = {
+        let aliases = aliases_from_files(&files);
+        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+    };
+    let cli = names_for_layer(&by_layer, "cli");
+    assert!(
+        cli.contains("visible_top"),
+        "top-level pub fn must be recorded, got {cli:?}"
+    );
+    assert!(
+        !cli.contains("helper"),
+        "pub fn inside private inline mod must be skipped, got {cli:?}"
+    );
+}
+
+#[test]
+fn test_collect_pub_fns_skips_impl_method_on_type_in_private_inline_mod() {
+    // `mod private { pub struct Hidden; impl Hidden { pub fn op() {} } }`
+    // — `Hidden` is pub but only inside a private mod, so its
+    // workspace-visible-types entry must NOT register, and the impl
+    // method `op` must not appear as adapter surface.
+    let file = parse(
+        r#"
+        mod private {
+            pub struct Hidden;
+            impl Hidden {
+                pub fn op(&self) {}
+            }
+        }
+        "#,
+    );
+    let files = vec![("src/cli/handlers.rs", &file)];
+    let by_layer = {
+        let aliases = aliases_from_files(&files);
+        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+    };
+    let cli = names_for_layer(&by_layer, "cli");
+    assert!(
+        !cli.contains("op"),
+        "impl method on type in private mod must be skipped, got {cli:?}"
+    );
+}

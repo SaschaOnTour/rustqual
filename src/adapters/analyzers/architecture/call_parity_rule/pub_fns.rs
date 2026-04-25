@@ -97,6 +97,7 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
             visible_types: &visible_types,
             impl_stack: Vec::new(),
             mod_stack: Vec::new(),
+            enclosing_mod_visible: true,
         };
         collector.visit_file(ast);
         out.entry(layer).or_default().extend(collector.found);
@@ -135,8 +136,11 @@ fn collect_visible_type_names_workspace(
 }
 
 /// Walk a slice of items, inserting visible type-name idents and
-/// recursing into non-cfg-test inline mods. Operation: closure-hidden
-/// recursion through nested `mod` blocks.
+/// recursing into non-cfg-test inline mods. Recursion is gated on the
+/// inline mod's own visibility — `mod private { pub struct X; }`
+/// keeps `X` out of the workspace-visible set so its impl methods
+/// don't leak into Check A/B as adapter surface. Operation:
+/// closure-hidden recursion through nested `mod` blocks.
 // qual:recursive
 fn collect_visible_type_names_in_items(items: &[syn::Item], out: &mut HashSet<String>) {
     let recurse = |inner: &[syn::Item], out: &mut HashSet<String>| {
@@ -159,7 +163,7 @@ fn collect_visible_type_names_in_items(items: &[syn::Item], out: &mut HashSet<St
             syn::Item::Type(t) if is_visible(&t.vis) => {
                 out.insert(t.ident.to_string());
             }
-            syn::Item::Mod(m) if !has_cfg_test(&m.attrs) => {
+            syn::Item::Mod(m) if is_visible(&m.vis) && !has_cfg_test(&m.attrs) => {
                 if let Some((_, inner)) = m.content.as_ref() {
                     recurse(inner, out);
                 }
@@ -186,6 +190,12 @@ struct PubFnCollector<'ast, 'vis> {
     impl_stack: Vec<(Vec<String>, bool)>,
     /// Names of enclosing inline `mod inner { ... }` blocks.
     mod_stack: Vec<String>,
+    /// True when every enclosing inline `mod` carries a visibility
+    /// modifier. False as soon as any ancestor is private. Top-level
+    /// items are always visible. Without this, `mod private { pub fn
+    /// helper() {} }` would record `helper` even though it's not
+    /// reachable from outside the parent module.
+    enclosing_mod_visible: bool,
 }
 
 impl<'ast, 'vis> PubFnCollector<'ast, 'vis> {
@@ -231,7 +241,7 @@ fn is_test_fn(attrs: &[syn::Attribute]) -> bool {
 
 impl<'ast, 'vis> Visit<'ast> for PubFnCollector<'ast, 'vis> {
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
-        if is_visible(&node.vis) && !is_test_fn(&node.attrs) {
+        if self.enclosing_mod_visible && is_visible(&node.vis) && !is_test_fn(&node.attrs) {
             let line = syn::spanned::Spanned::span(&node.sig.ident).start().line;
             let name = node.sig.ident.to_string();
             self.record_fn(name, line, &node.block, &node.sig);
@@ -288,8 +298,11 @@ impl<'ast, 'vis> Visit<'ast> for PubFnCollector<'ast, 'vis> {
         if has_cfg_test(&node.attrs) {
             return;
         }
+        let parent_visible = self.enclosing_mod_visible;
+        self.enclosing_mod_visible = parent_visible && is_visible(&node.vis);
         self.mod_stack.push(node.ident.to_string());
         syn::visit::visit_item_mod(self, node);
         self.mod_stack.pop();
+        self.enclosing_mod_visible = parent_visible;
     }
 }

@@ -35,7 +35,7 @@ fn collect(
     out: &mut Vec<(String, CanonicalType)>,
 ) {
     match pat {
-        syn::Pat::Ident(pi) => bind_ident(pi, matched_type, out),
+        syn::Pat::Ident(pi) => bind_ident(pi, matched_type, ctx, out),
         syn::Pat::Type(pt) => bind_annotated(pt, ctx, out),
         syn::Pat::Reference(r) => collect(&r.pat, matched_type, ctx, out),
         syn::Pat::Paren(p) => collect(&p.pat, matched_type, ctx, out),
@@ -51,7 +51,10 @@ fn collect(
 /// `Pat::Ident(x)` — the simplest case: bind the name to the matched
 /// type. `Opaque` bindings are still recorded so shadowing works
 /// correctly (a later `ctx.bindings.lookup(x)` sees `Some(Opaque)`,
-/// which callers can treat as "known unresolvable").
+/// which callers can treat as "known unresolvable"). When the ident
+/// carries an `@` subpattern (`whole @ Some(s)`), the subpattern is
+/// matched against the same `matched_type` so nested bindings (`s`)
+/// also get extracted.
 ///
 /// Syn-level ambiguity: `None` as a pattern is represented as
 /// `Pat::Ident("None")`, not a distinct variant pattern. We specifically
@@ -63,13 +66,16 @@ fn collect(
 fn bind_ident(
     pi: &syn::PatIdent,
     matched_type: &CanonicalType,
+    ctx: &InferContext<'_>,
     out: &mut Vec<(String, CanonicalType)>,
 ) {
     let name = pi.ident.to_string();
-    if is_variant_like(&name, matched_type) {
-        return;
+    if !is_variant_like(&name, matched_type) {
+        out.push((name, matched_type.clone()));
     }
-    out.push((name, matched_type.clone()));
+    if let Some((_, subpat)) = pi.subpat.as_ref() {
+        collect(subpat, matched_type, ctx, out);
+    }
 }
 
 /// True for identifiers that are unambiguously a stdlib enum-variant
