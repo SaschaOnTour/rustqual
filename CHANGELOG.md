@@ -199,6 +199,18 @@ fallback markers rather than fabricate edges:
   Workaround: write the impl at the file-level qualified path
   (`impl outer::Hidden { … }`) so impl-canonical and caller-canonical
   agree, or `qual:allow(architecture)` at the call-site.
+- `mod private { pub type Public = Hidden; … } pub use private::Public;`
+  — re-exported type aliases declared inside private modules are
+  *not* followed into their target. The visibility pass skips private
+  modules wholesale, so `Public`'s target type never enters the
+  visible-canonicals set. Workaround: lift the type alias to the
+  parent module (`pub use private::Hidden; pub type Public = Hidden;`).
+- `pub use internal::helper as Hidden;` where `helper` is a function —
+  the visibility pass treats every `pub use` leaf as a type export,
+  so a same-named private `struct Hidden` collides with the function
+  re-export and its impl methods get recorded as adapter surface.
+  Workaround: rename to avoid the collision, or
+  `qual:allow(architecture)` on the affected impl.
 - Arbitrary proc-macros that alter the call graph without being in
   `transparent_macros` config. User-annotate via
   `// qual:allow(architecture)` on the enclosing fn.

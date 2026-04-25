@@ -434,6 +434,36 @@ fn test_collect_pub_fns_records_impl_via_nested_pub_use_export_path() {
 }
 
 #[test]
+fn test_collect_pub_fns_records_impl_via_pub_type_alias_through_wrapper() {
+    // `pub type Public = Box<private::Hidden>;` — the alias target
+    // is wrapped in a Deref-transparent smart pointer. Receiver
+    // resolution peels Box/Arc/Rc/Cow, so the visible-types pass
+    // must do the same to reach the inner `private::Hidden` and
+    // recognise its impl methods as adapter surface.
+    let file = parse(
+        r#"
+        mod private {
+            pub struct Hidden;
+            impl Hidden {
+                pub fn op(&self) {}
+            }
+        }
+        pub type Public = Box<private::Hidden>;
+        "#,
+    );
+    let files = vec![("src/cli/handlers.rs", &file)];
+    let by_layer = {
+        let aliases = aliases_from_files(&files);
+        collect_pub_fns_by_layer(&files, &aliases, &adapter_layers(), &HashSet::new())
+    };
+    let cli = names_for_layer(&by_layer, "cli");
+    assert!(
+        cli.contains("op"),
+        "wrapper-alias target's impl method must be recorded, got {cli:?}"
+    );
+}
+
+#[test]
 fn test_collect_pub_fns_records_impl_via_pub_type_alias() {
     // `pub type Public = private::Hidden;` exposes a hidden source
     // type's methods through the alias. Receiver-type inference

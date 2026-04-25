@@ -118,21 +118,22 @@ fn collect_in_items(
     }
 }
 
-/// `pub type Public = private::Hidden;` — a public alias can expose
-/// methods declared on a hidden source type. Resolve the alias's
-/// target type-path through the workspace canonicaliser and add the
-/// resolved canonical so impls keyed on the source type are
-/// recognised when callers go through the alias. Non-path targets
-/// (`pub type Repo = Arc<Store>;`) don't expose target methods
-/// directly (the wrapper is what callers see), so they're skipped.
-/// Operation.
+/// `pub type Public = private::Hidden;` (or `Box<private::Hidden>`,
+/// `Arc<…>`, etc.) — a public alias can expose methods declared on
+/// a hidden source type. Peel any transparent stdlib wrapper
+/// (`Box` / `Arc` / `Rc` / `Cow`), `&` references, and parens to
+/// reach the inner type-path, then resolve through the workspace
+/// canonicaliser and add the result. Mirrors the receiver-type
+/// resolver, so impls keyed on the source type are recognised
+/// regardless of whether the alias is a bare path or a wrapper-
+/// wrapped one. Operation.
 fn register_alias_target(
     ty: &syn::Type,
     file_scope: &FileScope<'_>,
     mod_stack: &[String],
     out: &mut HashSet<String>,
 ) {
-    let syn::Type::Path(p) = ty else {
+    let Some(p) = peel_to_inner_path(ty) else {
         return;
     };
     let segs: Vec<String> = p
@@ -148,6 +149,43 @@ fn register_alias_target(
     if let Some(canonical) = canonicalise_type_segments_in_scope(&segs, &scope) {
         out.insert(canonical.join("::"));
     }
+}
+
+/// Recursively peel transparent wrappers + references to reach the
+/// inner `TypePath`. Returns `None` for types we can't reduce
+/// (`RwLock`, `Mutex`, `dyn Trait`, tuples, …) — those don't expose
+/// inner methods through Deref.
+// qual:recursive
+fn peel_to_inner_path(ty: &syn::Type) -> Option<&syn::TypePath> {
+    match ty {
+        syn::Type::Reference(r) => peel_to_inner_path(&r.elem),
+        syn::Type::Paren(p) => peel_to_inner_path(&p.elem),
+        syn::Type::Path(p) => match transparent_wrapper_inner(p) {
+            Some(inner) => peel_to_inner_path(inner),
+            None => Some(p),
+        },
+        _ => None,
+    }
+}
+
+/// If `tp`'s last segment is a Deref-transparent stdlib wrapper
+/// (`Box`/`Arc`/`Rc`/`Cow`), return its first generic type arg so the
+/// caller can peel further. Returns `None` for non-wrapper paths or
+/// wrappers without a positional type arg. Operation.
+fn transparent_wrapper_inner(tp: &syn::TypePath) -> Option<&syn::Type> {
+    const STDLIB_TRANSPARENT: &[&str] = &["Box", "Arc", "Rc", "Cow"];
+    let last = tp.path.segments.last()?;
+    let name = last.ident.to_string();
+    if !STDLIB_TRANSPARENT.contains(&name.as_str()) {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(ab) = &last.arguments else {
+        return None;
+    };
+    ab.args.iter().find_map(|arg| match arg {
+        syn::GenericArgument::Type(t) => Some(t),
+        _ => None,
+    })
 }
 
 /// Build `crate::<file_modules>::<mod_stack>::<ident>` joined as a
