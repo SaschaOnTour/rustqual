@@ -9,6 +9,7 @@
 use super::super::canonical::CanonicalType;
 use super::super::infer::InferContext;
 use super::super::resolve::{resolve_type, ResolveContext};
+use super::super::self_subst::substitute_bare_self;
 
 // qual:api
 /// Extract `(binding_name, canonical_type)` pairs from a pattern matched
@@ -94,7 +95,10 @@ fn bind_annotated(
             workspace_files: ctx.workspace_files,
             alias_param_subs: None,
         };
-        resolve_type(ty, &rctx)
+        match ctx.self_type.as_deref() {
+            Some(impl_segs) => resolve_type(&substitute_bare_self(ty, impl_segs), &rctx),
+            None => resolve_type(ty, &rctx),
+        }
     };
     let annotated = resolve(&pt.ty);
     collect(&pt.pat, &annotated, ctx, out);

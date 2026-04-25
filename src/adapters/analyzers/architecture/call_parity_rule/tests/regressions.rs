@@ -458,6 +458,89 @@ fn let_annotation_self_resolves() {
     );
 }
 
+#[test]
+fn turbofish_self_inside_impl_resolves() {
+    // `let s = get::<Self>(); s.diff();` inside `impl Session`. The
+    // turbofish-as-return-type fallback must substitute Self before
+    // resolving the type argument so the binding pins to Session.
+    let fx = parse(
+        r#"
+        impl Session {
+            pub fn run(&self) {
+                let s = get::<Self>();
+                s.diff();
+            }
+        }
+        "#,
+    );
+    let self_segs = vec![
+        "crate".to_string(),
+        "app".to_string(),
+        "session".to_string(),
+        "Session".to_string(),
+    ];
+    let calls = run_impl_method(&fx, &rlm_index(), "Session", "run", self_segs);
+    assert!(
+        calls.contains("crate::app::session::Session::diff"),
+        "`get::<Self>()` turbofish must resolve to Session, got {calls:?}"
+    );
+}
+
+#[test]
+fn annotated_destructuring_self_resolves() {
+    // `let Some(other): Option<Self> = maybe() else { return; };` —
+    // the annotation goes through `bind_annotated` in the destructure
+    // walker, which must substitute Self before resolving.
+    let fx = parse(
+        r#"
+        impl Session {
+            pub fn run(&self) {
+                let Some(other): Option<Self> = maybe() else { return; };
+                other.diff();
+            }
+        }
+        "#,
+    );
+    let self_segs = vec![
+        "crate".to_string(),
+        "app".to_string(),
+        "session".to_string(),
+        "Session".to_string(),
+    ];
+    let calls = run_impl_method(&fx, &rlm_index(), "Session", "run", self_segs);
+    assert!(
+        calls.contains("crate::app::session::Session::diff"),
+        "annotated destructuring with Self must bind to Session, got {calls:?}"
+    );
+}
+
+#[test]
+fn cast_as_self_resolves() {
+    // `(expr as Self).diff()` inside `impl Session` — `infer_cast`
+    // resolves the target type, which must substitute Self.
+    let fx = parse(
+        r#"
+        impl Session {
+            pub fn run(&self) {
+                let s = (raw() as Self);
+                s.diff();
+            }
+        }
+        "#,
+    );
+    let self_segs = vec![
+        "crate".to_string(),
+        "app".to_string(),
+        "session".to_string(),
+        "Session".to_string(),
+    ];
+    let calls = run_impl_method(&fx, &rlm_index(), "Session", "run", self_segs);
+    assert!(
+        calls.contains("crate::app::session::Session::diff"),
+        "`as Self` cast must resolve to Session, got {calls:?}"
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // Positive: free-fn return-type chain
 // ═══════════════════════════════════════════════════════════════════

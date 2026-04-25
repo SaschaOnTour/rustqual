@@ -10,6 +10,7 @@
 
 use super::super::canonical::CanonicalType;
 use super::super::resolve::{resolve_type, ResolveContext};
+use super::super::self_subst::substitute_bare_self;
 use super::InferContext;
 
 /// `base.field` — recurse on `base`, then look up the field in the
@@ -65,7 +66,10 @@ pub(super) fn infer_cast(c: &syn::ExprCast, ctx: &InferContext<'_>) -> Option<Ca
         workspace_files: ctx.workspace_files,
         alias_param_subs: None,
     };
-    let ty = resolve_type(&c.ty, &rctx);
+    let ty = match ctx.self_type.as_deref() {
+        Some(impl_segs) => resolve_type(&substitute_bare_self(&c.ty, impl_segs), &rctx),
+        None => resolve_type(&c.ty, &rctx),
+    };
     if ty.is_opaque() {
         None
     } else {

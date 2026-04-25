@@ -10,6 +10,7 @@
 
 use super::super::canonical::CanonicalType;
 use super::super::resolve::{resolve_type, ResolveContext};
+use super::super::self_subst::substitute_bare_self;
 use super::InferContext;
 
 /// Fallback after `fn_returns` / `method_returns` miss: use the
@@ -39,7 +40,10 @@ pub(super) fn turbofish_return_type(
         workspace_files: ctx.workspace_files,
         alias_param_subs: None,
     };
-    let resolved = resolve_type(first_ty, &rctx);
+    let resolved = match ctx.self_type.as_deref() {
+        Some(impl_segs) => resolve_type(&substitute_bare_self(first_ty, impl_segs), &rctx),
+        None => resolve_type(first_ty, &rctx),
+    };
     if matches!(resolved, CanonicalType::Opaque) {
         return None;
     }
