@@ -196,6 +196,8 @@ fn test_result_chain_unwrap_then_field() {
         importing_file: "src/app/test.rs",
         bindings: &bindings,
         self_type: None,
+        mod_stack: &[],
+        local_decl_scopes: None,
     };
     let expr: syn::Expr = syn::parse_str("res.unwrap().id").expect("parse");
     let t = infer_type(&expr, &ctx).expect("chain resolved");

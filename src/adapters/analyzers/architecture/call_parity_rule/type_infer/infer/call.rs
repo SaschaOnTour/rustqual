@@ -11,7 +11,9 @@
 use super::super::canonical::CanonicalType;
 use super::generics::turbofish_return_type;
 use super::InferContext;
-use crate::adapters::analyzers::architecture::call_parity_rule::bindings::canonicalise_type_segments;
+use crate::adapters::analyzers::architecture::call_parity_rule::bindings::{
+    canonicalise_type_segments_in_scope, CanonScope,
+};
 
 /// A bare `Expr::Path` in expression position is always either a local
 /// variable or a const/static ref. Stage 1 resolves only locals.
@@ -135,12 +137,16 @@ fn canonicalise_call_path(segs: &[String], ctx: &InferContext<'_>) -> Option<Vec
         return None;
     }
     let expanded = substitute_self(segs, ctx.self_type.as_ref())?;
-    canonicalise_type_segments(
+    canonicalise_type_segments_in_scope(
         &expanded,
-        ctx.alias_map,
-        ctx.local_symbols,
-        ctx.crate_root_modules,
-        ctx.importing_file,
+        &CanonScope {
+            alias_map: ctx.alias_map,
+            local_symbols: ctx.local_symbols,
+            crate_root_modules: ctx.crate_root_modules,
+            importing_file: ctx.importing_file,
+            local_decl_scopes: ctx.local_decl_scopes,
+            mod_stack: ctx.mod_stack,
+        },
     )
 }
 

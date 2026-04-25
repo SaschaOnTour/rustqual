@@ -73,6 +73,14 @@ pub struct InferContext<'a> {
     /// if we're currently inferring inside an impl body. `None` for
     /// free-fn contexts. Used to resolve `Self::method(...)` calls.
     pub self_type: Option<Vec<String>>,
+    /// Mod-path of the call site inside `importing_file`. Empty for
+    /// top-level inference; populated by the call collector so
+    /// `inner::make()` from within `mod inner` produces the same
+    /// `crate::file::inner::make` key the index stores.
+    pub mod_stack: &'a [String],
+    /// Per-name list of declaring mod-paths within `importing_file`.
+    /// `None` for legacy / unit-test callers.
+    pub local_decl_scopes: Option<&'a HashMap<String, Vec<Vec<String>>>>,
 }
 
 // qual:api

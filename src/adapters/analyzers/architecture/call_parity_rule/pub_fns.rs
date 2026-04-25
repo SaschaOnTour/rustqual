@@ -17,10 +17,11 @@
 //!
 //! See Task 2 in the v1.1.0 plan for the full test list.
 
+use super::bindings::CanonScope;
+use super::local_symbols::{collect_local_symbols_scoped, LocalSymbols};
 use super::signature_params::extract_signature_params;
 use super::workspace_graph::{
-    collect_crate_root_modules, collect_local_symbols, impl_self_ty_segments,
-    resolve_impl_self_type,
+    collect_crate_root_modules, impl_self_ty_segments, resolve_impl_self_type,
 };
 use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
 use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
@@ -77,13 +78,14 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
         // impl self-types via `use` anyway, and the local-symbol /
         // crate-root fallbacks still work.
         let alias_map = aliases_per_file.get(*path).unwrap_or(&empty_aliases);
-        let local_symbols = collect_local_symbols(ast);
+        let LocalSymbols { flat, by_name } = collect_local_symbols_scoped(ast);
         let mut collector = PubFnCollector {
             file: path.to_string(),
             found: Vec::new(),
             visible_types: &visible_types,
             alias_map,
-            local_symbols: &local_symbols,
+            local_symbols: &flat,
+            local_decl_scopes: &by_name,
             crate_root_modules: &crate_root_modules,
             impl_stack: Vec::new(),
             mod_stack: Vec::new(),
@@ -174,8 +176,13 @@ struct PubFnCollector<'ast, 'vis> {
     /// `use crate::app::Session; impl Session { ... }` and the call
     /// collector's receiver-tracked canonical agree on the same path.
     alias_map: &'vis HashMap<String, Vec<String>>,
-    /// Same-file top-level item names for the local-symbol fallback.
+    /// Same-file (top-level + nested) item names for the local-symbol
+    /// fallback in `canonicalise_type_segments_in_scope`.
     local_symbols: &'vis HashSet<String>,
+    /// Per-name list of declaring mod-paths within `file`. Lets the
+    /// resolver pick `crate::<file>::<mod>::Session` over the flat
+    /// top-level form when the type lives inside an inline mod.
+    local_decl_scopes: &'vis HashMap<String, Vec<Vec<String>>>,
     /// Workspace crate-root module names for Rust 2018+ absolute imports.
     crate_root_modules: &'vis HashSet<String>,
     /// Stack of enclosing `impl` blocks: `(self-type segments, is-visible)`.
@@ -260,10 +267,14 @@ impl<'ast, 'vis> Visit<'ast> for PubFnCollector<'ast, 'vis> {
         // never read under that flag.
         let canonical_segs = resolve_impl_self_type(
             &node.self_ty,
-            self.alias_map,
-            self.local_symbols,
-            self.crate_root_modules,
-            &self.file,
+            &CanonScope {
+                alias_map: self.alias_map,
+                local_symbols: self.local_symbols,
+                crate_root_modules: self.crate_root_modules,
+                importing_file: &self.file,
+                local_decl_scopes: Some(self.local_decl_scopes),
+                mod_stack: &self.mod_stack,
+            },
         )
         .unwrap_or_default();
         self.impl_stack.push((canonical_segs, visible));

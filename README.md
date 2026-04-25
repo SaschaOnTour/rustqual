@@ -902,9 +902,9 @@ For framework codebases you can extend the wrapper and macro lists:
 [architecture.call_parity]
 # Framework extractor wrappers peeled like Arc / Box:
 transparent_wrappers = ["State", "Extension", "Json", "Data"]
-# Attribute macros that don't affect the call graph (starter pack
-# — tracing::instrument, async_trait, tokio::main/test, rstest,
-# test_case, pyo3, wasm_bindgen — already applied by default):
+# Attribute macros that don't affect the call graph. The set is
+# recorded for future macro-expansion integrations and currently has
+# no observable effect on the call-graph / type-inference pipeline.
 transparent_macros = ["my_custom_attr"]
 ```
 

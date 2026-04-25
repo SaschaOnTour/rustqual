@@ -189,9 +189,7 @@ pub struct WorkspaceIndexInputs<'a> {
 /// populated so aliased return types (`fn foo() -> AppResult<T>`)
 /// resolve through to their targets instead of caching the raw alias
 /// path. Integration.
-pub fn build_workspace_type_index(
-    inputs: &WorkspaceIndexInputs<'_>,
-) -> WorkspaceTypeIndex {
+pub fn build_workspace_type_index(inputs: &WorkspaceIndexInputs<'_>) -> WorkspaceTypeIndex {
     let mut index = WorkspaceTypeIndex::new();
     index.transparent_wrappers = inputs.transparent_wrappers.clone();
     let shared = |type_aliases| WalkInputs {

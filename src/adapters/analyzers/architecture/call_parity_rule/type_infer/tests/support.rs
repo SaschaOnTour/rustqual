@@ -77,6 +77,8 @@ impl TypeInferFixture {
             importing_file: &self.file_path,
             bindings: &self.bindings as &dyn BindingLookup,
             self_type: self.self_type.clone(),
+            mod_stack: &[],
+            local_decl_scopes: None,
         }
     }
 }

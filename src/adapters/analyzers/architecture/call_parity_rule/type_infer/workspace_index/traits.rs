@@ -106,10 +106,14 @@ fn record_trait_impl(
     };
     let impl_type_canonical = resolve_impl_self_type(
         &node.self_ty,
-        ctx.alias_map,
-        ctx.local_symbols,
-        ctx.crate_root_modules,
-        ctx.path,
+        &CanonScope {
+            alias_map: ctx.alias_map,
+            local_symbols: ctx.local_symbols,
+            crate_root_modules: ctx.crate_root_modules,
+            importing_file: ctx.path,
+            local_decl_scopes: Some(ctx.local_decl_scopes),
+            mod_stack,
+        },
     );
     let Some(impl_segs) = impl_type_canonical else {
         return;

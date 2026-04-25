@@ -15,6 +15,7 @@
 use super::super::canonical::CanonicalType;
 use super::super::resolve::resolve_type;
 use super::{canonical_type_key, resolve_ctx_from_build, BuildContext, WorkspaceTypeIndex};
+use crate::adapters::analyzers::architecture::call_parity_rule::bindings::CanonScope;
 use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::resolve_impl_self_type;
 use crate::adapters::shared::cfg_test::has_cfg_test;
 use syn::visit::Visit;
@@ -55,10 +56,14 @@ impl<'ast, 'i, 'c> Visit<'ast> for MethodCollector<'i, 'c> {
         }
         let resolved = resolve_impl_self_type(
             &node.self_ty,
-            self.ctx.alias_map,
-            self.ctx.local_symbols,
-            self.ctx.crate_root_modules,
-            self.ctx.path,
+            &CanonScope {
+                alias_map: self.ctx.alias_map,
+                local_symbols: self.ctx.local_symbols,
+                crate_root_modules: self.ctx.crate_root_modules,
+                importing_file: self.ctx.path,
+                local_decl_scopes: Some(self.ctx.local_decl_scopes),
+                mod_stack: &self.mod_stack,
+            },
         );
         self.impl_stack.push(resolved);
         syn::visit::visit_item_impl(self, node);

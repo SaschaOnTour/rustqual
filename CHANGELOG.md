@@ -166,6 +166,13 @@ additive and the legacy fast-path stays intact as a safety net.
 ### Known Limits
 Patterns that intentionally stay unresolved and produce `<method>:name`
 fallback markers rather than fabricate edges:
+- Imports inside inline mods (`mod inner { use super::Foo; … }`) are
+  not separated from the file's top-level alias map. A top-level
+  `use crate::outer::Session;` is visible to nested mods (correct), but
+  a `use super::X;` inside `mod inner` isn't given a distinct
+  scope — alias-map lookups from outside `inner` may see it. In practice
+  this rarely causes false positives; the same-name-shadowing case can
+  be worked around by importing at the file-top level.
 - `Session::open().map(|r| r.m())` — closure-body argument type is
   unknown. Inner method call stays `<method>:m`.
 - `fn get<T>() -> T { … }; let x = get(); x.m()` without annotation

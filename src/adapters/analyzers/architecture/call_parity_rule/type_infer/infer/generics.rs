@@ -38,8 +38,8 @@ pub(super) fn turbofish_return_type(
         importing_file: ctx.importing_file,
         type_aliases: Some(&ctx.workspace.type_aliases),
         transparent_wrappers: Some(&ctx.workspace.transparent_wrappers),
-        local_decl_scopes: None,
-        mod_stack: &[],
+        local_decl_scopes: ctx.local_decl_scopes,
+        mod_stack: ctx.mod_stack,
     };
     let resolved = resolve_type(first_ty, &rctx);
     if matches!(resolved, CanonicalType::Opaque) {

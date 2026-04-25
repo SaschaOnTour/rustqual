@@ -24,7 +24,7 @@ use super::type_infer::{
     WorkspaceTypeIndex,
 };
 use crate::adapters::analyzers::architecture::forbidden_rule::{
-    file_to_module_segments, resolve_to_crate_absolute,
+    file_to_module_segments, resolve_to_crate_absolute_in,
 };
 use std::collections::{HashMap, HashSet};
 use syn::visit::Visit;
@@ -312,11 +312,10 @@ impl<'a> CanonicalCallCollector<'a> {
         bare(&segments.join("::"))
     }
 
-    /// `crate` / `self` / `super` — resolve through the file-relative
-    /// module path. Falls back to `<bare>:` if `resolve_to_crate_absolute`
-    /// can't make sense of the path. Operation.
     fn canonicalise_keyword_path(&self, segments: &[String]) -> String {
-        if let Some(resolved) = resolve_to_crate_absolute(self.importing_file, segments) {
+        if let Some(resolved) =
+            resolve_to_crate_absolute_in(self.importing_file, self.mod_stack, segments)
+        {
             let mut full = vec!["crate".to_string()];
             full.extend(resolved);
             return full.join("::");
@@ -431,6 +430,8 @@ impl<'a> CanonicalCallCollector<'a> {
             importing_file: self.importing_file,
             bindings: &adapter,
             self_type: self.self_type_canonical.clone(),
+            mod_stack: self.mod_stack,
+            local_decl_scopes: self.local_decl_scopes,
         };
         infer_type(expr, &ctx)
     }
@@ -557,6 +558,8 @@ impl<'a> CanonicalCallCollector<'a> {
             importing_file: self.importing_file,
             bindings: &adapter,
             self_type: self.self_type_canonical.clone(),
+            mod_stack: self.mod_stack,
+            local_decl_scopes: self.local_decl_scopes,
         };
         match kind {
             PatKind::Value => extract_bindings(pat, matched, &ictx),
@@ -780,7 +783,6 @@ fn bare(path: &str) -> String {
 fn method_unknown(method: &str) -> String {
     format!("{METHOD_UNKNOWN_PREFIX}{method}")
 }
-
 
 // The Visit impl uses an independent `'ast` lifetime so the same
 // collector can walk both the main fn body (long-lived) and macro

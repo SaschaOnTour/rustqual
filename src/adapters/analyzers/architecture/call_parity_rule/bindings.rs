@@ -9,7 +9,7 @@
 
 use super::local_symbols::scope_for_local;
 use crate::adapters::analyzers::architecture::forbidden_rule::{
-    file_to_module_segments, resolve_to_crate_absolute,
+    file_to_module_segments, resolve_to_crate_absolute, resolve_to_crate_absolute_in,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -75,19 +75,15 @@ fn strip_wrappers(ty: &syn::Type) -> &syn::Type {
     }
 }
 
-/// Bundled inputs for canonical-type-path resolution. Same-file fallback
-/// walks `mod_stack` outward against `local_decl_scopes` to pick the
-/// closest enclosing declaration of a single-ident type name.
-pub(super) struct CanonScope<'a> {
+/// Bundled inputs for canonical-type-path resolution. The same-file
+/// fallback walks `mod_stack` outward against `local_decl_scopes` to
+/// pick the closest enclosing declaration of a single-ident name.
+pub(crate) struct CanonScope<'a> {
     pub alias_map: &'a HashMap<String, Vec<String>>,
     pub local_symbols: &'a HashSet<String>,
     pub crate_root_modules: &'a HashSet<String>,
     pub importing_file: &'a str,
-    /// `name → list of mod-paths-within-file where this name is
-    /// declared`. `None` means flat top-level prepend (legacy path).
     pub local_decl_scopes: Option<&'a HashMap<String, Vec<Vec<String>>>>,
-    /// Mod-path of the calling site within `importing_file`. Empty for
-    /// top-level callers or legacy code paths.
     pub mod_stack: &'a [String],
 }
 
@@ -121,7 +117,7 @@ pub(super) fn canonicalise_type_segments(
 /// `scope.local_decl_scopes` are populated). Returns `None` for
 /// unresolvable paths (external crates, unknown idents).
 /// Operation: closure-hidden own calls keep IOSP clean.
-pub(super) fn canonicalise_type_segments_in_scope(
+pub(crate) fn canonicalise_type_segments_in_scope(
     segments: &[String],
     scope: &CanonScope<'_>,
 ) -> Option<Vec<String>> {
@@ -131,7 +127,8 @@ pub(super) fn canonicalise_type_segments_in_scope(
     let normalize =
         |full| normalize_after_alias(full, scope.importing_file, scope.crate_root_modules);
     if matches!(segments[0].as_str(), "crate" | "self" | "super") {
-        let resolved = resolve_to_crate_absolute(scope.importing_file, segments)?;
+        let resolved =
+            resolve_to_crate_absolute_in(scope.importing_file, scope.mod_stack, segments)?;
         let mut full = vec!["crate".to_string()];
         full.extend(resolved);
         return Some(full);
@@ -156,7 +153,6 @@ pub(super) fn canonicalise_type_segments_in_scope(
     }
     None
 }
-
 
 /// After alias-map substitution, re-run `self` / `super` normalisation
 /// and prepend `crate` for Rust 2018+ absolute imports that resolve

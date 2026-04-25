@@ -19,7 +19,7 @@
 //! file-local helpers — walking only pub fns would under-count delegation
 //! chains and trigger false positives in Check A.
 
-use super::bindings::canonicalise_type_segments;
+use super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
 use super::calls::{collect_canonical_calls, FnContext};
 use super::signature_params::extract_signature_params;
 use super::type_infer::{build_workspace_type_index, WorkspaceIndexInputs, WorkspaceTypeIndex};
@@ -172,22 +172,10 @@ pub(crate) use super::local_symbols::{
 /// to drop the type segment entirely and collide with free fns.
 pub(crate) fn resolve_impl_self_type(
     self_ty: &syn::Type,
-    alias_map: &HashMap<String, Vec<String>>,
-    local_symbols: &HashSet<String>,
-    crate_root_modules: &HashSet<String>,
-    importing_file: &str,
+    scope: &CanonScope<'_>,
 ) -> Option<Vec<String>> {
     let raw = impl_self_ty_segments(self_ty)?;
-    Some(
-        canonicalise_type_segments(
-            &raw,
-            alias_map,
-            local_symbols,
-            crate_root_modules,
-            importing_file,
-        )
-        .unwrap_or(raw),
-    )
+    Some(canonicalise_type_segments_in_scope(&raw, scope).unwrap_or(raw))
 }
 
 /// Flatten a `syn::Type::Path` to its segment identifiers — the shape
@@ -393,10 +381,14 @@ impl<'a, 'ast> Visit<'ast> for FileFnCollector<'a> {
         // `record_fn` skips method recording for those impls.
         let resolved = resolve_impl_self_type(
             &node.self_ty,
-            self.alias_map,
-            self.local_symbols,
-            self.crate_root_modules,
-            self.path,
+            &CanonScope {
+                alias_map: self.alias_map,
+                local_symbols: self.local_symbols,
+                crate_root_modules: self.crate_root_modules,
+                importing_file: self.path,
+                local_decl_scopes: Some(self.local_decl_scopes),
+                mod_stack: &self.mod_stack,
+            },
         );
         self.impl_type_stack.push(resolved);
         syn::visit::visit_item_impl(self, node);

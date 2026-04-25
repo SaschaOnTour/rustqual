@@ -93,8 +93,8 @@ fn bind_annotated(
             importing_file: ctx.importing_file,
             type_aliases: Some(&ctx.workspace.type_aliases),
             transparent_wrappers: Some(&ctx.workspace.transparent_wrappers),
-            local_decl_scopes: None,
-            mod_stack: &[],
+            local_decl_scopes: ctx.local_decl_scopes,
+            mod_stack: ctx.mod_stack,
         };
         resolve_type(ty, &rctx)
     };

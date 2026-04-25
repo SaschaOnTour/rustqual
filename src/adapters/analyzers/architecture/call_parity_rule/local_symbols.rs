@@ -43,17 +43,13 @@ pub(crate) fn collect_local_symbols_scoped(ast: &syn::File) -> LocalSymbols {
 /// Operation. Own calls hidden in closure for IOSP leniency.
 // qual:recursive
 fn walk_local_symbols(items: &[syn::Item], mod_stack: &mut Vec<String>, out: &mut LocalSymbols) {
-    let recurse =
-        |inner: &[syn::Item], stack: &mut Vec<String>, out: &mut LocalSymbols| {
-            walk_local_symbols(inner, stack, out);
-        };
+    let recurse = |inner: &[syn::Item], stack: &mut Vec<String>, out: &mut LocalSymbols| {
+        walk_local_symbols(inner, stack, out);
+    };
     for item in items {
         if let Some(name) = item_name(item) {
             out.flat.insert(name.clone());
-            out.by_name
-                .entry(name)
-                .or_default()
-                .push(mod_stack.clone());
+            out.by_name.entry(name).or_default().push(mod_stack.clone());
         }
         if let syn::Item::Mod(m) = item {
             if !has_cfg_test(&m.attrs) {

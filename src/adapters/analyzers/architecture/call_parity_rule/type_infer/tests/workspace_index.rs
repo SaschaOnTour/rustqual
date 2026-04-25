@@ -398,9 +398,7 @@ fn test_fn_inside_inline_mod_resolves_inner_return_type() {
     // and the return canonical is `crate::app::inner::Session`.
     assert_eq!(
         index.fn_return("crate::app::inner::make"),
-        Some(&CanonicalType::path([
-            "crate", "app", "inner", "Session"
-        ]))
+        Some(&CanonicalType::path(["crate", "app", "inner", "Session"]))
     );
 }
 
