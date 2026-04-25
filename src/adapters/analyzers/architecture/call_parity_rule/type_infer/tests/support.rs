@@ -79,6 +79,7 @@ impl TypeInferFixture {
             self_type: self.self_type.clone(),
             mod_stack: &[],
             local_decl_scopes: None,
+            aliases_per_scope: None,
         }
     }
 }

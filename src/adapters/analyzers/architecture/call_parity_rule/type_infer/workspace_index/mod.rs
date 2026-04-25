@@ -20,6 +20,7 @@ use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph:
     collect_local_symbols_scoped, LocalSymbols,
 };
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
+use crate::adapters::shared::use_tree::ScopedAliasMap;
 use std::collections::{HashMap, HashSet};
 
 /// Per-file resolution context passed to every collector. Owned by the
@@ -27,6 +28,7 @@ use std::collections::{HashMap, HashSet};
 pub(super) struct BuildContext<'a> {
     pub path: &'a str,
     pub alias_map: &'a HashMap<String, Vec<String>>,
+    pub aliases_per_scope: &'a ScopedAliasMap,
     pub local_symbols: &'a HashSet<String>,
     /// Per-name list of mod-paths-within-file where `local_symbols`
     /// names are declared. Lets the resolver pick
@@ -87,6 +89,7 @@ pub(super) fn resolve_ctx_from_build<'a>(
         type_aliases: ctx.type_aliases,
         transparent_wrappers: Some(ctx.transparent_wrappers),
         local_decl_scopes: Some(ctx.local_decl_scopes),
+        aliases_per_scope: Some(ctx.aliases_per_scope),
         mod_stack,
     }
 }
@@ -172,6 +175,7 @@ impl WorkspaceTypeIndex {
 pub struct WorkspaceIndexInputs<'a> {
     pub files: &'a [(&'a str, &'a syn::File)],
     pub aliases_per_file: &'a HashMap<String, HashMap<String, Vec<String>>>,
+    pub aliases_scoped_per_file: &'a HashMap<String, ScopedAliasMap>,
     pub local_symbols_per_file: &'a HashMap<String, LocalSymbols>,
     pub cfg_test_files: &'a HashSet<String>,
     pub crate_root_modules: &'a HashSet<String>,
@@ -195,6 +199,7 @@ pub fn build_workspace_type_index(inputs: &WorkspaceIndexInputs<'_>) -> Workspac
     let shared = |type_aliases| WalkInputs {
         files: inputs.files,
         aliases_per_file: inputs.aliases_per_file,
+        aliases_scoped_per_file: inputs.aliases_scoped_per_file,
         local_symbols_per_file: inputs.local_symbols_per_file,
         cfg_test_files: inputs.cfg_test_files,
         crate_root_modules: inputs.crate_root_modules,
@@ -228,6 +233,7 @@ pub fn build_workspace_type_index(inputs: &WorkspaceIndexInputs<'_>) -> Workspac
 struct WalkInputs<'a> {
     files: &'a [(&'a str, &'a syn::File)],
     aliases_per_file: &'a HashMap<String, HashMap<String, Vec<String>>>,
+    aliases_scoped_per_file: &'a HashMap<String, ScopedAliasMap>,
     local_symbols_per_file: &'a HashMap<String, LocalSymbols>,
     cfg_test_files: &'a HashSet<String>,
     crate_root_modules: &'a HashSet<String>,
@@ -252,9 +258,15 @@ where
         let Some(local) = inputs.local_symbols_per_file.get(*path) else {
             continue;
         };
+        let empty_scoped = HashMap::new();
+        let aliases_per_scope = inputs
+            .aliases_scoped_per_file
+            .get(*path)
+            .unwrap_or(&empty_scoped);
         let ctx = BuildContext {
             path,
             alias_map,
+            aliases_per_scope,
             local_symbols: &local.flat,
             local_decl_scopes: &local.by_name,
             crate_root_modules: inputs.crate_root_modules,

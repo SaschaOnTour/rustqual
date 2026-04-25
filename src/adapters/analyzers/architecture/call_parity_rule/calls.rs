@@ -26,6 +26,7 @@ use super::type_infer::{
 use crate::adapters::analyzers::architecture::forbidden_rule::{
     file_to_module_segments, resolve_to_crate_absolute_in,
 };
+use crate::adapters::shared::use_tree::ScopedAliasMap;
 use std::collections::{HashMap, HashSet};
 use syn::visit::Visit;
 
@@ -51,7 +52,11 @@ pub struct FnContext<'a> {
     /// path like `["crate","foo","Bar"]` for `impl crate::foo::Bar`.
     pub self_type: Option<Vec<String>>,
     /// File-level import alias map (output of `gather_alias_map`).
+    /// Used as fallback when `aliases_per_scope` is `None`.
     pub alias_map: &'a HashMap<String, Vec<String>>,
+    /// Per-mod alias maps (output of `gather_alias_map_scoped`). `None`
+    /// for legacy / unit-test callers.
+    pub aliases_per_scope: Option<&'a ScopedAliasMap>,
     /// Set of top-level + nested item names declared in the same file.
     /// Unqualified calls (`helper()`, no `use` statement) whose first
     /// segment is in this set resolve to `crate::<file_module>::<...>`.
@@ -96,6 +101,7 @@ pub fn collect_canonical_calls(ctx: &FnContext<'_>) -> HashSet<String> {
 // visit-order invariants the walker depends on.
 struct CanonicalCallCollector<'a> {
     alias_map: &'a HashMap<String, Vec<String>>,
+    aliases_per_scope: Option<&'a ScopedAliasMap>,
     local_symbols: &'a HashSet<String>,
     crate_root_modules: &'a HashSet<String>,
     importing_file: &'a str,
@@ -153,6 +159,7 @@ impl<'a> CanonicalCallCollector<'a> {
         });
         Self {
             alias_map: ctx.alias_map,
+            aliases_per_scope: ctx.aliases_per_scope,
             local_symbols: ctx.local_symbols,
             crate_root_modules: ctx.crate_root_modules,
             importing_file: ctx.importing_file,
@@ -191,12 +198,26 @@ impl<'a> CanonicalCallCollector<'a> {
     }
 
     /// Install a signature-param binding using the full `resolve_type`
-    /// pipeline. `Path` → legacy `Vec<String>` scope (simple and cheap
-    /// to look up). `Opaque` is dropped. Everything else — `TraitBound`,
-    /// `Result`/`Option`/`Future` wrappers, `Slice`/`Map` — lands in
-    /// `non_path_bindings` so `?` / `.await` / trait-dispatch fire
-    /// correctly on method-call sites. Operation.
+    /// pipeline. Path → legacy scope, wrappers / trait bounds →
+    /// `non_path_bindings`, `Opaque` dropped. Always seeds frame 0
+    /// because signature params live for the whole body walk.
     fn seed_param_via_resolver(&mut self, name: &str, ty: &syn::Type) {
+        match self.resolve_param_type(ty) {
+            CanonicalType::Path(segs) => {
+                self.bindings[0].insert(name.to_string(), segs);
+            }
+            CanonicalType::Opaque => {}
+            other => {
+                self.non_path_bindings[0].insert(name.to_string(), other);
+            }
+        }
+    }
+
+    /// Resolve a parameter / closure-arg type through the full
+    /// scope-aware pipeline (alias expansion, transparent wrappers,
+    /// trait-bound extraction, inline-mod resolution). Used by both
+    /// signature seeding and closure-param seeding.
+    fn resolve_param_type(&self, ty: &syn::Type) -> CanonicalType {
         let rctx = ResolveContext {
             alias_map: self.alias_map,
             local_symbols: self.local_symbols,
@@ -205,18 +226,10 @@ impl<'a> CanonicalCallCollector<'a> {
             type_aliases: self.workspace_index.map(|w| &w.type_aliases),
             transparent_wrappers: self.workspace_index.map(|w| &w.transparent_wrappers),
             local_decl_scopes: self.local_decl_scopes,
+            aliases_per_scope: self.aliases_per_scope,
             mod_stack: self.mod_stack,
         };
-        match resolve_type(ty, &rctx) {
-            CanonicalType::Path(segs) => {
-                self.bindings[0].insert(name.to_string(), segs);
-            }
-            CanonicalType::Opaque => {}
-            other => {
-                // Signature params always seed the outermost scope (frame 0).
-                self.non_path_bindings[0].insert(name.to_string(), other);
-            }
-        }
+        resolve_type(ty, &rctx)
     }
 
     fn enter_scope(&mut self) {
@@ -266,6 +279,28 @@ impl<'a> CanonicalCallCollector<'a> {
     fn install_non_path_binding(&mut self, name: String, ty: CanonicalType) {
         self.current_scope_mut().remove(&name);
         self.current_non_path_scope_mut().insert(name, ty);
+    }
+
+    /// Install a typed closure parameter (`|x: T| …`) through the same
+    /// scope-aware pipeline used for signature params. Untyped params
+    /// stay unbound (their type isn't recoverable without checker-level
+    /// inference); the resulting `Opaque` tombstone shadows any outer
+    /// same-name binding so the closure body can't accidentally reach
+    /// outer state.
+    fn install_closure_param(&mut self, pat: &syn::Pat) {
+        let syn::Pat::Type(pt) = pat else {
+            if let Some(name) = extract_pat_ident_name(pat) {
+                self.install_non_path_binding(name, CanonicalType::Opaque);
+            }
+            return;
+        };
+        let Some(name) = extract_pat_ident_name(pt.pat.as_ref()) else {
+            return;
+        };
+        match self.resolve_param_type(&pt.ty) {
+            CanonicalType::Path(segs) => self.install_path_binding(name, segs),
+            other => self.install_non_path_binding(name, other),
+        }
     }
 
     /// Turn a path-segment list into the canonical String used for all
@@ -432,6 +467,7 @@ impl<'a> CanonicalCallCollector<'a> {
             self_type: self.self_type_canonical.clone(),
             mod_stack: self.mod_stack,
             local_decl_scopes: self.local_decl_scopes,
+            aliases_per_scope: self.aliases_per_scope,
         };
         infer_type(expr, &ctx)
     }
@@ -467,6 +503,7 @@ impl<'a> CanonicalCallCollector<'a> {
             type_aliases: Some(&wi.type_aliases),
             transparent_wrappers: Some(&wi.transparent_wrappers),
             local_decl_scopes: self.local_decl_scopes,
+            aliases_per_scope: self.aliases_per_scope,
             mod_stack: self.mod_stack,
         };
         let name = pi.ident.to_string();
@@ -560,6 +597,7 @@ impl<'a> CanonicalCallCollector<'a> {
             self_type: self.self_type_canonical.clone(),
             mod_stack: self.mod_stack,
             local_decl_scopes: self.local_decl_scopes,
+            aliases_per_scope: self.aliases_per_scope,
         };
         match kind {
             PatKind::Value => extract_bindings(pat, matched, &ictx),
@@ -806,28 +844,26 @@ impl<'a, 'ast> Visit<'ast> for CanonicalCallCollector<'a> {
                 self.visit_expr(else_expr);
             }
         }
-        // `let x: T = …` with a workspace index — route the annotation
-        // through the full resolver so Stage-3 alias expansion + wrapper
-        // peeling + trait-bound extraction apply. Without this, `let r:
-        // AppResult<Session> = …` would cache the raw alias path and
-        // later `r.unwrap().m()` would miss the method-return edge.
         if self.try_install_annotated_binding(local) {
             return;
         }
-        // Fast-path: direct `let s = T::ctor()` — the legacy prefix-based
-        // extractor resolves without needing a populated workspace index,
-        // so unit-test fixtures work.
-        if let Some((name, ty_canonical)) = extract_let_binding(
-            local,
-            self.alias_map,
-            self.local_symbols,
-            self.crate_root_modules,
-            self.importing_file,
-        ) {
-            self.install_path_binding(name, ty_canonical);
-            return;
+        // The legacy `extract_let_binding` shortcut isn't mod-scope aware
+        // — it would install `let s = inner::Session::new()` as
+        // `crate::file::Session` while the index keys it under
+        // `crate::file::inner::Session`. Skip it when a workspace index
+        // is available so inference (which is scope-aware) takes over.
+        if self.workspace_index.is_none() {
+            if let Some((name, ty_canonical)) = extract_let_binding(
+                local,
+                self.alias_map,
+                self.local_symbols,
+                self.crate_root_modules,
+                self.importing_file,
+            ) {
+                self.install_path_binding(name, ty_canonical);
+                return;
+            }
         }
-        // Simple-ident inference fallback (handles method chains + wrapper types).
         if extract_pat_ident_name(&local.pat).is_some() {
             self.install_inferred_let_binding(local);
             return;
@@ -932,22 +968,8 @@ impl<'a, 'ast> Visit<'ast> for CanonicalCallCollector<'a> {
 
     fn visit_expr_closure(&mut self, c: &'ast syn::ExprClosure) {
         self.enter_scope();
-        // Closure params: extract typed idents into scope.
         for input in &c.inputs {
-            if let syn::Pat::Type(pt) = input {
-                if let syn::Pat::Ident(pi) = pt.pat.as_ref() {
-                    let name = pi.ident.to_string();
-                    if let Some(canonical) = canonical_from_type(
-                        &pt.ty,
-                        self.alias_map,
-                        self.local_symbols,
-                        self.crate_root_modules,
-                        self.importing_file,
-                    ) {
-                        self.current_scope_mut().insert(name, canonical);
-                    }
-                }
-            }
+            self.install_closure_param(input);
         }
         self.visit_expr(&c.body);
         self.exit_scope();

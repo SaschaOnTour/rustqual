@@ -131,6 +131,7 @@ fn run(fx: &RegFixture, index: &WorkspaceTypeIndex, fn_name: &str) -> HashSet<St
         workspace_index: Some(index),
         mod_stack: &[],
         local_decl_scopes: None,
+        aliases_per_scope: None,
     };
     collect_canonical_calls(&ctx)
 }

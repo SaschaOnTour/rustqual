@@ -198,6 +198,7 @@ fn test_result_chain_unwrap_then_field() {
         self_type: None,
         mod_stack: &[],
         local_decl_scopes: None,
+        aliases_per_scope: None,
     };
     let expr: syn::Expr = syn::parse_str("res.unwrap().id").expect("parse");
     let t = infer_type(&expr, &ctx).expect("chain resolved");

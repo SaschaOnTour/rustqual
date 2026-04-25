@@ -21,6 +21,7 @@
 use super::super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
 use super::alias_substitution::substitute_alias_args;
 use super::canonical::CanonicalType;
+use crate::adapters::shared::use_tree::ScopedAliasMap;
 use std::collections::{HashMap, HashSet};
 
 /// Resolution inputs, bundled so the recursive calls don't drag a long
@@ -48,6 +49,9 @@ pub(crate) struct ResolveContext<'a> {
     /// `Some(&workspace.local_decl_scopes_per_file[file])` (or the
     /// build-time equivalent).
     pub local_decl_scopes: Option<&'a HashMap<String, Vec<Vec<String>>>>,
+    /// Per-mod alias maps for `use` items declared inside inline mods.
+    /// `None` falls back to the flat `alias_map`.
+    pub aliases_per_scope: Option<&'a ScopedAliasMap>,
     /// Mod-path inside `importing_file` of the type / fn being resolved.
     /// Empty when the caller is at file-top-level or doesn't track mod
     /// scope. Used together with `local_decl_scopes` to pick the
@@ -70,6 +74,7 @@ fn canon_scope<'a>(ctx: &'a ResolveContext<'a>) -> CanonScope<'a> {
         crate_root_modules: ctx.crate_root_modules,
         importing_file: ctx.importing_file,
         local_decl_scopes: ctx.local_decl_scopes,
+        aliases_per_scope: ctx.aliases_per_scope,
         mod_stack: ctx.mod_stack,
     }
 }

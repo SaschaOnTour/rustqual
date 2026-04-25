@@ -112,6 +112,7 @@ fn record_trait_impl(
             crate_root_modules: ctx.crate_root_modules,
             importing_file: ctx.path,
             local_decl_scopes: Some(ctx.local_decl_scopes),
+            aliases_per_scope: Some(ctx.aliases_per_scope),
             mod_stack,
         },
     );
@@ -145,6 +146,7 @@ fn resolve_trait_path(
             crate_root_modules: ctx.crate_root_modules,
             importing_file: ctx.path,
             local_decl_scopes: Some(ctx.local_decl_scopes),
+            aliases_per_scope: Some(ctx.aliases_per_scope),
             mod_stack,
         },
     )?;

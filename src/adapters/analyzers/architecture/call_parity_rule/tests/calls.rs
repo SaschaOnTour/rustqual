@@ -127,6 +127,7 @@ fn ctx_for_fn<'a>(fctx: &'a FileCtx, fn_name: &str, importing_file: &'a str) -> 
         workspace_index: None,
         mod_stack: &[],
         local_decl_scopes: None,
+        aliases_per_scope: None,
     }
 }
 
@@ -319,6 +320,7 @@ fn test_collect_self_dispatch_in_impl() {
         workspace_index: None,
         mod_stack: &[],
         local_decl_scopes: None,
+        aliases_per_scope: None,
     };
     let calls = collect_canonical_calls(&ctx);
     assert!(
@@ -776,6 +778,7 @@ fn test_qualified_impl_path_does_not_double_crate() {
         workspace_index: None,
         mod_stack: &[],
         local_decl_scopes: None,
+        aliases_per_scope: None,
     };
     let calls = collect_canonical_calls(&ctx);
     assert!(
@@ -809,6 +812,7 @@ fn ctx_with_index<'a>(
         workspace_index: Some(index),
         mod_stack: &[],
         local_decl_scopes: None,
+        aliases_per_scope: None,
     }
 }
 

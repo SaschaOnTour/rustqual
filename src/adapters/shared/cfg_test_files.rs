@@ -124,8 +124,8 @@ impl<'a> ChildPathResolver<'a> {
         let dir_raw = child_dir.join(mod_name).join("mod.rs");
         let file_lossy = file_raw.to_string_lossy();
         let dir_lossy = dir_raw.to_string_lossy();
-        let candidate_file = normalize_sep(&file_lossy);
-        let candidate_dir = normalize_sep(&dir_lossy);
+        let candidate_file = normalize_sep(file_lossy.as_ref());
+        let candidate_dir = normalize_sep(dir_lossy.as_ref());
         if self.known_paths.contains(candidate_file.as_ref()) {
             Some(candidate_file.into_owned())
         } else if self.known_paths.contains(candidate_dir.as_ref()) {

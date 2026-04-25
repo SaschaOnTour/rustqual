@@ -19,6 +19,7 @@ pub mod generics;
 
 use super::canonical::CanonicalType;
 use super::workspace_index::WorkspaceTypeIndex;
+use crate::adapters::shared::use_tree::ScopedAliasMap;
 use std::collections::{HashMap, HashSet};
 
 /// Look up a scoped variable name → inferred type. Implementations may
@@ -81,6 +82,9 @@ pub struct InferContext<'a> {
     /// Per-name list of declaring mod-paths within `importing_file`.
     /// `None` for legacy / unit-test callers.
     pub local_decl_scopes: Option<&'a HashMap<String, Vec<Vec<String>>>>,
+    /// Per-mod alias maps for `use` items inside inline modules.
+    /// `None` falls back to `alias_map`.
+    pub aliases_per_scope: Option<&'a ScopedAliasMap>,
 }
 
 // qual:api

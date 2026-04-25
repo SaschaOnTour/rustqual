@@ -11,6 +11,7 @@ use super::local_symbols::scope_for_local;
 use crate::adapters::analyzers::architecture::forbidden_rule::{
     file_to_module_segments, resolve_to_crate_absolute, resolve_to_crate_absolute_in,
 };
+use crate::adapters::shared::use_tree::ScopedAliasMap;
 use std::collections::{HashMap, HashSet};
 
 /// Infer a canonical type-path from a `syn::Type`, stripping common
@@ -76,14 +77,23 @@ fn strip_wrappers(ty: &syn::Type) -> &syn::Type {
 }
 
 /// Bundled inputs for canonical-type-path resolution. The same-file
-/// fallback walks `mod_stack` outward against `local_decl_scopes` to
-/// pick the closest enclosing declaration of a single-ident name.
+/// fallback walks `mod_stack` outward against `local_decl_scopes` /
+/// `aliases_per_scope` to pick the closest enclosing declaration of a
+/// single-ident name.
 pub(crate) struct CanonScope<'a> {
+    /// Top-level (file-scope) `use` aliases. Used as the legacy fallback
+    /// when `aliases_per_scope` is `None`.
     pub alias_map: &'a HashMap<String, Vec<String>>,
     pub local_symbols: &'a HashSet<String>,
     pub crate_root_modules: &'a HashSet<String>,
     pub importing_file: &'a str,
     pub local_decl_scopes: Option<&'a HashMap<String, Vec<Vec<String>>>>,
+    /// `mod_path → (name → canonical_path)` capturing each inline
+    /// module's own `use` items. The empty `Vec` key holds top-level
+    /// aliases. When `Some`, alias lookup walks `mod_stack` outward
+    /// honouring per-mod scope; when `None`, the flat `alias_map` is
+    /// used (legacy / unit-test path).
+    pub aliases_per_scope: Option<&'a ScopedAliasMap>,
     pub mod_stack: &'a [String],
 }
 
@@ -106,6 +116,7 @@ pub(super) fn canonicalise_type_segments(
             crate_root_modules,
             importing_file,
             local_decl_scopes: None,
+            aliases_per_scope: None,
             mod_stack: &[],
         },
     )
@@ -133,8 +144,8 @@ pub(crate) fn canonicalise_type_segments_in_scope(
         full.extend(resolved);
         return Some(full);
     }
-    if let Some(alias) = scope.alias_map.get(&segments[0]) {
-        let mut full = alias.clone();
+    if let Some(alias) = lookup_alias(scope, &segments[0]) {
+        let mut full = alias.to_vec();
         full.extend_from_slice(&segments[1..]);
         return normalize(full);
     }
@@ -152,6 +163,26 @@ pub(crate) fn canonicalise_type_segments_in_scope(
         return Some(full);
     }
     None
+}
+
+/// Resolve `name` against the alias maps in scope. Walks `mod_stack`
+/// outward through `aliases_per_scope` so a `use` declared inside an
+/// inline mod shadows a same-name file-level alias. Falls back to the
+/// flat `alias_map` when the scoped overlay isn't provided (legacy /
+/// unit-test path).
+fn lookup_alias<'a>(scope: &'a CanonScope<'a>, name: &str) -> Option<&'a [String]> {
+    if let Some(per_scope) = scope.aliases_per_scope {
+        for depth in (0..=scope.mod_stack.len()).rev() {
+            let prefix = &scope.mod_stack[..depth];
+            if let Some(map) = per_scope.get(prefix) {
+                if let Some(path) = map.get(name) {
+                    return Some(path.as_slice());
+                }
+            }
+        }
+        return None;
+    }
+    scope.alias_map.get(name).map(Vec::as_slice)
 }
 
 /// After alias-map substitution, re-run `self` / `super` normalisation

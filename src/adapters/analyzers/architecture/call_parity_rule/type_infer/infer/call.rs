@@ -145,6 +145,7 @@ fn canonicalise_call_path(segs: &[String], ctx: &InferContext<'_>) -> Option<Vec
             crate_root_modules: ctx.crate_root_modules,
             importing_file: ctx.importing_file,
             local_decl_scopes: ctx.local_decl_scopes,
+            aliases_per_scope: ctx.aliases_per_scope,
             mod_stack: ctx.mod_stack,
         },
     )

@@ -27,6 +27,7 @@ fn ctx<'a>(
         type_aliases: None,
         transparent_wrappers: None,
         local_decl_scopes: None,
+        aliases_per_scope: None,
         mod_stack: &[],
     }
 }

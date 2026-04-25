@@ -62,6 +62,7 @@ impl<'ast, 'i, 'c> Visit<'ast> for MethodCollector<'i, 'c> {
                 crate_root_modules: self.ctx.crate_root_modules,
                 importing_file: self.ctx.path,
                 local_decl_scopes: Some(self.ctx.local_decl_scopes),
+                aliases_per_scope: Some(self.ctx.aliases_per_scope),
                 mod_stack: &self.mod_stack,
             },
         );
@@ -104,15 +105,13 @@ fn record_method(
     mod_stack: &[String],
     node: &syn::ImplItemFn,
 ) {
-    let resolve = |ty: &syn::Type| resolve_type(ty, &resolve_ctx_from_build(ctx, mod_stack));
-    let canon = |segs: &[String]| canonical_type_key(segs, ctx, mod_stack);
     let Some(Some(impl_segs)) = impl_stack.last() else {
         return;
     };
     let syn::ReturnType::Type(_, ret_ty) = &node.sig.output else {
         return;
     };
-    let inner = resolve(ret_ty);
+    let inner = resolve_method_return(ret_ty, impl_segs, ctx, mod_stack);
     if matches!(inner, CanonicalType::Opaque) {
         return;
     }
@@ -121,9 +120,27 @@ fn record_method(
     } else {
         inner
     };
-    let receiver_canonical = canon(impl_segs);
+    let receiver_canonical = canonical_type_key(impl_segs, ctx, mod_stack);
     let method_name = node.sig.ident.to_string();
     index
         .method_returns
         .insert((receiver_canonical, method_name), ret);
+}
+
+/// Resolve a method's return type, substituting bare `Self` (and
+/// `Self::Inner` paths) with the enclosing impl's canonical self-type.
+/// Without this, `pub fn open() -> Self` on `impl Session` would index
+/// as `Opaque` because the resolver doesn't know what `Self` refers to.
+fn resolve_method_return(
+    ret_ty: &syn::Type,
+    impl_segs: &[String],
+    ctx: &BuildContext<'_>,
+    mod_stack: &[String],
+) -> CanonicalType {
+    if let syn::Type::Path(p) = ret_ty {
+        if p.qself.is_none() && p.path.segments.first().is_some_and(|s| s.ident == "Self") {
+            return CanonicalType::Path(impl_segs.to_vec());
+        }
+    }
+    resolve_type(ret_ty, &resolve_ctx_from_build(ctx, mod_stack))
 }

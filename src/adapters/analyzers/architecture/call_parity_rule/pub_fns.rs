@@ -25,6 +25,8 @@ use super::workspace_graph::{
 };
 use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
 use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
+use crate::adapters::shared::use_tree::gather_alias_map_scoped;
+use crate::adapters::shared::use_tree::ScopedAliasMap;
 use std::collections::{HashMap, HashSet};
 use syn::visit::Visit;
 use syn::Visibility;
@@ -79,11 +81,13 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
         // crate-root fallbacks still work.
         let alias_map = aliases_per_file.get(*path).unwrap_or(&empty_aliases);
         let LocalSymbols { flat, by_name } = collect_local_symbols_scoped(ast);
+        let aliases_per_scope = gather_alias_map_scoped(ast);
         let mut collector = PubFnCollector {
             file: path.to_string(),
             found: Vec::new(),
             visible_types: &visible_types,
             alias_map,
+            aliases_per_scope: &aliases_per_scope,
             local_symbols: &flat,
             local_decl_scopes: &by_name,
             crate_root_modules: &crate_root_modules,
@@ -176,6 +180,8 @@ struct PubFnCollector<'ast, 'vis> {
     /// `use crate::app::Session; impl Session { ... }` and the call
     /// collector's receiver-tracked canonical agree on the same path.
     alias_map: &'vis HashMap<String, Vec<String>>,
+    /// Per-mod aliases for `use` items inside inline modules.
+    aliases_per_scope: &'vis ScopedAliasMap,
     /// Same-file (top-level + nested) item names for the local-symbol
     /// fallback in `canonicalise_type_segments_in_scope`.
     local_symbols: &'vis HashSet<String>,
@@ -273,6 +279,7 @@ impl<'ast, 'vis> Visit<'ast> for PubFnCollector<'ast, 'vis> {
                 crate_root_modules: self.crate_root_modules,
                 importing_file: &self.file,
                 local_decl_scopes: Some(self.local_decl_scopes),
+                aliases_per_scope: Some(self.aliases_per_scope),
                 mod_stack: &self.mod_stack,
             },
         )

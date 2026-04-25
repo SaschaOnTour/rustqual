@@ -26,6 +26,8 @@ use super::type_infer::{build_workspace_type_index, WorkspaceIndexInputs, Worksp
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
 use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
 use crate::adapters::shared::cfg_test::has_cfg_test;
+use crate::adapters::shared::use_tree::gather_alias_map_scoped;
+use crate::adapters::shared::use_tree::ScopedAliasMap;
 use std::collections::{HashMap, HashSet, VecDeque};
 use syn::visit::Visit;
 
@@ -243,22 +245,28 @@ pub(crate) fn build_call_graph<'ast>(
     transparent_wrappers: &HashSet<String>,
 ) -> CallGraph {
     let crate_root_modules = collect_crate_root_modules(files);
-    // Pre-compute `LocalSymbols` per file once and reuse across the
-    // type-index passes + the graph collector. Without this, every file
-    // would walk its AST three times just to rebuild the same maps.
+    // Pre-compute `LocalSymbols` + per-mod alias maps per file once and
+    // reuse across the type-index passes + the graph collector.
     let local_symbols_per_file: HashMap<String, LocalSymbols> = files
         .iter()
         .filter(|(p, _)| !cfg_test_files.contains(*p))
         .map(|(path, ast)| (path.to_string(), collect_local_symbols_scoped(ast)))
         .collect();
+    let aliases_scoped_per_file: HashMap<String, ScopedAliasMap> = files
+        .iter()
+        .filter(|(p, _)| !cfg_test_files.contains(*p))
+        .map(|(path, ast)| (path.to_string(), gather_alias_map_scoped(ast)))
+        .collect();
     let type_index = build_workspace_type_index(&WorkspaceIndexInputs {
         files,
         aliases_per_file,
+        aliases_scoped_per_file: &aliases_scoped_per_file,
         local_symbols_per_file: &local_symbols_per_file,
         cfg_test_files,
         crate_root_modules: &crate_root_modules,
         transparent_wrappers,
     });
+    let empty_scoped = HashMap::new();
     let mut graph = CallGraph::new();
     for (path, ast) in files {
         if cfg_test_files.contains(*path) {
@@ -270,9 +278,11 @@ pub(crate) fn build_call_graph<'ast>(
         let Some(local) = local_symbols_per_file.get(*path) else {
             continue;
         };
+        let aliases_per_scope = aliases_scoped_per_file.get(*path).unwrap_or(&empty_scoped);
         let mut collector = FileFnCollector {
             path,
             alias_map,
+            aliases_per_scope,
             local_symbols: &local.flat,
             local_decl_scopes: &local.by_name,
             crate_root_modules: &crate_root_modules,
@@ -305,6 +315,7 @@ fn populate_layer_cache(graph: &mut CallGraph, layers: &LayerDefinitions) {
 struct FileFnCollector<'a> {
     path: &'a str,
     alias_map: &'a HashMap<String, Vec<String>>,
+    aliases_per_scope: &'a ScopedAliasMap,
     local_symbols: &'a HashSet<String>,
     /// Per-name list of mod-paths-within-file where the name is
     /// declared. Threaded through `FnContext` so the call collector
@@ -346,6 +357,7 @@ impl<'a> FileFnCollector<'a> {
             signature_params: extract_signature_params(sig),
             self_type,
             alias_map: self.alias_map,
+            aliases_per_scope: Some(self.aliases_per_scope),
             local_symbols: self.local_symbols,
             crate_root_modules: self.crate_root_modules,
             importing_file: self.path,
@@ -387,6 +399,7 @@ impl<'a, 'ast> Visit<'ast> for FileFnCollector<'a> {
                 crate_root_modules: self.crate_root_modules,
                 importing_file: self.path,
                 local_decl_scopes: Some(self.local_decl_scopes),
+                aliases_per_scope: Some(self.aliases_per_scope),
                 mod_stack: &self.mod_stack,
             },
         );

@@ -94,6 +94,7 @@ fn bind_annotated(
             type_aliases: Some(&ctx.workspace.type_aliases),
             transparent_wrappers: Some(&ctx.workspace.transparent_wrappers),
             local_decl_scopes: ctx.local_decl_scopes,
+            aliases_per_scope: ctx.aliases_per_scope,
             mod_stack: ctx.mod_stack,
         };
         resolve_type(ty, &rctx)
