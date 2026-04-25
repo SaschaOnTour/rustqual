@@ -120,16 +120,11 @@ impl<'a> ChildPathResolver<'a> {
             parent.with_extension("")
         };
         // Normalize backslashes to forward slashes on Windows so the
-        // candidates match `known_paths` (which always store /).
-        let candidate_file = child_dir
-            .join(format!("{mod_name}.rs"))
-            .to_string_lossy()
-            .replace('\\', "/");
-        let candidate_dir = child_dir
-            .join(mod_name)
-            .join("mod.rs")
-            .to_string_lossy()
-            .replace('\\', "/");
+        // candidates match `known_paths` (which always store /). The
+        // `normalize_sep` helper is a no-op on Unix builds.
+        let candidate_file = normalize_sep(child_dir.join(format!("{mod_name}.rs")).to_string_lossy().as_ref());
+        let candidate_dir =
+            normalize_sep(child_dir.join(mod_name).join("mod.rs").to_string_lossy().as_ref());
         if self.known_paths.contains(candidate_file.as_str()) {
             Some(candidate_file)
         } else if self.known_paths.contains(candidate_dir.as_str()) {
@@ -142,6 +137,24 @@ impl<'a> ChildPathResolver<'a> {
 
 /// Extract the string value of a `#[path = "..."]` attribute if present.
 /// Operation: attribute lookup + literal parsing, no own calls.
+/// Convert OS-native path separators into the forward-slash form used
+/// by `known_paths`. On Unix this is the identity (no allocation); on
+/// Windows we only scan+replace when a backslash is actually present.
+/// Operation.
+#[cfg(windows)]
+fn normalize_sep(path: &str) -> String {
+    if path.contains('\\') {
+        path.replace('\\', "/")
+    } else {
+        path.to_string()
+    }
+}
+
+#[cfg(not(windows))]
+fn normalize_sep(path: &str) -> String {
+    path.to_string()
+}
+
 fn path_attribute(attrs: &[syn::Attribute]) -> Option<String> {
     attrs.iter().find_map(|attr| {
         if !attr.path().is_ident("path") {

@@ -17,9 +17,9 @@
 //!
 //! See Task 2 in the v1.1.0 plan for the full test list.
 
+use super::signature_params::extract_signature_params;
 use super::workspace_graph::{
-    collect_crate_root_modules, collect_local_symbols, extract_signature_params,
-    impl_self_ty_segments, resolve_impl_self_type,
+    collect_crate_root_modules, collect_local_symbols, impl_self_ty_segments, resolve_impl_self_type,
 };
 use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
 use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
@@ -40,6 +40,10 @@ pub(crate) struct PubFnInfo<'ast> {
     /// Type-name path of the enclosing `impl`, if any. Forms the
     /// `Self::method` resolution context for the call collector.
     pub self_type: Option<Vec<String>>,
+    /// Names of enclosing inline `mod inner { ... }` blocks, outer-most
+    /// first. Feeds the canonical-name builder so nested-mod items key
+    /// under `crate::<file>::inner::…` to match the graph + type index.
+    pub mod_stack: Vec<String>,
 }
 
 // qual:api
@@ -81,6 +85,7 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
             local_symbols: &local_symbols,
             crate_root_modules: &crate_root_modules,
             impl_stack: Vec::new(),
+            mod_stack: Vec::new(),
         };
         collector.visit_file(ast);
         out.entry(layer).or_default().extend(collector.found);
@@ -153,6 +158,10 @@ struct PubFnCollector<'ast, 'vis> {
     /// Stack of enclosing `impl` blocks: `(self-type segments, is-visible)`.
     /// Merged so the two halves can't drift out of sync.
     impl_stack: Vec<(Vec<String>, bool)>,
+    /// Names of enclosing inline `mod inner { ... }` blocks. Feeds
+    /// `PubFnInfo.mod_stack` so Check B canonical names align with the
+    /// graph keys / type index (both of which now prefix inline mods).
+    mod_stack: Vec<String>,
 }
 
 impl<'ast, 'vis> PubFnCollector<'ast, 'vis> {
@@ -178,6 +187,7 @@ impl<'ast, 'vis> PubFnCollector<'ast, 'vis> {
             body,
             signature_params: extract_signature_params(sig),
             self_type: self.current_self_type(),
+            mod_stack: self.mod_stack.clone(),
         });
     }
 }
@@ -254,6 +264,8 @@ impl<'ast, 'vis> Visit<'ast> for PubFnCollector<'ast, 'vis> {
         if has_cfg_test(&node.attrs) {
             return;
         }
+        self.mod_stack.push(node.ident.to_string());
         syn::visit::visit_item_mod(self, node);
+        self.mod_stack.pop();
     }
 }

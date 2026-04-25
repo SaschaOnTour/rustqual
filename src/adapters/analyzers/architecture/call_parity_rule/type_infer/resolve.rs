@@ -1,15 +1,22 @@
 //! `syn::Type` → `CanonicalType` conversion.
 //!
-//! Recognises stdlib wrappers (`Result`, `Option`, `Vec`, `HashMap`,
-//! `BTreeMap`, `Arc`, `Box`, `Rc`, `Cow`, `RwLock`, `Mutex`, `RefCell`,
-//! `Cell`) and projects their generic arguments into the matching
-//! `CanonicalType` variant. Unknown-generic paths resolve through the
-//! existing `bindings::canonicalise_type_segments` pipeline (alias map
-//! + local symbols + crate roots).
+//! Recognises `Result` / `Option` / `Future` / `Vec` / `HashMap` /
+//! `BTreeMap` and the Deref-transparent smart pointers `Arc` / `Box` /
+//! `Rc` / `Cow`, projecting their generic arguments into the matching
+//! `CanonicalType` variant. `RwLock` / `Mutex` / `RefCell` / `Cell` are
+//! intentionally *not* peeled — their methods (`read`, `lock`,
+//! `borrow`, `get`) don't exist on the inner type, and peeling them
+//! would synthesize false-positive call-graph edges. Users can opt back
+//! in per-wrapper via `[architecture.call_parity]::transparent_wrappers`
+//! when a domain-specific wrapper genuinely Derefs to its inner value.
 //!
-//! Shared between the workspace-index builder (Task 1.2) and the
-//! inference engine (Task 1.3) — both turn `syn::Type`s into
-//! `CanonicalType`s with identical semantics.
+//! Unknown-generic paths resolve through the existing
+//! `bindings::canonicalise_type_segments` pipeline (alias map + local
+//! symbols + crate roots).
+//!
+//! Shared between the workspace-index builder and the inference engine
+//! — both turn `syn::Type`s into `CanonicalType`s with identical
+//! semantics.
 
 use super::super::bindings::canonicalise_type_segments;
 use super::alias_substitution::substitute_alias_args;
@@ -242,9 +249,9 @@ where
     }
 }
 
-/// Peel a transparent single-type-param wrapper (Arc / Box / Rc / Cow /
-/// RwLock / Mutex / RefCell / Cell) by recursing into its first generic
-/// argument. Operation.
+/// Peel a transparent single-type-param wrapper (Arc / Box / Rc / Cow
+/// plus any user-configured `transparent_wrappers`) by recursing into
+/// its first generic argument. Operation.
 fn peel_single_generic(
     args: &syn::PathArguments,
     ctx: &ResolveContext<'_>,

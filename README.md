@@ -870,8 +870,13 @@ Session/Service/Context-pattern idioms out of the box:
   `as_ref` etc. Closure-dependent combinators (`map`, `and_then`)
   intentionally stay unresolved rather than fabricate an edge.
 - **Wrapper stripping:** `Arc<T>`, `Box<T>`, `Rc<T>`, `Cow<'_, T>`,
-  `RwLock<T>`, `Mutex<T>`, `RefCell<T>`, `Cell<T>`, `&T`, `&mut T` all
-  transparent. `Vec<T>` / `HashMap<_, V>` preserve the element/value type.
+  `&T`, `&mut T` — the Deref-transparent smart pointers — strip to the
+  inner type. `RwLock<T>` / `Mutex<T>` / `RefCell<T>` / `Cell<T>` do
+  **not** strip by default (their `read` / `lock` / `borrow` / `get`
+  methods don't exist on the inner type — stripping would synthesize
+  bogus edges). Opt in per-wrapper via `transparent_wrappers` if your
+  codebase uses a genuinely Deref-transparent domain wrapper. `Vec<T>`
+  / `HashMap<_, V>` preserve the element/value type.
 - **`Self::xxx`** in impl-method contexts substitutes to the enclosing
   type.
 - **`if let Some(s) = opt`** binds `s: T` when `opt: Option<T>`, same
@@ -884,9 +889,12 @@ Session/Service/Context-pattern idioms out of the box:
 - **Turbofish return types**: `get::<Session>()` for generic fns — the
   turbofish arg is used as the return type when the workspace index has
   no concrete return for `get`. Only single-ident paths trigger.
-- **Type aliases**: `type Db = Arc<RwLock<Store>>;` is recorded and
-  expanded during receiver resolution, so `fn h(db: Db) { db.read() }`
-  reaches `Store::read`.
+- **Type aliases**: `type Repo = Arc<Box<Store>>;` is recorded and
+  expanded during receiver resolution, so `fn h(r: Repo) { r.insert(..) }`
+  reaches `Store::insert` through the peeled smart-pointer chain.
+  Aliases wrapping non-Deref types (`type Db = Arc<RwLock<Store>>`) still
+  expand, but the `RwLock` stops peeling — methods on the inner `Store`
+  aren't reached unless `RwLock` is listed in `transparent_wrappers`.
 
 For framework codebases you can extend the wrapper and macro lists:
 

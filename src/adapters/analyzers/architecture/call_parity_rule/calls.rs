@@ -391,11 +391,13 @@ impl<'a> CanonicalCallCollector<'a> {
     /// `let x: T = …` — route the annotation through the full resolver
     /// when a workspace index is available so alias expansion + wrapper
     /// peeling + trait-bound extraction all apply. Returns `true` when
-    /// a binding was actually installed. Returns `false` when there's
-    /// no annotation, no workspace index, or the annotation resolves to
-    /// `Opaque` (e.g. `let s: _ = …` where `_` is the inference
-    /// placeholder) — the caller then falls through to initializer-
-    /// based inference. Operation: closure-hidden resolution.
+    /// a binding was installed. Returns `false` only when there's no
+    /// workspace index, the pattern isn't a typed ident, or the
+    /// annotation is the explicit `_` inference placeholder — the caller
+    /// then falls through to initializer-based inference (which is what
+    /// rustc does). An annotation that names an unresolvable type still
+    /// installs an `Opaque` tombstone so outer path bindings with the
+    /// same name don't leak back in. Operation.
     fn try_install_annotated_binding(&mut self, local: &syn::Local) -> bool {
         let Some(wi) = self.workspace_index else {
             return false;
@@ -406,6 +408,9 @@ impl<'a> CanonicalCallCollector<'a> {
         let syn::Pat::Ident(pi) = pt.pat.as_ref() else {
             return false;
         };
+        if matches!(pt.ty.as_ref(), syn::Type::Infer(_)) {
+            return false;
+        }
         let rctx = ResolveContext {
             alias_map: self.alias_map,
             local_symbols: self.local_symbols,
@@ -417,7 +422,6 @@ impl<'a> CanonicalCallCollector<'a> {
         let name = pi.ident.to_string();
         match resolve_type(pt.ty.as_ref(), &rctx) {
             CanonicalType::Path(segs) => self.install_path_binding(name, segs),
-            CanonicalType::Opaque => return false,
             other => self.install_non_path_binding(name, other),
         }
         true
@@ -425,24 +429,24 @@ impl<'a> CanonicalCallCollector<'a> {
 
     /// Install a `let x = expr` binding via shallow inference on the
     /// initializer. `Path` results go into the legacy scope, non-Path
-    /// results (wrappers, trait bounds) into `non_path_bindings` so
-    /// downstream `?` / `.await` / trait-dispatch on `x` resolve
-    /// correctly. Only simple `Pat::Ident` patterns are handled here;
-    /// destructuring is handled separately via `patterns::extract_bindings`.
+    /// results (wrappers, trait bounds) into `non_path_bindings`, and
+    /// unresolvable initializers (`let s = external()` where we can't
+    /// name the return type) into `non_path_bindings` as an `Opaque`
+    /// tombstone so an outer `s: Session` doesn't leak back in when
+    /// `s.method()` is resolved. Only simple `Pat::Ident` patterns are
+    /// handled here; destructuring flows through `install_destructure_bindings`.
     /// Operation.
     fn install_inferred_let_binding(&mut self, local: &syn::Local) {
-        let Some(init) = local.init.as_ref() else {
-            return;
-        };
         let Some(name) = extract_pat_ident_name(&local.pat) else {
             return;
         };
-        let Some(inferred) = self.infer_receiver_type(&init.expr) else {
-            return;
-        };
+        let inferred = local
+            .init
+            .as_ref()
+            .and_then(|init| self.infer_receiver_type(&init.expr))
+            .unwrap_or(CanonicalType::Opaque);
         match inferred {
             CanonicalType::Path(segs) => self.install_path_binding(name, segs),
-            CanonicalType::Opaque => {}
             other => self.install_non_path_binding(name, other),
         }
     }
@@ -456,24 +460,29 @@ impl<'a> CanonicalCallCollector<'a> {
     /// Extract pattern bindings from `pat` against a matched-type from
     /// `matched_expr`, installing them into the current scope. Path
     /// bindings go into the legacy scope, wrapper/trait-bound bindings
-    /// into `non_path_bindings`. Used by `let`-destructuring, `if let`,
-    /// `while let`, `match` arms. Integration.
+    /// into `non_path_bindings`. If the matched expression is itself
+    /// unresolvable, every syntactic binding in the pattern gets an
+    /// `Opaque` tombstone so outer same-name bindings can't leak back
+    /// in at a later `.method()` call. Used by `let`-destructuring,
+    /// `if let`, `while let`, `match` arms. Integration.
     fn install_destructure_bindings(&mut self, pat: &syn::Pat, matched_expr: &syn::Expr) {
-        let Some(matched) = self.infer_receiver_type(matched_expr) else {
-            return;
-        };
+        let matched = self
+            .infer_receiver_type(matched_expr)
+            .unwrap_or(CanonicalType::Opaque);
         let pairs = self.extract_pattern_pairs(pat, &matched, PatKind::Value);
-        self.install_binding_pairs(pairs);
+        self.install_binding_pairs_with_tombstones(pat, pairs);
     }
 
     /// Extract for-loop element-type bindings from `pat` against
-    /// `iter_expr` (the thing being iterated over). Integration.
+    /// `iter_expr` (the thing being iterated over). Unresolvable
+    /// iterators tombstone their pattern idents, same as
+    /// `install_destructure_bindings`. Integration.
     fn install_for_bindings(&mut self, pat: &syn::Pat, iter_expr: &syn::Expr) {
-        let Some(iter_type) = self.infer_receiver_type(iter_expr) else {
-            return;
-        };
+        let iter_type = self
+            .infer_receiver_type(iter_expr)
+            .unwrap_or(CanonicalType::Opaque);
         let pairs = self.extract_pattern_pairs(pat, &iter_type, PatKind::Iterator);
-        self.install_binding_pairs(pairs);
+        self.install_binding_pairs_with_tombstones(pat, pairs);
     }
 
     /// Wrapper around `patterns::extract_bindings` / `extract_for_bindings`
@@ -506,14 +515,30 @@ impl<'a> CanonicalCallCollector<'a> {
         }
     }
 
-    /// Dispatch each `(name, type)` pair into the right scope map.
+    /// Dispatch each `(name, type)` pair into the right scope map, then
+    /// walk `pat` and install `Opaque` tombstones for every syntactic
+    /// ident the resolver didn't reach. This keeps an unresolvable
+    /// `let (_, s) = external()` or `for s in opaque_iter` from letting
+    /// an outer `s: Session` leak back in at `s.method()` time.
     /// Operation.
-    fn install_binding_pairs(&mut self, pairs: Vec<(String, CanonicalType)>) {
+    fn install_binding_pairs_with_tombstones(
+        &mut self,
+        pat: &syn::Pat,
+        pairs: Vec<(String, CanonicalType)>,
+    ) {
+        let mut resolved: HashSet<String> = HashSet::new();
         for (name, ty) in pairs {
+            resolved.insert(name.clone());
             match ty {
                 CanonicalType::Path(segs) => self.install_path_binding(name, segs),
-                CanonicalType::Opaque => {}
                 other => self.install_non_path_binding(name, other),
+            }
+        }
+        let mut idents = Vec::new();
+        collect_pattern_idents(pat, &mut idents);
+        for name in idents {
+            if !resolved.contains(&name) {
+                self.install_non_path_binding(name, CanonicalType::Opaque);
             }
         }
     }
@@ -654,6 +679,44 @@ fn extract_pat_ident_name(pat: &syn::Pat) -> Option<String> {
         syn::Pat::Ident(pi) => Some(pi.ident.to_string()),
         syn::Pat::Type(pt) => extract_pat_ident_name(&pt.pat),
         _ => None,
+    }
+}
+
+/// Collect every binding ident introduced by `pat` (ignoring subpatterns
+/// that don't bind names — `_`, literals, ref subslices without idents).
+/// Used to install `Opaque` tombstones for syntactic bindings whose
+/// matched type couldn't be inferred. Integration: dispatch over pat
+/// variants, each arm delegates to a recursive helper.
+// qual:recursive
+fn collect_pattern_idents(pat: &syn::Pat, out: &mut Vec<String>) {
+    match pat {
+        syn::Pat::Ident(pi) => push_pat_ident(pi, out),
+        syn::Pat::Type(pt) => collect_pattern_idents(&pt.pat, out),
+        syn::Pat::Reference(r) => collect_pattern_idents(&r.pat, out),
+        syn::Pat::Paren(p) => collect_pattern_idents(&p.pat, out),
+        syn::Pat::Tuple(t) => walk_each(t.elems.iter(), out),
+        syn::Pat::TupleStruct(ts) => walk_each(ts.elems.iter(), out),
+        syn::Pat::Struct(s) => walk_each(s.fields.iter().map(|f| f.pat.as_ref()), out),
+        syn::Pat::Slice(s) => walk_each(s.elems.iter(), out),
+        syn::Pat::Or(o) => walk_each(o.cases.iter().take(1), out),
+        _ => {}
+    }
+}
+
+/// Recurse into every pattern in `iter`. Operation: closure-free fn
+/// keeps lifetime inference simple when called from the main walker.
+fn walk_each<'p, I: Iterator<Item = &'p syn::Pat>>(iter: I, out: &mut Vec<String>) {
+    for p in iter {
+        collect_pattern_idents(p, out);
+    }
+}
+
+/// Push a `Pat::Ident`'s name and recurse into its optional subpattern
+/// (`x @ Some(inner)`). Operation: closure-hidden recursion.
+fn push_pat_ident(pi: &syn::PatIdent, out: &mut Vec<String>) {
+    out.push(pi.ident.to_string());
+    if let Some((_, sub)) = &pi.subpat {
+        collect_pattern_idents(sub, out);
     }
 }
 

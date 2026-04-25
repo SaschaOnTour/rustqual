@@ -163,7 +163,11 @@ fn build_transparent_macros(user: &[String]) -> HashSet<String> {
         "cfg_attr",     // conditional attribute
     ];
     let mut set: HashSet<String> = DEFAULTS.iter().map(|s| (*s).to_string()).collect();
-    set.extend(user.iter().map(|s| last_path_segment(s.trim()).to_string()));
+    set.extend(
+        user.iter()
+            .map(|s| last_path_segment(s.trim()).to_string())
+            .filter(|s| !s.is_empty()),
+    );
     set
 }
 

@@ -134,10 +134,15 @@ additive and the legacy fast-path stays intact as a safety net.
   over-approximated.
 
 ### Added — Framework & Config Layer (Stage 3)
-- **Type-alias expansion.** `type Db = Arc<RwLock<Store>>;` recorded
-  in the workspace index; `fn h(db: Db) { db.read() }` expands `Db`
-  → `Arc<RwLock<Store>>` → `Store` (Arc/RwLock peeled by the stdlib
-  wrapper rules) and resolves `read` against Store's method index.
+- **Type-alias expansion.** `type Repo = Arc<Box<Store>>;` recorded in
+  the workspace index; `fn h(r: Repo) { r.insert(..) }` expands `Repo`
+  → `Arc<Box<Store>>` → `Store` (Arc/Box are Deref-transparent) and
+  resolves `insert` against Store's method index. Aliases wrapping
+  non-Deref types like `RwLock` / `Mutex` / `RefCell` / `Cell` still
+  expand the alias itself, but those wrappers aren't peeled by default
+  (their `read` / `lock` / `borrow` methods don't live on the inner
+  type) — list them in `transparent_wrappers` if your codebase genuinely
+  treats them as Deref-transparent.
 - **User-configurable transparent wrappers** via
   `[architecture.call_parity]::transparent_wrappers`:
   ```toml
