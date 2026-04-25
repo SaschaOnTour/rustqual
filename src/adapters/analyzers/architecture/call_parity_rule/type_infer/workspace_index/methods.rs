@@ -18,7 +18,7 @@ use super::super::self_subst::substitute_bare_self;
 use super::{canonical_type_key, resolve_ctx_from_build, BuildContext, WorkspaceTypeIndex};
 use crate::adapters::analyzers::architecture::call_parity_rule::bindings::CanonScope;
 use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::resolve_impl_self_type;
-use crate::adapters::shared::cfg_test::has_cfg_test;
+use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
 use syn::visit::Visit;
 
 /// Walk `ast` and populate `index.method_returns`. Integration: delegates
@@ -68,7 +68,7 @@ impl<'ast, 'i, 'c> Visit<'ast> for MethodCollector<'i, 'c> {
     }
 
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
-        if has_cfg_test(&node.attrs) {
+        if has_cfg_test(&node.attrs) || has_test_attr(&node.attrs) {
             return;
         }
         record_method(

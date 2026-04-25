@@ -10,7 +10,7 @@ use super::super::canonical::CanonicalType;
 use super::super::resolve::resolve_type;
 use super::{resolve_ctx_from_build, BuildContext, WorkspaceTypeIndex};
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
-use crate::adapters::shared::cfg_test::has_cfg_test;
+use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
 use syn::visit::Visit;
 
 /// Walk `ast` and populate `index.fn_returns`. Integration.
@@ -35,7 +35,7 @@ struct FnCollector<'i, 'c> {
 
 impl<'ast, 'i, 'c> Visit<'ast> for FnCollector<'i, 'c> {
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
-        if has_cfg_test(&node.attrs) {
+        if has_cfg_test(&node.attrs) || has_test_attr(&node.attrs) {
             return;
         }
         record_fn(self.index, self.ctx, &self.mod_stack, node);

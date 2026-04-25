@@ -25,7 +25,7 @@ use super::signature_params::extract_signature_params;
 use super::type_infer::{build_workspace_type_index, WorkspaceIndexInputs, WorkspaceTypeIndex};
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
 use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
-use crate::adapters::shared::cfg_test::has_cfg_test;
+use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
 use crate::adapters::shared::use_tree::gather_alias_map_scoped;
 use crate::adapters::shared::use_tree::ScopedAliasMap;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -360,7 +360,7 @@ impl<'a> FileFnCollector<'a> {
 
 impl<'a, 'ast> Visit<'ast> for FileFnCollector<'a> {
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
-        if has_cfg_test(&node.attrs) {
+        if has_cfg_test(&node.attrs) || has_test_attr(&node.attrs) {
             return;
         }
         let name = node.sig.ident.to_string();
@@ -389,7 +389,7 @@ impl<'a, 'ast> Visit<'ast> for FileFnCollector<'a> {
     }
 
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
-        if has_cfg_test(&node.attrs) {
+        if has_cfg_test(&node.attrs) || has_test_attr(&node.attrs) {
             return;
         }
         let name = node.sig.ident.to_string();

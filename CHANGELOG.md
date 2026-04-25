@@ -221,6 +221,15 @@ fallback markers rather than fabricate edges:
   private::Hidden { … }` directly so impl-canonical and
   caller-canonical agree, or `qual:allow(architecture)` on the
   affected impl.
+- `type Id<T> = T; pub type Public = Id<private::Hidden>;` — the
+  visibility pass doesn't substitute use-site generic args into
+  alias bodies (the workspace alias-index runs after pub-fn
+  enumeration). `Id` enters `visible_canonicals`, but
+  `private::Hidden` doesn't, so Check B can drop public methods on
+  `Hidden`. Receiver-side resolution does substitute, so callers
+  still reach `Hidden::op`. Workaround: skip the generic-alias
+  indirection (`pub type Public = private::Hidden;`), or
+  `qual:allow(architecture)` on the affected impl.
 - Arbitrary proc-macros that alter the call graph without being in
   `transparent_macros` config. User-annotate via
   `// qual:allow(architecture)` on the enclosing fn.

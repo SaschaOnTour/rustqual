@@ -193,9 +193,19 @@ fn is_marker_trait(path: &syn::Path) -> bool {
     MARKER_TRAITS.contains(&name.as_str())
 }
 
+/// Names of the recognised stdlib wrappers, used both for direct-name
+/// dispatch in `resolve_path` and for the alias-aware lookup that
+/// promotes `use std::sync::Arc as Shared;`-imported names to their
+/// canonical wrapper.
+const WRAPPER_NAMES: &[&str] = &[
+    "Result", "Option", "Future", "Vec", "HashMap", "BTreeMap", "Arc", "Box", "Rc", "Cow",
+];
+
 /// Dispatch on the last path-segment's ident to recognise stdlib
-/// wrappers. Falls through to `resolve_generic_path` for everything
-/// else. Integration: closure-hidden own calls keep IOSP clean.
+/// wrappers. Resolves `use std::sync::Arc as Shared;`-style import
+/// aliases first, so `Shared<T>` peels just like `Arc<T>`. Falls
+/// through to `resolve_generic_path` for everything else.
+/// Integration: closure-hidden own calls keep IOSP clean.
 fn resolve_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -> CanonicalType {
     let Some(last) = path.segments.last() else {
         return CanonicalType::Opaque;
@@ -206,9 +216,23 @@ fn resolve_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -> Canoni
     };
     let peel = || peel_single_generic(args, ctx, depth);
     let fallback = || resolve_generic_path(path, ctx, depth);
-    let name = last.ident.to_string();
     let wrap_future = || wrap_future_output(args, ctx, depth);
-    match name.as_str() {
+    let raw_name = last.ident.to_string();
+    // Promote `use std::sync::Arc as Shared`-style import aliases to
+    // their canonical wrapper name so `Shared<T>` matches the same
+    // arms as `Arc<T>`. Direct-name hits and unrelated paths skip
+    // the alias lookup.
+    let alias_target = (!WRAPPER_NAMES.contains(&raw_name.as_str())
+        && !is_user_transparent(&raw_name, ctx))
+    .then(|| ctx.file.alias_map.get(&raw_name).and_then(|p| p.last()))
+    .flatten();
+    let name = match alias_target {
+        Some(seg) if WRAPPER_NAMES.contains(&seg.as_str()) || is_user_transparent(seg, ctx) => {
+            seg.as_str()
+        }
+        _ => raw_name.as_str(),
+    };
+    match name {
         "Result" => wrap(0, CanonicalType::Result),
         "Option" => wrap(0, CanonicalType::Option),
         // Future uses `Output = T` associated-type syntax, not a
@@ -224,7 +248,7 @@ fn resolve_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -> Canoni
         // type. Users can opt back in via `transparent_wrappers` for
         // domain-specific deref-like wrappers.
         "Arc" | "Box" | "Rc" | "Cow" => peel(),
-        _ if is_user_transparent(&name, ctx) => peel(),
+        _ if is_user_transparent(name, ctx) => peel(),
         _ => fallback(),
     }
 }

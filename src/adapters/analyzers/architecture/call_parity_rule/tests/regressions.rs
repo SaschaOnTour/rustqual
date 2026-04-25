@@ -541,6 +541,27 @@ fn cast_as_self_resolves() {
     );
 }
 
+#[test]
+fn aliased_stdlib_wrapper_peels_to_inner() {
+    // `use std::sync::Arc as Shared;` then `fn h(s: Shared<Session>)`
+    // — the receiver resolver must follow the alias to recognise
+    // `Shared` as `Arc`, peel it, and reach `Session::diff`.
+    let fx = parse(
+        r#"
+        use std::sync::Arc as Shared;
+        use crate::app::session::Session;
+        pub fn handle(s: Shared<Session>) {
+            s.diff();
+        }
+        "#,
+    );
+    let calls = run(&fx, &rlm_index(), "handle");
+    assert!(
+        calls.contains("crate::app::session::Session::diff"),
+        "aliased Arc wrapper must peel to Session, got {calls:?}"
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // Positive: free-fn return-type chain
 // ═══════════════════════════════════════════════════════════════════
