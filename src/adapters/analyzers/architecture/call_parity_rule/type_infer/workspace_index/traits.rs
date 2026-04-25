@@ -107,12 +107,7 @@ fn record_trait_impl(
     let impl_type_canonical = resolve_impl_self_type(
         &node.self_ty,
         &CanonScope {
-            alias_map: ctx.alias_map,
-            local_symbols: ctx.local_symbols,
-            crate_root_modules: ctx.crate_root_modules,
-            importing_file: ctx.path,
-            local_decl_scopes: Some(ctx.local_decl_scopes),
-            aliases_per_scope: Some(ctx.aliases_per_scope),
+            file: ctx.file,
             mod_stack,
         },
     );
@@ -141,12 +136,7 @@ fn resolve_trait_path(
     let resolved = canonicalise_type_segments_in_scope(
         &segs,
         &CanonScope {
-            alias_map: ctx.alias_map,
-            local_symbols: ctx.local_symbols,
-            crate_root_modules: ctx.crate_root_modules,
-            importing_file: ctx.path,
-            local_decl_scopes: Some(ctx.local_decl_scopes),
-            aliases_per_scope: Some(ctx.aliases_per_scope),
+            file: ctx.file,
             mod_stack,
         },
     )?;
@@ -157,7 +147,7 @@ fn resolve_trait_path(
 /// Operation.
 fn canonical_name(ident: &str, ctx: &BuildContext<'_>, mod_stack: &[String]) -> String {
     let mut segs: Vec<String> = vec!["crate".to_string()];
-    segs.extend(file_to_module_segments(ctx.path));
+    segs.extend(file_to_module_segments(ctx.file.path));
     segs.extend(mod_stack.iter().cloned());
     segs.push(ident.to_string());
     segs.join("::")

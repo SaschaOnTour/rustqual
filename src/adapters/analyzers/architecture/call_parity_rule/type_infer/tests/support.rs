@@ -6,9 +6,11 @@
 //! directly — no `&mut self` helper methods, which keeps the struct
 //! SRP-clean and NMS-compliant.
 
+use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::FileScope;
 use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::{
     BindingLookup, FlatBindings, InferContext, WorkspaceTypeIndex,
 };
+use crate::adapters::shared::use_tree::ScopedAliasMap;
 use std::collections::{HashMap, HashSet};
 
 /// Parse a Rust pattern source string into `syn::Pat`. Tries `let …`
@@ -48,7 +50,9 @@ fn parse_pat_as_match_arm(src: &str) -> syn::Pat {
 pub(super) struct TypeInferFixture {
     pub index: WorkspaceTypeIndex,
     pub alias_map: HashMap<String, Vec<String>>,
+    pub aliases_per_scope: ScopedAliasMap,
     pub local_symbols: HashSet<String>,
+    pub local_decl_scopes: HashMap<String, Vec<Vec<String>>>,
     pub crate_roots: HashSet<String>,
     pub bindings: FlatBindings,
     pub file_path: String,
@@ -60,7 +64,9 @@ impl TypeInferFixture {
         Self {
             index: WorkspaceTypeIndex::new(),
             alias_map: HashMap::new(),
+            aliases_per_scope: ScopedAliasMap::new(),
             local_symbols: HashSet::new(),
+            local_decl_scopes: HashMap::new(),
             crate_roots: HashSet::new(),
             bindings: FlatBindings::new(),
             file_path: "src/app/test.rs".to_string(),
@@ -68,18 +74,25 @@ impl TypeInferFixture {
         }
     }
 
-    pub fn ctx(&self) -> InferContext<'_> {
-        InferContext {
-            workspace: &self.index,
+    pub fn file_scope(&self) -> FileScope<'_> {
+        FileScope {
+            path: &self.file_path,
             alias_map: &self.alias_map,
+            aliases_per_scope: &self.aliases_per_scope,
             local_symbols: &self.local_symbols,
+            local_decl_scopes: &self.local_decl_scopes,
             crate_root_modules: &self.crate_roots,
-            importing_file: &self.file_path,
+        }
+    }
+
+    pub fn ctx<'a>(&'a self, file_scope: &'a FileScope<'a>) -> InferContext<'a> {
+        InferContext {
+            file: file_scope,
+            mod_stack: &[],
+            workspace: &self.index,
             bindings: &self.bindings as &dyn BindingLookup,
             self_type: self.self_type.clone(),
-            mod_stack: &[],
-            local_decl_scopes: None,
-            aliases_per_scope: None,
+            workspace_files: None,
         }
     }
 }

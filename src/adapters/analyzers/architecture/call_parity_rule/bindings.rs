@@ -7,7 +7,7 @@
 //! `(name, canonical)` pair, preferring an explicit `let s: T =` annotation
 //! over constructor-inference from `let s = T::new()`.
 
-use super::local_symbols::scope_for_local;
+use super::local_symbols::{scope_for_local, FileScope};
 use crate::adapters::analyzers::architecture::forbidden_rule::{
     file_to_module_segments, resolve_to_crate_absolute, resolve_to_crate_absolute_in,
 };
@@ -76,31 +76,17 @@ fn strip_wrappers(ty: &syn::Type) -> &syn::Type {
     }
 }
 
-/// Bundled inputs for canonical-type-path resolution. The same-file
-/// fallback walks `mod_stack` outward against `local_decl_scopes` /
-/// `aliases_per_scope` to pick the closest enclosing declaration of a
-/// single-ident name.
+/// Bundled inputs for canonical-type-path resolution. Per-file lookup
+/// tables live in `file: &FileScope`; `mod_stack` is per-call-site.
 pub(crate) struct CanonScope<'a> {
-    /// Top-level (file-scope) `use` aliases. Used as the legacy fallback
-    /// when `aliases_per_scope` is `None`.
-    pub alias_map: &'a HashMap<String, Vec<String>>,
-    pub local_symbols: &'a HashSet<String>,
-    pub crate_root_modules: &'a HashSet<String>,
-    pub importing_file: &'a str,
-    pub local_decl_scopes: Option<&'a HashMap<String, Vec<Vec<String>>>>,
-    /// `mod_path → (name → canonical_path)` capturing each inline
-    /// module's own `use` items. The empty `Vec` key holds top-level
-    /// aliases. When `Some`, alias lookup walks `mod_stack` outward
-    /// honouring per-mod scope; when `None`, the flat `alias_map` is
-    /// used (legacy / unit-test path).
-    pub aliases_per_scope: Option<&'a ScopedAliasMap>,
+    pub file: &'a FileScope<'a>,
     pub mod_stack: &'a [String],
 }
 
-/// Legacy helper for callers that don't track mod scope (call collector,
-/// the `bindings::canonical_from_type` adapter, tests). Delegates to the
-/// scope-aware variant with empty `mod_stack` + `None` decl scopes —
-/// behaviour unchanged. Operation: thin wrapper.
+/// Legacy helper for callers that have only the flat per-file maps
+/// (unit-test fixtures, the `canonical_from_type` adapter). Builds an
+/// empty `ScopedAliasMap` / `local_decl_scopes` overlay so the
+/// scope-aware path falls back to flat behaviour automatically.
 pub(super) fn canonicalise_type_segments(
     segments: &[String],
     alias_map: &HashMap<String, Vec<String>>,
@@ -108,26 +94,29 @@ pub(super) fn canonicalise_type_segments(
     crate_root_modules: &HashSet<String>,
     importing_file: &str,
 ) -> Option<Vec<String>> {
+    let empty_scoped = ScopedAliasMap::new();
+    let empty_decls = HashMap::new();
+    let file = FileScope {
+        path: importing_file,
+        alias_map,
+        aliases_per_scope: &empty_scoped,
+        local_symbols,
+        local_decl_scopes: &empty_decls,
+        crate_root_modules,
+    };
     canonicalise_type_segments_in_scope(
         segments,
         &CanonScope {
-            alias_map,
-            local_symbols,
-            crate_root_modules,
-            importing_file,
-            local_decl_scopes: None,
-            aliases_per_scope: None,
+            file: &file,
             mod_stack: &[],
         },
     )
 }
 
-/// Resolve a type-path segment list into a canonical `[crate, …]` path,
-/// applying `crate/self/super` module normalisation, alias-map lookup,
-/// and same-file fallback (mod-scope-aware when `scope.mod_stack` /
-/// `scope.local_decl_scopes` are populated). Returns `None` for
-/// unresolvable paths (external crates, unknown idents).
-/// Operation: closure-hidden own calls keep IOSP clean.
+/// Resolve a type-path segment list into a canonical `[crate, …]` path
+/// against `scope`. Returns `None` for unresolvable paths (external
+/// crates, unknown idents, or in-file names not declared at the
+/// current `mod_stack`).
 pub(crate) fn canonicalise_type_segments_in_scope(
     segments: &[String],
     scope: &CanonScope<'_>,
@@ -135,11 +124,9 @@ pub(crate) fn canonicalise_type_segments_in_scope(
     if segments.is_empty() {
         return None;
     }
-    let normalize =
-        |full| normalize_after_alias(full, scope.importing_file, scope.crate_root_modules);
+    let file = scope.file;
     if matches!(segments[0].as_str(), "crate" | "self" | "super") {
-        let resolved =
-            resolve_to_crate_absolute_in(scope.importing_file, scope.mod_stack, segments)?;
+        let resolved = resolve_to_crate_absolute_in(file.path, scope.mod_stack, segments)?;
         let mut full = vec!["crate".to_string()];
         full.extend(resolved);
         return Some(full);
@@ -147,17 +134,26 @@ pub(crate) fn canonicalise_type_segments_in_scope(
     if let Some(alias) = lookup_alias(scope, &segments[0]) {
         let mut full = alias.to_vec();
         full.extend_from_slice(&segments[1..]);
-        return normalize(full);
+        return normalize_after_alias(full, file.path, scope.mod_stack, file.crate_root_modules);
     }
-    if scope.local_symbols.contains(&segments[0]) {
-        let mod_path = scope_for_local(scope.local_decl_scopes, &segments[0], scope.mod_stack);
-        let mut full = vec!["crate".to_string()];
-        full.extend(file_to_module_segments(scope.importing_file));
-        full.extend(mod_path.iter().cloned());
-        full.extend_from_slice(segments);
-        return Some(full);
+    if file.local_symbols.contains(&segments[0]) {
+        if let Some(mod_path) =
+            scope_for_local(file.local_decl_scopes, &segments[0], scope.mod_stack)
+        {
+            let mut full = vec!["crate".to_string()];
+            full.extend(file_to_module_segments(file.path));
+            full.extend(mod_path.iter().cloned());
+            full.extend_from_slice(segments);
+            return Some(full);
+        }
+        if file.local_decl_scopes.is_empty() {
+            let mut full = vec!["crate".to_string()];
+            full.extend(file_to_module_segments(file.path));
+            full.extend_from_slice(segments);
+            return Some(full);
+        }
     }
-    if scope.crate_root_modules.contains(&segments[0]) {
+    if file.crate_root_modules.contains(&segments[0]) {
         let mut full = vec!["crate".to_string()];
         full.extend_from_slice(segments);
         return Some(full);
@@ -165,39 +161,31 @@ pub(crate) fn canonicalise_type_segments_in_scope(
     None
 }
 
-/// Resolve `name` against the alias maps in scope. Walks `mod_stack`
-/// outward through `aliases_per_scope` so a `use` declared inside an
-/// inline mod shadows a same-name file-level alias. Falls back to the
-/// flat `alias_map` when the scoped overlay isn't provided (legacy /
-/// unit-test path).
+/// Resolve `name` against the alias map for exactly the current
+/// `mod_stack`. Rust `use` items are module-local — child mods don't
+/// inherit parents — so this looks up only at the current scope. When
+/// the scoped overlay has no entry for `mod_stack` (legacy / unit-test
+/// callers), falls back to the flat `alias_map`.
 fn lookup_alias<'a>(scope: &'a CanonScope<'a>, name: &str) -> Option<&'a [String]> {
-    if let Some(per_scope) = scope.aliases_per_scope {
-        for depth in (0..=scope.mod_stack.len()).rev() {
-            let prefix = &scope.mod_stack[..depth];
-            if let Some(map) = per_scope.get(prefix) {
-                if let Some(path) = map.get(name) {
-                    return Some(path.as_slice());
-                }
-            }
-        }
-        return None;
+    if let Some(map) = scope.file.aliases_per_scope.get(scope.mod_stack) {
+        return map.get(name).map(Vec::as_slice);
     }
-    scope.alias_map.get(name).map(Vec::as_slice)
+    scope.file.alias_map.get(name).map(Vec::as_slice)
 }
 
 /// After alias-map substitution, re-run `self` / `super` normalisation
-/// and prepend `crate` for Rust 2018+ absolute imports that resolve
-/// into a known workspace root module (`use app::foo;` →
-/// `crate::app::foo`). Without this, both forms leak non-crate-rooted
-/// canonicals that never match graph nodes.
+/// (relative to `mod_stack` inside `importing_file`, so an alias
+/// declared inside an inline mod resolves its `self`/`super` against
+/// that mod) and prepend `crate` for Rust 2018+ absolute imports.
 fn normalize_after_alias(
     expanded: Vec<String>,
     importing_file: &str,
+    mod_stack: &[String],
     crate_root_modules: &HashSet<String>,
 ) -> Option<Vec<String>> {
     match expanded.first().map(|s| s.as_str()) {
         Some("self") | Some("super") => {
-            let resolved = resolve_to_crate_absolute(importing_file, &expanded)?;
+            let resolved = resolve_to_crate_absolute_in(importing_file, mod_stack, &expanded)?;
             let mut full = vec!["crate".to_string()];
             full.extend(resolved);
             Some(full)
@@ -215,9 +203,10 @@ fn normalize_after_alias(
 pub(super) fn normalize_alias_expansion(
     expanded: Vec<String>,
     importing_file: &str,
+    mod_stack: &[String],
     crate_root_modules: &HashSet<String>,
 ) -> Option<Vec<String>> {
-    normalize_after_alias(expanded, importing_file, crate_root_modules)
+    normalize_after_alias(expanded, importing_file, mod_stack, crate_root_modules)
 }
 
 /// Extract a `(name, canonical_type_path)` pair from a `let` statement.

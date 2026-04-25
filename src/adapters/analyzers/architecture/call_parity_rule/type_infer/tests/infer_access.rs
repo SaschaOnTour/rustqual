@@ -8,7 +8,7 @@ use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::{
 
 fn infer(f: &TypeInferFixture, src: &str) -> Option<CanonicalType> {
     let expr: syn::Expr = syn::parse_str(src).ok()?;
-    infer_type(&expr, &f.ctx())
+    infer_type(&expr, &f.ctx(&f.file_scope()))
 }
 
 // ── Field access ─────────────────────────────────────────────────

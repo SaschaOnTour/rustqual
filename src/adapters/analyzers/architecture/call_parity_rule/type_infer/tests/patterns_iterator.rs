@@ -11,7 +11,7 @@ fn for_bindings(
     iter: CanonicalType,
 ) -> Vec<(String, CanonicalType)> {
     let pat = parse_pat(pat_src);
-    extract_for_bindings(&pat, &iter, &f.ctx())
+    extract_for_bindings(&pat, &iter, &f.ctx(&f.file_scope()))
 }
 
 #[test]

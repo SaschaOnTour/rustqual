@@ -15,11 +15,12 @@
 use crate::adapters::analyzers::architecture::call_parity_rule::calls::{
     collect_canonical_calls, FnContext,
 };
+use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::FileScope;
 use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::{
     CanonicalType, WorkspaceTypeIndex,
 };
 use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::collect_local_symbols;
-use crate::adapters::shared::use_tree::gather_alias_map;
+use crate::adapters::shared::use_tree::{gather_alias_map, ScopedAliasMap};
 use std::collections::{HashMap, HashSet};
 
 const SESSION_PATH: &str = "crate::app::session::Session";
@@ -121,17 +122,20 @@ fn sig_params(sig: &syn::Signature) -> Vec<(String, &syn::Type)> {
 fn run(fx: &RegFixture, index: &WorkspaceTypeIndex, fn_name: &str) -> HashSet<String> {
     let f = find_fn(&fx.file, fn_name);
     let ctx = FnContext {
+        file: &FileScope {
+            path: "src/cli/handlers.rs",
+            alias_map: &fx.alias_map,
+            aliases_per_scope: &ScopedAliasMap::new(),
+            local_symbols: &fx.local_symbols,
+            local_decl_scopes: &HashMap::new(),
+            crate_root_modules: &fx.crate_roots,
+        },
+        mod_stack: &[],
         body: &f.block,
         signature_params: sig_params(&f.sig),
         self_type: None,
-        alias_map: &fx.alias_map,
-        local_symbols: &fx.local_symbols,
-        crate_root_modules: &fx.crate_roots,
-        importing_file: "src/cli/handlers.rs",
         workspace_index: Some(index),
-        mod_stack: &[],
-        local_decl_scopes: None,
-        aliases_per_scope: None,
+        workspace_files: None,
     };
     collect_canonical_calls(&ctx)
 }
@@ -654,7 +658,12 @@ fn type_alias_expands_to_target_via_signature_param() {
     // Non-generic alias — no params to substitute.
     index.type_aliases.insert(
         "crate::cli::handlers::DbRef".to_string(),
-        (Vec::new(), aliased),
+        crate::adapters::analyzers::architecture::call_parity_rule::type_infer::workspace_index::AliasDef {
+            params: Vec::new(),
+            target: aliased,
+            decl_file: "src/cli/handlers.rs".to_string(),
+            decl_mod_stack: Vec::new(),
+        },
     );
     // Store::read() method.
     index.method_returns.insert(

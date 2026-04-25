@@ -1,13 +1,12 @@
 //! Type-alias collection.
 //!
 //! For every top-level `type Alias<P1, P2, …> = Target;` in the
-//! workspace, record `canonical_Alias → (params, Target)` as
-//! `(Vec<String>, syn::Type)`. The generic parameter names are kept
-//! so use-sites like `Alias<ArgA, ArgB>` can substitute them into
-//! `Target` before resolution — without that, generic aliases like
-//! `type AppResult<T> = Result<T, Error>` would cache `Result<T,
-//! Error>` with `T` unbound and downstream `.unwrap()` would return
-//! `Opaque`.
+//! workspace, record `canonical_Alias → AliasDef { params, target,
+//! decl_file, decl_mod_stack }`. Use-sites substitute generic args
+//! into `target` and resolve the result against the alias's *own*
+//! declaring scope — file-level `use crate::Store; type Repo =
+//! Arc<Store>;` only resolves `Store` correctly if the resolver
+//! consults the decl-site's alias map.
 
 use super::{canonical_type_key, BuildContext, WorkspaceTypeIndex};
 use crate::adapters::shared::cfg_test::has_cfg_test;
@@ -48,9 +47,15 @@ impl<'ast, 'i, 'c> Visit<'ast> for AliasCollector<'i, 'c> {
                 _ => None,
             })
             .collect();
-        self.index
-            .type_aliases
-            .insert(canonical, (params, (*node.ty).clone()));
+        self.index.type_aliases.insert(
+            canonical,
+            super::AliasDef {
+                params,
+                target: (*node.ty).clone(),
+                decl_file: self.ctx.file.path.to_string(),
+                decl_mod_stack: self.mod_stack.clone(),
+            },
+        );
     }
 
     fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {

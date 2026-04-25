@@ -158,7 +158,8 @@ fn crate_root_module_of(path: &str) -> Option<String> {
 }
 
 pub(crate) use super::local_symbols::{
-    collect_local_symbols, collect_local_symbols_scoped, LocalSymbols,
+    build_workspace_files_map, collect_local_symbols, collect_local_symbols_scoped, FileScope,
+    LocalSymbols,
 };
 
 /// Canonicalise an impl block's self-type through the same alias /
@@ -257,35 +258,28 @@ pub(crate) fn build_call_graph<'ast>(
         .filter(|(p, _)| !cfg_test_files.contains(*p))
         .map(|(path, ast)| (path.to_string(), gather_alias_map_scoped(ast)))
         .collect();
-    let type_index = build_workspace_type_index(&WorkspaceIndexInputs {
+    let workspace_files = build_workspace_files_map(super::local_symbols::WorkspaceFilesInputs {
         files,
+        cfg_test_files,
         aliases_per_file,
         aliases_scoped_per_file: &aliases_scoped_per_file,
         local_symbols_per_file: &local_symbols_per_file,
-        cfg_test_files,
         crate_root_modules: &crate_root_modules,
+    });
+    let type_index = build_workspace_type_index(&WorkspaceIndexInputs {
+        files,
+        workspace_files: &workspace_files,
+        cfg_test_files,
         transparent_wrappers,
     });
-    let empty_scoped = HashMap::new();
     let mut graph = CallGraph::new();
     for (path, ast) in files {
-        if cfg_test_files.contains(*path) {
-            continue;
-        }
-        let Some(alias_map) = aliases_per_file.get(*path) else {
+        let Some(file) = workspace_files.get(*path) else {
             continue;
         };
-        let Some(local) = local_symbols_per_file.get(*path) else {
-            continue;
-        };
-        let aliases_per_scope = aliases_scoped_per_file.get(*path).unwrap_or(&empty_scoped);
         let mut collector = FileFnCollector {
-            path,
-            alias_map,
-            aliases_per_scope,
-            local_symbols: &local.flat,
-            local_decl_scopes: &local.by_name,
-            crate_root_modules: &crate_root_modules,
+            file,
+            workspace_files: &workspace_files,
             type_index: &type_index,
             impl_type_stack: Vec::new(),
             mod_stack: Vec::new(),
@@ -313,20 +307,11 @@ fn populate_layer_cache(graph: &mut CallGraph, layers: &LayerDefinitions) {
 }
 
 struct FileFnCollector<'a> {
-    path: &'a str,
-    alias_map: &'a HashMap<String, Vec<String>>,
-    aliases_per_scope: &'a ScopedAliasMap,
-    local_symbols: &'a HashSet<String>,
-    /// Per-name list of mod-paths-within-file where the name is
-    /// declared. Threaded through `FnContext` so the call collector
-    /// resolves `Self::xxx` and unqualified local calls inside inline
-    /// mods to the correct `crate::<file>::<mod>::…` canonical.
-    local_decl_scopes: &'a HashMap<String, Vec<Vec<String>>>,
-    crate_root_modules: &'a HashSet<String>,
+    file: &'a FileScope<'a>,
+    workspace_files: &'a HashMap<String, FileScope<'a>>,
     type_index: &'a WorkspaceTypeIndex,
     /// `None` marks an unresolved self-type (trait object, `&T`, tuple)
-    /// whose methods we must not record — the canonical would collapse
-    /// to `crate::<file>::method` and collide with free fns.
+    /// whose methods we must not record.
     impl_type_stack: Vec<Option<Vec<String>>>,
     /// Enclosing inline-mod names so fns inside `mod inner { ... }`
     /// record under `crate::<file>::inner::fn`.
@@ -350,20 +335,20 @@ impl<'a> FileFnCollector<'a> {
             // don't record; see `resolve_impl_self_type`'s doc.
             Some(None) => return,
         };
-        let canonical =
-            canonical_fn_name(self.path, self_type.as_deref(), &self.mod_stack, fn_name);
+        let canonical = canonical_fn_name(
+            self.file.path,
+            self_type.as_deref(),
+            &self.mod_stack,
+            fn_name,
+        );
         let ctx = FnContext {
+            file: self.file,
+            mod_stack: &self.mod_stack,
             body,
             signature_params: extract_signature_params(sig),
             self_type,
-            alias_map: self.alias_map,
-            aliases_per_scope: Some(self.aliases_per_scope),
-            local_symbols: self.local_symbols,
-            crate_root_modules: self.crate_root_modules,
-            importing_file: self.path,
             workspace_index: Some(self.type_index),
-            mod_stack: &self.mod_stack,
-            local_decl_scopes: Some(self.local_decl_scopes),
+            workspace_files: Some(self.workspace_files),
         };
         let calls = collect_canonical_calls(&ctx);
         self.graph.add_node(&canonical);
@@ -394,12 +379,7 @@ impl<'a, 'ast> Visit<'ast> for FileFnCollector<'a> {
         let resolved = resolve_impl_self_type(
             &node.self_ty,
             &CanonScope {
-                alias_map: self.alias_map,
-                local_symbols: self.local_symbols,
-                crate_root_modules: self.crate_root_modules,
-                importing_file: self.path,
-                local_decl_scopes: Some(self.local_decl_scopes),
-                aliases_per_scope: Some(self.aliases_per_scope),
+                file: self.file,
                 mod_stack: &self.mod_stack,
             },
         );

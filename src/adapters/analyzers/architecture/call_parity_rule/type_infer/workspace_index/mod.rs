@@ -16,6 +16,7 @@ pub mod methods;
 pub mod traits;
 
 use super::canonical::CanonicalType;
+use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::FileScope;
 use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::{
     collect_local_symbols_scoped, LocalSymbols,
 };
@@ -26,25 +27,32 @@ use std::collections::{HashMap, HashSet};
 /// Per-file resolution context passed to every collector. Owned by the
 /// outer build loop, borrowed into each `collect_from_file` call.
 pub(super) struct BuildContext<'a> {
-    pub path: &'a str,
-    pub alias_map: &'a HashMap<String, Vec<String>>,
-    pub aliases_per_scope: &'a ScopedAliasMap,
-    pub local_symbols: &'a HashSet<String>,
-    /// Per-name list of mod-paths-within-file where `local_symbols`
-    /// names are declared. Lets the resolver pick
-    /// `crate::<file>::<mod>::Session` over `crate::<file>::Session`
-    /// when `Session` is declared inside an inline mod.
-    pub local_decl_scopes: &'a HashMap<String, Vec<Vec<String>>>,
-    pub crate_root_modules: &'a HashSet<String>,
-    /// user-wrapper names peeled during resolution. Shared
-    /// across the whole build.
+    pub file: &'a FileScope<'a>,
+    /// All workspace `FileScope`s, keyed by file path. Lets the
+    /// resolver switch into an alias's declaring scope when expanding
+    /// imported aliases.
+    pub workspace_files: &'a HashMap<String, FileScope<'a>>,
+    /// User-wrapper names peeled during resolution. Shared across the
+    /// whole build.
     pub transparent_wrappers: &'a HashSet<String>,
-    /// type aliases already collected across the workspace.
-    /// `None` in pass 1 (the alias collector itself); `Some(&…)` in
-    /// pass 2 so fields/methods/functions/traits that reference an
-    /// alias are resolved through the alias target instead of caching
-    /// the raw alias name.
-    pub type_aliases: Option<&'a HashMap<String, (Vec<String>, syn::Type)>>,
+    /// Type aliases already collected across the workspace. `None` in
+    /// pass 1 (the alias collector itself); `Some(&…)` in pass 2.
+    pub type_aliases: Option<&'a HashMap<String, AliasDef>>,
+}
+
+/// Workspace type-alias entry, keyed under the alias's canonical name.
+/// `target` is resolved against the alias's *own* declaring scope, not
+/// the use-site's, so cross-module aliases (`use crate::store::Store;
+/// type Repo = Arc<Store>;`) expand correctly.
+pub struct AliasDef {
+    /// Generic parameter names (`["T"]` for `type AppResult<T> = …`).
+    pub params: Vec<String>,
+    /// Right-hand side of the alias.
+    pub target: syn::Type,
+    /// Path of the file where the alias was declared.
+    pub decl_file: String,
+    /// Mod-stack inside `decl_file` of the alias's enclosing module.
+    pub decl_mod_stack: Vec<String>,
 }
 
 /// Build a canonical type-path key by prefixing the impl/trait segments
@@ -53,7 +61,6 @@ pub(super) struct BuildContext<'a> {
 /// `mod inner { ... }` blocks so items declared inside them key as
 /// `crate::<file>::inner::X`, matching the path a call-site like
 /// `inner::X` canonicalises to.
-/// Operation.
 pub(super) fn canonical_type_key(
     segs: &[String],
     ctx: &BuildContext<'_>,
@@ -63,7 +70,7 @@ pub(super) fn canonical_type_key(
         return segs.join("::");
     }
     let mut out: Vec<String> = vec!["crate".to_string()];
-    out.extend(file_to_module_segments(ctx.path));
+    out.extend(file_to_module_segments(ctx.file.path));
     out.extend(mod_stack.iter().cloned());
     out.extend(segs.iter().cloned());
     out.join("::")
@@ -71,26 +78,18 @@ pub(super) fn canonical_type_key(
 
 /// Build a `ResolveContext` from the shared `BuildContext` inputs —
 /// extracted so the per-field / per-method / per-free-fn collectors
-/// don't each repeat the same construction. `type_aliases` propagates
-/// through so pass-2 collectors (running after the alias-collector
-/// populated them) resolve aliased types transparently. `mod_stack` is
-/// the current mod-path inside `ctx.path` — pass `&[]` for top-level
-/// items.
-/// Operation.
+/// don't each repeat the same construction. `mod_stack` is the current
+/// mod-path inside `ctx.file.path` — pass `&[]` for top-level items.
 pub(super) fn resolve_ctx_from_build<'a>(
     ctx: &'a BuildContext<'a>,
     mod_stack: &'a [String],
 ) -> super::resolve::ResolveContext<'a> {
     super::resolve::ResolveContext {
-        alias_map: ctx.alias_map,
-        local_symbols: ctx.local_symbols,
-        crate_root_modules: ctx.crate_root_modules,
-        importing_file: ctx.path,
+        file: ctx.file,
+        mod_stack,
         type_aliases: ctx.type_aliases,
         transparent_wrappers: Some(ctx.transparent_wrappers),
-        local_decl_scopes: Some(ctx.local_decl_scopes),
-        aliases_per_scope: Some(ctx.aliases_per_scope),
-        mod_stack,
+        workspace_files: Some(ctx.workspace_files),
     }
 }
 
@@ -111,11 +110,10 @@ pub struct WorkspaceTypeIndex {
     /// trait-dispatch so `dyn Trait.unrelated_method()` stays
     /// unresolved.
     pub trait_methods: HashMap<String, std::collections::HashSet<String>>,
-    /// `alias_canonical → (generic_param_names, target)`.
-    /// Params are captured so use-sites like `Alias<ArgA>` can
-    /// substitute the params' idents in `target` before resolution.
-    /// Aliases without generics just have an empty `Vec`.
-    pub type_aliases: HashMap<String, (Vec<String>, syn::Type)>,
+    /// `alias_canonical → AliasDef`. Use-sites substitute generic args
+    /// into `target` and resolve the result against the alias's own
+    /// `decl_file` / `decl_mod_stack` scope (not the use-site's).
+    pub type_aliases: HashMap<String, AliasDef>,
     /// user-configured last-ident names to treat as
     /// transparent single-type-param wrappers (framework extractors
     /// like `State<T>` / `Data<T>`). Mirrored from the
@@ -174,11 +172,8 @@ impl WorkspaceTypeIndex {
 /// signature stays under the SRP param count.
 pub struct WorkspaceIndexInputs<'a> {
     pub files: &'a [(&'a str, &'a syn::File)],
-    pub aliases_per_file: &'a HashMap<String, HashMap<String, Vec<String>>>,
-    pub aliases_scoped_per_file: &'a HashMap<String, ScopedAliasMap>,
-    pub local_symbols_per_file: &'a HashMap<String, LocalSymbols>,
+    pub workspace_files: &'a HashMap<String, FileScope<'a>>,
     pub cfg_test_files: &'a HashSet<String>,
-    pub crate_root_modules: &'a HashSet<String>,
     pub transparent_wrappers: &'a HashSet<String>,
 }
 
@@ -197,13 +192,10 @@ pub fn build_workspace_type_index(inputs: &WorkspaceIndexInputs<'_>) -> Workspac
     let mut index = WorkspaceTypeIndex::new();
     index.transparent_wrappers = inputs.transparent_wrappers.clone();
     let shared = |type_aliases| WalkInputs {
-        files: inputs.files,
-        aliases_per_file: inputs.aliases_per_file,
-        aliases_scoped_per_file: inputs.aliases_scoped_per_file,
-        local_symbols_per_file: inputs.local_symbols_per_file,
         cfg_test_files: inputs.cfg_test_files,
-        crate_root_modules: inputs.crate_root_modules,
+        files: inputs.files,
         transparent_wrappers: inputs.transparent_wrappers,
+        workspace_files: inputs.workspace_files,
         type_aliases,
     };
     // Pass 1: aliases across all files (no alias map yet).
@@ -228,22 +220,17 @@ pub fn build_workspace_type_index(inputs: &WorkspaceIndexInputs<'_>) -> Workspac
     index
 }
 
-/// Inputs common to both index-build passes. Bundled so `walk_files`
-/// doesn't exceed the SRP parameter count.
+/// Inputs common to both index-build passes.
 struct WalkInputs<'a> {
     files: &'a [(&'a str, &'a syn::File)],
-    aliases_per_file: &'a HashMap<String, HashMap<String, Vec<String>>>,
-    aliases_scoped_per_file: &'a HashMap<String, ScopedAliasMap>,
-    local_symbols_per_file: &'a HashMap<String, LocalSymbols>,
+    workspace_files: &'a HashMap<String, FileScope<'a>>,
     cfg_test_files: &'a HashSet<String>,
-    crate_root_modules: &'a HashSet<String>,
     transparent_wrappers: &'a HashSet<String>,
-    type_aliases: Option<&'a HashMap<String, (Vec<String>, syn::Type)>>,
+    type_aliases: Option<&'a HashMap<String, AliasDef>>,
 }
 
-/// Shared file-walk scaffold for both index build passes. Skips
-/// cfg-test files and files without a pre-computed alias map; hands
-/// the per-file `BuildContext` to `visit`. Integration.
+/// Shared file-walk scaffold for both index build passes. Reuses the
+/// `workspace_files` map so each file's `FileScope` is built once.
 fn walk_files<F>(inputs: &WalkInputs<'_>, index: &mut WorkspaceTypeIndex, mut visit: F)
 where
     F: FnMut(&mut WorkspaceTypeIndex, &BuildContext<'_>, &syn::File),
@@ -252,24 +239,12 @@ where
         if inputs.cfg_test_files.contains(*path) {
             continue;
         }
-        let Some(alias_map) = inputs.aliases_per_file.get(*path) else {
+        let Some(file) = inputs.workspace_files.get(*path) else {
             continue;
         };
-        let Some(local) = inputs.local_symbols_per_file.get(*path) else {
-            continue;
-        };
-        let empty_scoped = HashMap::new();
-        let aliases_per_scope = inputs
-            .aliases_scoped_per_file
-            .get(*path)
-            .unwrap_or(&empty_scoped);
         let ctx = BuildContext {
-            path,
-            alias_map,
-            aliases_per_scope,
-            local_symbols: &local.flat,
-            local_decl_scopes: &local.by_name,
-            crate_root_modules: inputs.crate_root_modules,
+            file,
+            workspace_files: inputs.workspace_files,
             transparent_wrappers: inputs.transparent_wrappers,
             type_aliases: inputs.type_aliases,
         };

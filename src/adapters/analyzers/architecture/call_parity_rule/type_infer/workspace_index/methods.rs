@@ -57,12 +57,7 @@ impl<'ast, 'i, 'c> Visit<'ast> for MethodCollector<'i, 'c> {
         let resolved = resolve_impl_self_type(
             &node.self_ty,
             &CanonScope {
-                alias_map: self.ctx.alias_map,
-                local_symbols: self.ctx.local_symbols,
-                crate_root_modules: self.ctx.crate_root_modules,
-                importing_file: self.ctx.path,
-                local_decl_scopes: Some(self.ctx.local_decl_scopes),
-                aliases_per_scope: Some(self.ctx.aliases_per_scope),
+                file: self.ctx.file,
                 mod_stack: &self.mod_stack,
             },
         );
@@ -138,7 +133,7 @@ fn resolve_method_return(
     mod_stack: &[String],
 ) -> CanonicalType {
     if let syn::Type::Path(p) = ret_ty {
-        if p.qself.is_none() && p.path.segments.first().is_some_and(|s| s.ident == "Self") {
+        if p.qself.is_none() && p.path.segments.len() == 1 && p.path.segments[0].ident == "Self" {
             return CanonicalType::Path(impl_segs.to_vec());
         }
     }

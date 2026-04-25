@@ -18,7 +18,7 @@
 //! See Task 2 in the v1.1.0 plan for the full test list.
 
 use super::bindings::CanonScope;
-use super::local_symbols::{collect_local_symbols_scoped, LocalSymbols};
+use super::local_symbols::{collect_local_symbols_scoped, FileScope, LocalSymbols};
 use super::signature_params::extract_signature_params;
 use super::workspace_graph::{
     collect_crate_root_modules, impl_self_ty_segments, resolve_impl_self_type,
@@ -82,15 +82,19 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
         let alias_map = aliases_per_file.get(*path).unwrap_or(&empty_aliases);
         let LocalSymbols { flat, by_name } = collect_local_symbols_scoped(ast);
         let aliases_per_scope = gather_alias_map_scoped(ast);
-        let mut collector = PubFnCollector {
-            file: path.to_string(),
-            found: Vec::new(),
-            visible_types: &visible_types,
+        let file = FileScope {
+            path,
             alias_map,
             aliases_per_scope: &aliases_per_scope,
             local_symbols: &flat,
             local_decl_scopes: &by_name,
             crate_root_modules: &crate_root_modules,
+        };
+        let mut collector = PubFnCollector {
+            file_path: path.to_string(),
+            file: &file,
+            found: Vec::new(),
+            visible_types: &visible_types,
             impl_stack: Vec::new(),
             mod_stack: Vec::new(),
         };
@@ -168,35 +172,19 @@ fn collect_visible_type_names_in_items(items: &[syn::Item], out: &mut HashSet<St
 /// Workspace-walker — visits items, tracks impl-type visibility
 /// for nested impl methods, collects pub fn metadata.
 struct PubFnCollector<'ast, 'vis> {
-    file: String,
+    /// Owning copy of the file path — kept on the collector because
+    /// `PubFnInfo` is constructed for each fn, each takes the file
+    /// path by value, and `file.path: &str` from the borrowed
+    /// `FileScope` doesn't satisfy `String` ownership requirements.
+    file_path: String,
+    file: &'vis FileScope<'vis>,
     found: Vec<PubFnInfo<'ast>>,
     /// Workspace-wide set of type names whose declaration carries a
-    /// visibility modifier. Impls on any type not in this set are
-    /// skipped — impls on private types aren't reachable from outside
-    /// their declaring file. Shared across files so cross-file impls
-    /// on a `pub struct` are correctly recognised.
+    /// visibility modifier. Shared across files.
     visible_types: &'vis HashSet<String>,
-    /// File's import aliases — used to canonicalise impl self-types so
-    /// `use crate::app::Session; impl Session { ... }` and the call
-    /// collector's receiver-tracked canonical agree on the same path.
-    alias_map: &'vis HashMap<String, Vec<String>>,
-    /// Per-mod aliases for `use` items inside inline modules.
-    aliases_per_scope: &'vis ScopedAliasMap,
-    /// Same-file (top-level + nested) item names for the local-symbol
-    /// fallback in `canonicalise_type_segments_in_scope`.
-    local_symbols: &'vis HashSet<String>,
-    /// Per-name list of declaring mod-paths within `file`. Lets the
-    /// resolver pick `crate::<file>::<mod>::Session` over the flat
-    /// top-level form when the type lives inside an inline mod.
-    local_decl_scopes: &'vis HashMap<String, Vec<Vec<String>>>,
-    /// Workspace crate-root module names for Rust 2018+ absolute imports.
-    crate_root_modules: &'vis HashSet<String>,
     /// Stack of enclosing `impl` blocks: `(self-type segments, is-visible)`.
-    /// Merged so the two halves can't drift out of sync.
     impl_stack: Vec<(Vec<String>, bool)>,
-    /// Names of enclosing inline `mod inner { ... }` blocks. Feeds
-    /// `PubFnInfo.mod_stack` so Check B canonical names align with the
-    /// graph keys / type index (both of which now prefix inline mods).
+    /// Names of enclosing inline `mod inner { ... }` blocks.
     mod_stack: Vec<String>,
 }
 
@@ -217,7 +205,7 @@ impl<'ast, 'vis> PubFnCollector<'ast, 'vis> {
         sig: &'ast syn::Signature,
     ) {
         self.found.push(PubFnInfo {
-            file: self.file.clone(),
+            file: self.file_path.clone(),
             fn_name: name,
             line,
             body,
@@ -274,12 +262,7 @@ impl<'ast, 'vis> Visit<'ast> for PubFnCollector<'ast, 'vis> {
         let canonical_segs = resolve_impl_self_type(
             &node.self_ty,
             &CanonScope {
-                alias_map: self.alias_map,
-                local_symbols: self.local_symbols,
-                crate_root_modules: self.crate_root_modules,
-                importing_file: &self.file,
-                local_decl_scopes: Some(self.local_decl_scopes),
-                aliases_per_scope: Some(self.aliases_per_scope),
+                file: self.file,
                 mod_stack: &self.mod_stack,
             },
         )

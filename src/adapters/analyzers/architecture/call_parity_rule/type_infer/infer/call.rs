@@ -140,12 +140,7 @@ fn canonicalise_call_path(segs: &[String], ctx: &InferContext<'_>) -> Option<Vec
     canonicalise_type_segments_in_scope(
         &expanded,
         &CanonScope {
-            alias_map: ctx.alias_map,
-            local_symbols: ctx.local_symbols,
-            crate_root_modules: ctx.crate_root_modules,
-            importing_file: ctx.importing_file,
-            local_decl_scopes: ctx.local_decl_scopes,
-            aliases_per_scope: ctx.aliases_per_scope,
+            file: ctx.file,
             mod_stack: ctx.mod_stack,
         },
     )

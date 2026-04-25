@@ -170,9 +170,11 @@ fn test_slice_receiver_is_none() {
 fn test_result_chain_unwrap_then_field() {
     // Verifies that combinator lookup produces a `Path` the next layer
     // of inference can index. This is the rlm-bug unblocking pattern.
+    use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::FileScope;
     use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::{
         infer_type, FlatBindings, InferContext, WorkspaceTypeIndex,
     };
+    use crate::adapters::shared::use_tree::ScopedAliasMap;
     use std::collections::{HashMap, HashSet};
 
     let mut index = WorkspaceTypeIndex::new();
@@ -186,19 +188,24 @@ fn test_result_chain_unwrap_then_field() {
         CanonicalType::Result(Box::new(CanonicalType::path(["crate", "app", "Session"]))),
     );
     let alias_map = HashMap::new();
+    let aliases_per_scope = ScopedAliasMap::new();
     let local_symbols = HashSet::new();
+    let local_decl_scopes = HashMap::new();
     let crate_roots = HashSet::new();
     let ctx = InferContext {
+        file: &FileScope {
+            path: "src/app/test.rs",
+            alias_map: &alias_map,
+            aliases_per_scope: &aliases_per_scope,
+            local_symbols: &local_symbols,
+            local_decl_scopes: &local_decl_scopes,
+            crate_root_modules: &crate_roots,
+        },
+        mod_stack: &[],
         workspace: &index,
-        alias_map: &alias_map,
-        local_symbols: &local_symbols,
-        crate_root_modules: &crate_roots,
-        importing_file: "src/app/test.rs",
         bindings: &bindings,
         self_type: None,
-        mod_stack: &[],
-        local_decl_scopes: None,
-        aliases_per_scope: None,
+        workspace_files: None,
     };
     let expr: syn::Expr = syn::parse_str("res.unwrap().id").expect("parse");
     let t = infer_type(&expr, &ctx).expect("chain resolved");

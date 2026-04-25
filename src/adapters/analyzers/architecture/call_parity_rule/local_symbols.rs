@@ -12,13 +12,86 @@
 //!   `crate::<file>::inner::Session` when the type is declared there.
 
 use crate::adapters::shared::cfg_test::has_cfg_test;
+use crate::adapters::shared::use_tree::ScopedAliasMap;
 use std::collections::{HashMap, HashSet};
+use std::sync::OnceLock;
 
 /// `(flat-set, per-scope-map)` view over the names declared in a file.
 #[derive(Debug, Default, Clone)]
 pub(crate) struct LocalSymbols {
     pub flat: HashSet<String>,
     pub by_name: HashMap<String, Vec<Vec<String>>>,
+}
+
+/// All per-file lookup tables a resolver / call collector needs in
+/// one place. Built once per file by the call-parity entry points;
+/// borrowed into every `CanonScope` / `ResolveContext` / `FnContext`
+/// / `InferContext` / `BuildContext` instead of duplicating the same
+/// six fields across each context struct.
+pub(crate) struct FileScope<'a> {
+    pub path: &'a str,
+    /// Top-level (file-scope) `use` aliases. Equivalent to
+    /// `aliases_per_scope.get(&[])` when the scoped map was built via
+    /// `gather_alias_map_scoped`; kept as a separate field so legacy /
+    /// unit-test callers can populate just this one.
+    pub alias_map: &'a HashMap<String, Vec<String>>,
+    /// Per-mod alias maps (output of `gather_alias_map_scoped`). Tests
+    /// can pass an empty map; the lookup then falls back to
+    /// `alias_map` for the legacy flat behaviour.
+    pub aliases_per_scope: &'a ScopedAliasMap,
+    pub local_symbols: &'a HashSet<String>,
+    pub local_decl_scopes: &'a HashMap<String, Vec<Vec<String>>>,
+    pub crate_root_modules: &'a HashSet<String>,
+}
+
+/// Inputs to `build_workspace_files_map`. Bundled because the per-file
+/// pre-computed maps are themselves several arguments.
+pub(crate) struct WorkspaceFilesInputs<'a> {
+    pub files: &'a [(&'a str, &'a syn::File)],
+    pub cfg_test_files: &'a HashSet<String>,
+    pub aliases_per_file: &'a HashMap<String, HashMap<String, Vec<String>>>,
+    pub aliases_scoped_per_file: &'a HashMap<String, ScopedAliasMap>,
+    pub local_symbols_per_file: &'a HashMap<String, LocalSymbols>,
+    pub crate_root_modules: &'a HashSet<String>,
+}
+
+// qual:api
+/// Pre-build a `FileScope` for every non-cfg-test workspace file.
+/// Reused by the type-index build and the call-graph collector so each
+/// file's lookup tables only get assembled once.
+pub(crate) fn build_workspace_files_map<'a>(
+    inputs: WorkspaceFilesInputs<'a>,
+) -> HashMap<String, FileScope<'a>> {
+    static EMPTY_SCOPED: OnceLock<ScopedAliasMap> = OnceLock::new();
+    let empty_scoped: &'static ScopedAliasMap = EMPTY_SCOPED.get_or_init(ScopedAliasMap::new);
+    let mut out = HashMap::new();
+    for (path, _) in inputs.files {
+        if inputs.cfg_test_files.contains(*path) {
+            continue;
+        }
+        let Some(alias_map) = inputs.aliases_per_file.get(*path) else {
+            continue;
+        };
+        let Some(local) = inputs.local_symbols_per_file.get(*path) else {
+            continue;
+        };
+        let aliases_per_scope = inputs
+            .aliases_scoped_per_file
+            .get(*path)
+            .unwrap_or(empty_scoped);
+        out.insert(
+            path.to_string(),
+            FileScope {
+                path,
+                alias_map,
+                aliases_per_scope,
+                local_symbols: &local.flat,
+                local_decl_scopes: &local.by_name,
+                crate_root_modules: inputs.crate_root_modules,
+            },
+        );
+    }
+    out
 }
 
 // qual:api
@@ -64,33 +137,29 @@ fn walk_local_symbols(items: &[syn::Item], mod_stack: &mut Vec<String>, out: &mu
 }
 
 // qual:api
-/// Walk `mod_stack` outward and return the closest enclosing mod-path
-/// in which `name` is declared. Falls back to the empty (top-level)
-/// scope when `decl_scopes` is `None` (legacy callers) or the name
-/// isn't declared anywhere mappable. Shared by the bindings
-/// canonicaliser and the call collector so call canonicals and
-/// type-index keys agree on which mod a same-name item belongs to.
-/// Operation.
+/// Look up the mod-path in which `name` is declared at exactly the
+/// current `mod_stack` scope. Rust resolves unqualified names against
+/// the current module only — child modules don't inherit parent
+/// declarations — so this intentionally does *not* walk outward.
+///
+/// An empty `decl_scopes` map means "scope tracking not populated"
+/// (test fixtures without `collect_local_symbols_scoped`); the
+/// canonicaliser then falls back to flat top-level prepend. A
+/// populated map with no exact match returns `None` so the caller
+/// skips the same-file branch entirely.
 pub(crate) fn scope_for_local<'a>(
-    decl_scopes: Option<&'a HashMap<String, Vec<Vec<String>>>>,
+    decl_scopes: &'a HashMap<String, Vec<Vec<String>>>,
     name: &str,
     mod_stack: &[String],
-) -> &'a [String] {
-    let Some(scopes) = decl_scopes else {
-        return &[];
-    };
-    let Some(candidates) = scopes.get(name) else {
-        return &[];
-    };
-    for depth in (0..=mod_stack.len()).rev() {
-        let prefix = &mod_stack[..depth];
-        for path in candidates {
-            if path.as_slice() == prefix {
-                return path.as_slice();
-            }
-        }
+) -> Option<&'a [String]> {
+    if decl_scopes.is_empty() {
+        return Some(&[]);
     }
-    candidates.first().map(Vec::as_slice).unwrap_or(&[])
+    let candidates = decl_scopes.get(name)?;
+    candidates
+        .iter()
+        .find(|path| path.as_slice() == mod_stack)
+        .map(Vec::as_slice)
 }
 
 /// Extract the declared ident from an `Item` if it has one

@@ -85,7 +85,7 @@ fn record_fn(
 /// string construction.
 fn canonical_fn_name(fn_ident: &str, ctx: &BuildContext<'_>, mod_stack: &[String]) -> String {
     let mut segs: Vec<String> = vec!["crate".to_string()];
-    segs.extend(file_to_module_segments(ctx.path));
+    segs.extend(file_to_module_segments(ctx.file.path));
     segs.extend(mod_stack.iter().cloned());
     segs.push(fn_ident.to_string());
     segs.join("::")

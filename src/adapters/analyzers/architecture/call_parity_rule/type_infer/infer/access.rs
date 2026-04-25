@@ -58,15 +58,11 @@ pub(super) fn infer_await(a: &syn::ExprAwait, ctx: &InferContext<'_>) -> Option<
 /// Operation: delegate to `resolve_type`.
 pub(super) fn infer_cast(c: &syn::ExprCast, ctx: &InferContext<'_>) -> Option<CanonicalType> {
     let rctx = ResolveContext {
-        alias_map: ctx.alias_map,
-        local_symbols: ctx.local_symbols,
-        crate_root_modules: ctx.crate_root_modules,
-        importing_file: ctx.importing_file,
+        file: ctx.file,
+        mod_stack: ctx.mod_stack,
         type_aliases: Some(&ctx.workspace.type_aliases),
         transparent_wrappers: Some(&ctx.workspace.transparent_wrappers),
-        local_decl_scopes: ctx.local_decl_scopes,
-        aliases_per_scope: ctx.aliases_per_scope,
-        mod_stack: ctx.mod_stack,
+        workspace_files: ctx.workspace_files,
     };
     let ty = resolve_type(&c.ty, &rctx);
     if ty.is_opaque() {

@@ -17,10 +17,10 @@ pub mod access;
 pub mod call;
 pub mod generics;
 
+use super::super::local_symbols::FileScope;
 use super::canonical::CanonicalType;
 use super::workspace_index::WorkspaceTypeIndex;
-use crate::adapters::shared::use_tree::ScopedAliasMap;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 /// Look up a scoped variable name → inferred type. Implementations may
 /// back this by a flat map (tests), a stack of maps, or an adapter over
@@ -59,32 +59,22 @@ impl BindingLookup for FlatBindings {
     }
 }
 
-/// Inputs to the inference engine. Bundles the workspace index, the
-/// per-file resolution pipeline (alias map + local symbols + crate
-/// roots + importing file path), the current binding scope, and the
-/// enclosing impl's self-type (for `Self::xxx` path resolution).
+/// Inputs to the inference engine. Per-file lookup tables live in
+/// `file`; the rest is per-call-site.
 pub struct InferContext<'a> {
+    pub file: &'a FileScope<'a>,
+    /// Mod-path of the call site inside `file.path`. Empty for
+    /// top-level inference.
+    pub mod_stack: &'a [String],
     pub workspace: &'a WorkspaceTypeIndex,
-    pub alias_map: &'a HashMap<String, Vec<String>>,
-    pub local_symbols: &'a HashSet<String>,
-    pub crate_root_modules: &'a HashSet<String>,
-    pub importing_file: &'a str,
     pub bindings: &'a dyn BindingLookup,
     /// Canonical segments of the enclosing `impl T { ... }`'s self-type,
     /// if we're currently inferring inside an impl body. `None` for
-    /// free-fn contexts. Used to resolve `Self::method(...)` calls.
+    /// free-fn contexts.
     pub self_type: Option<Vec<String>>,
-    /// Mod-path of the call site inside `importing_file`. Empty for
-    /// top-level inference; populated by the call collector so
-    /// `inner::make()` from within `mod inner` produces the same
-    /// `crate::file::inner::make` key the index stores.
-    pub mod_stack: &'a [String],
-    /// Per-name list of declaring mod-paths within `importing_file`.
-    /// `None` for legacy / unit-test callers.
-    pub local_decl_scopes: Option<&'a HashMap<String, Vec<Vec<String>>>>,
-    /// Per-mod alias maps for `use` items inside inline modules.
-    /// `None` falls back to `alias_map`.
-    pub aliases_per_scope: Option<&'a ScopedAliasMap>,
+    /// All workspace `FileScope`s, for cross-module alias resolution.
+    /// `None` for unit-test fixtures.
+    pub workspace_files: Option<&'a HashMap<String, FileScope<'a>>>,
 }
 
 // qual:api

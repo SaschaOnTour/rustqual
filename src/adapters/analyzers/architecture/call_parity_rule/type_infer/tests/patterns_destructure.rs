@@ -11,7 +11,7 @@ fn bindings(
     matched: CanonicalType,
 ) -> Vec<(String, CanonicalType)> {
     let pat = parse_pat(pat_src);
-    extract_bindings(&pat, &matched, &f.ctx())
+    extract_bindings(&pat, &matched, &f.ctx(&f.file_scope()))
 }
 
 // ── Pat::Ident ───────────────────────────────────────────────────
