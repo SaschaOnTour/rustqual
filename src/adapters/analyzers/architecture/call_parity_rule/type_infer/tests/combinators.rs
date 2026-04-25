@@ -190,8 +190,9 @@ fn test_result_chain_unwrap_then_field() {
     use std::collections::{HashMap, HashSet};
 
     let mut index = WorkspaceTypeIndex::new();
-    index.struct_fields.insert(
-        ("crate::app::Session".to_string(), "id".to_string()),
+    index.insert_struct_field(
+        "crate::app::Session",
+        "id",
         CanonicalType::path(["crate", "app", "Id"]),
     );
     let mut bindings = FlatBindings::new();

@@ -884,11 +884,9 @@ fn test_inference_fallback_resolves_rlm_pattern() {
     );
     let mut index = WorkspaceTypeIndex::new();
     // `Session::open()` returns Result<Session, _>.
-    index.method_returns.insert(
-        (
-            "crate::app::session::Session".to_string(),
-            "open".to_string(),
-        ),
+    index.insert_method_return(
+        "crate::app::session::Session",
+        "open",
         CanonicalType::Result(Box::new(CanonicalType::path([
             "crate", "app", "session", "Session",
         ]))),
@@ -920,8 +918,9 @@ fn test_inference_fallback_resolves_field_access() {
         "#,
     );
     let mut index = WorkspaceTypeIndex::new();
-    index.struct_fields.insert(
-        ("crate::app::Ctx".to_string(), "session".to_string()),
+    index.insert_struct_field(
+        "crate::app::Ctx",
+        "session",
         CanonicalType::path(["crate", "app", "Session"]),
     );
     let fs = fctx.file_scope("src/cli/handlers.rs");
@@ -949,11 +948,9 @@ fn test_inference_fallback_on_result_unwrap_chain() {
         "#,
     );
     let mut index = WorkspaceTypeIndex::new();
-    index.method_returns.insert(
-        (
-            "crate::app::session::Session".to_string(),
-            "open".to_string(),
-        ),
+    index.insert_method_return(
+        "crate::app::session::Session",
+        "open",
         CanonicalType::Result(Box::new(CanonicalType::path([
             "crate", "app", "session", "Session",
         ]))),

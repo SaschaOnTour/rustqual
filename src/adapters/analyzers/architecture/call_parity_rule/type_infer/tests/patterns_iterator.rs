@@ -47,8 +47,9 @@ fn test_for_over_opaque_binds_opaque() {
 #[test]
 fn test_for_with_destructuring_pattern() {
     let mut f = TypeInferFixture::new();
-    f.index.struct_fields.insert(
-        ("crate::app::Handler".to_string(), "id".to_string()),
+    f.index.insert_struct_field(
+        "crate::app::Handler",
+        "id",
         CanonicalType::path(["crate", "app", "Id"]),
     );
     let vec_type = CanonicalType::Slice(Box::new(CanonicalType::path(["crate", "app", "Handler"])));

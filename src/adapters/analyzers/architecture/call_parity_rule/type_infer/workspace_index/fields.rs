@@ -93,9 +93,7 @@ fn record_field(
     if matches!(field_type, CanonicalType::Opaque) {
         return;
     }
-    index
-        .struct_fields
-        .insert((canonical.to_string(), ident.to_string()), field_type);
+    index.insert_struct_field(canonical, ident.to_string(), field_type);
 }
 
 /// Build `crate::<file-module>::<inline-mods>::<StructIdent>` from a

@@ -19,6 +19,7 @@
 use super::bindings::{canonical_from_type, extract_let_binding, normalize_alias_expansion};
 use super::local_symbols::{scope_for_local, FileScope};
 use super::type_infer::resolve::{resolve_type, ResolveContext};
+use super::type_infer::self_subst::substitute_bare_self;
 use super::type_infer::{
     extract_bindings, extract_for_bindings, infer_type, BindingLookup, CanonicalType, InferContext,
     WorkspaceTypeIndex,
@@ -170,8 +171,11 @@ impl<'a> CanonicalCallCollector<'a> {
 
     /// Resolve a parameter / closure-arg type through the full
     /// scope-aware pipeline (alias expansion, transparent wrappers,
-    /// trait-bound extraction, inline-mod resolution). Used by both
-    /// signature seeding and closure-param seeding.
+    /// trait-bound extraction, inline-mod resolution). Pre-substitutes
+    /// bare `Self` with `self_type_canonical` so impl-body declarations
+    /// like `fn merge(&self, other: Self)` and typed closure params
+    /// resolve to the enclosing impl type. Used by both signature
+    /// seeding and closure-param seeding.
     fn resolve_param_type(&self, ty: &syn::Type) -> CanonicalType {
         let rctx = ResolveContext {
             file: self.file,
@@ -181,7 +185,10 @@ impl<'a> CanonicalCallCollector<'a> {
             workspace_files: self.workspace_files,
             alias_param_subs: None,
         };
-        resolve_type(ty, &rctx)
+        match self.self_type_canonical.as_deref() {
+            Some(impl_segs) => resolve_type(&substitute_bare_self(ty, impl_segs), &rctx),
+            None => resolve_type(ty, &rctx),
+        }
     }
 
     fn enter_scope(&mut self) {
@@ -468,7 +475,13 @@ impl<'a> CanonicalCallCollector<'a> {
             alias_param_subs: None,
         };
         let name = pi.ident.to_string();
-        match resolve_type(pt.ty.as_ref(), &rctx) {
+        let resolved = match self.self_type_canonical.as_deref() {
+            Some(impl_segs) => {
+                resolve_type(&substitute_bare_self(pt.ty.as_ref(), impl_segs), &rctx)
+            }
+            None => resolve_type(pt.ty.as_ref(), &rctx),
+        };
+        match resolved {
             CanonicalType::Path(segs) => self.install_path_binding(name, segs),
             other => self.install_non_path_binding(name, other),
         }

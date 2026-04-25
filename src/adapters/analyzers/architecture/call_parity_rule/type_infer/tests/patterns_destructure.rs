@@ -119,8 +119,9 @@ fn test_none_pattern_binds_nothing() {
 #[test]
 fn test_struct_pattern_binds_field_by_name() {
     let mut f = TypeInferFixture::new();
-    f.index.struct_fields.insert(
-        ("crate::app::Ctx".to_string(), "session".to_string()),
+    f.index.insert_struct_field(
+        "crate::app::Ctx",
+        "session",
         CanonicalType::path(["crate", "app", "Session"]),
     );
     let matched = CanonicalType::path(["crate", "app", "Ctx"]);
@@ -133,8 +134,9 @@ fn test_struct_pattern_binds_field_by_name() {
 #[test]
 fn test_struct_pattern_with_aliased_field() {
     let mut f = TypeInferFixture::new();
-    f.index.struct_fields.insert(
-        ("crate::app::Ctx".to_string(), "session".to_string()),
+    f.index.insert_struct_field(
+        "crate::app::Ctx",
+        "session",
         CanonicalType::path(["crate", "app", "Session"]),
     );
     let matched = CanonicalType::path(["crate", "app", "Ctx"]);
@@ -159,8 +161,9 @@ fn test_struct_pattern_missing_field_binds_opaque() {
 #[test]
 fn test_struct_pattern_with_rest() {
     let mut f = TypeInferFixture::new();
-    f.index.struct_fields.insert(
-        ("crate::app::Ctx".to_string(), "a".to_string()),
+    f.index.insert_struct_field(
+        "crate::app::Ctx",
+        "a",
         CanonicalType::path(["crate", "app", "A"]),
     );
     let matched = CanonicalType::path(["crate", "app", "Ctx"]);
@@ -235,8 +238,9 @@ fn test_or_pattern_uses_first_branch_bindings() {
 #[test]
 fn test_nested_some_struct() {
     let mut f = TypeInferFixture::new();
-    f.index.struct_fields.insert(
-        ("crate::app::Ctx".to_string(), "id".to_string()),
+    f.index.insert_struct_field(
+        "crate::app::Ctx",
+        "id",
         CanonicalType::path(["crate", "app", "Id"]),
     );
     // matched: Option<Ctx>; pattern unwraps Some to Ctx then binds id.

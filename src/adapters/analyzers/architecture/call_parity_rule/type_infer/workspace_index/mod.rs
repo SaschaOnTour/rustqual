@@ -91,12 +91,20 @@ pub(super) fn resolve_ctx_from_build<'a>(
 }
 
 /// Lookup tables populated from one walk over the workspace.
+///
+/// `struct_fields` and `method_returns` use a nested map shape
+/// (outer keyed by canonical type, inner by field/method) so the hot
+/// `infer_field` / `infer_method_call` paths can probe with `&str`s
+/// against the inner map without allocating a `(String, String)` key
+/// per lookup. The dedicated `insert_struct_field` /
+/// `insert_method_return` helpers keep call-sites tidy in production
+/// and tests.
 #[derive(Default)]
 pub struct WorkspaceTypeIndex {
-    /// `(struct_canonical, field_name) → canonical field type`.
-    pub struct_fields: HashMap<(String, String), CanonicalType>,
-    /// `(receiver_type_canonical, method_name) → canonical return type`.
-    pub method_returns: HashMap<(String, String), CanonicalType>,
+    /// `struct_canonical → {field_name → canonical field type}`.
+    pub struct_fields: HashMap<String, HashMap<String, CanonicalType>>,
+    /// `receiver_canonical → {method_name → canonical return type}`.
+    pub method_returns: HashMap<String, HashMap<String, CanonicalType>>,
     /// `canonical_free_fn_name → canonical return type`.
     pub fn_returns: HashMap<String, CanonicalType>,
     /// `trait_canonical → [impl_type_canonical, …]`. Every
@@ -124,17 +132,47 @@ impl WorkspaceTypeIndex {
     }
 
     // qual:api
-    /// Look up a struct field's canonical type. Operation.
+    /// Look up a struct field's canonical type. Two `&str` probes
+    /// against the nested map — no allocation. Operation.
     pub fn struct_field(&self, type_canonical: &str, field: &str) -> Option<&CanonicalType> {
-        self.struct_fields
-            .get(&(type_canonical.to_string(), field.to_string()))
+        self.struct_fields.get(type_canonical)?.get(field)
     }
 
     // qual:api
-    /// Look up a method's return type. Operation.
+    /// Look up a method's return type. Two `&str` probes against the
+    /// nested map — no allocation. Operation.
     pub fn method_return(&self, receiver_canonical: &str, method: &str) -> Option<&CanonicalType> {
+        self.method_returns.get(receiver_canonical)?.get(method)
+    }
+
+    // qual:api
+    /// Insert a `(type, field) → canonical` entry. Builds the nested
+    /// map shape on demand. Operation.
+    pub fn insert_struct_field(
+        &mut self,
+        type_canonical: impl Into<String>,
+        field: impl Into<String>,
+        ty: CanonicalType,
+    ) {
+        self.struct_fields
+            .entry(type_canonical.into())
+            .or_default()
+            .insert(field.into(), ty);
+    }
+
+    // qual:api
+    /// Insert a `(receiver, method) → canonical` entry. Builds the
+    /// nested map shape on demand. Operation.
+    pub fn insert_method_return(
+        &mut self,
+        receiver_canonical: impl Into<String>,
+        method: impl Into<String>,
+        ret: CanonicalType,
+    ) {
         self.method_returns
-            .get(&(receiver_canonical.to_string(), method.to_string()))
+            .entry(receiver_canonical.into())
+            .or_default()
+            .insert(method.into(), ret);
     }
 
     // qual:api

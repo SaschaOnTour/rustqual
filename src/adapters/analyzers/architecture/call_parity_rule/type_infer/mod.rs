@@ -16,6 +16,7 @@ pub mod infer;
 pub mod patterns;
 pub mod resolve;
 mod resolve_alias;
+pub(crate) mod self_subst;
 pub mod workspace_index;
 
 // qual:api

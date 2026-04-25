@@ -55,34 +55,29 @@ fn rlm_index() -> WorkspaceTypeIndex {
     let error = CanonicalType::path(["crate", "app", "Error"]);
     let mut index = WorkspaceTypeIndex::new();
     // Session::open() -> Result<Session, Error>
-    index.method_returns.insert(
-        (SESSION_PATH.to_string(), "open".to_string()),
+    index.insert_method_return(
+        SESSION_PATH,
+        "open",
         CanonicalType::Result(Box::new(session.clone())),
     );
     // Session::open_cwd() -> Result<Session, Error>
-    index.method_returns.insert(
-        (SESSION_PATH.to_string(), "open_cwd".to_string()),
+    index.insert_method_return(
+        SESSION_PATH,
+        "open_cwd",
         CanonicalType::Result(Box::new(session.clone())),
     );
     // Session::diff() -> Response
-    index.method_returns.insert(
-        (SESSION_PATH.to_string(), "diff".to_string()),
-        response.clone(),
-    );
+    index.insert_method_return(SESSION_PATH, "diff", response.clone());
     // Session::files() -> Response
-    index.method_returns.insert(
-        (SESSION_PATH.to_string(), "files".to_string()),
-        response.clone(),
-    );
+    index.insert_method_return(SESSION_PATH, "files", response.clone());
     // Session::insert() -> Result<Response, Error>
-    index.method_returns.insert(
-        (SESSION_PATH.to_string(), "insert".to_string()),
+    index.insert_method_return(
+        SESSION_PATH,
+        "insert",
         CanonicalType::Result(Box::new(response.clone())),
     );
     // Ctx { session: Session }
-    index
-        .struct_fields
-        .insert((CTX_PATH.to_string(), "session".to_string()), session);
+    index.insert_struct_field(CTX_PATH, "session", session);
     // Free fn make_session() -> Result<Session, Error>
     index.fn_returns.insert(
         "crate::app::make_session".to_string(),
@@ -409,6 +404,60 @@ fn self_field_access_resolves_via_impl_type() {
     );
 }
 
+#[test]
+fn signature_param_typed_self_resolves() {
+    // `fn merge(&self, other: Self)` inside `impl Session` — `other`
+    // is declared as `Self`, must bind to `Session` so `other.diff()`
+    // routes through `method_returns`.
+    let fx = parse(
+        r#"
+        impl Session {
+            pub fn merge(&self, other: Self) {
+                other.diff();
+            }
+        }
+        "#,
+    );
+    let self_segs = vec![
+        "crate".to_string(),
+        "app".to_string(),
+        "session".to_string(),
+        "Session".to_string(),
+    ];
+    let calls = run_impl_method(&fx, &rlm_index(), "Session", "merge", self_segs);
+    assert!(
+        calls.contains("crate::app::session::Session::diff"),
+        "param `other: Self` must resolve to Session, got {calls:?}"
+    );
+}
+
+#[test]
+fn let_annotation_self_resolves() {
+    // `let other: Self = make();` inside `impl Session` — annotation
+    // must substitute Self before resolving.
+    let fx = parse(
+        r#"
+        impl Session {
+            pub fn run(&self) {
+                let other: Self = make();
+                other.diff();
+            }
+        }
+        "#,
+    );
+    let self_segs = vec![
+        "crate".to_string(),
+        "app".to_string(),
+        "session".to_string(),
+        "Session".to_string(),
+    ];
+    let calls = run_impl_method(&fx, &rlm_index(), "Session", "run", self_segs);
+    assert!(
+        calls.contains("crate::app::session::Session::diff"),
+        "`let other: Self = …` must bind to Session, got {calls:?}"
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // Positive: free-fn return-type chain
 // ═══════════════════════════════════════════════════════════════════
@@ -716,8 +765,9 @@ fn user_wrapper_is_peeled_on_signature_param() {
     );
     let db = CanonicalType::path(["crate", "app", "Db"]);
     let mut index = WorkspaceTypeIndex::new();
-    index.method_returns.insert(
-        ("crate::app::Db".to_string(), "query".to_string()),
+    index.insert_method_return(
+        "crate::app::Db",
+        "query",
         CanonicalType::path(["crate", "app", "Rows"]),
     );
     // Register `State` as a transparent wrapper.
@@ -783,11 +833,9 @@ fn type_alias_expands_to_target_via_signature_param() {
         },
     );
     // Store::read() method.
-    index.method_returns.insert(
-        (
-            "crate::cli::handlers::Store".to_string(),
-            "read".to_string(),
-        ),
+    index.insert_method_return(
+        "crate::cli::handlers::Store",
+        "read",
         CanonicalType::path(["crate", "cli", "handlers", "Data"]),
     );
     // Include `DbRef` in local symbols so the alias key resolves.

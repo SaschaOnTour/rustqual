@@ -14,12 +14,12 @@
 
 use super::super::canonical::CanonicalType;
 use super::super::resolve::resolve_type;
+use super::super::self_subst::substitute_bare_self;
 use super::{canonical_type_key, resolve_ctx_from_build, BuildContext, WorkspaceTypeIndex};
 use crate::adapters::analyzers::architecture::call_parity_rule::bindings::CanonScope;
 use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::resolve_impl_self_type;
 use crate::adapters::shared::cfg_test::has_cfg_test;
 use syn::visit::Visit;
-use syn::visit_mut::VisitMut;
 
 /// Walk `ast` and populate `index.method_returns`. Integration: delegates
 /// to the nested visitor.
@@ -118,9 +118,7 @@ fn record_method(
     };
     let receiver_canonical = canonical_type_key(impl_segs, ctx, mod_stack);
     let method_name = node.sig.ident.to_string();
-    index
-        .method_returns
-        .insert((receiver_canonical, method_name), ret);
+    index.insert_method_return(receiver_canonical, method_name, ret);
 }
 
 /// Resolve a method's return type, substituting bare `Self` with the
@@ -140,48 +138,4 @@ fn resolve_method_return(
 ) -> CanonicalType {
     let substituted = substitute_bare_self(ret_ty, impl_segs);
     resolve_type(&substituted, &resolve_ctx_from_build(ctx, mod_stack))
-}
-
-/// Clone `ret_ty` and rewrite every bare `Self` ident path to the
-/// impl's canonical segments. Operation: clone + visit-mut walk.
-fn substitute_bare_self(ret_ty: &syn::Type, impl_segs: &[String]) -> syn::Type {
-    let mut out = ret_ty.clone();
-    let Ok(replacement) = syn::parse_str::<syn::Path>(&impl_segs.join("::")) else {
-        return out;
-    };
-    SelfPathRewriter { replacement }.visit_type_mut(&mut out);
-    out
-}
-
-/// `VisitMut` adapter that replaces each `Type::Path` whose path is a
-/// single bare `Self` with the impl's canonical path. Multi-segment
-/// `Self::Output` is intentionally left alone.
-struct SelfPathRewriter {
-    replacement: syn::Path,
-}
-
-impl VisitMut for SelfPathRewriter {
-    fn visit_type_mut(&mut self, ty: &mut syn::Type) {
-        if let syn::Type::Path(tp) = ty {
-            if is_bare_self_path(tp) {
-                *ty = syn::Type::Path(syn::TypePath {
-                    qself: None,
-                    path: self.replacement.clone(),
-                });
-                return;
-            }
-        }
-        syn::visit_mut::visit_type_mut(self, ty);
-    }
-}
-
-/// True when `tp` is `Self` with no qself, no further segments, and
-/// no path arguments — the only shape that maps unambiguously to the
-/// enclosing impl's self-type. Operation.
-fn is_bare_self_path(tp: &syn::TypePath) -> bool {
-    if tp.qself.is_some() || tp.path.segments.len() != 1 {
-        return false;
-    }
-    let seg = &tp.path.segments[0];
-    seg.ident == "Self" && matches!(seg.arguments, syn::PathArguments::None)
 }

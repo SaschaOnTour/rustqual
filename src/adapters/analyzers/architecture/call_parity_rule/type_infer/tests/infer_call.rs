@@ -72,8 +72,9 @@ fn test_call_unknown_fn_is_none() {
 fn test_call_type_ctor_resolves_via_method_returns() {
     let mut f = TypeInferFixture::new();
     f.local_symbols.insert("Session".to_string());
-    f.index.method_returns.insert(
-        ("crate::app::test::Session".to_string(), "open".to_string()),
+    f.index.insert_method_return(
+        "crate::app::test::Session",
+        "open",
         CanonicalType::path(["crate", "app", "test", "Session"]),
     );
     let t = infer(&f, "Session::open()").expect("assoc fn resolved");
@@ -92,11 +93,9 @@ fn test_call_ctor_via_alias() {
             "Session".to_string(),
         ],
     );
-    f.index.method_returns.insert(
-        (
-            "crate::app::session::Session".to_string(),
-            "new".to_string(),
-        ),
+    f.index.insert_method_return(
+        "crate::app::session::Session",
+        "new",
         CanonicalType::path(["crate", "app", "session", "Session"]),
     );
     let t = infer(&f, "Session::new()").expect("alias resolved");
@@ -110,8 +109,9 @@ fn test_call_ctor_via_alias() {
 fn test_call_ctor_returning_result() {
     let mut f = TypeInferFixture::new();
     f.local_symbols.insert("Session".to_string());
-    f.index.method_returns.insert(
-        ("crate::app::test::Session".to_string(), "open".to_string()),
+    f.index.insert_method_return(
+        "crate::app::test::Session",
+        "open",
         CanonicalType::Result(Box::new(CanonicalType::path([
             "crate", "app", "test", "Session",
         ]))),
@@ -130,8 +130,9 @@ fn test_call_self_substitutes_to_impl_type() {
         "app".to_string(),
         "Session".to_string(),
     ]);
-    f.index.method_returns.insert(
-        ("crate::app::Session".to_string(), "new".to_string()),
+    f.index.insert_method_return(
+        "crate::app::Session",
+        "new",
         CanonicalType::path(["crate", "app", "Session"]),
     );
     let t = infer(&f, "Self::new()").expect("Self::new resolved");
@@ -151,8 +152,9 @@ fn test_method_call_with_bound_receiver() {
     let mut f = TypeInferFixture::new();
     f.bindings
         .insert("session", CanonicalType::path(["crate", "app", "Session"]));
-    f.index.method_returns.insert(
-        ("crate::app::Session".to_string(), "diff".to_string()),
+    f.index.insert_method_return(
+        "crate::app::Session",
+        "diff",
         CanonicalType::path(["crate", "app", "Response"]),
     );
     let t = infer(&f, "session.diff()").expect("method resolved");
@@ -167,8 +169,9 @@ fn test_method_call_chained_via_fn_return() {
         "crate::app::test::make_session".to_string(),
         CanonicalType::path(["crate", "app", "Session"]),
     );
-    f.index.method_returns.insert(
-        ("crate::app::Session".to_string(), "diff".to_string()),
+    f.index.insert_method_return(
+        "crate::app::Session",
+        "diff",
         CanonicalType::path(["crate", "app", "Response"]),
     );
     let t = infer(&f, "make_session().diff()").expect("chain resolved");
@@ -219,8 +222,9 @@ fn test_method_call_on_reference_strips_and_resolves() {
     let mut f = TypeInferFixture::new();
     f.bindings
         .insert("s", CanonicalType::path(["crate", "app", "Session"]));
-    f.index.method_returns.insert(
-        ("crate::app::Session".to_string(), "diff".to_string()),
+    f.index.insert_method_return(
+        "crate::app::Session",
+        "diff",
         CanonicalType::path(["crate", "app", "Response"]),
     );
     let t = infer(&f, "(&s).diff()").expect("ref receiver resolved");

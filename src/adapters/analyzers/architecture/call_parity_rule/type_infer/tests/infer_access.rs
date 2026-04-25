@@ -18,8 +18,9 @@ fn test_field_access_on_bound_struct() {
     let mut f = TypeInferFixture::new();
     f.bindings
         .insert("ctx", CanonicalType::path(["crate", "app", "Ctx"]));
-    f.index.struct_fields.insert(
-        ("crate::app::Ctx".to_string(), "session".to_string()),
+    f.index.insert_struct_field(
+        "crate::app::Ctx",
+        "session",
         CanonicalType::path(["crate", "app", "Session"]),
     );
     let t = infer(&f, "ctx.session").expect("field resolved");
@@ -31,12 +32,14 @@ fn test_nested_field_access() {
     let mut f = TypeInferFixture::new();
     f.bindings
         .insert("ctx", CanonicalType::path(["crate", "app", "Ctx"]));
-    f.index.struct_fields.insert(
-        ("crate::app::Ctx".to_string(), "session".to_string()),
+    f.index.insert_struct_field(
+        "crate::app::Ctx",
+        "session",
         CanonicalType::path(["crate", "app", "Session"]),
     );
-    f.index.struct_fields.insert(
-        ("crate::app::Session".to_string(), "id".to_string()),
+    f.index.insert_struct_field(
+        "crate::app::Session",
+        "id",
         CanonicalType::path(["crate", "app", "Id"]),
     );
     let t = infer(&f, "ctx.session.id").expect("nested field resolved");
