@@ -166,13 +166,12 @@ fn test_struct_pattern_with_aliased_field() {
 
 #[test]
 fn test_struct_pattern_missing_field_binds_opaque() {
-    let mut f = TypeInferFixture::new();
+    let f = TypeInferFixture::new();
     let matched = CanonicalType::path(["crate", "app", "Ctx"]);
     // No entry for "unknown" — binding is still made but with Opaque.
     let b = bindings(&f, "Ctx { unknown }", matched);
     assert_eq!(b.len(), 1);
     assert_eq!(b[0].1, CanonicalType::Opaque);
-    f.self_type = None; // silence unused mut warning
 }
 
 #[test]

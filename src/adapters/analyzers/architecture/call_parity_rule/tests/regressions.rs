@@ -544,6 +544,55 @@ fn cast_as_self_resolves() {
 }
 
 #[test]
+fn qualified_path_does_not_alias_promote_through_leaf() {
+    // `use std::sync::Arc as Shared;` is in scope, but the use site
+    // is `wrap::Shared<Session>` — a *qualified* path. The leaf
+    // `Shared` matches the alias name, but the prefix `wrap::` makes
+    // the type unrelated. Receiver inference must NOT peel
+    // `wrap::Shared<Session>` to `Session::diff` just because the
+    // bare-`Shared` alias resolves to `Arc`. (Session is in scope
+    // here so alias-promotion would otherwise produce a real edge.)
+    let fx = parse(
+        r#"
+        use std::sync::Arc as Shared;
+        use crate::app::session::Session;
+        pub fn handle(s: wrap::Shared<Session>) {
+            s.diff();
+        }
+        "#,
+    );
+    let calls = run(&fx, &rlm_index(), "handle");
+    assert!(
+        !calls.contains("crate::app::session::Session::diff"),
+        "qualified path must not be alias-promoted, got {calls:?}"
+    );
+}
+
+#[test]
+fn aliased_local_wrapper_does_not_auto_peel() {
+    // `use crate::wrap::Arc as Shared;` aliases a *local* wrapper
+    // type to `Shared`. The local `crate::wrap::Arc` may not be
+    // Deref-transparent like stdlib Arc, so receiver inference must
+    // NOT auto-peel `Shared<Session>` just because the alias's leaf
+    // segment is `Arc`. Only when the alias canonical lives in
+    // `std`/`core`/`alloc` do we trust the auto-peel.
+    let fx = parse(
+        r#"
+        use crate::wrap::Arc as Shared;
+        use crate::app::session::Session;
+        pub fn handle(s: Shared<Session>) {
+            s.diff();
+        }
+        "#,
+    );
+    let calls = run(&fx, &rlm_index(), "handle");
+    assert!(
+        !calls.contains("crate::app::session::Session::diff"),
+        "aliased local wrapper must not auto-peel as stdlib Arc, got {calls:?}"
+    );
+}
+
+#[test]
 fn aliased_stdlib_wrapper_inside_inline_mod_peels_to_inner() {
     // Same renamed-Arc test, but the `use` statement lives inside an
     // inline mod. Top-level `alias_map` doesn't see it; the scoped

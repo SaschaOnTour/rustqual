@@ -197,9 +197,23 @@ fn is_marker_trait(path: &syn::Path) -> bool {
 /// dispatch in `resolve_path` and for the alias-aware lookup that
 /// promotes `use std::sync::Arc as Shared;`-imported names to their
 /// canonical wrapper.
-const WRAPPER_NAMES: &[&str] = &[
+pub(super) const WRAPPER_NAMES: &[&str] = &[
     "Result", "Option", "Future", "Vec", "HashMap", "BTreeMap", "Arc", "Box", "Rc", "Cow",
 ];
+
+/// True when the canonical path starts with `std`, `core`, or
+/// `alloc` — the prefixes that distinguish a real stdlib import
+/// (`use std::sync::Arc as Shared;`) from a local one with a
+/// matching leaf (`use crate::wrap::Arc as Shared;`). Shared by the
+/// receiver-type resolver (this module) and the visibility pass
+/// (`pub_fns_visibility`) so both apply the same alias-promotion
+/// rules. Operation.
+pub(crate) fn is_stdlib_prefixed(canonical: &[String]) -> bool {
+    matches!(
+        canonical.first().map(String::as_str),
+        Some("std" | "core" | "alloc")
+    )
+}
 
 /// Dispatch on the last path-segment's ident to recognise stdlib
 /// wrappers. Resolves `use std::sync::Arc as Shared;`-style import
@@ -220,23 +234,32 @@ fn resolve_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -> Canoni
     let raw_name = last.ident.to_string();
     // Promote `use std::sync::Arc as Shared`-style import aliases to
     // their canonical wrapper name so `Shared<T>` matches the same
-    // arms as `Arc<T>`. Uses the scope-aware canonicaliser so
-    // imports inside inline mods (`mod inner { use … as Shared; }`)
-    // resolve too. Direct-name hits and unrelated paths skip the
-    // alias lookup.
-    let alias_resolved = (!WRAPPER_NAMES.contains(&raw_name.as_str())
+    // arms as `Arc<T>`. Two safeguards:
+    // - Single-segment paths only — qualified `wrap::Shared<T>`
+    //   refers to a `Shared` declared inside `wrap`, not the
+    //   bare-`Shared` alias from `use … as Shared`.
+    // - For stdlib wrappers the alias canonical must start with
+    //   `std` / `core` / `alloc`, so `use crate::wrap::Arc as Shared`
+    //   doesn't get auto-peeled. User-configured wrappers stay
+    //   last-segment based — that's the opt-in.
+    let alias_resolved = (path.segments.len() == 1
+        && !WRAPPER_NAMES.contains(&raw_name.as_str())
         && !is_user_transparent(&raw_name, ctx))
     .then(|| {
         canonicalise_type_segments_in_scope(std::slice::from_ref(&raw_name), &canon_scope(ctx))
     })
     .flatten();
-    let alias_target = alias_resolved.as_ref().and_then(|p| p.last());
-    let name = match alias_target {
-        Some(seg) if WRAPPER_NAMES.contains(&seg.as_str()) || is_user_transparent(seg, ctx) => {
-            seg.as_str()
+    let alias_target = alias_resolved.as_ref().and_then(|p| {
+        let last_seg = p.last()?;
+        let stdlib_prefixed = is_stdlib_prefixed(p);
+        let stdlib_match = stdlib_prefixed && WRAPPER_NAMES.contains(&last_seg.as_str());
+        if stdlib_match || is_user_transparent(last_seg, ctx) {
+            Some(last_seg.as_str())
+        } else {
+            None
         }
-        _ => raw_name.as_str(),
-    };
+    });
+    let name = alias_target.unwrap_or(raw_name.as_str());
     match name {
         "Result" => wrap(0, CanonicalType::Result),
         "Option" => wrap(0, CanonicalType::Option),

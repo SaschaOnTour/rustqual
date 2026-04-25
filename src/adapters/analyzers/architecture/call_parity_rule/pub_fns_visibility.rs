@@ -12,6 +12,7 @@ use super::local_symbols::{collect_local_symbols_scoped, FileScope, LocalSymbols
 use super::pub_fns_alias_chain::{
     chase_alias_chain, collect_alias_chain, resolve_alias_target_canonical,
 };
+use super::type_infer::resolve::is_stdlib_prefixed;
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
 use crate::adapters::shared::cfg_test::has_cfg_test;
 use crate::adapters::shared::use_tree::gather_alias_map_scoped;
@@ -225,8 +226,16 @@ pub(super) fn peel_to_inner_path<'a>(
 /// caller can peel further. Renamed imports
 /// (`use std::sync::Arc as Shared;`) are followed through the
 /// scope-aware canonicaliser so `Shared<T>` peels just like
-/// `Arc<T>`. Returns `None` for non-wrapper paths or wrappers
-/// without a positional type arg. Operation.
+/// `Arc<T>`. Two safeguards on the aliased path:
+///   - Single-segment paths only (`wrap::Shared<T>` keeps its
+///     `wrap::` prefix, so it isn't a bare-alias use-site).
+///   - The alias canonical must start with `std`/`core`/`alloc` for
+///     stdlib auto-peeling, so `use crate::wrap::Arc as Shared`
+///     doesn't trick the resolver. User wrappers stay last-segment
+///     based.
+///
+/// Returns `None` for non-wrapper paths or wrappers without a
+/// positional type arg. Operation.
 fn transparent_wrapper_inner<'a>(
     tp: &'a syn::TypePath,
     transparent_wrappers: &HashSet<String>,
@@ -234,13 +243,13 @@ fn transparent_wrapper_inner<'a>(
     mod_stack: &[String],
 ) -> Option<&'a syn::Type> {
     const STDLIB_TRANSPARENT: &[&str] = &["Box", "Arc", "Rc", "Cow"];
-    let is_transparent_name = |name: &str| -> bool {
-        STDLIB_TRANSPARENT.contains(&name) || transparent_wrappers.contains(name)
-    };
+    let is_user = |name: &str| transparent_wrappers.contains(name);
+    let is_stdlib_direct = |name: &str| STDLIB_TRANSPARENT.contains(&name);
     let last = tp.path.segments.last()?;
     let raw_name = last.ident.to_string();
-    let direct = is_transparent_name(&raw_name);
+    let direct = is_stdlib_direct(&raw_name) || is_user(&raw_name);
     let aliased = !direct
+        && tp.path.segments.len() == 1
         && canonicalise_type_segments_in_scope(
             std::slice::from_ref(&raw_name),
             &CanonScope {
@@ -249,8 +258,10 @@ fn transparent_wrapper_inner<'a>(
             },
         )
         .as_ref()
-        .and_then(|p| p.last())
-        .map(|seg| is_transparent_name(seg))
+        .map(|p| {
+            let last_seg = p.last().map(String::as_str).unwrap_or("");
+            (is_stdlib_prefixed(p) && is_stdlib_direct(last_seg)) || is_user(last_seg)
+        })
         .unwrap_or(false);
     if !direct && !aliased {
         return None;
