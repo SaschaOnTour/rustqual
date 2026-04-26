@@ -25,7 +25,6 @@ use super::workspace_graph::{collect_crate_root_modules, resolve_impl_self_type}
 use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
 use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
 use crate::adapters::shared::use_tree::gather_alias_map_scoped;
-use crate::adapters::shared::use_tree::ScopedAliasMap;
 use std::collections::{HashMap, HashSet};
 use syn::visit::Visit;
 
