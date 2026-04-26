@@ -219,53 +219,30 @@ pub(super) fn peel_to_inner_path<'a>(
     }
 }
 
-/// If `tp`'s last segment is a Deref-transparent wrapper — either a
+/// If `tp` resolves to a Deref-transparent wrapper — either a
 /// stdlib one (`Box`/`Arc`/`Rc`/`Cow`) or a user-configured entry in
-/// `[architecture.call_parity]::transparent_wrappers` (e.g. axum
-/// `State`, actix `Data`) — return its first generic type arg so the
-/// caller can peel further. Renamed imports
-/// (`use std::sync::Arc as Shared;`) are followed through the
-/// scope-aware canonicaliser so `Shared<T>` peels just like
-/// `Arc<T>`. Two safeguards on the aliased path:
-///   - Single-segment paths only (`wrap::Shared<T>` keeps its
-///     `wrap::` prefix, so it isn't a bare-alias use-site).
-///   - The alias canonical must start with `std`/`core`/`alloc` for
-///     stdlib auto-peeling, so `use crate::wrap::Arc as Shared`
-///     doesn't trick the resolver. User wrappers stay last-segment
-///     based.
+/// `[architecture.call_parity]::transparent_wrappers` — return its
+/// first generic type arg so the caller can peel further. The
+/// resolution mirrors `resolve::resolve_path`'s wrapper detection:
+///   - Single-segment bare wrapper names match directly.
+///   - Explicit stdlib qualification (`std::boxed::Box<T>`) matches.
+///   - Aliased / qualified paths run through the scope-aware
+///     canonicaliser; auto-peel only if the canonical is
+///     stdlib-prefixed or the leaf is in the user-transparent set.
 ///
-/// Returns `None` for non-wrapper paths or wrappers without a
-/// positional type arg. Operation.
+/// Multi-segment paths to local types named `Arc`/`Box`/etc. don't
+/// peel — only stdlib-rooted forms do. Returns `None` for non-wrapper
+/// paths or wrappers without a positional type arg. Operation.
 fn transparent_wrapper_inner<'a>(
     tp: &'a syn::TypePath,
     transparent_wrappers: &HashSet<String>,
     file_scope: &FileScope<'_>,
     mod_stack: &[String],
 ) -> Option<&'a syn::Type> {
-    const STDLIB_TRANSPARENT: &[&str] = &["Box", "Arc", "Rc", "Cow"];
-    let is_user = |name: &str| transparent_wrappers.contains(name);
-    let is_stdlib_direct = |name: &str| STDLIB_TRANSPARENT.contains(&name);
-    let last = tp.path.segments.last()?;
-    let raw_name = last.ident.to_string();
-    let direct = is_stdlib_direct(&raw_name) || is_user(&raw_name);
-    let aliased = !direct
-        && tp.path.segments.len() == 1
-        && canonicalise_type_segments_in_scope(
-            std::slice::from_ref(&raw_name),
-            &CanonScope {
-                file: file_scope,
-                mod_stack,
-            },
-        )
-        .as_ref()
-        .map(|p| {
-            let last_seg = p.last().map(String::as_str).unwrap_or("");
-            (is_stdlib_prefixed(p) && is_stdlib_direct(last_seg)) || is_user(last_seg)
-        })
-        .unwrap_or(false);
-    if !direct && !aliased {
+    if !is_transparent_wrapper(&tp.path, transparent_wrappers, file_scope, mod_stack) {
         return None;
     }
+    let last = tp.path.segments.last()?;
     let syn::PathArguments::AngleBracketed(ab) = &last.arguments else {
         return None;
     };
@@ -273,6 +250,47 @@ fn transparent_wrapper_inner<'a>(
         syn::GenericArgument::Type(t) => Some(t),
         _ => None,
     })
+}
+
+/// Decide whether `path` should be treated as a transparent wrapper
+/// for visibility-pass peeling. Mirrors `resolve_path`'s wrapper
+/// detection so the visibility set agrees with the receiver-type
+/// resolver. Operation.
+fn is_transparent_wrapper(
+    path: &syn::Path,
+    transparent_wrappers: &HashSet<String>,
+    file_scope: &FileScope<'_>,
+    mod_stack: &[String],
+) -> bool {
+    const STDLIB_TRANSPARENT: &[&str] = &["Box", "Arc", "Rc", "Cow"];
+    let is_user = |name: &str| transparent_wrappers.contains(name);
+    let is_stdlib_direct = |name: &str| STDLIB_TRANSPARENT.contains(&name);
+    let Some(last) = path.segments.last() else {
+        return false;
+    };
+    let raw_name = last.ident.to_string();
+    let single = path.segments.len() == 1;
+    if single && (is_stdlib_direct(&raw_name) || is_user(&raw_name)) {
+        return true;
+    }
+    let first_seg = path.segments.first().map(|s| s.ident.to_string());
+    let explicit_stdlib = matches!(first_seg.as_deref(), Some("std" | "core" | "alloc"));
+    if explicit_stdlib && is_stdlib_direct(&raw_name) {
+        return true;
+    }
+    let segs: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
+    let scope = CanonScope {
+        file: file_scope,
+        mod_stack,
+    };
+    let Some(canonical) = canonicalise_type_segments_in_scope(&segs, &scope) else {
+        return false;
+    };
+    let Some(last_seg) = canonical.last() else {
+        return false;
+    };
+    let stdlib_match = is_stdlib_prefixed(&canonical) && is_stdlib_direct(last_seg);
+    stdlib_match || is_user(last_seg)
 }
 
 /// Build `crate::<file_modules>::<mod_stack>::<ident>` joined as a

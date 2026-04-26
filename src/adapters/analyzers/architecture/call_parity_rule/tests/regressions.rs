@@ -569,6 +569,54 @@ fn qualified_path_does_not_alias_promote_through_leaf() {
 }
 
 #[test]
+fn qualified_local_arc_does_not_auto_peel() {
+    // `wrap::Arc<Session>` where `wrap::Arc` is a *local* type that
+    // happens to be named `Arc`. Direct wrapper dispatch must NOT
+    // peel just because the leaf is `Arc`. Only stdlib-rooted
+    // qualifications (`std::sync::Arc`) auto-peel.
+    let fx = parse(
+        r#"
+        use crate::app::session::Session;
+        mod wrap { pub struct Arc<T>(T); }
+        pub fn handle(s: wrap::Arc<Session>) {
+            s.diff();
+        }
+        "#,
+    );
+    let calls = run(&fx, &rlm_index(), "handle");
+    assert!(
+        !calls.contains("crate::app::session::Session::diff"),
+        "qualified local Arc must not auto-peel as stdlib Arc, got {calls:?}"
+    );
+}
+
+#[test]
+fn renamed_external_user_wrapper_peels_via_user_config() {
+    // `use axum::extract::State as ExtractState;` with
+    // `transparent_wrappers = ["State"]`. The alias resolves to
+    // `axum::extract::State` (external path), the last segment is
+    // "State", which IS in the user-transparent set → peel. Already
+    // works through the existing alias-resolution path; this test
+    // pins that.
+    let fx = parse(
+        r#"
+        use axum::extract::State as ExtractState;
+        use crate::app::session::Session;
+        pub fn handle(s: ExtractState<Session>) {
+            s.diff();
+        }
+        "#,
+    );
+    let mut index = rlm_index();
+    index.transparent_wrappers.insert("State".to_string());
+    let calls = run(&fx, &index, "handle");
+    assert!(
+        calls.contains("crate::app::session::Session::diff"),
+        "renamed external user wrapper must peel, got {calls:?}"
+    );
+}
+
+#[test]
 fn aliased_local_wrapper_does_not_auto_peel() {
     // `use crate::wrap::Arc as Shared;` aliases a *local* wrapper
     // type to `Shared`. The local `crate::wrap::Arc` may not be

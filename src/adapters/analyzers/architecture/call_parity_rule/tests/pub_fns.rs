@@ -566,6 +566,42 @@ fn test_collect_pub_fns_records_impl_via_chained_type_alias() {
 }
 
 #[test]
+fn test_collect_pub_fns_does_not_promote_qualified_local_arc() {
+    // `pub type Public = wrap::Arc<private::Hidden>;` — `wrap::Arc`
+    // is a *local* wrapper, not stdlib. Direct dispatch on the leaf
+    // `Arc` must NOT peel; otherwise Check B would require coverage
+    // for methods on `private::Hidden` that aren't actually exposed.
+    let file = parse(
+        r#"
+        mod wrap { pub struct Arc<T>(T); }
+        mod private {
+            pub struct Hidden;
+            impl Hidden {
+                pub fn op(&self) {}
+            }
+        }
+        pub type Public = wrap::Arc<private::Hidden>;
+        "#,
+    );
+    let files = vec![("src/cli/handlers.rs", &file)];
+    let by_layer = {
+        let aliases = aliases_from_files(&files);
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
+    };
+    let cli = names_for_layer(&by_layer, "cli");
+    assert!(
+        !cli.contains("op"),
+        "qualified local Arc must not auto-peel as stdlib Arc, got {cli:?}"
+    );
+}
+
+#[test]
 fn test_collect_pub_fns_does_not_promote_local_wrapper_alias() {
     // `use crate::wrap::Arc as Shared;` aliases a *local* wrapper
     // type — its canonical (`crate::wrap::Arc`) doesn't start with

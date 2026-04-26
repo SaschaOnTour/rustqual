@@ -22,6 +22,7 @@ use super::super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
 use super::super::local_symbols::FileScope;
 use super::canonical::CanonicalType;
 use super::resolve_alias::{expand_alias, lookup_alias_param};
+use super::resolve_wrapper::identify_wrapper_name;
 use std::collections::{HashMap, HashSet};
 
 /// Resolution inputs. Per-file lookup tables live in `file`; the
@@ -232,34 +233,17 @@ fn resolve_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -> Canoni
     let fallback = || resolve_generic_path(path, ctx, depth);
     let wrap_future = || wrap_future_output(args, ctx, depth);
     let raw_name = last.ident.to_string();
-    // Promote `use std::sync::Arc as Shared`-style import aliases to
-    // their canonical wrapper name so `Shared<T>` matches the same
-    // arms as `Arc<T>`. Two safeguards:
-    // - Single-segment paths only — qualified `wrap::Shared<T>`
-    //   refers to a `Shared` declared inside `wrap`, not the
-    //   bare-`Shared` alias from `use … as Shared`.
-    // - For stdlib wrappers the alias canonical must start with
-    //   `std` / `core` / `alloc`, so `use crate::wrap::Arc as Shared`
-    //   doesn't get auto-peeled. User-configured wrappers stay
-    //   last-segment based — that's the opt-in.
-    let alias_resolved = (path.segments.len() == 1
-        && !WRAPPER_NAMES.contains(&raw_name.as_str())
-        && !is_user_transparent(&raw_name, ctx))
-    .then(|| {
-        canonicalise_type_segments_in_scope(std::slice::from_ref(&raw_name), &canon_scope(ctx))
-    })
-    .flatten();
-    let alias_target = alias_resolved.as_ref().and_then(|p| {
-        let last_seg = p.last()?;
-        let stdlib_prefixed = is_stdlib_prefixed(p);
-        let stdlib_match = stdlib_prefixed && WRAPPER_NAMES.contains(&last_seg.as_str());
-        if stdlib_match || is_user_transparent(last_seg, ctx) {
-            Some(last_seg.as_str())
-        } else {
-            None
-        }
-    });
-    let name = alias_target.unwrap_or(raw_name.as_str());
+    let resolved_name = identify_wrapper_name(path, &raw_name, ctx);
+    // For a single-segment path with an unrecognised name, fall back
+    // to the raw name (the match arms below test for stdlib idents).
+    // For a multi-segment path with no canonical wrapper match,
+    // skip the wrapper-arm match entirely — `wrap::Arc<T>` must not
+    // be peeled as stdlib `Arc<T>`.
+    let name = match (resolved_name.as_deref(), path.segments.len() == 1) {
+        (Some(s), _) => s,
+        (None, true) => raw_name.as_str(),
+        (None, false) => return fallback(),
+    };
     match name {
         "Result" => wrap(0, CanonicalType::Result),
         "Option" => wrap(0, CanonicalType::Option),
@@ -312,7 +296,7 @@ fn future_output_type(args: &syn::PathArguments) -> Option<&syn::Type> {
 
 /// Check if `name` is a user-configured transparent wrapper.
 /// Operation: set lookup with optional presence.
-fn is_user_transparent(name: &str, ctx: &ResolveContext<'_>) -> bool {
+pub(super) fn is_user_transparent(name: &str, ctx: &ResolveContext<'_>) -> bool {
     ctx.transparent_wrappers
         .is_some_and(|set| set.contains(name))
 }
