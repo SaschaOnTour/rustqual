@@ -40,7 +40,7 @@ impl std::str::FromStr for OutputFormat {
 #[derive(Parser, Debug)]
 #[command(
     name = "rustqual",
-    about = "Comprehensive Rust code quality analyzer — six dimensions: IOSP, Complexity, DRY, SRP, Coupling, Test Quality.",
+    about = "Structural quality analyzer for Rust — seven dimensions: IOSP, Complexity, DRY, SRP, Coupling, Test Quality, Architecture (with adapter call-parity).",
     version
 )]
 pub(crate) struct Cli {
