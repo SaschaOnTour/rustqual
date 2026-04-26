@@ -10,6 +10,15 @@ use std::collections::HashMap;
 use syn::spanned::Spanned;
 use syn::UseTree;
 
+/// `name → canonical_path_segments` — flat alias map for one scope.
+pub type AliasMap = HashMap<String, Vec<String>>;
+
+/// Per-mod alias maps within a single file. Key is the mod-path inside
+/// the file (empty `Vec` for top-level); value is that mod's own `use`
+/// items. Inner mods don't inherit outer entries — Rust requires each
+/// mod to re-import names it wants to reference.
+pub type ScopedAliasMap = HashMap<Vec<String>, AliasMap>;
+
 /// Apply `f` to the root `UseTree` of every `use` item in the file.
 /// Shared iteration backbone for `gather_imports` / `gather_alias_map`
 /// so the two walkers don't duplicate the item-filter.
@@ -83,6 +92,43 @@ pub fn gather_alias_map(ast: &syn::File) -> HashMap<String, Vec<String>> {
     let mut out = HashMap::new();
     for_each_use_tree(ast, |tree| collect_alias_entries(&[], tree, &mut out));
     out
+}
+
+// qual:api
+/// Like `gather_alias_map`, but separates `use` items by their declaring
+/// inline-mod scope. Returns `mod_path → name → canonical_path`. The
+/// empty `Vec` key holds top-level `use` items. Each inline `mod inner
+/// { use … }` contributes its own `[…inner]` entry. Inner mods do not
+/// inherit outer entries — Rust's name-resolution scoping requires
+/// each mod to re-import names it wants to use.
+pub fn gather_alias_map_scoped(ast: &syn::File) -> ScopedAliasMap {
+    let mut out = ScopedAliasMap::new();
+    walk_scoped_aliases(&ast.items, &mut Vec::new(), &mut out);
+    out
+}
+
+// qual:recursive
+fn walk_scoped_aliases(items: &[syn::Item], mod_stack: &mut Vec<String>, out: &mut ScopedAliasMap) {
+    let walk = |inner: &[syn::Item], stack: &mut Vec<String>, out: &mut ScopedAliasMap| {
+        walk_scoped_aliases(inner, stack, out);
+    };
+    {
+        let scope_map = out.entry(mod_stack.clone()).or_default();
+        for item in items {
+            if let syn::Item::Use(u) = item {
+                collect_alias_entries(&[], &u.tree, scope_map);
+            }
+        }
+    }
+    for item in items {
+        if let syn::Item::Mod(m) = item {
+            if let Some((_, inner)) = m.content.as_ref() {
+                mod_stack.push(m.ident.to_string());
+                walk(inner, mod_stack, out);
+                mod_stack.pop();
+            }
+        }
+    }
 }
 
 // qual:recursive

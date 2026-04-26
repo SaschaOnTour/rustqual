@@ -6,6 +6,7 @@
 //! resulting set to classify functions as test helpers rather than
 //! production code.
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::path::Path;
 
@@ -119,22 +120,31 @@ impl<'a> ChildPathResolver<'a> {
         } else {
             parent.with_extension("")
         };
-        let candidate_file = child_dir
-            .join(format!("{mod_name}.rs"))
-            .to_string_lossy()
-            .into_owned();
-        let candidate_dir = child_dir
-            .join(mod_name)
-            .join("mod.rs")
-            .to_string_lossy()
-            .into_owned();
-        if self.known_paths.contains(candidate_file.as_str()) {
-            Some(candidate_file)
-        } else if self.known_paths.contains(candidate_dir.as_str()) {
-            Some(candidate_dir)
+        let file_raw = child_dir.join(format!("{mod_name}.rs"));
+        let dir_raw = child_dir.join(mod_name).join("mod.rs");
+        let file_lossy = file_raw.to_string_lossy();
+        let dir_lossy = dir_raw.to_string_lossy();
+        let candidate_file = normalize_sep(file_lossy.as_ref());
+        let candidate_dir = normalize_sep(dir_lossy.as_ref());
+        if self.known_paths.contains(candidate_file.as_ref()) {
+            Some(candidate_file.into_owned())
+        } else if self.known_paths.contains(candidate_dir.as_ref()) {
+            Some(candidate_dir.into_owned())
         } else {
             None
         }
+    }
+}
+
+/// Convert OS-native path separators into the forward-slash form used
+/// by `known_paths`. Returns `Cow::Borrowed` on Unix and on Windows
+/// paths without backslashes; allocates only when a replacement is
+/// actually needed.
+fn normalize_sep(path: &str) -> Cow<'_, str> {
+    if cfg!(windows) && path.contains('\\') {
+        Cow::Owned(path.replace('\\', "/"))
+    } else {
+        Cow::Borrowed(path)
     }
 }
 

@@ -17,15 +17,16 @@
 //!
 //! See Task 2 in the v1.1.0 plan for the full test list.
 
-use super::workspace_graph::{
-    collect_crate_root_modules, collect_local_symbols, extract_signature_params,
-    impl_self_ty_segments, resolve_impl_self_type,
-};
+use super::bindings::CanonScope;
+use super::local_symbols::{collect_local_symbols_scoped, FileScope, LocalSymbols};
+use super::pub_fns_visibility::{collect_visible_type_canonicals_workspace, is_visible};
+use super::signature_params::extract_signature_params;
+use super::workspace_graph::{collect_crate_root_modules, resolve_impl_self_type};
 use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
 use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
+use crate::adapters::shared::use_tree::gather_alias_map_scoped;
 use std::collections::{HashMap, HashSet};
 use syn::visit::Visit;
-use syn::Visibility;
 
 /// Shape used by both Check A and Check B — we need the fn name to
 /// build the canonical-call-target string, the body to walk, and the
@@ -40,6 +41,10 @@ pub(crate) struct PubFnInfo<'ast> {
     /// Type-name path of the enclosing `impl`, if any. Forms the
     /// `Self::method` resolution context for the call collector.
     pub self_type: Option<Vec<String>>,
+    /// Names of enclosing inline `mod inner { ... }` blocks, outer-most
+    /// first. Feeds the canonical-name builder so nested-mod items key
+    /// under `crate::<file>::inner::…` to match the graph + type index.
+    pub mod_stack: Vec<String>,
 }
 
 // qual:api
@@ -52,9 +57,16 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
     aliases_per_file: &HashMap<String, HashMap<String, Vec<String>>>,
     layers: &LayerDefinitions,
     cfg_test_files: &HashSet<String>,
+    transparent_wrappers: &HashSet<String>,
 ) -> HashMap<String, Vec<PubFnInfo<'ast>>> {
-    let visible_types = collect_visible_type_names_workspace(files, cfg_test_files);
     let crate_root_modules = collect_crate_root_modules(files);
+    let visible_canonicals = collect_visible_type_canonicals_workspace(
+        files,
+        cfg_test_files,
+        aliases_per_file,
+        &crate_root_modules,
+        transparent_wrappers,
+    );
     let empty_aliases = HashMap::new();
     let mut out: HashMap<String, Vec<PubFnInfo<'ast>>> = HashMap::new();
     for (path, ast) in files {
@@ -72,15 +84,24 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
         // impl self-types via `use` anyway, and the local-symbol /
         // crate-root fallbacks still work.
         let alias_map = aliases_per_file.get(*path).unwrap_or(&empty_aliases);
-        let local_symbols = collect_local_symbols(ast);
-        let mut collector = PubFnCollector {
-            file: path.to_string(),
-            found: Vec::new(),
-            visible_types: &visible_types,
+        let LocalSymbols { flat, by_name } = collect_local_symbols_scoped(ast);
+        let aliases_per_scope = gather_alias_map_scoped(ast);
+        let file = FileScope {
+            path,
             alias_map,
-            local_symbols: &local_symbols,
+            aliases_per_scope: &aliases_per_scope,
+            local_symbols: &flat,
+            local_decl_scopes: &by_name,
             crate_root_modules: &crate_root_modules,
+        };
+        let mut collector = PubFnCollector {
+            file_path: path.to_string(),
+            file: &file,
+            found: Vec::new(),
+            visible_canonicals: &visible_canonicals,
             impl_stack: Vec::new(),
+            mod_stack: Vec::new(),
+            enclosing_mod_visible: true,
         };
         collector.visit_file(ast);
         out.entry(layer).or_default().extend(collector.found);
@@ -88,71 +109,31 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
     out
 }
 
-/// Collect every visible (non-inherited-visibility) top-level type name
-/// across the whole non-test workspace. Impls on the same type name get
-/// counted as visible regardless of which file the impl lives in — so
-/// `pub struct Session` in `src/app/session.rs` and its `impl Session`
-/// in a companion file both contribute to the check.
-///
-/// The matching is string-equality on the last segment of the impl's
-/// self-type path. Two distinct types with the same name in different
-/// files both match; that's MVP-level imprecision — false positives
-/// (over-counting) rather than false negatives.
-fn collect_visible_type_names_workspace(
-    files: &[(&str, &syn::File)],
-    cfg_test_files: &HashSet<String>,
-) -> HashSet<String> {
-    let mut out = HashSet::new();
-    for (path, ast) in files {
-        if cfg_test_files.contains(*path) {
-            continue;
-        }
-        for item in &ast.items {
-            match item {
-                syn::Item::Struct(s) if is_visible(&s.vis) => {
-                    out.insert(s.ident.to_string());
-                }
-                syn::Item::Enum(e) if is_visible(&e.vis) => {
-                    out.insert(e.ident.to_string());
-                }
-                syn::Item::Union(u) if is_visible(&u.vis) => {
-                    out.insert(u.ident.to_string());
-                }
-                syn::Item::Trait(t) if is_visible(&t.vis) => {
-                    out.insert(t.ident.to_string());
-                }
-                syn::Item::Type(t) if is_visible(&t.vis) => {
-                    out.insert(t.ident.to_string());
-                }
-                _ => {}
-            }
-        }
-    }
-    out
-}
-
 /// Workspace-walker — visits items, tracks impl-type visibility
 /// for nested impl methods, collects pub fn metadata.
 struct PubFnCollector<'ast, 'vis> {
-    file: String,
+    /// Owning copy of the file path — kept on the collector because
+    /// `PubFnInfo` is constructed for each fn, each takes the file
+    /// path by value, and `file.path: &str` from the borrowed
+    /// `FileScope` doesn't satisfy `String` ownership requirements.
+    file_path: String,
+    file: &'vis FileScope<'vis>,
     found: Vec<PubFnInfo<'ast>>,
-    /// Workspace-wide set of type names whose declaration carries a
-    /// visibility modifier. Impls on any type not in this set are
-    /// skipped — impls on private types aren't reachable from outside
-    /// their declaring file. Shared across files so cross-file impls
-    /// on a `pub struct` are correctly recognised.
-    visible_types: &'vis HashSet<String>,
-    /// File's import aliases — used to canonicalise impl self-types so
-    /// `use crate::app::Session; impl Session { ... }` and the call
-    /// collector's receiver-tracked canonical agree on the same path.
-    alias_map: &'vis HashMap<String, Vec<String>>,
-    /// Same-file top-level item names for the local-symbol fallback.
-    local_symbols: &'vis HashSet<String>,
-    /// Workspace crate-root module names for Rust 2018+ absolute imports.
-    crate_root_modules: &'vis HashSet<String>,
+    /// Workspace-wide set of canonical paths of publicly named types.
+    /// `crate::<file_modules>::<mod_stack>::<ident>` joined as one
+    /// string, comparable directly against `resolve_impl_self_type`'s
+    /// output. Shared across files.
+    visible_canonicals: &'vis HashSet<String>,
     /// Stack of enclosing `impl` blocks: `(self-type segments, is-visible)`.
-    /// Merged so the two halves can't drift out of sync.
     impl_stack: Vec<(Vec<String>, bool)>,
+    /// Names of enclosing inline `mod inner { ... }` blocks.
+    mod_stack: Vec<String>,
+    /// True when every enclosing inline `mod` carries a visibility
+    /// modifier. False as soon as any ancestor is private. Top-level
+    /// items are always visible. Without this, `mod private { pub fn
+    /// helper() {} }` would record `helper` even though it's not
+    /// reachable from outside the parent module.
+    enclosing_mod_visible: bool,
 }
 
 impl<'ast, 'vis> PubFnCollector<'ast, 'vis> {
@@ -172,21 +153,15 @@ impl<'ast, 'vis> PubFnCollector<'ast, 'vis> {
         sig: &'ast syn::Signature,
     ) {
         self.found.push(PubFnInfo {
-            file: self.file.clone(),
+            file: self.file_path.clone(),
             fn_name: name,
             line,
             body,
             signature_params: extract_signature_params(sig),
             self_type: self.current_self_type(),
+            mod_stack: self.mod_stack.clone(),
         });
     }
-}
-
-/// Visibility modifier counts as "visible for the check" iff it's
-/// anything other than the implicit (no-modifier) case. See D-5 for
-/// the rationale.
-fn is_visible(vis: &Visibility) -> bool {
-    !matches!(vis, Visibility::Inherited)
 }
 
 /// True iff the `#[test]` / `#[cfg(test)]` attribute set would make
@@ -197,7 +172,7 @@ fn is_test_fn(attrs: &[syn::Attribute]) -> bool {
 
 impl<'ast, 'vis> Visit<'ast> for PubFnCollector<'ast, 'vis> {
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
-        if is_visible(&node.vis) && !is_test_fn(&node.attrs) {
+        if self.enclosing_mod_visible && is_visible(&node.vis) && !is_test_fn(&node.attrs) {
             let line = syn::spanned::Spanned::span(&node.sig.ident).start().line;
             let name = node.sig.ident.to_string();
             self.record_fn(name, line, &node.block, &node.sig);
@@ -206,39 +181,36 @@ impl<'ast, 'vis> Visit<'ast> for PubFnCollector<'ast, 'vis> {
     }
 
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
-        // Visibility is still name-based (last segment of the raw impl
-        // header), but the self-type we store runs through the same
-        // canonicalisation pipeline as receiver-tracked method calls
-        // — otherwise `use crate::app::Session; impl Session { ... }`
-        // would produce `crate::<file_mod>::Session::method` for
-        // Check B while the call collector resolves caller sites to
-        // `crate::app::Session::method`, and every method on an
-        // imported type would be silently "unreached".
-        let raw_segs = impl_self_ty_segments(&node.self_ty);
-        let visible = raw_segs
-            .as_ref()
-            .and_then(|segs| segs.last())
-            .is_some_and(|name| self.visible_types.contains(name));
-        // `visible` already gates on the raw-segments path (last segment
-        // in the workspace-wide visible-types set), so unresolved
-        // self-types (trait objects, references) bring `visible=false`
-        // with them and the method is skipped regardless. Coalescing
-        // `None` to an empty segment list here is safe because it's
-        // never read under that flag.
+        // Resolve the impl's self-type through the same canonicalisation
+        // pipeline used by receiver-tracked method calls, then probe
+        // the workspace `visible_canonicals` set with the joined path.
+        // Canonical comparison handles short-name collisions
+        // (`api::Session` vs `internal::Session`), private-mod impls
+        // for top-level pub types (`mod methods { impl super::Session
+        // … }`), and re-exports (`pub use private::Hidden`) uniformly.
+        // Unresolved self-types (trait objects, references) bring an
+        // empty segment list with `visible=false` and the methods
+        // are skipped regardless.
         let canonical_segs = resolve_impl_self_type(
             &node.self_ty,
-            self.alias_map,
-            self.local_symbols,
-            self.crate_root_modules,
-            &self.file,
+            &CanonScope {
+                file: self.file,
+                mod_stack: &self.mod_stack,
+            },
         )
         .unwrap_or_default();
+        let visible = !canonical_segs.is_empty()
+            && self.visible_canonicals.contains(&canonical_segs.join("::"));
         self.impl_stack.push((canonical_segs, visible));
         syn::visit::visit_item_impl(self, node);
         self.impl_stack.pop();
     }
 
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+        // No enclosing-mod-visible gate here: `visible_canonicals`
+        // already encodes whether the type is reachable, so impls in
+        // private modules for publicly named types record correctly
+        // and impls on private types are filtered uniformly.
         if self.current_impl_visible() && is_visible(&node.vis) && !is_test_fn(&node.attrs) {
             let line = syn::spanned::Spanned::span(&node.sig.ident).start().line;
             let name = node.sig.ident.to_string();
@@ -254,6 +226,11 @@ impl<'ast, 'vis> Visit<'ast> for PubFnCollector<'ast, 'vis> {
         if has_cfg_test(&node.attrs) {
             return;
         }
+        let parent_visible = self.enclosing_mod_visible;
+        self.enclosing_mod_visible = parent_visible && is_visible(&node.vis);
+        self.mod_stack.push(node.ident.to_string());
         syn::visit::visit_item_mod(self, node);
+        self.mod_stack.pop();
+        self.enclosing_mod_visible = parent_visible;
     }
 }

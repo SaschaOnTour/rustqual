@@ -111,6 +111,8 @@ fn minimal_call_parity() -> CallParityConfig {
         target: "application".to_string(),
         call_depth: 3,
         exclude_targets: Vec::new(),
+        transparent_wrappers: Vec::new(),
+        transparent_macros: Vec::new(),
     }
 }
 
@@ -242,6 +244,41 @@ fn compile_call_parity_rejects_invalid_exclude_glob() {
         err.to_lowercase().contains("exclude_targets"),
         "err = {err}"
     );
+}
+
+#[test]
+fn compile_call_parity_normalises_transparent_wrappers() {
+    // Resolver lookups are keyed on the bare type ident, so config
+    // values may include path prefixes (`axum::extract::State`) and
+    // generic suffixes (`State<T>`); both must reduce to `State`.
+    let mut cfg = call_parity_cfg();
+    let mut cp = minimal_call_parity();
+    cp.transparent_wrappers = vec![
+        "  State  ".to_string(),
+        "axum::extract::Extension".to_string(),
+        "Json<T>".to_string(),
+        "actix_web::web::Data<DbPool>".to_string(),
+        // Path-qualified generic arg: the `::` lives inside the
+        // generic, so naive last-`::`-split picks `Db>` instead of
+        // `State`. Must strip `<…>` before splitting.
+        "axum::extract::State<crate::app::Db>".to_string(),
+        // Whitespace before `<` survives the split; must trim again.
+        "Json <Body>".to_string(),
+    ];
+    cfg.call_parity = Some(cp);
+    let c = compile_architecture(&cfg).expect("compile");
+    let wrappers = c.call_parity.unwrap().transparent_wrappers;
+    assert!(wrappers.contains("State"), "wrappers = {wrappers:?}");
+    assert!(wrappers.contains("Extension"), "wrappers = {wrappers:?}");
+    assert!(wrappers.contains("Json"), "wrappers = {wrappers:?}");
+    assert!(wrappers.contains("Data"), "wrappers = {wrappers:?}");
+    // No leftover entries with `<` or whitespace.
+    for w in &wrappers {
+        assert!(
+            !w.contains('<') && w == w.trim(),
+            "wrapper key not normalised: {w:?}"
+        );
+    }
 }
 
 // ── LayerDefinitions::layer_of_crate_path (Task 2) ──────────────

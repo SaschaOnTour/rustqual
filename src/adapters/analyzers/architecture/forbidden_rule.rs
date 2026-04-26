@@ -107,20 +107,29 @@ pub(crate) fn resolve_to_crate_absolute(
     importing_file: &str,
     segments: &[String],
 ) -> Option<Vec<String>> {
+    resolve_to_crate_absolute_in(importing_file, &[], segments)
+}
+
+/// Variant that resolves `self::` / `super::` relative to the inline
+/// `mod_stack` inside `importing_file`. Pass `&[]` to behave as the
+/// file-level resolver.
+pub(crate) fn resolve_to_crate_absolute_in(
+    importing_file: &str,
+    mod_stack: &[String],
+    segments: &[String],
+) -> Option<Vec<String>> {
     let first = segments.first()?;
+    let mut base = file_to_module_segments(importing_file);
+    base.extend_from_slice(mod_stack);
     let resolved = match first.as_str() {
         "crate" => segments[1..].to_vec(),
         "self" => {
-            let mut base = file_to_module_segments(importing_file);
             base.extend_from_slice(&segments[1..]);
             base
         }
         "super" => {
-            let mut base = file_to_module_segments(importing_file);
             let mut i = 0;
             while segments.get(i).is_some_and(|s| s == "super") {
-                // More `super`s than ancestors → silently ignore (no
-                // architecture-rule meaning we can derive).
                 base.pop()?;
                 i += 1;
             }
@@ -129,9 +138,6 @@ pub(crate) fn resolve_to_crate_absolute(
         }
         _ => return None,
     };
-    // A resolved path with a `*` leaf (e.g. `crate::foo::*`) matches no
-    // concrete file — skip so we don't emit bogus `src/*/…` candidates
-    // that could collide with broad `to = "src/**"` rules.
     if resolved.iter().any(|s| s == "*") {
         return None;
     }

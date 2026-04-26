@@ -828,7 +828,7 @@ Checks: `receiver_may_be`, `methods_must_be_async`,
 `required_supertraits_contain`, `must_be_object_safe` (conservative: flags
 `Self` returns and method-level generics), `forbidden_error_variant_contains`.
 
-**5. `[architecture.call_parity]` — cross-adapter delegation drift check (v1.1).**
+**5. `[architecture.call_parity]` — cross-adapter delegation drift check (v1.1, hardened in v1.2).**
 Detects when N peer adapters (CLI + MCP + REST + …) fall out of sync
 with the shared Application layer. Two rules run under one config
 section:
@@ -854,11 +854,59 @@ exclude_targets = ["app::setup::*"]
 ```
 
 Zero per-function annotation: adapter fns are enumerated automatically
-from the layer globs you already have. Receiver-type tracking resolves
-`let s = Session::open(); s.search();` idioms through `let` bindings,
-`fn` signatures, and common wrappers (`Arc<T>`, `Box<T>`, `Rc<T>`,
-`&T`, `&mut T`, `Cow<'_, T>`), so Session/Service/Context-pattern
-architectures aren't 100% false-positive out of the box.
+from the layer globs you already have. Shallow type-inference resolves
+Session/Service/Context-pattern idioms out of the box:
+
+- **Method-chain constructors:** `let s = Session::open().map_err(f)?;
+  s.diff(...)` — the inference walks through `?`, `.unwrap()`, `.expect()`,
+  `.map_err()`, `.or_else()`, `.unwrap_or*()` and back to the
+  constructor to find `Session`.
+- **Field access:** `ctx.session.diff(...)` — looks up `session` in the
+  workspace struct-field index, then resolves `diff` on the resulting type.
+- **Free-fn return types:** `make_session().unwrap().diff()` — the
+  free-fn's declared return type is indexed and flows through the chain.
+- **Result/Option combinators:** full stdlib table for `unwrap`,
+  `expect`, `ok`, `err`, `map_err`, `or_else`, `ok_or`, `filter`,
+  `as_ref` etc. Closure-dependent combinators (`map`, `and_then`)
+  intentionally stay unresolved rather than fabricate an edge.
+- **Wrapper stripping:** `Arc<T>`, `Box<T>`, `Rc<T>`, `Cow<'_, T>`,
+  `&T`, `&mut T` — the Deref-transparent smart pointers — strip to the
+  inner type. `RwLock<T>` / `Mutex<T>` / `RefCell<T>` / `Cell<T>` do
+  **not** strip by default (their `read` / `lock` / `borrow` / `get`
+  methods don't exist on the inner type — stripping would synthesize
+  bogus edges). Opt in per-wrapper via `transparent_wrappers` if your
+  codebase uses a genuinely Deref-transparent domain wrapper. `Vec<T>`
+  / `HashMap<_, V>` preserve the element/value type.
+- **`Self::xxx`** in impl-method contexts substitutes to the enclosing
+  type.
+- **`if let Some(s) = opt`** binds `s: T` when `opt: Option<T>`, same
+  for `Ok(x)` / `Err(e)` patterns.
+- **Trait dispatch** (`dyn Trait` / `&dyn Trait` / `Box<dyn Trait>`
+  receivers): fans out to every workspace impl of the trait. Method
+  must be declared on the trait — unrelated methods stay unresolved
+  rather than fabricating edges. Marker traits (`Send`, `Sync`, …)
+  skipped when picking the dispatch-relevant bound.
+- **Turbofish return types**: `get::<Session>()` for generic fns — the
+  turbofish arg is used as the return type when the workspace index has
+  no concrete return for `get`. Only single-ident paths trigger.
+- **Type aliases**: `type Repo = Arc<Box<Store>>;` is recorded and
+  expanded during receiver resolution, so `fn h(r: Repo) { r.insert(..) }`
+  reaches `Store::insert` through the peeled smart-pointer chain.
+  Aliases wrapping non-Deref types (`type Db = Arc<RwLock<Store>>`) still
+  expand, but the `RwLock` stops peeling — methods on the inner `Store`
+  aren't reached unless `RwLock` is listed in `transparent_wrappers`.
+
+For framework codebases you can extend the wrapper and macro lists:
+
+```toml
+[architecture.call_parity]
+# Framework extractor wrappers peeled like Arc / Box:
+transparent_wrappers = ["State", "Extension", "Json", "Data"]
+# Attribute macros that don't affect the call graph. The set is
+# recorded for future macro-expansion integrations and currently has
+# no observable effect on the call-graph / type-inference pipeline.
+transparent_macros = ["my_custom_attr"]
+```
 
 Two escape mechanisms:
 - `exclude_targets` — glob list in config for whole groups of
@@ -867,9 +915,25 @@ Two escape mechanisms:
   exceptions. Counts against `max_suppression_ratio`.
 
 See `examples/architecture/call_parity/` for a runnable 3-adapter
-fixture. Known MVP limitation: factory-helper return types aren't
-inferred — `let s = helpers::open()?;` stays `<method>:search`.
-Workaround: explicit `let s: Session = helpers::open()?;`.
+fixture.
+
+Known limits (documented, with clear workarounds):
+- **Closure-body arg types** `Session::open().map(|r| r.m())` — the
+  closure arg's type isn't inferred. Inner method call stays
+  `<method>:m`. Workaround: pull the method call out of the closure.
+- **Unannotated generics** `let x = get(); x.m()` where `get<T>() -> T`
+  — use turbofish `get::<T>()` or `let x: T = get();`.
+- **`impl Trait` inherent methods** — `fn make() -> impl Handler; make().trait_method()` resolves to every workspace impl of `Handler::trait_method` via over-approximation, but an inherent method not declared on `Handler` can't be reached (the concrete type is hidden by design).
+- **Multi-bound `impl Trait` / `dyn Trait` returns** — `fn make() -> impl Future<Output = T> + Handler` keeps only the first non-marker bound, so `.await` propagation *or* trait-dispatch fires, never both. Marker traits (`Send`/`Sync`/`Unpin`/`Copy`/`Clone`/`Sized`/`Debug`/`Display`) are filtered first, so `impl Future<Output = T> + Send` is unaffected. Workaround: split the return into two methods, or `qual:allow(architecture)` on the call-site.
+- **Caller-side `pub use` path-following.** `pub mod outer { mod private { pub struct Hidden; impl Hidden { pub fn op() } } pub use self::private::Hidden; }` with a caller `fn h(x: outer::Hidden) { x.op() }` resolves the parameter to `crate::…::outer::Hidden` while the impl is keyed under `crate::…::outer::private::Hidden`. Visibility is recognised on both paths, but the call-graph edge goes to `<method>:op` because the resolver doesn't follow workspace-wide `pub use` re-exports inside nested modules. Workaround: write `impl outer::Hidden { … }` at the file-level qualified path so impl-canonical and caller-canonical agree, or `qual:allow(architecture)` at the call-site.
+- **Re-exported type aliases inside private modules.** `mod private { pub type Public = Hidden; … } pub use private::Public;` doesn't follow into the alias's target — private modules aren't walked by the visibility pass, so the alias's source type stays out of `visible_canonicals`. Workaround: lift the type alias to the parent module (`pub use private::Hidden; pub type Public = Hidden;`) so both the alias declaration and its target are processed.
+- **Type-vs-value namespace ambiguity in `pub use`.** A `pub use internal::helper as Hidden;` re-export adds `Hidden` as a workspace-visible *type* canonical without checking whether the leaf is actually a type. If the same scope has a private `struct Hidden`, its impl methods get registered as adapter surface even though the `pub use` only exported a function. Workaround: rename to avoid the value/type collision, or `qual:allow(architecture)` on the affected impl.
+- **`impl Alias { … }` with caller-side alias expansion.** `pub type Public = private::Hidden; impl Public { pub fn op(&self) {} }` indexes the method under `crate::…::Public::op` (impl self-type goes through the path canonicaliser), while a caller `fn h(x: Public) { x.op() }` resolves `x` via type-alias expansion to `crate::…::private::Hidden` and produces a `Hidden::op` edge. Visibility recognises `Public`, but the call-graph edges and the indexed method canonical disagree, so Check B reports `Public::op` as unreached. Workaround: declare the `impl` against the source type (`impl private::Hidden { … }`) so impl-canonical and caller-canonical agree, or `qual:allow(architecture)` on the affected impl.
+- **Generic type-alias substitution in the visibility chain.** `type Id<T> = T; pub type Public = Id<private::Hidden>;` doesn't substitute the use-site arg `private::Hidden` into `Id`'s body in the visibility pass — only the immediate alias `Id` enters `visible_canonicals`. Receiver-side resolution does substitute (the workspace alias-index runs after pub-fn enumeration), so callers reach `Hidden::op` correctly, but Check B can drop the public target. Workaround: skip the generic-alias indirection (`pub type Public = private::Hidden;`), or `qual:allow(architecture)` on the affected impl.
+- **Arbitrary proc-macros** not listed in `transparent_macros` —
+  `// qual:allow(architecture)` on the enclosing fn is the escape.
+
+Design reference: `docs/rustqual-design-receiver-type-inference.md`.
 
 **`--explain <FILE>`** diagnostic mode prints the file's layer assignment,
 classified imports, and rule hits — useful for understanding why a rule

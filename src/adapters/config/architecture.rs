@@ -270,6 +270,34 @@ pub struct CallParityConfig {
     /// always use the on-disk module path.
     #[serde(default)]
     pub exclude_targets: Vec<String>,
+
+    /// Stage 3 — user-defined transparent wrapper types. These are
+    /// peeled during receiver-type resolution just like `Arc`, `Box`,
+    /// `Rc`, `Cow`. Typical candidates are framework extractor types:
+    /// Axum's `State` / `Extension` / `Json`, Actix's `Data`, tower's
+    /// `Router`. Without an entry here,
+    /// `fn h(State(db): State<Db>) { db.query() }` leaves `db`
+    /// unresolved.
+    ///
+    /// Entries are matched on the bare type ident — both path prefixes
+    /// (`axum::extract::State`) and generic suffixes (`State<T>`) are
+    /// stripped during compile, so `"State"`, `"axum::extract::State"`,
+    /// and `"State<T>"` all key on `State` at lookup time. Prefer the
+    /// bare-ident form for clarity.
+    #[serde(default)]
+    pub transparent_wrappers: Vec<String>,
+
+    /// Stage 3 — transparent attribute-macro names. These are
+    /// attribute macros whose expansion does not alter the fn body
+    /// semantically from a call-graph perspective
+    /// (`#[tracing::instrument]`, `#[async_trait]`, `#[tokio::main]`).
+    /// The default list covers the most common cases; user entries
+    /// extend it. Recorded here for authorial intent and future
+    /// extensions — the default syn-based AST walk already treats
+    /// attribute macros as transparent, so this config currently
+    /// documents rather than changes behaviour.
+    #[serde(default)]
+    pub transparent_macros: Vec<String>,
 }
 
 pub(crate) fn default_call_depth() -> usize {

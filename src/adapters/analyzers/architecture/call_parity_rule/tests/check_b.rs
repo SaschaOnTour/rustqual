@@ -4,10 +4,7 @@
 //! `missing_adapters` set produced by `check_missing_adapter` for each
 //! target-layer pub-fn. Suppression is covered end-to-end in Task 5.
 
-use super::support::{borrowed_files, build_workspace, globset, Workspace};
-use crate::adapters::analyzers::architecture::call_parity_rule::check_b::check_missing_adapter;
-use crate::adapters::analyzers::architecture::call_parity_rule::pub_fns::collect_pub_fns_by_layer;
-use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::build_call_graph;
+use super::support::{build_workspace, empty_cfg_test, globset, run_check_b, Workspace};
 use crate::adapters::analyzers::architecture::compiled::CompiledCallParity;
 use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
@@ -40,19 +37,9 @@ fn make_config(
         target: "application".to_string(),
         call_depth,
         exclude_targets: globset(exclude_targets),
+        transparent_wrappers: HashSet::new(),
+        transparent_macros: HashSet::new(),
     }
-}
-
-fn run_check_b(
-    ws: &Workspace,
-    layers: &LayerDefinitions,
-    cp: &CompiledCallParity,
-    cfg_test: &HashSet<String>,
-) -> Vec<MatchLocation> {
-    let borrowed = borrowed_files(ws);
-    let pub_fns = collect_pub_fns_by_layer(&borrowed, &ws.aliases_per_file, layers, cfg_test);
-    let graph = build_call_graph(&borrowed, &ws.aliases_per_file, cfg_test, layers);
-    check_missing_adapter(&pub_fns, &graph, layers, cp)
 }
 
 /// Extract the `(target_fn, missing_adapters)` pair from a
@@ -69,10 +56,6 @@ fn missing_pairs(findings: &[MatchLocation]) -> Vec<(String, Vec<String>)> {
             _ => None,
         })
         .collect()
-}
-
-fn empty_cfg_test() -> HashSet<String> {
-    HashSet::new()
 }
 
 // ── Direct / transitive coverage ──────────────────────────────

@@ -1,6 +1,6 @@
 [package]
 name = "rustqual"
-version = "1.1.0"
+version = "1.2.0"
 edition = "2021"
 description = "Comprehensive Rust code quality analyzer — seven dimensions: IOSP, Complexity, DRY, SRP, Coupling, Test Quality, Architecture"
 license = "MIT"
@@ -15,7 +15,7 @@ default-run = "rustqual"
 exclude = ["docs/*", "prd-*.md", ".github/*", ".claude/*"]
 
 [dependencies]
-syn = { version = "2", features = ["full", "parsing", "visit"] }
+syn = { version = "2", features = ["full", "parsing", "visit", "visit-mut"] }
 quote = "1"
 proc-macro2 = { version = "1", features = ["span-locations"] }
 walkdir = "2"

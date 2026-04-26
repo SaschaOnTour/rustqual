@@ -5,10 +5,11 @@
 use crate::adapters::analyzers::architecture::call_parity_rule::calls::{
     collect_canonical_calls, FnContext,
 };
+use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::FileScope;
 use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::{
     collect_crate_root_modules, collect_local_symbols,
 };
-use crate::adapters::shared::use_tree::gather_alias_map;
+use crate::adapters::shared::use_tree::{gather_alias_map, ScopedAliasMap};
 use std::collections::{HashMap, HashSet};
 
 fn parse_file(src: &str) -> syn::File {
@@ -25,22 +26,38 @@ fn parse_type(src: &str) -> syn::Type {
 struct FileCtx {
     file: syn::File,
     alias_map: HashMap<String, Vec<String>>,
+    aliases_per_scope: ScopedAliasMap,
     local_symbols: HashSet<String>,
+    local_decl_scopes: HashMap<String, Vec<Vec<String>>>,
     crate_root_modules: HashSet<String>,
+}
+
+impl FileCtx {
+    fn file_scope<'a>(&'a self, importing_file: &'a str) -> FileScope<'a> {
+        FileScope {
+            path: importing_file,
+            alias_map: &self.alias_map,
+            aliases_per_scope: &self.aliases_per_scope,
+            local_symbols: &self.local_symbols,
+            local_decl_scopes: &self.local_decl_scopes,
+            crate_root_modules: &self.crate_root_modules,
+        }
+    }
 }
 
 fn load(src: &str) -> FileCtx {
     let file = parse_file(src);
     let alias_map = gather_alias_map(&file);
     let local_symbols = collect_local_symbols(&file);
-    // For single-file unit tests the root module set is empty — tests
-    // that exercise Rust-2018 absolute imports populate it manually.
-    let crate_root_modules = HashSet::new();
+    // Single-file unit tests don't populate the scoped overlays —
+    // they're left empty so the resolver falls back to flat behaviour.
     FileCtx {
         file,
         alias_map,
+        aliases_per_scope: ScopedAliasMap::new(),
         local_symbols,
-        crate_root_modules,
+        local_decl_scopes: HashMap::new(),
+        crate_root_modules: HashSet::new(),
     }
 }
 
@@ -114,16 +131,20 @@ fn sig_params(sig: &syn::Signature) -> Vec<(String, &syn::Type)> {
         .collect()
 }
 
-fn ctx_for_fn<'a>(fctx: &'a FileCtx, fn_name: &str, importing_file: &'a str) -> FnContext<'a> {
+fn ctx_for_fn<'a>(
+    fctx: &'a FileCtx,
+    file_scope: &'a FileScope<'a>,
+    fn_name: &str,
+) -> FnContext<'a> {
     let f = find_fn(&fctx.file, fn_name);
     FnContext {
+        file: file_scope,
+        mod_stack: &[],
         body: &f.block,
         signature_params: sig_params(&f.sig),
         self_type: None,
-        alias_map: &fctx.alias_map,
-        local_symbols: &fctx.local_symbols,
-        crate_root_modules: &fctx.crate_root_modules,
-        importing_file,
+        workspace_index: None,
+        workspace_files: None,
     }
 }
 
@@ -152,7 +173,8 @@ fn test_collect_direct_qualified_call() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "cmd_search", "src/cli/handlers.rs");
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "cmd_search");
     let calls = collect_canonical_calls(&ctx);
     assert!(calls.contains("crate::application::stats::get_stats"));
 }
@@ -167,7 +189,8 @@ fn test_collect_unqualified_via_use_alias() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "cmd_search", "src/cli/handlers.rs");
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "cmd_search");
     let calls = collect_canonical_calls(&ctx);
     assert!(calls.contains("crate::application::stats::get_stats"));
 }
@@ -181,7 +204,8 @@ fn test_collect_unqualified_no_alias_is_bare() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "cmd_search", "src/cli/handlers.rs");
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "cmd_search");
     let calls = collect_canonical_calls(&ctx);
     assert!(calls.contains("<bare>:foo"));
 }
@@ -198,7 +222,8 @@ fn test_collect_in_semicolon_separated_macro_descends() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "cmd_search", "src/cli/handlers.rs");
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "cmd_search");
     let calls = collect_canonical_calls(&ctx);
     assert!(
         calls.contains("<bare>:compute"),
@@ -215,7 +240,8 @@ fn test_collect_in_macro_descends() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "cmd_search", "src/cli/handlers.rs");
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "cmd_search");
     let calls = collect_canonical_calls(&ctx);
     assert!(calls.contains("<bare>:validate"));
     // The macro itself must not be recorded as a call target.
@@ -237,7 +263,8 @@ fn test_collect_self_super_prefix() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "cmd_search", "src/cli/mod.rs");
+    let fs = fctx.file_scope("src/cli/mod.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "cmd_search");
     let calls = collect_canonical_calls(&ctx);
     assert!(
         calls.contains("crate::cli::helpers::format"),
@@ -255,7 +282,8 @@ fn test_collect_turbofish_stripped() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "cmd_search", "src/cli/handlers.rs");
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "cmd_search");
     let calls = collect_canonical_calls(&ctx);
     assert!(calls.contains("<bare>:Box::new"));
 }
@@ -270,7 +298,8 @@ fn test_collect_closure_body_collected() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "cmd_search", "src/cli/handlers.rs");
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "cmd_search");
     let calls = collect_canonical_calls(&ctx);
     assert!(calls.contains("<bare>:inner_call"));
 }
@@ -284,7 +313,8 @@ fn test_collect_await_is_not_extra_call() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "cmd_search", "src/cli/handlers.rs");
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "cmd_search");
     let calls = collect_canonical_calls(&ctx);
     assert!(calls.contains("<bare>:f"));
     // .await is not a call target
@@ -306,13 +336,20 @@ fn test_collect_self_dispatch_in_impl() {
     let (item, f) = find_impl_fn(&fctx.file, "RlmSession", "search");
     let self_ty = canonical_of_impl_self(item);
     let ctx = FnContext {
+        file: &FileScope {
+            path: "src/application/session.rs",
+            alias_map: &fctx.alias_map,
+            aliases_per_scope: &ScopedAliasMap::new(),
+            local_symbols: &fctx.local_symbols,
+            local_decl_scopes: &HashMap::new(),
+            crate_root_modules: &fctx.crate_root_modules,
+        },
+        mod_stack: &[],
         body: &f.block,
         signature_params: sig_params(&f.sig),
         self_type: self_ty,
-        alias_map: &fctx.alias_map,
-        local_symbols: &fctx.local_symbols,
-        crate_root_modules: &fctx.crate_root_modules,
-        importing_file: "src/application/session.rs",
+        workspace_index: None,
+        workspace_files: None,
     };
     let calls = collect_canonical_calls(&ctx);
     assert!(
@@ -335,7 +372,8 @@ fn test_tracker_let_constructor_binding() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "cmd_search", "src/cli/handlers.rs");
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "cmd_search");
     let calls = collect_canonical_calls(&ctx);
     assert!(
         calls.contains("crate::app::session::RlmSession::search"),
@@ -355,7 +393,8 @@ fn test_tracker_let_type_annotation() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "cmd_search", "src/cli/handlers.rs");
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "cmd_search");
     let calls = collect_canonical_calls(&ctx);
     assert!(calls.contains("crate::app::session::RlmSession::search"));
 }
@@ -370,7 +409,8 @@ fn test_tracker_fn_param_type() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "handle", "src/mcp/handlers.rs");
+    let fs = fctx.file_scope("src/mcp/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "handle");
     let calls = collect_canonical_calls(&ctx);
     assert!(calls.contains("crate::app::session::RlmSession::search"));
 }
@@ -385,7 +425,8 @@ fn test_tracker_fn_param_ref_type() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "handle", "src/mcp/handlers.rs");
+    let fs = fctx.file_scope("src/mcp/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "handle");
     let calls = collect_canonical_calls(&ctx);
     assert!(calls.contains("crate::app::session::RlmSession::search"));
 }
@@ -401,7 +442,8 @@ fn test_tracker_fn_param_arc_type() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "handle", "src/mcp/handlers.rs");
+    let fs = fctx.file_scope("src/mcp/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "handle");
     let calls = collect_canonical_calls(&ctx);
     assert!(calls.contains("crate::app::session::RlmSession::search"));
 }
@@ -415,8 +457,9 @@ fn test_tracker_fn_param_box_ref_mut_type() {
         pub fn b(session: &mut RlmSession) { session.search(1); }
         "#,
     );
+    let fs = fctx.file_scope("src/mcp/handlers.rs");
     for name in &["a", "b"] {
-        let ctx = ctx_for_fn(&fctx, name, "src/mcp/handlers.rs");
+        let ctx = ctx_for_fn(&fctx, &fs, name);
         let calls = collect_canonical_calls(&ctx);
         assert!(
             calls.contains("crate::app::session::RlmSession::search"),
@@ -437,7 +480,8 @@ fn test_tracker_alias_resolved_constructor() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "cmd_search", "src/cli/handlers.rs");
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "cmd_search");
     let calls = collect_canonical_calls(&ctx);
     assert!(calls.contains("crate::app::session::RlmSession::search"));
 }
@@ -455,7 +499,8 @@ fn test_tracker_shadowing_uses_latest() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "cmd_search", "src/cli/handlers.rs");
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "cmd_search");
     let calls = collect_canonical_calls(&ctx);
     assert!(calls.contains("crate::app::session::RlmSession::search"));
     assert!(!calls.contains("crate::cli::CliSession::search"));
@@ -470,7 +515,8 @@ fn test_tracker_unknown_receiver_falls_back_to_method_shape() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "cmd_search", "src/cli/handlers.rs");
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "cmd_search");
     let calls = collect_canonical_calls(&ctx);
     assert!(calls.contains("<method>:search"));
     assert!(!calls.iter().any(|c| c.contains("UnknownType::search")));
@@ -488,7 +534,8 @@ fn test_tracker_closure_inherits_parent_bindings() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "cmd_search", "src/cli/handlers.rs");
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "cmd_search");
     let calls = collect_canonical_calls(&ctx);
     assert!(calls.contains("crate::app::session::RlmSession::search"));
 }
@@ -504,7 +551,8 @@ fn test_tracker_factory_helper_unresolved_falls_back_to_method_shape() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "cmd_search", "src/cli/handlers.rs");
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "cmd_search");
     let calls = collect_canonical_calls(&ctx);
     assert!(calls.contains("<method>:search"));
 }
@@ -519,7 +567,8 @@ fn test_tracker_in_async_fn() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "handle", "src/mcp/handlers.rs");
+    let fs = fctx.file_scope("src/mcp/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "handle");
     let calls = collect_canonical_calls(&ctx);
     assert!(calls.contains("crate::app::session::RlmSession::search"));
 }
@@ -535,7 +584,8 @@ fn test_collect_async_block() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "cmd_search", "src/cli/handlers.rs");
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "cmd_search");
     let calls = collect_canonical_calls(&ctx);
     assert!(
         calls.contains("crate::app::session::RlmSession::search"),
@@ -547,7 +597,8 @@ fn test_collect_async_block() {
 #[test]
 fn test_empty_body_yields_no_calls() {
     let fctx = load("pub fn f() {}");
-    let ctx = ctx_for_fn(&fctx, "f", "src/cli/handlers.rs");
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "f");
     let calls = collect_canonical_calls(&ctx);
     assert_eq!(calls, HashSet::<String>::new());
 }
@@ -565,7 +616,8 @@ fn test_local_helper_call_resolves_to_crate_module() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "cmd_foo", "src/cli/handlers.rs");
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "cmd_foo");
     let calls = collect_canonical_calls(&ctx);
     assert!(
         calls.contains("crate::cli::handlers::helper"),
@@ -589,7 +641,8 @@ fn test_external_call_without_use_still_falls_to_bare() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "cmd_foo", "src/cli/handlers.rs");
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "cmd_foo");
     let calls = collect_canonical_calls(&ctx);
     assert!(
         calls.contains("<bare>:not_a_local_symbol"),
@@ -611,7 +664,8 @@ fn test_super_aliased_call_normalises_to_crate_rooted() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "cmd_foo", "src/cli/handlers.rs");
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "cmd_foo");
     let calls = collect_canonical_calls(&ctx);
     assert!(
         calls.contains("crate::cli::stats::get_stats"),
@@ -639,7 +693,8 @@ fn test_unqualified_local_type_in_signature_resolves() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "cmd_foo", "src/application/session.rs");
+    let fs = fctx.file_scope("src/application/session.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "cmd_foo");
     let calls = collect_canonical_calls(&ctx);
     assert!(
         calls.contains("crate::application::session::Session::search"),
@@ -664,7 +719,8 @@ fn test_rust2018_absolute_call_without_use_resolves_to_crate_rooted() {
         "#,
         &["app"],
     );
-    let ctx = ctx_for_fn(&fctx, "cmd_x", "src/cli/handlers.rs");
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "cmd_x");
     let calls = collect_canonical_calls(&ctx);
     assert!(
         calls.contains("crate::app::foo"),
@@ -691,7 +747,8 @@ fn test_rust2018_absolute_import_resolves_to_crate_rooted() {
         "#,
         &["app"],
     );
-    let ctx = ctx_for_fn(&fctx, "cmd_x", "src/cli/handlers.rs");
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "cmd_x");
     let calls = collect_canonical_calls(&ctx);
     assert!(
         calls.contains("crate::app::foo"),
@@ -734,7 +791,8 @@ fn test_top_level_self_as_alias_maps_to_current_file() {
         }
         "#,
     );
-    let ctx = ctx_for_fn(&fctx, "cmd_x", "src/util/fs_helpers.rs");
+    let fs = fctx.file_scope("src/util/fs_helpers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "cmd_x");
     let calls = collect_canonical_calls(&ctx);
     assert!(
         calls.contains("crate::util::fs_helpers::something"),
@@ -760,13 +818,20 @@ fn test_qualified_impl_path_does_not_double_crate() {
     let (item, f) = find_impl_fn(&fctx.file, "Session", "search");
     let self_ty = canonical_of_impl_self(item);
     let ctx = FnContext {
+        file: &FileScope {
+            path: "src/other_file.rs",
+            alias_map: &fctx.alias_map,
+            aliases_per_scope: &ScopedAliasMap::new(),
+            local_symbols: &fctx.local_symbols,
+            local_decl_scopes: &HashMap::new(),
+            crate_root_modules: &fctx.crate_root_modules,
+        },
+        mod_stack: &[],
         body: &f.block,
         signature_params: sig_params(&f.sig),
         self_type: self_ty,
-        alias_map: &fctx.alias_map,
-        local_symbols: &fctx.local_symbols,
-        crate_root_modules: &fctx.crate_root_modules,
-        importing_file: "src/other_file.rs",
+        workspace_index: None,
+        workspace_files: None,
     };
     let calls = collect_canonical_calls(&ctx);
     assert!(
@@ -777,4 +842,143 @@ fn test_qualified_impl_path_does_not_double_crate() {
         !calls.iter().any(|c| c.contains("crate::crate::")),
         "must not double-crate, got {calls:?}"
     );
+}
+
+// ── Shallow-inference fallback (Task 1.6) ────────────────────────
+
+/// Helper: build a `FnContext` with a pre-populated workspace index.
+fn ctx_with_index<'a>(
+    fctx: &'a FileCtx,
+    file_scope: &'a FileScope<'a>,
+    fn_name: &str,
+    index: &'a crate::adapters::analyzers::architecture::call_parity_rule::type_infer::WorkspaceTypeIndex,
+) -> FnContext<'a> {
+    let f = find_fn(&fctx.file, fn_name);
+    FnContext {
+        file: file_scope,
+        mod_stack: &[],
+        body: &f.block,
+        signature_params: sig_params(&f.sig),
+        self_type: None,
+        workspace_index: Some(index),
+        workspace_files: None,
+    }
+}
+
+#[test]
+fn test_inference_fallback_resolves_rlm_pattern() {
+    // The exact pattern that motivated Task 1.6: method chain on a
+    // constructor + `?` unwrap. Legacy extract_let_binding can't see
+    // through the MethodCall; inference walks the chain and ends at T.
+    use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::{
+        CanonicalType, WorkspaceTypeIndex,
+    };
+    let fctx = load(
+        r#"
+        use crate::app::session::Session;
+        pub fn cmd_diff() {
+            let session = Session::open().map_err(handle_err).unwrap();
+            session.diff();
+        }
+        "#,
+    );
+    let mut index = WorkspaceTypeIndex::new();
+    // `Session::open()` returns Result<Session, _>.
+    index.insert_method_return(
+        "crate::app::session::Session",
+        "open",
+        CanonicalType::Result(Box::new(CanonicalType::path([
+            "crate", "app", "session", "Session",
+        ]))),
+    );
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_with_index(&fctx, &fs, "cmd_diff", &index);
+    let calls = collect_canonical_calls(&ctx);
+    assert!(
+        calls.contains("crate::app::session::Session::diff"),
+        "inference fallback should resolve session.diff(), got {calls:?}"
+    );
+}
+
+#[test]
+fn test_inference_fallback_resolves_field_access() {
+    // `ctx.session.diff()` — receiver is Expr::Field, resolved via the
+    // inference layer + workspace struct-field index. Fixture uses
+    // `use crate::app::Ctx` so the signature-param `&Ctx` canonicalises
+    // to `crate::app::Ctx` directly.
+    use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::{
+        CanonicalType, WorkspaceTypeIndex,
+    };
+    let fctx = load(
+        r#"
+        use crate::app::Ctx;
+        pub fn handle_diff(ctx: &Ctx) {
+            ctx.session.diff();
+        }
+        "#,
+    );
+    let mut index = WorkspaceTypeIndex::new();
+    index.insert_struct_field(
+        "crate::app::Ctx",
+        "session",
+        CanonicalType::path(["crate", "app", "Session"]),
+    );
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_with_index(&fctx, &fs, "handle_diff", &index);
+    let calls = collect_canonical_calls(&ctx);
+    assert!(
+        calls.contains("crate::app::Session::diff"),
+        "field-access inference should resolve ctx.session.diff(), got {calls:?}"
+    );
+}
+
+#[test]
+fn test_inference_fallback_on_result_unwrap_chain() {
+    // End-to-end: `session.open().unwrap().diff()` — combinator table
+    // unwraps Result, then method resolution on Session proceeds.
+    use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::{
+        CanonicalType, WorkspaceTypeIndex,
+    };
+    let fctx = load(
+        r#"
+        use crate::app::session::Session;
+        pub fn cmd_direct() {
+            Session::open().unwrap().diff();
+        }
+        "#,
+    );
+    let mut index = WorkspaceTypeIndex::new();
+    index.insert_method_return(
+        "crate::app::session::Session",
+        "open",
+        CanonicalType::Result(Box::new(CanonicalType::path([
+            "crate", "app", "session", "Session",
+        ]))),
+    );
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_with_index(&fctx, &fs, "cmd_direct", &index);
+    let calls = collect_canonical_calls(&ctx);
+    assert!(
+        calls.contains("crate::app::session::Session::diff"),
+        "combinator chain should resolve Session::open().unwrap().diff(), got {calls:?}"
+    );
+}
+
+#[test]
+fn test_existing_fast_path_still_works_without_index() {
+    // Regression guard: legacy extract_let_binding keeps working when
+    // workspace_index is None (unit-test fixture shape).
+    let fctx = load(
+        r#"
+        use crate::app::session::RlmSession;
+        pub fn cmd_search(q: u32) {
+            let s = RlmSession::open_cwd();
+            s.search(q);
+        }
+        "#,
+    );
+    let fs = fctx.file_scope("src/cli/handlers.rs");
+    let ctx = ctx_for_fn(&fctx, &fs, "cmd_search");
+    let calls = collect_canonical_calls(&ctx);
+    assert!(calls.contains("crate::app::session::RlmSession::search"));
 }

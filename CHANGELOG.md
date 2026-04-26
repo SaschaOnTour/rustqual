@@ -5,6 +5,250 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-04-24
+
+Minor release: **shallow type-inference** for `call_parity` receiver
+resolution across three dimensions:
+
+1. **Return-type propagation** (method chains, field access, stdlib
+   Result/Option/Future combinators, destructuring patterns) —
+   eliminates the dominant false-positive class that made v1.1.0
+   unusable on any Session/Context/Handle-pattern Rust codebase.
+2. **Trait dispatch over-approximation** — `dyn Trait` / `&dyn Trait` /
+   `Box<dyn Trait>` receivers fan out to every workspace impl of the
+   trait. Makes the tool structurally sound for Ports&Adapters
+   architectures, where dependency inversion via trait objects is the
+   core abstraction.
+3. **Framework & type-alias config** — type-alias expansion,
+   user-configurable transparent wrapper types (Axum `State<T>`,
+   Actix `Data<T>`, tower `Router<T>`, …), and attribute-macro
+   transparency (with a default starter-pack for `tracing::instrument`,
+   `async_trait`, `tokio::main`/`test`, etc.).
+
+No breaking changes; existing `[architecture.call_parity]` configs
+keep working without modification — the new resolution paths are all
+additive and the legacy fast-path stays intact as a safety net.
+
+### Fixed
+- **`call_parity` method-chain constructor resolution.** v1.1.0's
+  resolver only extracted binding types from direct constructor calls
+  (`let s = T::ctor()`). Real-world Rust code more often wraps the
+  constructor in a `?` / `.unwrap()` / `.map_err(…)?` chain, which
+  returned `None` from the legacy extractor and left the downstream
+  method call as a layer-unknown `<method>:name`. On rlm (the reference
+  adopter codebase), this produced 93 of 116 false-positive findings —
+  roughly 80 % of the total. Symptom: every CLI handler shaped like
+  ```rust
+  pub fn cmd_diff(path: &str) -> Result<(), Error> {
+      let session = RlmSession::open_cwd().map_err(map_err)?;
+      session.diff(path).map_err(map_err)?;
+      Ok(())
+  }
+  ```
+  was reported as "not delegating to application" even though it
+  obviously did.
+- **`self` receiver resolution inside impl methods.** Signature seeding
+  only iterated typed `FnArg::Typed` params, never the `self` receiver.
+  As a result `self.helper()` and `self.field.method()` fell through to
+  `<method>:…` even when the enclosing impl's canonical type was known
+  via `self_type`. The collector now binds `self` to the impl's
+  canonical segments alongside the typed params, so ordinary
+  method-internal delegation routes through `method_returns` /
+  `struct_fields` like any other receiver.
+
+### Added
+- **`call_parity_rule::type_infer`** — new module implementing shallow
+  type inference over `syn::Expr`. Exposes `infer_type(expr, ctx) ->
+  Option<CanonicalType>` as the public entry point. Built on three
+  layers:
+  - `workspace_index`: single pre-pass over the workspace collecting
+    struct-field types, impl-method return types, and free-fn return
+    types into a lookup index. Runs once per `build_call_graph` call.
+  - `infer`: dispatch over expression variants — `Path`, `Call`,
+    `MethodCall`, `Field`, `Try` (`?`), `Await`, `Cast`, `Unary(Deref)`,
+    plus transparent `Paren` / `Reference` / `Group`. Supports
+    `Self::xxx` substitution in impl-method contexts.
+  - `combinators`: stdlib table covering `Result<T,E>` / `Option<T>` /
+    `Future<T>` — `unwrap`, `expect`, `unwrap_or*`, `ok`, `err`,
+    `map_err`, `or_else`, `ok_or`, `filter`, `as_ref` etc. Closure-
+    dependent methods (`map`, `and_then`, `then`) intentionally stay
+    unresolved rather than fabricate an edge.
+- **Pattern-binding walker** (`type_infer::patterns`) — extracts
+  `(name, type)` pairs from `let` / `if let` / `while let` / `let …
+  else` / `match`-arm / `for` patterns. Handles tuple-struct
+  destructuring (`Some(x)`, `Ok(x)`, `Err(_)`), named-field struct
+  patterns (`Ctx { session }`, `Ctx { session: s }`, `Ctx { a, .. }`),
+  slice patterns with rest, and disambiguates `None` as a variant
+  against `Option<_>` instead of binding it as a variable name.
+- **Fallback wiring in `calls::CanonicalCallCollector`** — both
+  `visit_local` (for binding extraction) and `visit_expr_method_call`
+  (for method resolution) now invoke `type_infer` as a fallback after
+  the legacy fast-path fails. The fast path (direct constructor
+  extraction, signature-parameter types, explicit `let x: T = …`
+  annotation) is preserved for unit-test fixtures that don't build a
+  workspace index, so no existing tests regressed.
+- **`BindingLookup` trait** bridges the legacy `Vec<String>` scope
+  stack into the inference engine's `CanonicalType` vocabulary via
+  the `CollectorBindings` adapter. Returns owned `Option<CanonicalType>`
+  so adapters can synthesize types on the fly without lifetime
+  gymnastics.
+
+### Changed
+- **`FnContext` in `call_parity_rule::calls`** gained a new
+  `workspace_index: Option<&'a WorkspaceTypeIndex>` field. The full
+  `build_call_graph` pipeline always passes `Some(&index)`; unit-test
+  fixtures pass `None` and fall back to the legacy fast-path only.
+  Additive change — no public-API break for existing
+  `collect_canonical_calls` call sites.
+- **`build_call_graph`** now pre-builds the workspace type-index once
+  before the per-file walk. The index shares the same `cfg_test_files`
+  filter as the call-graph itself, so the two stay consistent.
+- **`iosp::analyze_file`** — bugfix discovered during Task 1.3:
+  `file_in_test` was propagated only to free-fn analysis, not to
+  `Item::Impl` / `Item::Trait` / `Item::Mod`. This meant any impl-method
+  helper inside a `#[cfg(test)] mod tests;` file incorrectly had
+  `is_test = false` and got flagged by ERROR_HANDLING / MAGIC_NUMBER /
+  LONG_FN checks. Now matches `analyze_mod`'s already-correct
+  propagation.
+
+### Documentation
+- **`docs/rustqual-design-receiver-type-inference.md`** — the
+  normative spec for the multi-stage receiver-resolution work
+  (v1.2.0 → v1.3.0 → v1.4.0). Contains the type-inference grammar
+  (§3), full stdlib-combinator table (§4), pattern-binding catalog
+  (§5), workspace-index schema (§6), trait-dispatch plan (§7),
+  config-schema additions (§8), documented Stage-1 limits (§9), and
+  test-matrix (§10). Every PR modifying `type_infer/` is reviewed
+  against this doc.
+
+### Added — Trait-Dispatch (Stage 2)
+- **`dyn Trait` / `&dyn Trait` / `Box<dyn Trait>` receivers** fan out
+  to every workspace impl. `fn dispatch(h: &dyn Handler) { h.handle() }`
+  records one edge per `impl Handler for X` — sound over-approximation
+  that makes call-parity structurally correct for Ports&Adapters
+  architectures. Marker traits (`Send`, `Sync`, `Unpin`, `Copy`,
+  `Clone`, `Sized`, `Debug`, `Display`) are skipped when picking the
+  dispatch-relevant bound from `dyn T1 + T2`.
+- **Trait-method gate**: dispatch only fires when the method is in the
+  trait's declared method set. `dyn Handler.unrelated_method()` still
+  falls through to `<method>:name` rather than fabricating edges.
+- **`trait_impls` + `trait_methods` index** built once per
+  `build_call_graph`. `impls_of_trait(trait)` and
+  `trait_has_method(trait, method)` are the public query methods.
+- **Turbofish-as-return-type**: `get::<Session>()` where `get` is a
+  generic fn with no concrete workspace return infers `Session` from
+  the turbofish arg. Narrow by design — only single-ident paths
+  trigger, so `Vec::<u32>::new()` (turbofish on type segment) isn't
+  over-approximated.
+
+### Added — Framework & Config Layer (Stage 3)
+- **Type-alias expansion.** `type Repo = Arc<Box<Store>>;` recorded in
+  the workspace index; `fn h(r: Repo) { r.insert(..) }` expands `Repo`
+  → `Arc<Box<Store>>` → `Store` (Arc/Box are Deref-transparent) and
+  resolves `insert` against Store's method index. Aliases wrapping
+  non-Deref types like `RwLock` / `Mutex` / `RefCell` / `Cell` still
+  expand the alias itself, but those wrappers aren't peeled by default
+  (their `read` / `lock` / `borrow` methods don't live on the inner
+  type) — list them in `transparent_wrappers` if your codebase genuinely
+  treats them as Deref-transparent.
+- **User-configurable transparent wrappers** via
+  `[architecture.call_parity]::transparent_wrappers`:
+  ```toml
+  [architecture.call_parity]
+  transparent_wrappers = ["State", "Extension", "Json", "Data"]
+  ```
+  Peeled identically to `Arc`/`Box` during resolution. Unblocks
+  Axum/Actix-style framework-extractor patterns where
+  `fn h(State(db): State<Db>) { db.query() }` would otherwise stay
+  unresolved.
+- **Attribute-macro transparency** via
+  `[architecture.call_parity]::transparent_macros` with a starter-pack
+  (`instrument`, `async_trait`, `main`, `test`, `rstest`, `test_case`,
+  `pyfunction`, `pymethods`, `wasm_bindgen`, `cfg_attr`) applied by
+  default. Current effect is config-schema groundwork + authorial
+  intent — the syn-based AST walk already treats attribute macros as
+  transparent, so listed entries compile but don't change today's
+  behaviour. Retained for future macro-expansion integrations that
+  can consult the list without a config-schema break.
+
+### Known Limits
+Patterns that intentionally stay unresolved and produce `<method>:name`
+fallback markers rather than fabricate edges:
+- `Session::open().map(|r| r.m())` — closure-body argument type is
+  unknown. Inner method call stays `<method>:m`.
+- `fn get<T>() -> T { … }; let x = get(); x.m()` without annotation
+  or turbofish. Use `let x: T = get();` or `get::<T>()`.
+- `fn make() -> impl Trait { … }; make().inherent_method()` —
+  `impl Trait` hides the concrete type by design. Methods declared on
+  the trait resolve via trait-dispatch over-approximation; inherent
+  methods stay `<method>:name`.
+- `fn make() -> impl Future<Output = T> + Handler { … }` — multi-bound
+  intersection returns. `CanonicalType` carries one type per receiver,
+  so `resolve_bound_list` keeps the first non-marker bound only;
+  `.await` propagation *or* trait-dispatch fires, never both. Marker
+  traits (`Send` / `Sync` / `Unpin` / `Copy` / `Clone` / `Sized` /
+  `Debug` / `Display`) are filtered first, so the common
+  `impl Future<Output = T> + Send` shape is unaffected.
+- `pub mod outer { … pub use self::private::Hidden; }` followed by
+  `fn h(x: outer::Hidden) { x.op() }` — the receiver-type resolver
+  doesn't follow workspace-wide `pub use` re-exports inside nested
+  modules, so the parameter resolves to `crate::…::outer::Hidden`
+  while methods on the impl (inside `mod private`) are indexed under
+  `crate::…::outer::private::Hidden`. Visibility recognises both
+  paths, but the call-graph edge collapses to `<method>:op`.
+  Workaround: write the impl at the file-level qualified path
+  (`impl outer::Hidden { … }`) so impl-canonical and caller-canonical
+  agree, or `qual:allow(architecture)` at the call-site.
+- `mod private { pub type Public = Hidden; … } pub use private::Public;`
+  — re-exported type aliases declared inside private modules are
+  *not* followed into their target. The visibility pass skips private
+  modules wholesale, so `Public`'s target type never enters the
+  visible-canonicals set. Workaround: lift the type alias to the
+  parent module (`pub use private::Hidden; pub type Public = Hidden;`).
+- `pub use internal::helper as Hidden;` where `helper` is a function —
+  the visibility pass treats every `pub use` leaf as a type export,
+  so a same-named private `struct Hidden` collides with the function
+  re-export and its impl methods get recorded as adapter surface.
+  Workaround: rename to avoid the collision, or
+  `qual:allow(architecture)` on the affected impl.
+- `pub type Public = private::Hidden; impl Public { pub fn op() }` —
+  the impl method is indexed under `crate::…::Public::op` (impl
+  self-type via path canonicaliser), but a caller `fn h(x: Public)
+  { x.op() }` resolves `x` via type-alias expansion to
+  `crate::…::private::Hidden` and emits a `Hidden::op` edge.
+  Visibility sees `Public`, but the edges disagree so Check B
+  flags `Public::op` as unreached. Workaround: write `impl
+  private::Hidden { … }` directly so impl-canonical and
+  caller-canonical agree, or `qual:allow(architecture)` on the
+  affected impl.
+- `type Id<T> = T; pub type Public = Id<private::Hidden>;` — the
+  visibility pass doesn't substitute use-site generic args into
+  alias bodies (the workspace alias-index runs after pub-fn
+  enumeration). `Id` enters `visible_canonicals`, but
+  `private::Hidden` doesn't, so Check B can drop public methods on
+  `Hidden`. Receiver-side resolution does substitute, so callers
+  still reach `Hidden::op`. Workaround: skip the generic-alias
+  indirection (`pub type Public = private::Hidden;`), or
+  `qual:allow(architecture)` on the affected impl.
+- Arbitrary proc-macros that alter the call graph without being in
+  `transparent_macros` config. User-annotate via
+  `// qual:allow(architecture)` on the enclosing fn.
+
+### Infrastructure
+- **`tests/rlm_snapshot.rs`** — end-to-end regression snapshot with a
+  3-file rlm-shape fixture (application/session, cli/handlers,
+  mcp/handlers). Asserts a budget of **0 Check A findings + 5 Check B
+  findings** (the 5 legitimate asymmetries / dead-code items). Any
+  drift in this count is a clear regression signal.
+- **`tests/regressions.rs`** — unit-level tests covering every rlm
+  Group-2 / Group-3 pattern plus Stage-2 trait-dispatch /
+  turbofish cases and Stage-3 type-alias / user-wrapper cases.
+  Negative tests pin documented limits in place.
+- **~160 new unit tests** across `type_infer/tests/` covering
+  `CanonicalType`, `resolve_type`, workspace-index building, inference
+  dispatch, pattern binding, the stdlib-combinator table, trait
+  collection, and type-alias collection.
+
 ## [1.1.0] - 2026-04-24
 
 Minor release: zero-annotation cross-adapter delegation check for
