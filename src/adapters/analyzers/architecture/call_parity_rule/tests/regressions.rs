@@ -591,6 +591,52 @@ fn qualified_local_arc_does_not_auto_peel() {
 }
 
 #[test]
+fn bare_local_arc_does_not_auto_peel() {
+    // `use crate::wrap::Arc;` then `s: Arc<Session>` — `Arc` is
+    // single-segment and matches the stdlib wrapper list, but the
+    // active `use` resolves it to a *local* type. The bare-name
+    // fast path must canonicalise first and skip auto-peeling for
+    // non-stdlib targets.
+    let fx = parse(
+        r#"
+        use crate::wrap::Arc;
+        use crate::app::session::Session;
+        pub fn handle(s: Arc<Session>) {
+            s.diff();
+        }
+        "#,
+    );
+    let calls = run(&fx, &rlm_index(), "handle");
+    assert!(
+        !calls.contains("crate::app::session::Session::diff"),
+        "bare Arc shadowed by local must not auto-peel, got {calls:?}"
+    );
+}
+
+#[test]
+fn fully_qualified_user_wrapper_peels_via_leaf_match() {
+    // `axum::extract::State<Session>` with
+    // `transparent_wrappers = ["State"]`. The canonicaliser can't
+    // resolve external `axum::*` paths, so the user-transparent
+    // matching must fall back to the leaf segment.
+    let fx = parse(
+        r#"
+        use crate::app::session::Session;
+        pub fn handle(s: axum::extract::State<Session>) {
+            s.diff();
+        }
+        "#,
+    );
+    let mut index = rlm_index();
+    index.transparent_wrappers.insert("State".to_string());
+    let calls = run(&fx, &index, "handle");
+    assert!(
+        calls.contains("crate::app::session::Session::diff"),
+        "fully-qualified user wrapper must peel via leaf-name, got {calls:?}"
+    );
+}
+
+#[test]
 fn renamed_external_user_wrapper_peels_via_user_config() {
     // `use axum::extract::State as ExtractState;` with
     // `transparent_wrappers = ["State"]`. The alias resolves to

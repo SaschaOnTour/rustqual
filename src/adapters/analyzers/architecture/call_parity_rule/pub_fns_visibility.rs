@@ -254,8 +254,9 @@ fn transparent_wrapper_inner<'a>(
 
 /// Decide whether `path` should be treated as a transparent wrapper
 /// for visibility-pass peeling. Mirrors `resolve_path`'s wrapper
-/// detection so the visibility set agrees with the receiver-type
-/// resolver. Operation.
+/// detection (canonicalise-first, fallbacks for unresolvable paths)
+/// so the visibility set agrees with the receiver-type resolver.
+/// Operation.
 fn is_transparent_wrapper(
     path: &syn::Path,
     transparent_wrappers: &HashSet<String>,
@@ -269,28 +270,28 @@ fn is_transparent_wrapper(
         return false;
     };
     let raw_name = last.ident.to_string();
-    let single = path.segments.len() == 1;
-    if single && (is_stdlib_direct(&raw_name) || is_user(&raw_name)) {
-        return true;
-    }
-    let first_seg = path.segments.first().map(|s| s.ident.to_string());
-    let explicit_stdlib = matches!(first_seg.as_deref(), Some("std" | "core" | "alloc"));
-    if explicit_stdlib && is_stdlib_direct(&raw_name) {
-        return true;
-    }
-    let segs: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
     let scope = CanonScope {
         file: file_scope,
         mod_stack,
     };
-    let Some(canonical) = canonicalise_type_segments_in_scope(&segs, &scope) else {
-        return false;
-    };
-    let Some(last_seg) = canonical.last() else {
-        return false;
-    };
-    let stdlib_match = is_stdlib_prefixed(&canonical) && is_stdlib_direct(last_seg);
-    stdlib_match || is_user(last_seg)
+    let segs: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
+    if let Some(canonical) = canonicalise_type_segments_in_scope(&segs, &scope) {
+        let Some(last_seg) = canonical.last() else {
+            return false;
+        };
+        let stdlib_match = is_stdlib_prefixed(&canonical) && is_stdlib_direct(last_seg);
+        return stdlib_match || is_user(last_seg);
+    }
+    if is_user(&raw_name) {
+        return true;
+    }
+    let single = path.segments.len() == 1;
+    if single && is_stdlib_direct(&raw_name) {
+        return true;
+    }
+    let first_seg = path.segments.first().map(|s| s.ident.to_string());
+    let explicit_stdlib = matches!(first_seg.as_deref(), Some("std" | "core" | "alloc"));
+    explicit_stdlib && is_stdlib_direct(&raw_name)
 }
 
 /// Build `crate::<file_modules>::<mod_stack>::<ident>` joined as a

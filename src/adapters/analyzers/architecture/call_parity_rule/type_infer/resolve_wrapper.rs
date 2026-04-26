@@ -11,16 +11,27 @@ use super::resolve::{is_stdlib_prefixed, is_user_transparent, ResolveContext, WR
 
 /// Decide the wrapper-arm name for `path`. Returns `Some(name)` when
 /// the path should be dispatched as a wrapper, `None` otherwise.
-/// Three resolution paths, each guarded:
-///   - Single-segment bare wrapper (`Arc<T>` after `use … Arc`):
-///     fast path, no canonicalisation needed.
-///   - Explicit stdlib qualification (`std::sync::Arc<T>`,
-///     `core::option::Option<T>`): leaf is the wrapper name and the
-///     prefix proves stdlib origin.
-///   - Aliased / canonicalised paths (`Shared<T>`, `wrap::Shared<T>`):
-///     run the scope-aware canonicaliser; auto-peel only if the
-///     canonical is stdlib-prefixed and ends in a wrapper name, or
-///     the leaf is in the user-transparent set.
+///
+/// Resolution flow (canonicalise-first, fallbacks for unresolvable
+/// paths):
+///   1. Full canonicalisation. When the path resolves through the
+///      alias / local-symbol / crate-root pipeline, the canonical
+///      authoritatively decides: stdlib-prefixed + wrapper leaf, or
+///      user-transparent leaf → wrapper. Anything else → not a
+///      wrapper. This catches the shadow case
+///      (`use crate::wrap::Arc;` then `Arc<T>`) — the canonical
+///      points to the local type, not stdlib.
+///   2. User-transparent leaf-name match. The user opts into "any
+///      path ending in `State` is transparent", so external-crate
+///      forms like `axum::extract::State<T>` (which the
+///      canonicaliser can't reach) still peel.
+///   3. Bare wrapper convention. `Result<T>`, `Option<T>`,
+///      `Arc<T>` without an active `use` (or with the standard
+///      stdlib `use`) work as expected — the canonicaliser fails
+///      cleanly in those cases.
+///   4. Explicit stdlib qualification (`std::sync::Arc<T>`,
+///      `core::option::Option<T>`) for callers that fully qualify
+///      without aliasing.
 ///
 /// Operation.
 pub(super) fn identify_wrapper_name(
@@ -28,8 +39,26 @@ pub(super) fn identify_wrapper_name(
     raw_name: &str,
     ctx: &ResolveContext<'_>,
 ) -> Option<String> {
+    let scope = CanonScope {
+        file: ctx.file,
+        mod_stack: ctx.mod_stack,
+    };
+    let segs: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
+    if let Some(canonical) = canonicalise_type_segments_in_scope(&segs, &scope) {
+        let last_seg = canonical.last()?;
+        let stdlib_match =
+            is_stdlib_prefixed(&canonical) && WRAPPER_NAMES.contains(&last_seg.as_str());
+        return if stdlib_match || is_user_transparent(last_seg, ctx) {
+            Some(last_seg.clone())
+        } else {
+            None
+        };
+    }
+    if is_user_transparent(raw_name, ctx) {
+        return Some(raw_name.to_string());
+    }
     let single = path.segments.len() == 1;
-    if single && (WRAPPER_NAMES.contains(&raw_name) || is_user_transparent(raw_name, ctx)) {
+    if single && WRAPPER_NAMES.contains(&raw_name) {
         return Some(raw_name.to_string());
     }
     let first_seg = path.segments.first().map(|s| s.ident.to_string());
@@ -37,17 +66,5 @@ pub(super) fn identify_wrapper_name(
     if explicit_stdlib && WRAPPER_NAMES.contains(&raw_name) {
         return Some(raw_name.to_string());
     }
-    let scope = CanonScope {
-        file: ctx.file,
-        mod_stack: ctx.mod_stack,
-    };
-    let segs: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
-    let canonical = canonicalise_type_segments_in_scope(&segs, &scope)?;
-    let last_seg = canonical.last()?;
-    let stdlib_match = is_stdlib_prefixed(&canonical) && WRAPPER_NAMES.contains(&last_seg.as_str());
-    if stdlib_match || is_user_transparent(last_seg, ctx) {
-        Some(last_seg.clone())
-    } else {
-        None
-    }
+    None
 }

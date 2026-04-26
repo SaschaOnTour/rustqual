@@ -566,6 +566,79 @@ fn test_collect_pub_fns_records_impl_via_chained_type_alias() {
 }
 
 #[test]
+fn test_collect_pub_fns_does_not_promote_bare_local_arc() {
+    // `use crate::wrap::Arc; pub type Public = Arc<private::Hidden>;`
+    // — bare `Arc` is shadowed by the local `use`. Visibility must
+    // canonicalise first and refuse to auto-peel local Arcs.
+    let file = parse(
+        r#"
+        mod wrap { pub struct Arc<T>(T); }
+        use crate::wrap::Arc;
+        mod private {
+            pub struct Hidden;
+            impl Hidden {
+                pub fn op(&self) {}
+            }
+        }
+        pub type Public = Arc<private::Hidden>;
+        "#,
+    );
+    let files = vec![("src/cli/handlers.rs", &file)];
+    let by_layer = {
+        let aliases = aliases_from_files(&files);
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
+    };
+    let cli = names_for_layer(&by_layer, "cli");
+    assert!(
+        !cli.contains("op"),
+        "bare Arc shadowed by local must not auto-peel, got {cli:?}"
+    );
+}
+
+#[test]
+fn test_collect_pub_fns_peels_qualified_user_wrapper() {
+    // `pub type Public = axum::extract::State<private::Hidden>;` with
+    // `transparent_wrappers = ["State"]`. External `axum::*` paths
+    // can't be canonicalised, so the visibility pass must fall back
+    // to last-segment matching for user-transparent wrappers.
+    let file = parse(
+        r#"
+        mod private {
+            pub struct Hidden;
+            impl Hidden {
+                pub fn op(&self) {}
+            }
+        }
+        pub type Public = axum::extract::State<private::Hidden>;
+        "#,
+    );
+    let files = vec![("src/cli/handlers.rs", &file)];
+    let mut wrappers = HashSet::new();
+    wrappers.insert("State".to_string());
+    let by_layer = {
+        let aliases = aliases_from_files(&files);
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &adapter_layers(),
+            &HashSet::new(),
+            &wrappers,
+        )
+    };
+    let cli = names_for_layer(&by_layer, "cli");
+    assert!(
+        cli.contains("op"),
+        "fully-qualified user wrapper must peel via leaf, got {cli:?}"
+    );
+}
+
+#[test]
 fn test_collect_pub_fns_does_not_promote_qualified_local_arc() {
     // `pub type Public = wrap::Arc<private::Hidden>;` — `wrap::Arc`
     // is a *local* wrapper, not stdlib. Direct dispatch on the leaf

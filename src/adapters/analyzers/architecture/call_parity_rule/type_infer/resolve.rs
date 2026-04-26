@@ -233,18 +233,16 @@ fn resolve_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -> Canoni
     let fallback = || resolve_generic_path(path, ctx, depth);
     let wrap_future = || wrap_future_output(args, ctx, depth);
     let raw_name = last.ident.to_string();
-    let resolved_name = identify_wrapper_name(path, &raw_name, ctx);
-    // For a single-segment path with an unrecognised name, fall back
-    // to the raw name (the match arms below test for stdlib idents).
-    // For a multi-segment path with no canonical wrapper match,
-    // skip the wrapper-arm match entirely — `wrap::Arc<T>` must not
-    // be peeled as stdlib `Arc<T>`.
-    let name = match (resolved_name.as_deref(), path.segments.len() == 1) {
-        (Some(s), _) => s,
-        (None, true) => raw_name.as_str(),
-        (None, false) => return fallback(),
+    // `identify_wrapper_name` is authoritative: it considers the
+    // canonical resolution (catching shadow cases like
+    // `use crate::wrap::Arc;`), explicit-stdlib qualification, and
+    // user-transparent leaf matches. When it returns `None`, the
+    // path isn't a wrapper — drop straight into the regular
+    // canonicalisation pipeline.
+    let Some(name) = identify_wrapper_name(path, &raw_name, ctx) else {
+        return fallback();
     };
-    match name {
+    match name.as_str() {
         "Result" => wrap(0, CanonicalType::Result),
         "Option" => wrap(0, CanonicalType::Option),
         // Future uses `Output = T` associated-type syntax, not a
@@ -260,7 +258,7 @@ fn resolve_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -> Canoni
         // type. Users can opt back in via `transparent_wrappers` for
         // domain-specific deref-like wrappers.
         "Arc" | "Box" | "Rc" | "Cow" => peel(),
-        _ if is_user_transparent(name, ctx) => peel(),
+        _ if is_user_transparent(&name, ctx) => peel(),
         _ => fallback(),
     }
 }
