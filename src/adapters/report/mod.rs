@@ -7,6 +7,7 @@ mod github;
 mod github_annotations;
 mod html;
 mod json;
+mod json_arch;
 mod json_srp;
 mod json_structural;
 mod json_tq;

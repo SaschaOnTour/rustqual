@@ -71,6 +71,39 @@ pub(super) fn sarif_rules() -> Vec<serde_json::Value> {
             "ORPHAN-001",
             "Stale qual:allow marker: no finding in the annotation window",
         ),
+        // Architecture dimension — hierarchical rule IDs.
+        // Pattern + trait_contract have dynamic sub-kinds (the user-defined
+        // rule's name / check string); only the base IDs registered here.
+        rule("architecture/layer", "Layer rule violation"),
+        rule(
+            "architecture/layer/unmatched",
+            "File doesn't match any configured layer",
+        ),
+        rule(
+            "architecture/forbidden",
+            "Forbidden-edge violation between layers",
+        ),
+        rule(
+            "architecture/pattern",
+            "Symbol-pattern violation (path/method/macro)",
+        ),
+        rule("architecture/trait_contract", "Trait-contract violation"),
+        rule(
+            "architecture/call_parity/no_delegation",
+            "Adapter pub fn does not reach the target layer",
+        ),
+        rule(
+            "architecture/call_parity/missing_adapter",
+            "Target pub fn is not reached by every adapter (or is orphaned)",
+        ),
+        rule(
+            "architecture/call_parity/multi_touchpoint",
+            "Adapter pub fn has multiple target touchpoints",
+        ),
+        rule(
+            "architecture/call_parity/multiplicity_mismatch",
+            "Target pub fn reached with divergent handler counts across adapters",
+        ),
     ]
 }
 

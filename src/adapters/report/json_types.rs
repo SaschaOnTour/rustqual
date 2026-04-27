@@ -28,6 +28,21 @@ pub(crate) struct JsonOutput {
     pub(crate) repeated_matches: Vec<JsonRepeatedMatchGroup>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) orphan_suppressions: Vec<JsonOrphanSuppression>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) architecture_findings: Vec<JsonArchitectureFinding>,
+}
+
+/// Architecture-dimension finding (layer / forbidden / pattern /
+/// trait_contract / call_parity). Mirrors `domain::Finding` with the
+/// dimension implicit and severity stringified for JSON consumers.
+#[derive(serde::Serialize)]
+pub(crate) struct JsonArchitectureFinding {
+    pub(crate) file: String,
+    pub(crate) line: usize,
+    pub(crate) rule_id: String,
+    pub(crate) severity: String,
+    pub(crate) message: String,
+    pub(crate) suppressed: bool,
 }
 
 /// `// qual:allow(...)` marker that matched no finding in its window.

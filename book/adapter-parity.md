@@ -111,7 +111,7 @@ src/cli/commands/sync.rs:12  ARCHITECTURE  adapter cli::cmd_sync does not delega
 src/application/export.rs:8  ARCHITECTURE  'crate::application::export::run_export' is not reached from adapter layer(s): cli: call parity
 ```
 
-(Rule IDs in JSON/SARIF output: `architecture/call_parity/no_delegation` and `architecture/call_parity/missing_adapter` respectively. See [reference-rules.md](./reference-rules.md) for the full ID list.)
+(In `--format json` these surface under the top-level `architecture_findings[]` array; in `--format sarif` as `result` entries with `ruleId = "architecture/call_parity/no_delegation"` / `"…/missing_adapter"`. Full rule-ID list: [reference-rules.md](./reference-rules.md).)
 
 The first says "this CLI command does logic locally instead of delegating". The second says "you added a new application capability and forgot to expose it via CLI".
 
