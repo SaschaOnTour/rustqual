@@ -231,17 +231,29 @@ pub struct TraitContract {
 
 /// `[architecture.call_parity]` — cross-adapter delegation check.
 ///
-/// Declares a set of peer adapter layers (e.g. `cli`, `mcp`, `rest`) and a
-/// shared target layer (e.g. `application`). Two checks run under one rule:
+/// Declares a set of peer adapter layers (e.g. `cli`, `mcp`) and a
+/// shared target layer (e.g. `application`). Four checks run under one
+/// rule, all anchored at the **boundary** — the first call from an
+/// adapter pub-fn into the target layer:
 ///
-/// 1. **No-delegation**: each `pub fn` in an adapter layer must transitively
-///    (up to `call_depth` hops) call into the target layer.
-/// 2. **Missing-adapter**: each `pub fn` in the target layer must be
-///    (transitively) reached from every adapter layer.
+/// 1. **A — No-delegation**: each adapter `pub fn` must reach the
+///    target layer (touchpoint set non-empty).
+/// 2. **B — Missing-adapter**: a target `pub fn` reached by some
+///    adapter must be reached by every adapter, OR be transitively
+///    reachable from at least one adapter touchpoint via target-
+///    internal callers (otherwise it's an orphan and gets flagged).
+/// 3. **C — Single-touchpoint**: each adapter `pub fn` should have
+///    exactly one target touchpoint. Configurable severity via
+///    [`Self::single_touchpoint`].
+/// 4. **D — Multiplicity-match**: targets reached by every adapter
+///    must be reached with the same per-adapter handler count.
+///
+/// Adapter pub-fns marked `#[deprecated]` are excluded across all
+/// four checks.
 ///
 /// `exclude_targets` is a glob list silencing Check-B for legitimately
-/// asymmetric target fns (setup, debug-only endpoints). Fn-level escape
-/// via `// qual:allow(architecture)`.
+/// asymmetric target fns (setup, debug-only endpoints). Fn-level
+/// escape via `// qual:allow(architecture)`.
 #[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct CallParityConfig {
@@ -253,7 +265,16 @@ pub struct CallParityConfig {
     /// `[architecture.layers]` and not overlap `adapters`.
     pub target: String,
 
-    /// Transitive call-graph depth for both checks. Default 3, range 1..=10.
+    /// Adapter-internal traversal depth — the maximum number of hops
+    /// the boundary BFS will walk through adapter-layer helpers before
+    /// giving up. Default 3, range 1..=10.
+    ///
+    /// The semantic is bounded to the adapter→target walk only: once
+    /// a target-layer node is reached, the touchpoint set records it
+    /// and the walk stops descending into target callees. So
+    /// `call_depth` controls how deep adapter-internal helper chains
+    /// can go before the BFS abandons the path; it does not influence
+    /// post-boundary application-internal call depth.
     #[serde(default = "default_call_depth")]
     pub call_depth: usize,
 
@@ -298,6 +319,33 @@ pub struct CallParityConfig {
     /// documents rather than changes behaviour.
     #[serde(default)]
     pub transparent_macros: Vec<String>,
+
+    /// Severity for Check C (multi-touchpoint):
+    /// - `"off"` — skip the check entirely; no findings emitted.
+    /// - `"warn"` (default) — emit findings as `Severity::Low`.
+    /// - `"error"` — emit findings as `Severity::Medium`.
+    ///
+    /// **Note:** `"warn"` and `"error"` only differ in the reported
+    /// severity tag. rustqual's default exit gate fails on **any**
+    /// finding regardless of severity (use `--no-fail` for local
+    /// exploration). To make a Check-C finding genuinely non-blocking
+    /// in CI, either suppress it via `// qual:allow(architecture)` or
+    /// set this field to `"off"`.
+    #[serde(default)]
+    pub single_touchpoint: SingleTouchpointMode,
+}
+
+/// Mode for Check C — multi-touchpoint detection.
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SingleTouchpointMode {
+    /// Skip Check C entirely.
+    Off,
+    /// Emit findings as `Severity::Low` (default).
+    #[default]
+    Warn,
+    /// Emit findings as `Severity::Medium`.
+    Error,
 }
 
 pub(crate) fn default_call_depth() -> usize {

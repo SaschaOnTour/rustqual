@@ -70,8 +70,43 @@ fn collect_all_findings(analysis: &AnalysisResult) -> Vec<serde_json::Value> {
     sarif_results.extend(collect_orphan_suppression_findings(
         &analysis.orphan_suppressions,
     ));
+    sarif_results.extend(collect_architecture_findings(
+        &analysis.architecture_findings,
+    ));
     sarif_results.extend(collect_suppression_ratio_finding(&analysis.summary));
     sarif_results
+}
+
+/// Collect SARIF result entries for the Architecture dimension. Maps
+/// each `Finding` (rule_id, severity, message, file, line) into a
+/// SARIF result. Suppressed findings are filtered out so consumers
+/// see exactly what failed exit gates.
+/// Operation: filter + JSON construction (severity mapping inlined
+/// because rustqual's DRY-002 doesn't track helper calls through
+/// `.map()` closures).
+fn collect_architecture_findings(findings: &[crate::domain::Finding]) -> Vec<serde_json::Value> {
+    findings
+        .iter()
+        .filter(|f| !f.suppressed)
+        .map(|f| {
+            let level = match f.severity {
+                crate::domain::Severity::Low => "note",
+                crate::domain::Severity::Medium => "warning",
+                crate::domain::Severity::High => "error",
+            };
+            serde_json::json!({
+                "ruleId": f.rule_id,
+                "level": level,
+                "message": { "text": f.message },
+                "locations": [{
+                    "physicalLocation": {
+                        "artifactLocation": { "uri": f.file },
+                        "region": { "startLine": f.line }
+                    }
+                }]
+            })
+        })
+        .collect()
 }
 
 /// Construct the SARIF envelope with tool metadata and results.

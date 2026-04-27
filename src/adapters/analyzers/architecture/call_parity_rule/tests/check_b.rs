@@ -4,28 +4,10 @@
 //! `missing_adapters` set produced by `check_missing_adapter` for each
 //! target-layer pub-fn. Suppression is covered end-to-end in Task 5.
 
-use super::support::{build_workspace, empty_cfg_test, globset, run_check_b, Workspace};
+use super::support::{build_workspace, empty_cfg_test, four_layer, globset, run_check_b};
 use crate::adapters::analyzers::architecture::compiled::CompiledCallParity;
-use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use std::collections::HashSet;
-
-fn three_layer() -> LayerDefinitions {
-    LayerDefinitions::new(
-        vec![
-            "application".to_string(),
-            "cli".to_string(),
-            "mcp".to_string(),
-            "rest".to_string(),
-        ],
-        vec![
-            ("application".to_string(), globset(&["src/application/**"])),
-            ("cli".to_string(), globset(&["src/cli/**"])),
-            ("mcp".to_string(), globset(&["src/mcp/**"])),
-            ("rest".to_string(), globset(&["src/rest/**"])),
-        ],
-    )
-}
 
 fn make_config(
     call_depth: usize,
@@ -39,6 +21,7 @@ fn make_config(
         exclude_targets: globset(exclude_targets),
         transparent_wrappers: HashSet::new(),
         transparent_macros: HashSet::new(),
+        single_touchpoint: crate::config::architecture::SingleTouchpointMode::default(),
     }
 }
 
@@ -87,7 +70,7 @@ fn test_target_fn_called_from_all_adapters_passes() {
         ),
     ]);
     let cp = make_config(3, &["cli", "mcp", "rest"], &[]);
-    let findings = run_check_b(&ws, &three_layer(), &cp, &empty_cfg_test());
+    let findings = run_check_b(&ws, &four_layer(), &cp, &empty_cfg_test());
     assert!(
         missing_pairs(&findings).is_empty(),
         "covered-by-all should pass, got {findings:?}"
@@ -115,7 +98,7 @@ fn test_target_fn_missing_one_adapter_fails() {
         // rest is missing
     ]);
     let cp = make_config(3, &["cli", "mcp", "rest"], &[]);
-    let findings = run_check_b(&ws, &three_layer(), &cp, &empty_cfg_test());
+    let findings = run_check_b(&ws, &four_layer(), &cp, &empty_cfg_test());
     let pairs = missing_pairs(&findings);
     assert_eq!(pairs.len(), 1);
     assert!(pairs[0].0.ends_with("get_stats"));
@@ -135,7 +118,7 @@ fn test_target_fn_missing_two_adapters_fails() {
         ),
     ]);
     let cp = make_config(3, &["cli", "mcp", "rest"], &[]);
-    let findings = run_check_b(&ws, &three_layer(), &cp, &empty_cfg_test());
+    let findings = run_check_b(&ws, &four_layer(), &cp, &empty_cfg_test());
     let pairs = missing_pairs(&findings);
     assert_eq!(pairs.len(), 1);
     let mut missing = pairs[0].1.clone();
@@ -147,7 +130,7 @@ fn test_target_fn_missing_two_adapters_fails() {
 fn test_target_fn_not_called_from_any_adapter_lists_all_missing() {
     let ws = build_workspace(&[("src/application/stats.rs", "pub fn get_stats() {}")]);
     let cp = make_config(3, &["cli", "mcp", "rest"], &[]);
-    let findings = run_check_b(&ws, &three_layer(), &cp, &empty_cfg_test());
+    let findings = run_check_b(&ws, &four_layer(), &cp, &empty_cfg_test());
     let pairs = missing_pairs(&findings);
     assert_eq!(pairs.len(), 1);
     let mut missing = pairs[0].1.clone();
@@ -193,7 +176,7 @@ fn test_target_fn_reached_transitively_passes() {
         ),
     ]);
     let cp = make_config(3, &["cli", "mcp", "rest"], &[]);
-    let findings = run_check_b(&ws, &three_layer(), &cp, &empty_cfg_test());
+    let findings = run_check_b(&ws, &four_layer(), &cp, &empty_cfg_test());
     assert!(
         missing_pairs(&findings).is_empty(),
         "transitive coverage should pass, got {findings:?}"
@@ -242,7 +225,7 @@ fn test_target_fn_transitive_depth_exceeds_fails() {
         ),
     ]);
     let cp = make_config(1, &["cli", "mcp", "rest"], &[]);
-    let findings = run_check_b(&ws, &three_layer(), &cp, &empty_cfg_test());
+    let findings = run_check_b(&ws, &four_layer(), &cp, &empty_cfg_test());
     let pairs = missing_pairs(&findings);
     assert_eq!(pairs.len(), 1, "got {findings:?}");
     assert_eq!(pairs[0].1, vec!["rest".to_string()]);
@@ -282,7 +265,7 @@ fn test_target_fn_only_called_from_tests_fails() {
     let cp = make_config(3, &["cli", "mcp", "rest"], &[]);
     let mut cfg_test = HashSet::new();
     cfg_test.insert("src/rest/tests.rs".to_string());
-    let findings = run_check_b(&ws, &three_layer(), &cp, &cfg_test);
+    let findings = run_check_b(&ws, &four_layer(), &cp, &cfg_test);
     let pairs = missing_pairs(&findings);
     assert_eq!(pairs.len(), 1, "got {findings:?}");
     assert_eq!(pairs[0].1, vec!["rest".to_string()]);
@@ -294,7 +277,7 @@ fn test_non_pub_target_fn_ignored() {
     // even when no adapter calls it.
     let ws = build_workspace(&[("src/application/stats.rs", "fn get_stats() {}")]);
     let cp = make_config(3, &["cli", "mcp", "rest"], &[]);
-    let findings = run_check_b(&ws, &three_layer(), &cp, &empty_cfg_test());
+    let findings = run_check_b(&ws, &four_layer(), &cp, &empty_cfg_test());
     assert!(missing_pairs(&findings).is_empty());
 }
 
@@ -337,7 +320,7 @@ fn test_method_caller_with_receiver_binding_counts() {
     ]);
     // Only test cli + mcp coverage so rest doesn't appear as missing.
     let cp = make_config(3, &["cli", "mcp"], &[]);
-    let findings = run_check_b(&ws, &three_layer(), &cp, &empty_cfg_test());
+    let findings = run_check_b(&ws, &four_layer(), &cp, &empty_cfg_test());
     // `search` is reached from both adapters; `open` is reached from both.
     assert!(
         missing_pairs(&findings).is_empty(),
@@ -360,7 +343,7 @@ fn test_method_caller_without_binding_ignored() {
         ),
     ]);
     let cp = make_config(3, &["cli"], &[]);
-    let findings = run_check_b(&ws, &three_layer(), &cp, &empty_cfg_test());
+    let findings = run_check_b(&ws, &four_layer(), &cp, &empty_cfg_test());
     let pairs = missing_pairs(&findings);
     assert_eq!(pairs.len(), 1);
     assert_eq!(pairs[0].1, vec!["cli".to_string()]);
@@ -382,7 +365,7 @@ fn test_target_in_exclude_targets_glob_ignored() {
         // mcp + rest missing, but `setup::run` is excluded.
     ]);
     let cp = make_config(3, &["cli", "mcp", "rest"], &["application::setup::*"]);
-    let findings = run_check_b(&ws, &three_layer(), &cp, &empty_cfg_test());
+    let findings = run_check_b(&ws, &four_layer(), &cp, &empty_cfg_test());
     assert!(
         missing_pairs(&findings).is_empty(),
         "glob-excluded target should not produce a finding, got {findings:?}"
@@ -411,7 +394,7 @@ fn test_target_not_matching_exclude_glob_still_checked() {
     ]);
     // Exclude only setup::*; stats::get_stats remains in scope.
     let cp = make_config(3, &["cli", "mcp"], &["application::setup::*"]);
-    let findings = run_check_b(&ws, &three_layer(), &cp, &empty_cfg_test());
+    let findings = run_check_b(&ws, &four_layer(), &cp, &empty_cfg_test());
     let pairs = missing_pairs(&findings);
     assert_eq!(pairs.len(), 1, "got {findings:?}");
     assert!(pairs[0].0.ends_with("get_stats"));
@@ -424,8 +407,266 @@ fn test_exclude_targets_uses_canonical_without_crate_prefix() {
     // matcher needs to strip it before comparing.
     let ws = build_workspace(&[("src/application/setup.rs", "pub fn run() {}")]);
     let cp = make_config(3, &["cli", "mcp"], &["application::setup::run"]);
-    let findings = run_check_b(&ws, &three_layer(), &cp, &empty_cfg_test());
+    let findings = run_check_b(&ws, &four_layer(), &cp, &empty_cfg_test());
     assert!(missing_pairs(&findings).is_empty());
+}
+
+// ── Orphan target-layer islands (v1.2.1) ───────────────────────
+
+#[test]
+fn test_orphan_target_with_only_dead_target_caller_fires() {
+    // `admin_purge` is a target pub fn that no adapter touches at the
+    // boundary. Its only caller in the target layer is another target
+    // fn (`_legacy_wrapper`) that is ITSELF unreachable from any
+    // adapter — a dead island within the target layer.
+    //
+    // Before the fix: `has_target_layer_caller` returned true (because
+    // `_legacy_wrapper` is a target-layer caller) and the orphan
+    // branch was suppressed → no finding. False negative.
+    //
+    // After: the orphan branch only suppresses when the target is
+    // transitively reachable from at least one adapter touchpoint.
+    // Since neither admin_purge nor _legacy_wrapper is reachable
+    // from any adapter, the orphan finding fires.
+    let ws = build_workspace(&[
+        (
+            "src/application/admin.rs",
+            r#"
+            pub fn admin_purge() {}
+            pub fn _legacy_wrapper() { admin_purge(); }
+            "#,
+        ),
+        // No adapter touches admin_purge or _legacy_wrapper.
+        (
+            "src/cli/handlers.rs",
+            r#"
+            pub fn cmd_other() {}
+            "#,
+        ),
+        (
+            "src/mcp/handlers.rs",
+            r#"
+            pub fn handle_other() {}
+            "#,
+        ),
+    ]);
+    let cp = make_config(3, &["cli", "mcp"], &[]);
+    let findings = run_check_b(&ws, &four_layer(), &cp, &empty_cfg_test());
+    let names: Vec<String> = missing_pairs(&findings)
+        .into_iter()
+        .map(|(t, _)| t)
+        .collect();
+    assert!(
+        names.iter().any(|n| n.ends_with("admin_purge")),
+        "orphan target with only dead target-internal callers must fire, got {names:?}"
+    );
+}
+
+#[test]
+fn test_target_reached_transitively_via_target_chain_no_finding() {
+    // Wired chain: cli → session.search (boundary touchpoint) →
+    // record_operation (target-internal). record_operation has zero
+    // adapter coverage but is reachable through session.search from
+    // cli. Must NOT fire (it's not orphan; it's wired).
+    let ws = build_workspace(&[
+        (
+            "src/application/middleware.rs",
+            r#"
+            pub fn record_operation() {}
+            "#,
+        ),
+        (
+            "src/application/session.rs",
+            r#"
+            use crate::application::middleware::record_operation;
+            pub fn search() { record_operation(); }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::session::search;
+            pub fn cmd_search() { search(); }
+            "#,
+        ),
+        (
+            "src/mcp/handlers.rs",
+            r#"
+            use crate::application::session::search;
+            pub fn handle_search() { search(); }
+            "#,
+        ),
+    ]);
+    let cp = make_config(3, &["cli", "mcp"], &[]);
+    let findings = run_check_b(&ws, &four_layer(), &cp, &empty_cfg_test());
+    let names: Vec<String> = missing_pairs(&findings)
+        .into_iter()
+        .map(|(t, _)| t)
+        .collect();
+    assert!(
+        !names.iter().any(|n| n.ends_with("record_operation")),
+        "transitively-reached target must not fire, got {names:?}"
+    );
+}
+
+#[test]
+fn test_target_self_caller_only_still_fires_orphan() {
+    // Self-call: `admin_purge` calls itself recursively. Before the
+    // fix, has_target_layer_caller saw `admin_purge` as its own caller
+    // (target layer), suppressed the orphan branch. Should fire.
+    let ws = build_workspace(&[(
+        "src/application/admin.rs",
+        r#"
+        pub fn admin_purge() { admin_purge(); }
+        "#,
+    )]);
+    let cp = make_config(3, &["cli", "mcp"], &[]);
+    let findings = run_check_b(&ws, &four_layer(), &cp, &empty_cfg_test());
+    let names: Vec<String> = missing_pairs(&findings)
+        .into_iter()
+        .map(|(t, _)| t)
+        .collect();
+    assert!(
+        names.iter().any(|n| n.ends_with("admin_purge")),
+        "self-only-caller orphan must still fire, got {names:?}"
+    );
+}
+
+// ── Boundary semantic (v1.2.1) ─────────────────────────────────
+
+#[test]
+fn test_post_boundary_helper_not_flagged_when_transitive_reach_asymmetric() {
+    // The asymmetric setup: cli reaches `record_operation` transitively
+    // (via search), mcp doesn't reach it at all (handle_admin → admin,
+    // which doesn't touch record_operation). Under the OLD leaf-
+    // reachability semantic, this would fire a Check B finding for
+    // `record_operation` ("missing from mcp"). Under the new boundary
+    // semantic, `record_operation` is application-internal plumbing
+    // that no adapter touches at the boundary — not a parity concern.
+    let ws = build_workspace(&[
+        (
+            "src/application/middleware.rs",
+            r#"
+            pub fn record_operation() {}
+            "#,
+        ),
+        (
+            "src/application/session.rs",
+            r#"
+            use crate::application::middleware::record_operation;
+            pub fn search() { record_operation(); }
+            pub fn admin() {}
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::session::search;
+            pub fn cmd_search() { search(); }
+            "#,
+        ),
+        (
+            "src/mcp/handlers.rs",
+            r#"
+            use crate::application::session::admin;
+            pub fn handle_admin() { admin(); }
+            "#,
+        ),
+    ]);
+    let cp = make_config(3, &["cli", "mcp"], &[]);
+    let findings = run_check_b(&ws, &four_layer(), &cp, &empty_cfg_test());
+    let pairs = missing_pairs(&findings);
+    // `search` is reached only by cli → mismatch finding.
+    // `admin` is reached only by mcp → mismatch finding.
+    // `record_operation` is post-boundary plumbing → MUST NOT appear.
+    let names: Vec<String> = pairs.iter().map(|(t, _)| t.clone()).collect();
+    assert!(
+        !names.iter().any(|n| n.ends_with("record_operation")),
+        "post-boundary helper should not appear in findings, got {pairs:?}"
+    );
+}
+
+#[test]
+fn test_internal_application_chain_no_findings() {
+    // session.search → record_operation → impact_count: a chain of
+    // internal application fns. Adapters touch only `search`. None of
+    // `record_operation` / `impact_count` should produce findings.
+    let ws = build_workspace(&[
+        (
+            "src/application/middleware.rs",
+            r#"
+            pub fn impact_count() -> u32 { 0 }
+            pub fn record_operation() { impact_count(); }
+            "#,
+        ),
+        (
+            "src/application/session.rs",
+            r#"
+            use crate::application::middleware::record_operation;
+            pub fn search() { record_operation(); }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::session::search;
+            pub fn cmd_search() { search(); }
+            "#,
+        ),
+        (
+            "src/mcp/handlers.rs",
+            r#"
+            use crate::application::session::search;
+            pub fn handle_search() { search(); }
+            "#,
+        ),
+    ]);
+    let cp = make_config(3, &["cli", "mcp"], &[]);
+    let findings = run_check_b(&ws, &four_layer(), &cp, &empty_cfg_test());
+    assert!(
+        missing_pairs(&findings).is_empty(),
+        "deeper application chain should not fire findings, got {findings:?}"
+    );
+}
+
+#[test]
+fn test_capability_in_one_adapter_only_fires_for_that_target() {
+    // cli reaches `admin_purge`; mcp doesn't. mcp reaches `search` too,
+    // both adapters cover that one. Only `admin_purge` produces a
+    // finding (mismatch case: present in cli, missing from mcp).
+    let ws = build_workspace(&[
+        (
+            "src/application/session.rs",
+            r#"
+            pub fn search() {}
+            pub fn admin_purge() {}
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::session::{search, admin_purge};
+            pub fn cmd_search() { search(); }
+            pub fn cmd_admin() { admin_purge(); }
+            "#,
+        ),
+        (
+            "src/mcp/handlers.rs",
+            r#"
+            use crate::application::session::search;
+            pub fn handle_search() { search(); }
+            "#,
+        ),
+    ]);
+    let cp = make_config(3, &["cli", "mcp"], &[]);
+    let findings = run_check_b(&ws, &four_layer(), &cp, &empty_cfg_test());
+    let pairs = missing_pairs(&findings);
+    assert_eq!(pairs.len(), 1, "got {findings:?}");
+    assert!(
+        pairs[0].0.ends_with("admin_purge"),
+        "expected admin_purge finding, got {pairs:?}"
+    );
+    assert_eq!(pairs[0].1, vec!["mcp".to_string()]);
 }
 
 #[test]
@@ -472,7 +713,7 @@ fn test_impl_in_separate_file_matches_receiver_tracked_calls() {
         ),
     ]);
     let cp = make_config(3, &["cli", "mcp"], &[]);
-    let findings = run_check_b(&ws, &three_layer(), &cp, &empty_cfg_test());
+    let findings = run_check_b(&ws, &four_layer(), &cp, &empty_cfg_test());
     assert!(
         missing_pairs(&findings).is_empty(),
         "cross-file impl via use should match receiver-tracked calls, got {findings:?}"

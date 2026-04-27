@@ -10,7 +10,7 @@
 use crate::adapters::analyzers::architecture::forbidden_rule::CompiledForbiddenRule;
 use crate::adapters::analyzers::architecture::layer_rule::{LayerDefinitions, UnmatchedBehavior};
 use crate::adapters::analyzers::architecture::trait_contract_rule::CompiledTraitContract;
-use crate::config::architecture::CallParityConfig;
+use crate::config::architecture::{CallParityConfig, SingleTouchpointMode};
 use crate::config::ArchitectureConfig;
 use globset::{Glob, GlobMatcher, GlobSet, GlobSetBuilder};
 use std::collections::{HashMap, HashSet};
@@ -51,6 +51,8 @@ pub struct CompiledCallParity {
     /// enhancements have the list available without a config-schema
     /// break.
     pub transparent_macros: HashSet<String>,
+    /// Severity mode for Check C (multi-touchpoint).
+    pub single_touchpoint: SingleTouchpointMode,
 }
 
 /// Compile the raw config into `CompiledArchitecture`.
@@ -136,6 +138,7 @@ fn compile_call_parity(
         exclude_targets,
         transparent_wrappers,
         transparent_macros,
+        single_touchpoint: cp.single_touchpoint,
     }))
 }
 

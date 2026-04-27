@@ -28,12 +28,32 @@ target   = "application"
 
 `adapters` can list any number of peer layers — REST endpoints, web handlers, gRPC servers, message-queue consumers — they're treated identically.
 
-Two checks run under one rule:
+Four checks run under one rule, all anchored at the **boundary** — the first call from an adapter into the target layer:
 
-- **Check A — every adapter must delegate.** Each `pub fn` in an adapter layer must (transitively) reach into the `target` layer. A CLI command that doesn't actually call into the application layer is logic in the wrong place. Caught at build time.
-- **Check B — every target capability must reach all adapters.** Each `pub fn` in the `target` layer must be (transitively) reached from *every* adapter layer. Add `app::ingest::run`, forget to wire it into CLI, and Check B reports exactly that — by name, in CI, before review.
+- **Check A — every adapter must delegate.** Each `pub fn` in an adapter layer must reach into the `target` layer. A CLI command that doesn't actually call into the application layer is logic in the wrong place. Caught at build time.
+- **Check B — touchpoint sets must match.** Each target `pub fn` reached from one adapter must be reached from every adapter (or excluded explicitly). Add `app::ingest::run`, forget to wire it into CLI, and Check B reports exactly that — by name, in CI, before review.
+- **Check C — single touchpoint per handler.** Each adapter `pub fn` should have exactly one touchpoint in the target layer. Multi-touchpoint handlers orchestrate across application calls themselves — that orchestration logic risks divergence between adapters. Configurable severity (`single_touchpoint = "off" | "warn" | "error"`, default `warn`).
+- **Check D — multiplicity must match.** When two adapters both reach the same target capability, they must reach it with the same handler count. cli having `cmd_search` + `cmd_grep` (alias) both reach `session.search` while mcp has only `handle_search` is API surface drift, even though Check B is silent.
 
-`call_depth` (default 3) controls how many hops the transitive walk traces.
+### Touchpoints — what counts and what doesn't
+
+A **touchpoint** is the first node in the target layer reached when walking forward from an adapter pub-fn through adapter-internal helpers. The walk stops on first target hit and does not descend into target callees.
+
+This boundary stop is deliberate: application-internal call chains (`session.search → record_operation → impact_count`) aren't a parity concern. If two adapters both reach `session.search`, the parity question is answered. What `session.search` does internally is `DRY-002`'s job, not `call_parity`'s.
+
+`call_depth` (default 3) bounds the **adapter-internal** traversal — how many helper hops the walk will go through before giving up. It does not constrain post-boundary application chain depth.
+
+### Deprecated-handler exclusion
+
+Adapter `pub fn`s marked with `#[deprecated]` (in any form: bare,
+`#[deprecated = "..."]`, or `#[deprecated(since = "...", note = "...")]`)
+are excluded from Checks A/B/C/D. Aliases that are explicitly being
+phased out shouldn't drag the parity report.
+
+```rust
+#[deprecated = "use cmd_search"]
+pub fn cmd_grep(args: ClapArgs) { /* … */ }   // skipped from parity
+```
 
 ## Why this is unusual
 
@@ -84,17 +104,16 @@ The default `transparent_macros` list already covers the common cases; entries h
 
 ## What you'll see
 
-```
-✗ ARCH-CALL-PARITY  src/cli/commands/sync.rs::cmd_sync (Check A)
-                    pub fn does not (transitively, depth=3) reach the target layer
-                    'application' — adapter has no delegation path
+In `--findings` (one-line) output, real findings look like:
 
-✗ ARCH-CALL-PARITY  src/application/export.rs::run_export (Check B)
-                    target fn is unreached by adapter 'cli'
-                    (reachable from: mcp)
+```
+src/cli/commands/sync.rs:12  ARCHITECTURE  adapter cli::cmd_sync does not delegate to 'application' within 3 hops: call parity
+src/application/export.rs:8  ARCHITECTURE  'crate::application::export::run_export' is not reached from adapter layer(s): cli: call parity
 ```
 
-The first finding says "this CLI command does logic locally instead of delegating". The second says "you added a new application capability and forgot to expose it via CLI".
+(In `--format json` these surface under the top-level `architecture_findings[]` array; in `--format sarif` as `result` entries with `ruleId = "architecture/call_parity/no_delegation"` / `"…/missing_adapter"`. Full rule-ID list: [reference-rules.md](./reference-rules.md).)
+
+The first says "this CLI command does logic locally instead of delegating". The second says "you added a new application capability and forgot to expose it via CLI".
 
 ## Excluding legitimate asymmetries
 

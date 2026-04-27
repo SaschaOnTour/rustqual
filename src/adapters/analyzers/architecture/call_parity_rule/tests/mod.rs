@@ -1,7 +1,10 @@
 mod calls;
 mod check_a;
 mod check_b;
+mod check_c;
+mod check_d;
 mod pub_fns;
 mod regressions;
 mod rlm_snapshot;
 mod support;
+mod touchpoints;

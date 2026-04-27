@@ -4,7 +4,7 @@ use super::json_types::{
     JsonHotspot, JsonMagicNumber, JsonOrphanSuppression, JsonOutput, JsonRepeatedMatchEntry,
     JsonRepeatedMatchGroup, JsonSdpViolation, JsonSummary, JsonWildcardWarning,
 };
-use super::{json_srp, json_structural, json_tq, AnalysisResult};
+use super::{json_arch, json_srp, json_structural, json_tq, AnalysisResult};
 use crate::adapters::analyzers::iosp::Classification;
 
 /// Print results in a machine-readable format (for CI integration).
@@ -296,6 +296,7 @@ pub(crate) fn build_json_string(analysis: &AnalysisResult) -> String {
                 reason: w.reason.clone(),
             })
             .collect(),
+        architecture_findings: json_arch::build_json_arch(&analysis.architecture_findings),
     };
 
     serde_json::to_string_pretty(&output)

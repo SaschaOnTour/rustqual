@@ -113,6 +113,7 @@ fn minimal_call_parity() -> CallParityConfig {
         exclude_targets: Vec::new(),
         transparent_wrappers: Vec::new(),
         transparent_macros: Vec::new(),
+        single_touchpoint: crate::config::architecture::SingleTouchpointMode::default(),
     }
 }
 
