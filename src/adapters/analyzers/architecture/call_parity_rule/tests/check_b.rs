@@ -411,6 +411,127 @@ fn test_exclude_targets_uses_canonical_without_crate_prefix() {
     assert!(missing_pairs(&findings).is_empty());
 }
 
+// ── Orphan target-layer islands (v1.2.1) ───────────────────────
+
+#[test]
+fn test_orphan_target_with_only_dead_target_caller_fires() {
+    // `admin_purge` is a target pub fn that no adapter touches at the
+    // boundary. Its only caller in the target layer is another target
+    // fn (`_legacy_wrapper`) that is ITSELF unreachable from any
+    // adapter — a dead island within the target layer.
+    //
+    // Before the fix: `has_target_layer_caller` returned true (because
+    // `_legacy_wrapper` is a target-layer caller) and the orphan
+    // branch was suppressed → no finding. False negative.
+    //
+    // After: the orphan branch only suppresses when the target is
+    // transitively reachable from at least one adapter touchpoint.
+    // Since neither admin_purge nor _legacy_wrapper is reachable
+    // from any adapter, the orphan finding fires.
+    let ws = build_workspace(&[
+        (
+            "src/application/admin.rs",
+            r#"
+            pub fn admin_purge() {}
+            pub fn _legacy_wrapper() { admin_purge(); }
+            "#,
+        ),
+        // No adapter touches admin_purge or _legacy_wrapper.
+        (
+            "src/cli/handlers.rs",
+            r#"
+            pub fn cmd_other() {}
+            "#,
+        ),
+        (
+            "src/mcp/handlers.rs",
+            r#"
+            pub fn handle_other() {}
+            "#,
+        ),
+    ]);
+    let cp = make_config(3, &["cli", "mcp"], &[]);
+    let findings = run_check_b(&ws, &four_layer(), &cp, &empty_cfg_test());
+    let names: Vec<String> = missing_pairs(&findings)
+        .into_iter()
+        .map(|(t, _)| t)
+        .collect();
+    assert!(
+        names.iter().any(|n| n.ends_with("admin_purge")),
+        "orphan target with only dead target-internal callers must fire, got {names:?}"
+    );
+}
+
+#[test]
+fn test_target_reached_transitively_via_target_chain_no_finding() {
+    // Wired chain: cli → session.search (boundary touchpoint) →
+    // record_operation (target-internal). record_operation has zero
+    // adapter coverage but is reachable through session.search from
+    // cli. Must NOT fire (it's not orphan; it's wired).
+    let ws = build_workspace(&[
+        (
+            "src/application/middleware.rs",
+            r#"
+            pub fn record_operation() {}
+            "#,
+        ),
+        (
+            "src/application/session.rs",
+            r#"
+            use crate::application::middleware::record_operation;
+            pub fn search() { record_operation(); }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::session::search;
+            pub fn cmd_search() { search(); }
+            "#,
+        ),
+        (
+            "src/mcp/handlers.rs",
+            r#"
+            use crate::application::session::search;
+            pub fn handle_search() { search(); }
+            "#,
+        ),
+    ]);
+    let cp = make_config(3, &["cli", "mcp"], &[]);
+    let findings = run_check_b(&ws, &four_layer(), &cp, &empty_cfg_test());
+    let names: Vec<String> = missing_pairs(&findings)
+        .into_iter()
+        .map(|(t, _)| t)
+        .collect();
+    assert!(
+        !names.iter().any(|n| n.ends_with("record_operation")),
+        "transitively-reached target must not fire, got {names:?}"
+    );
+}
+
+#[test]
+fn test_target_self_caller_only_still_fires_orphan() {
+    // Self-call: `admin_purge` calls itself recursively. Before the
+    // fix, has_target_layer_caller saw `admin_purge` as its own caller
+    // (target layer), suppressed the orphan branch. Should fire.
+    let ws = build_workspace(&[(
+        "src/application/admin.rs",
+        r#"
+        pub fn admin_purge() { admin_purge(); }
+        "#,
+    )]);
+    let cp = make_config(3, &["cli", "mcp"], &[]);
+    let findings = run_check_b(&ws, &four_layer(), &cp, &empty_cfg_test());
+    let names: Vec<String> = missing_pairs(&findings)
+        .into_iter()
+        .map(|(t, _)| t)
+        .collect();
+    assert!(
+        names.iter().any(|n| n.ends_with("admin_purge")),
+        "self-only-caller orphan must still fire, got {names:?}"
+    );
+}
+
 // ── Boundary semantic (v1.2.1) ─────────────────────────────────
 
 #[test]

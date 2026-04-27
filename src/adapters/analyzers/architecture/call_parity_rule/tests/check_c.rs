@@ -125,7 +125,7 @@ fn check_c_branch_two_targets() {
     assert_eq!(tps.len(), 2);
 }
 
-// ── Severity: error mode → silently still emits but consumer can filter ──
+// ── single_touchpoint mode dispatch (Off / Warn / Error) ─────────
 
 #[test]
 fn check_c_severity_off_skips_check() {

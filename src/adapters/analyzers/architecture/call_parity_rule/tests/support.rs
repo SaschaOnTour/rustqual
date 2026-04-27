@@ -168,7 +168,6 @@ pub(super) fn run_check(
 ) -> Vec<MatchLocation> {
     let (pub_fns, graph) = build_pub_fns_and_graph(ws, layers, cp, cfg_test);
     let touchpoints = build_handler_touchpoints(&pub_fns, &graph, cp);
-    let _ = layers;
     match which {
         Check::A => check_no_delegation(&pub_fns, &touchpoints, cp),
         Check::B => check_missing_adapter(&pub_fns, &graph, &touchpoints, cp),

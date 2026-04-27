@@ -95,62 +95,79 @@ fn render_violation_head(kind: &ViolationKind) -> String {
             check,
             detail,
         } => format!("trait {trait_name} [{check}]: {detail}"),
-        ViolationKind::CallParityNoDelegation { .. }
-        | ViolationKind::CallParityMissingAdapter { .. }
-        | ViolationKind::CallParityMultiplicityMismatch { .. }
-        | ViolationKind::CallParityMultiTouchpoint { .. } => render_call_parity_head(kind),
-    }
-}
-
-/// Head text for the four call-parity ViolationKinds. Kept separate
-/// from `render_violation_head` to keep that function below the
-/// cyclomatic threshold.
-/// Operation: variant-local formatting.
-fn render_call_parity_head(kind: &ViolationKind) -> String {
-    match kind {
         ViolationKind::CallParityNoDelegation {
             fn_name,
             adapter_layer,
             target_layer,
             call_depth,
-        } => format!(
-            "adapter {adapter_layer}::{fn_name} does not delegate to '{target_layer}' within {call_depth} hops"
-        ),
+        } => render_no_delegation_head(fn_name, adapter_layer, target_layer, *call_depth),
         ViolationKind::CallParityMissingAdapter {
             target_fn,
             missing_adapters,
             ..
-        } => format!(
-            "'{target_fn}' is not reached from adapter layer(s): {}",
-            missing_adapters.join(", ")
-        ),
+        } => render_missing_adapter_head(target_fn, missing_adapters),
         ViolationKind::CallParityMultiplicityMismatch {
             target_fn,
             counts_per_adapter,
             ..
-        } => {
-            let parts: Vec<String> = counts_per_adapter
-                .iter()
-                .map(|(a, c)| format!("{a}={c}"))
-                .collect();
-            format!(
-                "'{target_fn}' has divergent handler counts across adapters: {}",
-                parts.join(", ")
-            )
-        }
+        } => render_multiplicity_mismatch_head(target_fn, counts_per_adapter),
         ViolationKind::CallParityMultiTouchpoint {
             fn_name,
             adapter_layer,
             touchpoints,
-        } => format!(
-            "adapter {adapter_layer}::{fn_name} has multiple target touchpoints: {}",
-            touchpoints.join(", ")
-        ),
-        // Caller (`render_violation_head`) only dispatches CallParity*
-        // variants here. Reaching this branch would mean a new variant
-        // was added without updating the dispatcher.
-        _ => String::new(),
+        } => render_multi_touchpoint_head(fn_name, adapter_layer, touchpoints),
     }
+}
+
+/// Head text for `CallParityNoDelegation`.
+/// Operation: format string.
+fn render_no_delegation_head(
+    fn_name: &str,
+    adapter_layer: &str,
+    target_layer: &str,
+    call_depth: usize,
+) -> String {
+    format!(
+        "adapter {adapter_layer}::{fn_name} does not delegate to '{target_layer}' within {call_depth} hops"
+    )
+}
+
+/// Head text for `CallParityMissingAdapter`.
+/// Operation: format string + slice join.
+fn render_missing_adapter_head(target_fn: &str, missing_adapters: &[String]) -> String {
+    format!(
+        "'{target_fn}' is not reached from adapter layer(s): {}",
+        missing_adapters.join(", ")
+    )
+}
+
+/// Head text for `CallParityMultiplicityMismatch`.
+/// Operation: format per-adapter count list.
+fn render_multiplicity_mismatch_head(
+    target_fn: &str,
+    counts_per_adapter: &[(String, usize)],
+) -> String {
+    let parts: Vec<String> = counts_per_adapter
+        .iter()
+        .map(|(a, c)| format!("{a}={c}"))
+        .collect();
+    format!(
+        "'{target_fn}' has divergent handler counts across adapters: {}",
+        parts.join(", ")
+    )
+}
+
+/// Head text for `CallParityMultiTouchpoint`.
+/// Operation: format string + slice join.
+fn render_multi_touchpoint_head(
+    fn_name: &str,
+    adapter_layer: &str,
+    touchpoints: &[String],
+) -> String {
+    format!(
+        "adapter {adapter_layer}::{fn_name} has multiple target touchpoints: {}",
+        touchpoints.join(", ")
+    )
 }
 
 /// Head text for an `ItemKind` violation (anonymous items omit the name).

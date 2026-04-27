@@ -47,11 +47,13 @@ for parity — that's `DRY-002`'s concern, not `call_parity`'s.
 - **Check B — boundary semantic**. A target pub-fn is flagged when:
   - it appears in some adapter's coverage but is missing from another
     (mismatch case — adapter feature drift), OR
-  - no adapter touches it at the boundary AND it has no callers within
-    the target layer either (orphan case — application capability not
-    wired to any adapter).
-  Internal application chains (`session.search → record_operation →
-  impact_count`) are silent.
+  - it isn't transitively reachable from any adapter touchpoint
+    through target-internal callers (orphan case — application
+    capability not wired to any adapter, including dead target-layer
+    islands where only other unreachable target fns call it).
+  Internal application chains wired up via at least one adapter
+  (`session.search → record_operation → impact_count` when an adapter
+  reaches `session.search`) are silent.
 - `call_depth` semantic narrowed: now bounds **adapter-internal**
   traversal depth only. Once the target layer is reached, the walk
   stops descending into target callees. Default unchanged (3); no
@@ -60,10 +62,11 @@ for parity — that's `DRY-002`'s concern, not `call_parity`'s.
 ### Migration notes
 
 If you saw v1.2.0 fire findings on application-internal helpers
-(`record_operation`, `impact_count`, etc.), those will silently
-disappear under v1.2.1. The legitimate adapter-asymmetry findings
-remain. Genuinely orphaned application pub-fns (no callers anywhere)
-still produce findings under the orphan branch of Check B.
+(`record_operation`, `impact_count`, etc.) that ARE wired up through
+some adapter, those silently disappear under v1.2.1. The legitimate
+adapter-asymmetry findings remain. Genuinely orphaned target pub-fns
+— including those only callable via other dead target-layer code —
+still produce findings under Check B's orphan branch.
 
 If you want to detect "internal application helpers reached
 asymmetrically through other application code", that semantic is no

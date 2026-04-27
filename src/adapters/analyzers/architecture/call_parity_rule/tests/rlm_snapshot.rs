@@ -3,7 +3,7 @@
 //!
 //! Sets up a mini multi-file workspace that mirrors rlm's session /
 //! handler pattern (the one the original bug report called out), runs
-//! the full Check A + Check B pipeline, and asserts the exact set of
+//! the full call-parity pipeline (Checks A/B/C/D), and asserts the exact set of
 //! surviving findings. The fixture is deliberately small (3 files,
 //! ~50 lines of rlm-shaped source) but covers every `call_parity_rule`
 //! code path the rlm bug exercised:

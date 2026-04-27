@@ -28,14 +28,13 @@ use super::workspace_graph::{canonical_name_for_pub_fn, CallGraph};
 use super::HandlerTouchpoints;
 use crate::adapters::analyzers::architecture::compiled::CompiledCallParity;
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 // qual:api
 /// Emit one `CallParityMissingAdapter` finding per target pub-fn whose
 /// boundary-reach set isn't symmetric across the configured adapters.
-/// Integration: builds the per-adapter coverage view from the shared
-/// `HandlerTouchpoints` cache, then per-target finding construction
-/// via `inspect_target`.
+/// Integration: builds per-adapter coverage + the adapter-reachable
+/// target set, then per-target finding construction via `inspect_target`.
 pub(crate) fn check_missing_adapter<'ast>(
     pub_fns_by_layer: &HashMap<String, Vec<PubFnInfo<'ast>>>,
     graph: &CallGraph,
@@ -46,10 +45,11 @@ pub(crate) fn check_missing_adapter<'ast>(
         return Vec::new();
     };
     let coverage = build_adapter_coverage(pub_fns_by_layer, touchpoints, cp);
+    let reachable = build_adapter_reachable_targets(&coverage, graph, &cp.target);
     let ctx = TargetCtx {
-        graph,
         cp,
         coverage: &coverage,
+        reachable: &reachable,
     };
     let mut out = Vec::new();
     for info in targets {
@@ -92,16 +92,16 @@ fn build_adapter_coverage(
 /// Read-only context bundle threaded into `inspect_target`. Operation:
 /// data container.
 struct TargetCtx<'a> {
-    graph: &'a CallGraph,
     cp: &'a CompiledCallParity,
     coverage: &'a AdapterCoverage,
+    reachable: &'a HashSet<String>,
 }
 
 /// Decide whether one target pub-fn produces a finding under the
 /// boundary semantic. Returns `Some(hit)` for mismatch or orphan,
 /// `None` otherwise (silent for excluded targets and post-boundary
-/// helpers).
-/// Integration: dispatches on coverage shape via `classify_target`.
+/// helpers wired into adapter coverage).
+/// Integration: probe coverage + suppress post-boundary plumbing.
 fn inspect_target(info: &PubFnInfo<'_>, ctx: &TargetCtx<'_>) -> Option<MatchLocation> {
     let canonical = canonical_name_for_pub_fn(info);
     if is_excluded(&canonical, ctx.cp) {
@@ -112,7 +112,7 @@ fn inspect_target(info: &PubFnInfo<'_>, ctx: &TargetCtx<'_>) -> Option<MatchLoca
     if missing.is_empty() {
         return None;
     }
-    if reached.is_empty() && has_target_layer_caller(&canonical, ctx.graph, &ctx.cp.target) {
+    if reached.is_empty() && ctx.reachable.contains(&canonical) {
         return None;
     }
     Some(build_finding(
@@ -154,17 +154,39 @@ fn adapters_missing(reached: &[String], adapters: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// True iff `target` has at least one caller in the target layer
-/// itself — distinguishes post-boundary helpers (silent) from genuine
-/// orphans (flagged).
-/// Operation: lookup + layer probe.
-fn has_target_layer_caller(target: &str, graph: &CallGraph, target_layer: &str) -> bool {
-    let Some(callers) = graph.reverse.get(target) else {
-        return false;
-    };
-    callers
-        .iter()
-        .any(|c| graph.layer_of(c) == Some(target_layer))
+/// Set of target-layer canonicals transitively reachable from at least
+/// one adapter touchpoint, traversing only target-layer edges.
+///
+/// Used to distinguish post-boundary helpers (wired into adapter
+/// coverage via target-internal callers — silent) from genuine
+/// orphans and dead target-layer islands (flagged). Multi-source
+/// forward BFS seeded from the touchpoint union.
+/// Operation: BFS over `graph.forward`, gated by target layer.
+fn build_adapter_reachable_targets(
+    coverage: &AdapterCoverage,
+    graph: &CallGraph,
+    target_layer: &str,
+) -> HashSet<String> {
+    let mut reachable: HashSet<String> = HashSet::new();
+    let mut queue: VecDeque<String> = VecDeque::new();
+    for tps in coverage.values() {
+        for tp in tps {
+            if reachable.insert(tp.clone()) {
+                queue.push_back(tp.clone());
+            }
+        }
+    }
+    while let Some(node) = queue.pop_front() {
+        let Some(callees) = graph.forward.get(&node) else {
+            continue;
+        };
+        for callee in callees {
+            if graph.layer_of(callee) == Some(target_layer) && reachable.insert(callee.clone()) {
+                queue.push_back(callee.clone());
+            }
+        }
+    }
+    reachable
 }
 
 /// Construct a `CallParityMissingAdapter` MatchLocation. Operation:

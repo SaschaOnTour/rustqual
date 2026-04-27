@@ -292,7 +292,7 @@ pub(crate) fn build_call_graph<'ast>(
 }
 
 /// Pre-compute `layer_of_crate_path` for every canonical that appears
-/// in the graph (as source or sink). Hot-path BFS in Check A + Check B
+/// in the graph (as source or sink). Hot-path BFS in the call-parity checks
 /// can then look up layers in O(1) instead of doing glob probes per
 /// visited node — measured ~1.5s saved on rustqual's own source tree.
 fn populate_layer_cache(graph: &mut CallGraph, layers: &LayerDefinitions) {
