@@ -104,17 +104,16 @@ The default `transparent_macros` list already covers the common cases; entries h
 
 ## What you'll see
 
-```
-✗ ARCH-CALL-PARITY  src/cli/commands/sync.rs::cmd_sync (Check A)
-                    pub fn does not (transitively, depth=3) reach the target layer
-                    'application' — adapter has no delegation path
+In `--findings` (one-line) output, real findings look like:
 
-✗ ARCH-CALL-PARITY  src/application/export.rs::run_export (Check B)
-                    target fn is unreached by adapter 'cli'
-                    (reachable from: mcp)
+```
+src/cli/commands/sync.rs:12  ARCHITECTURE  adapter cli::cmd_sync does not delegate to 'application' within 3 hops: call parity
+src/application/export.rs:8  ARCHITECTURE  'crate::application::export::run_export' is not reached from adapter layer(s): cli: call parity
 ```
 
-The first finding says "this CLI command does logic locally instead of delegating". The second says "you added a new application capability and forgot to expose it via CLI".
+(Rule IDs in JSON/SARIF output: `architecture/call_parity/no_delegation` and `architecture/call_parity/missing_adapter` respectively. See [reference-rules.md](./reference-rules.md) for the full ID list.)
+
+The first says "this CLI command does logic locally instead of delegating". The second says "you added a new application capability and forgot to expose it via CLI".
 
 ## Excluding legitimate asymmetries
 

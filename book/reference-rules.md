@@ -90,17 +90,22 @@ Part of SRP (BTC, SLM, NMS) and Coupling (OI, SIT, DEH, IET).
 
 ## Architecture
 
-Architecture findings carry the originating rule kind and the source rule's name:
+Architecture findings emit hierarchical rule IDs of the form
+`architecture/<rule-family>[/<sub-kind>]`. The `<sub-kind>` is dynamic
+for pattern and trait-contract rules (the user-defined rule's `name` /
+`check` string).
 
-| Code | Meaning |
+| Rule ID | Meaning |
 |---|---|
-| `ARCH-LAYER`        | Layer rule violation — file imports outside its allowed direction |
-| `ARCH-FORBID`       | Forbidden-edge violation — `[[architecture.forbidden]]` rule fired |
-| `ARCH-PATTERN`      | Symbol-pattern violation — `[[architecture.pattern]]` rule fired |
-| `ARCH-TRAIT`        | Trait-contract violation — `[[architecture.trait_contract]]` rule fired |
+| `architecture/layer` | Layer rule violation — file imports outside its allowed direction |
+| `architecture/layer/unmatched` | File doesn't match any configured layer glob (under `unmatched_behavior = "strict_error"`) |
+| `architecture/forbidden` | Forbidden-edge violation — `[[architecture.forbidden]]` rule fired |
+| `architecture/pattern/<name>` | Symbol-pattern violation — `[[architecture.pattern]]` rule with the given `name` fired (e.g. `architecture/pattern/no_panic_helpers_in_production`) |
+| `architecture/trait_contract` | Trait-contract violation — generic catch-all |
+| `architecture/trait_contract/<check>` | Trait-contract violation with a specific `<check>` kind (e.g. `architecture/trait_contract/object_safety`) |
 | `architecture/call_parity/no_delegation`        | Check A — adapter `pub fn` doesn't reach the target layer at all |
-| `architecture/call_parity/missing_adapter`      | Check B — target `pub fn` is in some adapter's coverage but missing from another (or genuinely orphaned) |
-| `architecture/call_parity/multi_touchpoint`     | Check C — adapter `pub fn` has more than one touchpoint in the target layer (configurable severity, default warn) |
+| `architecture/call_parity/missing_adapter`      | Check B — target `pub fn` is in some adapter's coverage but missing from another (or transitively unreachable from any adapter touchpoint — orphan / dead island) |
+| `architecture/call_parity/multi_touchpoint`     | Check C — adapter `pub fn` has more than one touchpoint in the target layer (configurable severity via `single_touchpoint`, default `warn`) |
 | `architecture/call_parity/multiplicity_mismatch` | Check D — target `pub fn` is reached by every adapter but with divergent handler counts (e.g. cli=2, mcp=1) |
 
 ## Suppression / governance

@@ -7,8 +7,10 @@
 //! - **A — No-delegation**: every adapter `pub fn` must reach the
 //!   target layer. Empty touchpoint set ⇒ finding.
 //! - **B — Missing adapter**: a target `pub fn` reached by some
-//!   adapter must be reached by every adapter (or be a genuine
-//!   orphan with no callers in the target layer either).
+//!   adapter must be reached by every adapter, OR be transitively
+//!   reachable from some adapter touchpoint via target-internal
+//!   callers (otherwise it's an orphan / dead target-layer island
+//!   and gets flagged).
 //! - **C — Single touchpoint**: each adapter `pub fn` should reach
 //!   exactly one target node (configurable via `single_touchpoint`).
 //! - **D — Multiplicity match**: a target reached by every adapter

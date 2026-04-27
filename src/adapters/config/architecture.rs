@@ -231,17 +231,29 @@ pub struct TraitContract {
 
 /// `[architecture.call_parity]` — cross-adapter delegation check.
 ///
-/// Declares a set of peer adapter layers (e.g. `cli`, `mcp`, `rest`) and a
-/// shared target layer (e.g. `application`). Two checks run under one rule:
+/// Declares a set of peer adapter layers (e.g. `cli`, `mcp`) and a
+/// shared target layer (e.g. `application`). Four checks run under one
+/// rule, all anchored at the **boundary** — the first call from an
+/// adapter pub-fn into the target layer:
 ///
-/// 1. **No-delegation**: each `pub fn` in an adapter layer must transitively
-///    (up to `call_depth` hops) call into the target layer.
-/// 2. **Missing-adapter**: each `pub fn` in the target layer must be
-///    (transitively) reached from every adapter layer.
+/// 1. **A — No-delegation**: each adapter `pub fn` must reach the
+///    target layer (touchpoint set non-empty).
+/// 2. **B — Missing-adapter**: a target `pub fn` reached by some
+///    adapter must be reached by every adapter, OR be transitively
+///    reachable from at least one adapter touchpoint via target-
+///    internal callers (otherwise it's an orphan and gets flagged).
+/// 3. **C — Single-touchpoint**: each adapter `pub fn` should have
+///    exactly one target touchpoint. Configurable severity via
+///    [`Self::single_touchpoint`].
+/// 4. **D — Multiplicity-match**: targets reached by every adapter
+///    must be reached with the same per-adapter handler count.
+///
+/// Adapter pub-fns marked `#[deprecated]` are excluded across all
+/// four checks.
 ///
 /// `exclude_targets` is a glob list silencing Check-B for legitimately
-/// asymmetric target fns (setup, debug-only endpoints). Fn-level escape
-/// via `// qual:allow(architecture)`.
+/// asymmetric target fns (setup, debug-only endpoints). Fn-level
+/// escape via `// qual:allow(architecture)`.
 #[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct CallParityConfig {
@@ -308,9 +320,17 @@ pub struct CallParityConfig {
     #[serde(default)]
     pub transparent_macros: Vec<String>,
 
-    /// Severity for Check C (multi-touchpoint): `"off"`, `"warn"`
-    /// (default — emits with `Severity::Low`), or `"error"` (emits
-    /// with `Severity::Medium`). When `"off"`, the check is skipped.
+    /// Severity for Check C (multi-touchpoint):
+    /// - `"off"` — skip the check entirely; no findings emitted.
+    /// - `"warn"` (default) — emit findings as `Severity::Low`.
+    /// - `"error"` — emit findings as `Severity::Medium`.
+    ///
+    /// **Note:** `"warn"` and `"error"` only differ in the reported
+    /// severity tag. rustqual's default exit gate fails on **any**
+    /// finding regardless of severity (use `--no-fail` for local
+    /// exploration). To make a Check-C finding genuinely non-blocking
+    /// in CI, either suppress it via `// qual:allow(architecture)` or
+    /// set this field to `"off"`.
     #[serde(default)]
     pub single_touchpoint: SingleTouchpointMode,
 }

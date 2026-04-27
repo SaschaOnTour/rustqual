@@ -7,15 +7,24 @@
 //!
 //! - Some adapter touches T at the boundary AND another adapter doesn't
 //!   (mismatch case — feature-coverage drift), OR
-//! - No adapter touches T at the boundary AND T has no callers within
-//!   the target layer either (orphan case — application capability
-//!   that isn't wired to any adapter).
+//! - T is **not transitively reachable** from any adapter touchpoint
+//!   via target-internal callers (orphan case — application capability
+//!   not wired to any adapter, including dead target-layer islands
+//!   where T is only called by other unreachable target fns).
 //!
 //! The intermediate case — T isn't touched by any adapter directly but
-//! IS called by other application fns (post-boundary plumbing like
-//! `record_operation`, `impact_count`) — is silent. That used to fire
-//! under v1.2.0's leaf-reachability semantic; v1.2.1 deliberately
-//! drops it. Internal application chains aren't a parity concern.
+//! IS reachable through some adapter via target-internal callers
+//! (post-boundary plumbing like `record_operation`, `impact_count`
+//! when an adapter reaches `session.search`) — is silent. That used to
+//! fire under v1.2.0's leaf-reachability semantic; v1.2.1 deliberately
+//! drops it. Internal application chains wired up via at least one
+//! adapter aren't a parity concern.
+//!
+//! The reachability set is computed by `build_adapter_reachable_targets`
+//! (multi-source forward BFS from the touchpoint union, traversing only
+//! target-layer edges). A merely-existing target-layer caller no longer
+//! suppresses the orphan branch — only a *live* one (transitively
+//! reachable from some adapter) does.
 //!
 //! Two escape mechanisms:
 //! - `exclude_targets` glob in the call-parity config (matched against
