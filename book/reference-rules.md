@@ -98,7 +98,10 @@ Architecture findings carry the originating rule kind and the source rule's name
 | `ARCH-FORBID`       | Forbidden-edge violation — `[[architecture.forbidden]]` rule fired |
 | `ARCH-PATTERN`      | Symbol-pattern violation — `[[architecture.pattern]]` rule fired |
 | `ARCH-TRAIT`        | Trait-contract violation — `[[architecture.trait_contract]]` rule fired |
-| `ARCH-CALL-PARITY`  | Call-parity violation — Check A (no delegation) or Check B (missing adapter) |
+| `architecture/call_parity/no_delegation`        | Check A — adapter `pub fn` doesn't reach the target layer at all |
+| `architecture/call_parity/missing_adapter`      | Check B — target `pub fn` is in some adapter's coverage but missing from another (or genuinely orphaned) |
+| `architecture/call_parity/multi_touchpoint`     | Check C — adapter `pub fn` has more than one touchpoint in the target layer (configurable severity, default warn) |
+| `architecture/call_parity/multiplicity_mismatch` | Check D — target `pub fn` is reached by every adapter but with divergent handler counts (e.g. cli=2, mcp=1) |
 
 ## Suppression / governance
 
@@ -123,4 +126,4 @@ Warnings (`SUP-001`) don't fail by default — pass `--fail-on-warnings` to flip
 - [code-reuse.md](./code-reuse.md) — DRY-*, BP-*
 - [test-quality.md](./test-quality.md) — TQ-*
 - [architecture-rules.md](./architecture-rules.md) — ARCH-*
-- [adapter-parity.md](./adapter-parity.md) — ARCH-CALL-PARITY
+- [adapter-parity.md](./adapter-parity.md) — `architecture/call_parity/*`

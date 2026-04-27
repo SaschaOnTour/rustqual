@@ -253,7 +253,16 @@ pub struct CallParityConfig {
     /// `[architecture.layers]` and not overlap `adapters`.
     pub target: String,
 
-    /// Transitive call-graph depth for both checks. Default 3, range 1..=10.
+    /// Adapter-internal traversal depth — the maximum number of hops
+    /// the boundary BFS will walk through adapter-layer helpers before
+    /// giving up. Default 3, range 1..=10.
+    ///
+    /// The semantic is bounded to the adapter→target walk only: once
+    /// a target-layer node is reached, the touchpoint set records it
+    /// and the walk stops descending into target callees. So
+    /// `call_depth` controls how deep adapter-internal helper chains
+    /// can go before the BFS abandons the path; it does not influence
+    /// post-boundary application-internal call depth.
     #[serde(default = "default_call_depth")]
     pub call_depth: usize,
 
@@ -298,6 +307,25 @@ pub struct CallParityConfig {
     /// documents rather than changes behaviour.
     #[serde(default)]
     pub transparent_macros: Vec<String>,
+
+    /// Severity for Check C (multi-touchpoint): `"off"`, `"warn"`
+    /// (default — emits with `Severity::Low`), or `"error"` (emits
+    /// with `Severity::Medium`). When `"off"`, the check is skipped.
+    #[serde(default)]
+    pub single_touchpoint: SingleTouchpointMode,
+}
+
+/// Mode for Check C — multi-touchpoint detection.
+#[derive(Debug, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum SingleTouchpointMode {
+    /// Skip Check C entirely.
+    Off,
+    /// Emit findings as `Severity::Low` (default).
+    #[default]
+    Warn,
+    /// Emit findings as `Severity::Medium`.
+    Error,
 }
 
 pub(crate) fn default_call_depth() -> usize {

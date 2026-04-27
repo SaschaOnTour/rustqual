@@ -5,6 +5,71 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-04-27
+
+Patch release: **`call_parity` boundary semantic + new Checks C/D**.
+
+The v1.2.0 `call_parity` rule walked transitive reachability across
+the entire target layer up to `call_depth` hops. On a clean codebase
+with zero genuine adapter asymmetries, this still produced findings
+for every application-internal helper that wasn't directly touched
+by every adapter (e.g. `record_operation`, `impact_count`). The
+findings pointed *inward* at application plumbing rather than at
+real adapter drift.
+
+v1.2.1 reframes Check B's semantic to **boundary-only**: walk forward
+from each adapter pub-fn until the target layer is hit, record that
+node as the adapter's touchpoint, then stop. Compare touchpoint sets
+across adapters. Application-internal helpers are no longer inspected
+for parity — that's `DRY-002`'s concern, not `call_parity`'s.
+
+### Added
+
+- **Check C — multi-touchpoint** (`architecture/call_parity/multi_touchpoint`):
+  flags adapter pub-fns that orchestrate across multiple application
+  calls themselves. Configurable severity via
+  `[architecture.call_parity] single_touchpoint = "off" | "warn" | "error"`,
+  default `"warn"` (emits as `Severity::Low`).
+- **Check D — multiplicity mismatch**
+  (`architecture/call_parity/multiplicity_mismatch`): flags target
+  pub-fns reached by every adapter but with divergent per-adapter
+  handler counts (e.g. cli has 2 handlers → `session.search`, mcp
+  has 1).
+- **Deprecated-handler exclusion**: adapter pub-fns marked
+  `#[deprecated]` (in any form) are excluded from Checks A/B/C/D.
+  Aliases that are explicitly being phased out shouldn't drag the
+  parity report.
+- Regression tests pinning correct turbofish + inferred-generic call
+  resolution behavior in the canonical-call collector.
+
+### Changed
+
+- **Check B — boundary semantic**. A target pub-fn is flagged when:
+  - it appears in some adapter's coverage but is missing from another
+    (mismatch case — adapter feature drift), OR
+  - no adapter touches it at the boundary AND it has no callers within
+    the target layer either (orphan case — application capability not
+    wired to any adapter).
+  Internal application chains (`session.search → record_operation →
+  impact_count`) are silent.
+- `call_depth` semantic narrowed: now bounds **adapter-internal**
+  traversal depth only. Once the target layer is reached, the walk
+  stops descending into target callees. Default unchanged (3); no
+  config breakage.
+
+### Migration notes
+
+If you saw v1.2.0 fire findings on application-internal helpers
+(`record_operation`, `impact_count`, etc.), those will silently
+disappear under v1.2.1. The legitimate adapter-asymmetry findings
+remain. Genuinely orphaned application pub-fns (no callers anywhere)
+still produce findings under the orphan branch of Check B.
+
+If you want to detect "internal application helpers reached
+asymmetrically through other application code", that semantic is no
+longer covered by `call_parity`; use `DRY-002` (dead code) plus the
+existing per-target visibility audit in code review.
+
 ## [1.2.0] - 2026-04-24
 
 Minor release: **shallow type-inference** for `call_parity` receiver

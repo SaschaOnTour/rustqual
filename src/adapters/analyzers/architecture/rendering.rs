@@ -96,13 +96,15 @@ fn render_violation_head(kind: &ViolationKind) -> String {
             detail,
         } => format!("trait {trait_name} [{check}]: {detail}"),
         ViolationKind::CallParityNoDelegation { .. }
-        | ViolationKind::CallParityMissingAdapter { .. } => render_call_parity_head(kind),
+        | ViolationKind::CallParityMissingAdapter { .. }
+        | ViolationKind::CallParityMultiplicityMismatch { .. }
+        | ViolationKind::CallParityMultiTouchpoint { .. } => render_call_parity_head(kind),
     }
 }
 
-/// Head text for the two call-parity ViolationKinds. Kept separate from
-/// `render_violation_head` to keep that function below the cyclomatic
-/// threshold — call-parity has two variants, each with its own shape.
+/// Head text for the four call-parity ViolationKinds. Kept separate
+/// from `render_violation_head` to keep that function below the
+/// cyclomatic threshold.
 /// Operation: variant-local formatting.
 fn render_call_parity_head(kind: &ViolationKind) -> String {
     match kind {
@@ -122,6 +124,31 @@ fn render_call_parity_head(kind: &ViolationKind) -> String {
             "'{target_fn}' is not reached from adapter layer(s): {}",
             missing_adapters.join(", ")
         ),
+        ViolationKind::CallParityMultiplicityMismatch {
+            target_fn,
+            counts_per_adapter,
+            ..
+        } => {
+            let parts: Vec<String> = counts_per_adapter
+                .iter()
+                .map(|(a, c)| format!("{a}={c}"))
+                .collect();
+            format!(
+                "'{target_fn}' has divergent handler counts across adapters: {}",
+                parts.join(", ")
+            )
+        }
+        ViolationKind::CallParityMultiTouchpoint {
+            fn_name,
+            adapter_layer,
+            touchpoints,
+        } => format!(
+            "adapter {adapter_layer}::{fn_name} has multiple target touchpoints: {}",
+            touchpoints.join(", ")
+        ),
+        // Caller (`render_violation_head`) only dispatches CallParity*
+        // variants here. Reaching this branch would mean a new variant
+        // was added without updating the dispatcher.
         _ => String::new(),
     }
 }

@@ -1,0 +1,218 @@
+//! Tests for Check D — multiplicity mismatch.
+//!
+//! Check D fires when a target pub-fn IS in every adapter's coverage
+//! (so Check B is silent) but the per-adapter handler counts diverge
+//! — typical case: cli has two handlers (`cmd_search`, `cmd_grep`)
+//! both reaching `session.search` while mcp has only `handle_search`.
+
+use super::support::{build_workspace, empty_cfg_test, four_layer, globset, run_check_d};
+use crate::adapters::analyzers::architecture::compiled::CompiledCallParity;
+use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
+use std::collections::HashSet;
+
+fn make_config(adapters: &[&str]) -> CompiledCallParity {
+    CompiledCallParity {
+        adapters: adapters.iter().map(|s| s.to_string()).collect(),
+        target: "application".to_string(),
+        call_depth: 3,
+        exclude_targets: globset(&[]),
+        transparent_wrappers: HashSet::new(),
+        transparent_macros: HashSet::new(),
+        single_touchpoint: crate::config::architecture::SingleTouchpointMode::default(),
+    }
+}
+
+fn extract_d(findings: &[MatchLocation]) -> Vec<(String, Vec<(String, usize)>)> {
+    findings
+        .iter()
+        .filter_map(|f| match &f.kind {
+            ViolationKind::CallParityMultiplicityMismatch {
+                target_fn,
+                counts_per_adapter,
+                ..
+            } => Some((target_fn.clone(), counts_per_adapter.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+// ── Two adapters, asymmetric multiplicity ────────────────────────
+
+#[test]
+fn check_d_alias_in_one_adapter() {
+    // cli has cmd_search and cmd_grep both → session.search.
+    // mcp has handle_search only → session.search.
+    // counts: cli=2, mcp=1 → finding for session.search.
+    let ws = build_workspace(&[
+        ("src/application/session.rs", "pub fn search() {}"),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::session::search;
+            pub fn cmd_search() { search(); }
+            pub fn cmd_grep() { search(); }
+            "#,
+        ),
+        (
+            "src/mcp/handlers.rs",
+            r#"
+            use crate::application::session::search;
+            pub fn handle_search() { search(); }
+            "#,
+        ),
+    ]);
+    let cp = make_config(&["cli", "mcp"]);
+    let findings = run_check_d(&ws, &four_layer(), &cp, &empty_cfg_test());
+    let pairs = extract_d(&findings);
+    assert_eq!(pairs.len(), 1, "got {findings:?}");
+    let (target, counts) = &pairs[0];
+    assert!(target.ends_with("session::search"));
+    let cli_count = counts.iter().find(|(a, _)| a == "cli").map(|(_, c)| *c);
+    let mcp_count = counts.iter().find(|(a, _)| a == "mcp").map(|(_, c)| *c);
+    assert_eq!(cli_count, Some(2));
+    assert_eq!(mcp_count, Some(1));
+}
+
+// ── Balanced multiplicity → silent ───────────────────────────────
+
+#[test]
+fn check_d_balanced_fan_in_no_finding() {
+    // cli: cmd_search + cmd_grep → search; mcp: handle_search +
+    // handle_grep → search. counts match (2,2) → no Check D finding.
+    let ws = build_workspace(&[
+        ("src/application/session.rs", "pub fn search() {}"),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::session::search;
+            pub fn cmd_search() { search(); }
+            pub fn cmd_grep() { search(); }
+            "#,
+        ),
+        (
+            "src/mcp/handlers.rs",
+            r#"
+            use crate::application::session::search;
+            pub fn handle_search() { search(); }
+            pub fn handle_grep() { search(); }
+            "#,
+        ),
+    ]);
+    let cp = make_config(&["cli", "mcp"]);
+    let findings = run_check_d(&ws, &four_layer(), &cp, &empty_cfg_test());
+    assert!(
+        extract_d(&findings).is_empty(),
+        "balanced fan-in should be silent, got {findings:?}"
+    );
+}
+
+// ── Three adapters, one diverges ─────────────────────────────────
+
+#[test]
+fn check_d_three_adapters_one_diverges() {
+    // cli=2, rest=2, mcp=1 → finding citing the divergence.
+    let ws = build_workspace(&[
+        ("src/application/session.rs", "pub fn search() {}"),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::session::search;
+            pub fn cmd_search() { search(); }
+            pub fn cmd_grep() { search(); }
+            "#,
+        ),
+        (
+            "src/mcp/handlers.rs",
+            r#"
+            use crate::application::session::search;
+            pub fn handle_search() { search(); }
+            "#,
+        ),
+        (
+            "src/rest/handlers.rs",
+            r#"
+            use crate::application::session::search;
+            pub fn post_search() { search(); }
+            pub fn post_grep() { search(); }
+            "#,
+        ),
+    ]);
+    let cp = make_config(&["cli", "mcp", "rest"]);
+    let findings = run_check_d(&ws, &four_layer(), &cp, &empty_cfg_test());
+    let pairs = extract_d(&findings);
+    assert_eq!(pairs.len(), 1, "got {findings:?}");
+    let counts = &pairs[0].1;
+    let cli_count = counts.iter().find(|(a, _)| a == "cli").map(|(_, c)| *c);
+    let mcp_count = counts.iter().find(|(a, _)| a == "mcp").map(|(_, c)| *c);
+    let rest_count = counts.iter().find(|(a, _)| a == "rest").map(|(_, c)| *c);
+    assert_eq!(cli_count, Some(2));
+    assert_eq!(mcp_count, Some(1));
+    assert_eq!(rest_count, Some(2));
+}
+
+// ── Deprecated alias not counted (v1.2.1) ────────────────────────
+
+#[test]
+fn check_d_skips_deprecated_alias() {
+    // cli has cmd_search (live) + cmd_grep (deprecated alias) → both
+    // would touch session.search. With deprecation-exclusion, cmd_grep
+    // is filtered: cli effective count = 1, mcp = 1 → no D finding.
+    let ws = build_workspace(&[
+        ("src/application/session.rs", "pub fn search() {}"),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::session::search;
+            pub fn cmd_search() { search(); }
+            #[deprecated]
+            pub fn cmd_grep() { search(); }
+            "#,
+        ),
+        (
+            "src/mcp/handlers.rs",
+            r#"
+            use crate::application::session::search;
+            pub fn handle_search() { search(); }
+            "#,
+        ),
+    ]);
+    let cp = make_config(&["cli", "mcp"]);
+    let findings = run_check_d(&ws, &four_layer(), &cp, &empty_cfg_test());
+    assert!(
+        extract_d(&findings).is_empty(),
+        "deprecated alias should be excluded from D's count, got {findings:?}"
+    );
+}
+
+// ── Distinct from B: capability missing entirely emits B not D ───
+
+#[test]
+fn check_d_distinct_from_b() {
+    // cli reaches session.search; mcp doesn't reach it at all.
+    // → Check B finding (capability missing). Check D MUST be silent
+    // because D only fires when target is in every adapter's coverage
+    // but counts differ.
+    let ws = build_workspace(&[
+        ("src/application/session.rs", "pub fn search() {}"),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::session::search;
+            pub fn cmd_search() { search(); }
+            "#,
+        ),
+        (
+            "src/mcp/handlers.rs",
+            r#"
+            // mcp doesn't touch search at all
+            pub fn handle_other() {}
+            "#,
+        ),
+    ]);
+    let cp = make_config(&["cli", "mcp"]);
+    let findings = run_check_d(&ws, &four_layer(), &cp, &empty_cfg_test());
+    assert!(
+        extract_d(&findings).is_empty(),
+        "Check D should not fire when target missing entirely from an adapter (that's Check B's job), got {findings:?}"
+    );
+}

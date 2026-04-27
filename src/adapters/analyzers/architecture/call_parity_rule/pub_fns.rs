@@ -45,6 +45,10 @@ pub(crate) struct PubFnInfo<'ast> {
     /// first. Feeds the canonical-name builder so nested-mod items key
     /// under `crate::<file>::inner::…` to match the graph + type index.
     pub mod_stack: Vec<String>,
+    /// True iff the fn carries `#[deprecated]` (in any form). Used to
+    /// exclude phased-out adapter handlers from call-parity Checks A,
+    /// B, C, and D.
+    pub deprecated: bool,
 }
 
 // qual:api
@@ -151,6 +155,7 @@ impl<'ast, 'vis> PubFnCollector<'ast, 'vis> {
         line: usize,
         body: &'ast syn::Block,
         sig: &'ast syn::Signature,
+        attrs: &[syn::Attribute],
     ) {
         self.found.push(PubFnInfo {
             file: self.file_path.clone(),
@@ -160,6 +165,7 @@ impl<'ast, 'vis> PubFnCollector<'ast, 'vis> {
             signature_params: extract_signature_params(sig),
             self_type: self.current_self_type(),
             mod_stack: self.mod_stack.clone(),
+            deprecated: has_deprecated_attribute(attrs),
         });
     }
 }
@@ -170,12 +176,20 @@ fn is_test_fn(attrs: &[syn::Attribute]) -> bool {
     has_test_attr(attrs) || has_cfg_test(attrs)
 }
 
+/// True iff the attribute set contains `#[deprecated]` in any of its
+/// three forms: bare `#[deprecated]`, `#[deprecated = "..."]`, or
+/// `#[deprecated(since = "...", note = "...")]`. Operation: path-ident
+/// probe.
+fn has_deprecated_attribute(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|a| a.path().is_ident("deprecated"))
+}
+
 impl<'ast, 'vis> Visit<'ast> for PubFnCollector<'ast, 'vis> {
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
         if self.enclosing_mod_visible && is_visible(&node.vis) && !is_test_fn(&node.attrs) {
             let line = syn::spanned::Spanned::span(&node.sig.ident).start().line;
             let name = node.sig.ident.to_string();
-            self.record_fn(name, line, &node.block, &node.sig);
+            self.record_fn(name, line, &node.block, &node.sig, &node.attrs);
         }
         syn::visit::visit_item_fn(self, node);
     }
@@ -214,7 +228,7 @@ impl<'ast, 'vis> Visit<'ast> for PubFnCollector<'ast, 'vis> {
         if self.current_impl_visible() && is_visible(&node.vis) && !is_test_fn(&node.attrs) {
             let line = syn::spanned::Spanned::span(&node.sig.ident).start().line;
             let name = node.sig.ident.to_string();
-            self.record_fn(name, line, &node.block, &node.sig);
+            self.record_fn(name, line, &node.block, &node.sig, &node.attrs);
         }
         syn::visit::visit_impl_item_fn(self, node);
     }

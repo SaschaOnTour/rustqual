@@ -120,6 +120,7 @@ fn rlm_config() -> CompiledCallParity {
         exclude_targets: globset(&[]),
         transparent_wrappers: HashSet::new(),
         transparent_macros: HashSet::new(),
+        single_touchpoint: crate::config::architecture::SingleTouchpointMode::default(),
     }
 }
 
