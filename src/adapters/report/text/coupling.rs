@@ -1,89 +1,107 @@
+use std::fmt::Write;
+
 use colored::Colorize;
 
-/// Print coupling analysis section with module metrics.
-/// Integration: orchestrates coupling sub-sections.
-pub fn print_coupling_section(
-    analysis: &crate::adapters::analyzers::coupling::CouplingAnalysis,
-    config: &crate::config::sections::CouplingConfig,
-    verbose: bool,
-) {
-    print_coupling_header(analysis, verbose);
-    print_coupling_cycles(analysis);
-    print_coupling_sdp_violations(analysis);
-    print_coupling_table(analysis, config, verbose);
-}
+use super::views::{CouplingTableView, CouplingView, ModuleRow};
+use crate::adapters::report::projections::coupling::{split_coupling_findings, SdpViolationRow};
+use crate::domain::analysis_data::ModuleCouplingRecord;
+use crate::domain::findings::CouplingFinding;
 
-/// Print coupling section header with module count.
-/// Operation: formatting logic, no own calls.
-fn print_coupling_header(
-    analysis: &crate::adapters::analyzers::coupling::CouplingAnalysis,
-    verbose: bool,
-) {
-    println!("\n{}", "═══ Coupling ═══".bold());
-    if verbose {
-        println!("  Modules analyzed: {}", analysis.metrics.len());
+/// Project Coupling findings into the typed text View via the shared
+/// `split_coupling_findings` helper.
+pub(super) fn build_coupling_view(findings: &[CouplingFinding]) -> CouplingView {
+    let buckets = split_coupling_findings(findings);
+    CouplingView {
+        cycle_paths: buckets.cycle_paths,
+        sdp_violations: buckets.sdp_violations,
+        structural_rows: buckets.structural_rows,
     }
 }
 
-/// Print circular dependency cycles.
-/// Operation: iteration and formatting logic, no own calls.
-fn print_coupling_cycles(analysis: &crate::adapters::analyzers::coupling::CouplingAnalysis) {
-    if !analysis.cycles.is_empty() {
-        for cycle in &analysis.cycles {
-            println!(
-                "  {} Circular dependency: {}",
-                "✗".red(),
-                cycle.modules.join(" → "),
-            );
-        }
-    }
-}
-
-/// Print SDP violations, skipping suppressed ones.
-/// Operation: iteration and formatting logic, no own calls.
-fn print_coupling_sdp_violations(
-    analysis: &crate::adapters::analyzers::coupling::CouplingAnalysis,
-) {
-    if analysis.sdp_violations.is_empty() {
-        return;
-    }
-    analysis
-        .sdp_violations
+/// Project Coupling module records into the typed table View.
+pub(super) fn build_coupling_table_view(modules: &[ModuleCouplingRecord]) -> CouplingTableView {
+    let modules = modules
         .iter()
-        .filter(|v| !v.suppressed)
-        .for_each(|v| {
-            println!(
-                "  {} SDP violation: {} (I={:.2}) depends on {} (I={:.2})",
-                "⚠".yellow(),
-                v.from_module,
-                v.from_instability,
-                v.to_module,
-                v.to_instability,
-            );
-        });
+        .map(|m| ModuleRow {
+            name: m.module_name.clone(),
+            afferent: m.afferent,
+            efferent: m.efferent,
+            instability: m.instability,
+            suppressed: m.suppressed,
+            warning: m.warning,
+            incoming: m.incoming.clone(),
+            outgoing: m.outgoing.clone(),
+        })
+        .collect();
+    CouplingTableView { modules }
 }
 
-/// Print module coupling metrics table.
-/// Integration: orchestrates legend, table rows, and cycle status.
-fn print_coupling_table(
-    analysis: &crate::adapters::analyzers::coupling::CouplingAnalysis,
-    config: &crate::config::sections::CouplingConfig,
+/// Format the coupling analysis section.
+/// Always rendered (compact + verbose); verbose adds the legend +
+/// per-module incoming/outgoing detail.
+pub(super) fn format_coupling_section(
+    findings: &CouplingView,
+    table: &CouplingTableView,
     verbose: bool,
-) {
-    if verbose {
-        print_coupling_legend(&analysis.metrics);
-    } else if !analysis.metrics.is_empty() {
-        println!("\n    {:<20} {:>3}  {:>3}  Instability", "", "In", "Out");
-    }
-    print_coupling_rows(&analysis.metrics, config, verbose);
-    print_coupling_cycle_status(&analysis.cycles);
+) -> String {
+    let mut out = String::new();
+    push_header(&mut out, table, verbose);
+    push_cycles(&mut out, &findings.cycle_paths);
+    push_sdp_violations(&mut out, &findings.sdp_violations);
+    push_table(&mut out, table, verbose);
+    push_cycle_status(&mut out, &findings.cycle_paths);
+    out
 }
 
-/// Print coupling table legend and column headers.
-/// Operation: formatting logic, no own calls.
-fn print_coupling_legend(metrics: &[crate::adapters::analyzers::coupling::CouplingMetrics]) {
-    if !metrics.is_empty() {
-        println!(
+fn push_header(out: &mut String, table: &CouplingTableView, verbose: bool) {
+    let _ = writeln!(out, "\n{}", "═══ Coupling ═══".bold());
+    if verbose {
+        let _ = writeln!(out, "  Modules analyzed: {}", table.modules.len());
+    }
+}
+
+fn push_cycles(out: &mut String, cycle_paths: &[Vec<String>]) {
+    cycle_paths.iter().for_each(|path| {
+        let _ = writeln!(
+            out,
+            "  {} Circular dependency: {}",
+            "✗".red(),
+            path.join(" → "),
+        );
+    });
+}
+
+fn push_sdp_violations(out: &mut String, rows: &[SdpViolationRow]) {
+    rows.iter().for_each(|r| {
+        let _ = writeln!(
+            out,
+            "  {} SDP violation: {} (I={:.2}) depends on {} (I={:.2})",
+            "⚠".yellow(),
+            r.from,
+            r.from_instability,
+            r.to,
+            r.to_instability,
+        );
+    });
+}
+
+fn push_table(out: &mut String, table: &CouplingTableView, verbose: bool) {
+    if verbose {
+        push_legend(out, &table.modules);
+    } else if !table.modules.is_empty() {
+        let _ = writeln!(
+            out,
+            "\n    {:<20} {:>3}  {:>3}  Instability",
+            "", "In", "Out"
+        );
+    }
+    push_rows(out, &table.modules, verbose);
+}
+
+fn push_legend(out: &mut String, modules: &[ModuleRow]) {
+    if !modules.is_empty() {
+        let _ = writeln!(
+            out,
             "\n  {} {}\n  {} {}\n  {} {}",
             "Incoming".dimmed(),
             "= modules depending on this one".dimmed(),
@@ -92,59 +110,56 @@ fn print_coupling_legend(metrics: &[crate::adapters::analyzers::coupling::Coupli
             "Instability".dimmed(),
             "= Outgoing / (Incoming + Outgoing)".dimmed(),
         );
-        println!("\n    {:<20} {:>3}  {:>3}  Instability", "", "In", "Out",);
+        let _ = writeln!(
+            out,
+            "\n    {:<20} {:>3}  {:>3}  Instability",
+            "", "In", "Out",
+        );
     }
 }
 
-/// Print individual module coupling rows with threshold tags.
-/// Operation: iteration and formatting logic, no own calls.
-/// Threshold check logic is in a closure (lenient mode).
-fn print_coupling_rows(
-    metrics: &[crate::adapters::analyzers::coupling::CouplingMetrics],
-    config: &crate::config::sections::CouplingConfig,
-    verbose: bool,
-) {
-    let module_tag = |m: &crate::adapters::analyzers::coupling::CouplingMetrics| -> String {
+fn push_rows(out: &mut String, modules: &[ModuleRow], verbose: bool) {
+    let module_tag = |m: &ModuleRow| -> String {
         if m.suppressed {
-            return format!("  {}", "~ suppressed".yellow());
-        }
-        let instability_exceeded = m.afferent > 0 && m.instability > config.max_instability;
-        let fan_in_exceeded = m.afferent > config.max_fan_in;
-        let fan_out_exceeded = m.efferent > config.max_fan_out;
-        let has_warning = instability_exceeded || fan_in_exceeded || fan_out_exceeded;
-        if has_warning {
+            format!("  {}", "~ suppressed".yellow())
+        } else if m.warning {
             format!("  {} exceeds threshold", "⚠".yellow())
         } else {
             String::new()
         }
     };
 
-    metrics.iter().for_each(|m| {
-        println!(
+    modules.iter().for_each(|m| {
+        let _ = writeln!(
+            out,
             "    {:<20} {:>3}  {:>3}  {:.2}{}",
-            m.module_name,
+            m.name,
             m.afferent,
             m.efferent,
             m.instability,
             module_tag(m),
         );
         if verbose && !m.outgoing.is_empty() {
-            println!(
+            let _ = writeln!(
+                out,
                 "      {} {}",
                 "→ depends on:".dimmed(),
                 m.outgoing.join(", "),
             );
         }
         if verbose && !m.incoming.is_empty() {
-            println!("      {} {}", "← used by:".dimmed(), m.incoming.join(", "),);
+            let _ = writeln!(
+                out,
+                "      {} {}",
+                "← used by:".dimmed(),
+                m.incoming.join(", "),
+            );
         }
     });
 }
 
-/// Print no-cycles confirmation.
-/// Operation: conditional formatting, no own calls.
-fn print_coupling_cycle_status(cycles: &[crate::adapters::analyzers::coupling::CycleReport]) {
-    if cycles.is_empty() {
-        println!("\n  {} No circular dependencies.", "✓".green());
+fn push_cycle_status(out: &mut String, cycle_paths: &[Vec<String>]) {
+    if cycle_paths.is_empty() {
+        let _ = writeln!(out, "\n  {} No circular dependencies.", "✓".green());
     }
 }

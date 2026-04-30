@@ -1,80 +1,27 @@
-use super::html_escape;
+//! HTML SRP section: struct cohesion, module length, parameter count
+//! sub-tables. The Structural variant is filtered out — it's rendered
+//! by the cross-dim Structural section.
 
-/// Build the SRP analysis section — Integration: delegates to header builder + generic table builder.
-pub(super) fn html_srp_section(
-    srp: Option<&crate::adapters::analyzers::srp::SrpAnalysis>,
-) -> String {
-    let esc = |s: &str| html_escape(s);
-    let mut html = html_srp_header(srp);
-    html.push_str(&html_srp_table(
-        "Struct Warnings",
-        "<th>Struct</th><th>File</th><th>Line</th>\
-         <th>LCOM4</th><th>Fields</th><th>Methods</th><th>Fan-out</th><th>Score</th>",
-        srp.map(|s| s.struct_warnings.as_slice()).unwrap_or(&[]),
-        |w: &crate::adapters::analyzers::srp::SrpWarning| w.suppressed,
-        |w: &crate::adapters::analyzers::srp::SrpWarning| {
-            format!(
-                "<tr><td>{}</td><td>{}</td><td>{}</td>\
-                 <td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{:.2}</td></tr>\n",
-                esc(&w.struct_name),
-                esc(&w.file),
-                w.line,
-                w.lcom4,
-                w.field_count,
-                w.method_count,
-                w.fan_out,
-                w.composite_score,
-            )
-        },
-    ));
-    html.push_str(&html_srp_table(
-        "Module Warnings",
-        "<th>Module</th><th>File</th><th>Production Lines</th><th>Length Score</th><th>Clusters</th>",
-        srp.map(|s| s.module_warnings.as_slice()).unwrap_or(&[]),
-        |w: &crate::adapters::analyzers::srp::ModuleSrpWarning| w.suppressed,
-        |w: &crate::adapters::analyzers::srp::ModuleSrpWarning| {
-            let cluster_info = if w.independent_clusters > 0 {
-                format!("{} clusters", w.independent_clusters)
-            } else { String::from("\u{2014}") };
-            format!(
-                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{:.2}</td><td>{}</td></tr>\n",
-                esc(&w.module), esc(&w.file), w.production_lines, w.length_score, cluster_info,
-            )
-        },
-    ));
-    html.push_str(&html_srp_table(
-        "Too-Many-Arguments Warnings",
-        "<th>Function</th><th>File</th><th>Line</th><th>Params</th>",
-        srp.map(|s| s.param_warnings.as_slice()).unwrap_or(&[]),
-        |w: &crate::adapters::analyzers::srp::ParamSrpWarning| w.suppressed,
-        |w: &crate::adapters::analyzers::srp::ParamSrpWarning| {
-            format!(
-                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n",
-                esc(&w.function_name),
-                esc(&w.file),
-                w.line,
-                w.parameter_count,
-            )
-        },
-    ));
-    html.push_str("</div>\n</details>\n\n");
-    html
+use super::html_escape;
+use super::views::HtmlSrpView;
+use crate::adapters::report::projections::srp::{
+    split_srp_findings, SrpModuleRow, SrpParamRow, SrpStructRow,
+};
+use crate::domain::findings::SrpFinding;
+
+/// Project SRP findings into the typed view via the shared splitter.
+pub(super) fn build_srp_view(findings: &[SrpFinding]) -> HtmlSrpView {
+    let buckets = split_srp_findings(findings);
+    HtmlSrpView {
+        struct_warnings: buckets.struct_warnings,
+        module_warnings: buckets.module_warnings,
+        param_warnings: buckets.param_warnings,
+        structural_rows: buckets.structural_rows,
+    }
 }
 
-/// Build the SRP section header with summary and details wrapper.
-/// Operation: formatting logic, no own calls.
-fn html_srp_header(srp: Option<&crate::adapters::analyzers::srp::SrpAnalysis>) -> String {
-    let (struct_count, module_count, param_count) = srp
-        .map(|s| {
-            (
-                s.struct_warnings.iter().filter(|w| !w.suppressed).count(),
-                s.module_warnings.iter().filter(|w| !w.suppressed).count(),
-                s.param_warnings.iter().filter(|w| !w.suppressed).count(),
-            )
-        })
-        .unwrap_or((0, 0, 0));
-    let total = struct_count + module_count + param_count;
-
+pub(super) fn format_srp_section(view: &HtmlSrpView) -> String {
+    let total = view.struct_warnings.len() + view.module_warnings.len() + view.param_warnings.len();
     let mut html = String::new();
     html.push_str(&format!(
         "<details>\n<summary>SRP \u{2014} {} Warning{}</summary>\n\
@@ -82,32 +29,93 @@ fn html_srp_header(srp: Option<&crate::adapters::analyzers::srp::SrpAnalysis>) -
         total,
         if total == 1 { "" } else { "s" },
     ));
-
     if total == 0 {
         html.push_str("<p class=\"empty-state\">No SRP warnings.</p>\n");
     }
+    html.push_str(&format_struct_warnings(&view.struct_warnings));
+    html.push_str(&format_module_warnings(&view.module_warnings));
+    html.push_str(&format_param_warnings(&view.param_warnings));
+    html.push_str("</div>\n</details>\n\n");
     html
 }
 
-/// Build a generic SRP warning table with the given title, headers, items, and row formatter.
-/// Operation: formatting logic with closures, no own calls.
-fn html_srp_table<T>(
-    title: &str,
-    headers: &str,
-    items: &[T],
-    is_suppressed: impl Fn(&T) -> bool,
-    format_row: impl Fn(&T) -> String,
-) -> String {
-    let active: Vec<_> = items.iter().filter(|w| !is_suppressed(w)).collect();
-    if active.is_empty() {
+fn html_table(title: &str, headers: &str, rows: Vec<String>) -> String {
+    if rows.is_empty() {
         return String::new();
     }
-    let mut html = format!(
-        "<h3>{title}</h3>\n<table>\n<thead><tr>\
-         {headers}\
-         </tr></thead>\n<tbody>\n"
-    );
-    active.iter().for_each(|w| html.push_str(&format_row(w)));
+    let mut html =
+        format!("<h3>{title}</h3>\n<table>\n<thead><tr>{headers}</tr></thead>\n<tbody>\n");
+    rows.iter().for_each(|r| html.push_str(r));
     html.push_str("</tbody></table>\n");
     html
+}
+
+fn format_struct_warnings(rows: &[SrpStructRow]) -> String {
+    let rendered: Vec<String> = rows
+        .iter()
+        .map(|r| {
+            format!(
+                "<tr><td>{}</td><td>{}</td><td>{}</td>\
+                 <td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n",
+                html_escape(&r.struct_name),
+                html_escape(&r.file),
+                r.line,
+                r.lcom4,
+                r.field_count,
+                r.method_count,
+                r.fan_out,
+            )
+        })
+        .collect();
+    html_table(
+        "Struct Warnings",
+        "<th>Struct</th><th>File</th><th>Line</th>\
+         <th>LCOM4</th><th>Fields</th><th>Methods</th><th>Fan-out</th>",
+        rendered,
+    )
+}
+
+fn format_module_warnings(rows: &[SrpModuleRow]) -> String {
+    let rendered: Vec<String> = rows
+        .iter()
+        .map(|r| {
+            let cluster_info = if r.independent_clusters > 0 {
+                format!("{} clusters", r.independent_clusters)
+            } else {
+                String::from("\u{2014}")
+            };
+            format!(
+                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n",
+                html_escape(&r.module),
+                html_escape(&r.file),
+                r.production_lines,
+                cluster_info,
+            )
+        })
+        .collect();
+    html_table(
+        "Module Warnings",
+        "<th>Module</th><th>File</th><th>Production Lines</th><th>Clusters</th>",
+        rendered,
+    )
+}
+
+fn format_param_warnings(rows: &[SrpParamRow]) -> String {
+    let rendered: Vec<String> = rows
+        .iter()
+        .map(|r| {
+            format!(
+                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n",
+                html_escape(&r.function_name),
+                html_escape(&r.file),
+                r.line,
+                r.parameter_count,
+            )
+        })
+        .collect();
+    html_table(
+        "Too-Many-Arguments Warnings",
+        "<th>Function</th><th>File</th><th>Line</th><th>Params</th>",
+        rendered,
+    )
 }

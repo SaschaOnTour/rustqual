@@ -2,65 +2,40 @@
 mod ai;
 mod baseline;
 mod dot;
+mod dry_dedup;
 pub(crate) mod findings_list;
 mod github;
-mod github_annotations;
 mod html;
 mod json;
-mod json_arch;
-mod json_srp;
-mod json_structural;
-mod json_tq;
 mod json_types;
+mod projections;
 mod sarif;
 mod suggestions;
-mod text;
+pub mod text;
 
 pub use ai::{print_ai, print_ai_json};
 pub use baseline::{create_baseline, print_comparison};
 pub use dot::print_dot;
 pub use github::print_github;
-pub use github_annotations::print_coupling_annotations;
-pub use github_annotations::print_dry_annotations;
-pub use github_annotations::print_srp_annotations;
-pub use github_annotations::print_structural_annotations;
-pub use github_annotations::print_tq_annotations;
 // print_dry_section re-exported below
 pub use html::print_html;
 pub use json::print_json;
 pub use sarif::print_sarif;
 pub use suggestions::print_suggestions;
-pub use text::print_coupling_section;
-pub use text::print_dry_section;
-pub use text::print_files_only;
-pub use text::print_srp_section;
-pub(crate) use text::print_structural_section;
-pub use text::print_summary_only;
-pub(crate) use text::print_tq_section;
+pub use text::{print_files_only, print_summary_only, print_text};
 
-use crate::adapters::analyzers::dry::boilerplate::BoilerplateFind;
-use crate::adapters::analyzers::dry::dead_code::DeadCodeWarning;
-use crate::adapters::analyzers::dry::fragments::FragmentGroup;
-use crate::adapters::analyzers::dry::functions::DuplicateGroup;
-use crate::adapters::analyzers::dry::wildcards::WildcardImportWarning;
 use crate::adapters::analyzers::iosp::{Classification, FunctionAnalysis};
 
 /// All outputs from a full analysis run.
 pub struct AnalysisResult {
+    /// Per-function IOSP analysis records — classification, complexity
+    /// metrics, severity, suppression flags. Source-of-truth for IOSP +
+    /// Complexity reporting; the typed projections under `findings.iosp`
+    /// and `findings.complexity` are derived from this.
     pub results: Vec<FunctionAnalysis>,
+    /// Summary statistics: dimension scores, finding counts, total
+    /// suppressions. Populated by the analysis pipeline.
     pub summary: Summary,
-    pub coupling: Option<crate::adapters::analyzers::coupling::CouplingAnalysis>,
-    pub duplicates: Vec<DuplicateGroup>,
-    pub dead_code: Vec<DeadCodeWarning>,
-    pub fragments: Vec<FragmentGroup>,
-    pub boilerplate: Vec<BoilerplateFind>,
-    pub wildcard_warnings: Vec<WildcardImportWarning>,
-    pub repeated_matches: Vec<crate::adapters::analyzers::dry::match_patterns::RepeatedMatchGroup>,
-    pub srp: Option<crate::adapters::analyzers::srp::SrpAnalysis>,
-    pub tq: Option<crate::adapters::analyzers::tq::TqAnalysis>,
-    pub structural: Option<crate::adapters::analyzers::structural::StructuralAnalysis>,
-    /// Findings from the Architecture dimension (port-based analyzers).
-    pub architecture_findings: Vec<crate::domain::Finding>,
     /// `// qual:allow(...)` markers that matched no finding in their
     /// annotation window — stale or misplaced suppressions that should
     /// be removed or corrected. Coupling-only markers are verified
@@ -68,6 +43,15 @@ pub struct AnalysisResult {
     /// if present; when the file has only module-global coupling reports,
     /// the marker is skipped rather than falsely flagged as orphan.
     pub orphan_suppressions: Vec<OrphanSuppressionWarning>,
+    /// Per-dimension typed findings — the unified payload that the
+    /// `Reporter` trait (in `ports::reporter`) consumes. Populated by
+    /// projection adapters during analysis.
+    pub findings: crate::domain::AnalysisFindings,
+    /// Typed state-of-codebase data — counterpart to `findings`, the
+    /// payload `AnalysisReporter` consumes. Carries per-function
+    /// classifications + raw complexity metrics, per-module coupling
+    /// records.
+    pub data: crate::domain::AnalysisData,
 }
 
 /// A `// qual:allow(...)` marker that failed to match any finding in

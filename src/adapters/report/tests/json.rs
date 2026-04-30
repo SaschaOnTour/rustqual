@@ -34,21 +34,13 @@ fn make_result(name: &str, classification: Classification) -> FunctionAnalysis {
 
 fn make_analysis(results: Vec<FunctionAnalysis>) -> AnalysisResult {
     let summary = Summary::from_results(&results);
+    let data = crate::app::projection::project_data(&results, None);
     AnalysisResult {
         results,
         summary,
-        coupling: None,
-        duplicates: vec![],
-        dead_code: vec![],
-        fragments: vec![],
-        boilerplate: vec![],
-        wildcard_warnings: vec![],
-        repeated_matches: vec![],
-        srp: None,
-        tq: None,
-        structural: None,
-        architecture_findings: vec![],
         orphan_suppressions: vec![],
+        findings: crate::domain::AnalysisFindings::default(),
+        data,
     }
 }
 

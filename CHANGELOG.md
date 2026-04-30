@@ -5,6 +5,71 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-04-30
+
+Patch release: **Reporter-Trait sealed two-trait + Snapshot pattern**.
+
+Internal refactor — no user-visible behaviour change. Every output
+format (text, html, json, sarif, github, ai, dot, findings_list) now
+goes through a single `Reporter::render()` entry point backed by a
+sealed `ReporterImpl` trait. The compile-time Reporter-Parity guarantee
+(adding a new dimension forces every reporter to address it) is now
+proven by three orthogonal failure modes simultaneously: trait method
+set, snapshot constructor, and exhaustive `publish` destructuring —
+verified in Phase 11 by introducing a synthetic 8th dimension and
+observing 18 compile errors across all 9 reporter sites.
+
+### Changed
+
+- **Sealed two-trait design** in `src/ports/reporter.rs`: public
+  `Reporter` trait with single `render()` method (only entry point
+  external code can invoke), crate-internal `ReporterImpl` with
+  per-dim `build_*` projections and `publish()` composition. The
+  `sealed::Sealed` supertrait lives in a private module so no external
+  crate can implement `Reporter` directly. `Snapshot<R>` aggregates
+  all 10 per-dim views with `pub(crate)` fields, locking
+  `ReporterImpl::publish` to crate-internal callers.
+- **Per-reporter pure-data Views**: every reporter projects findings
+  into typed row structs (`HtmlIospView`, `SarifResultRow`,
+  `AiIospRow`, etc.); `publish()` formats them into the final string.
+  No reporter pre-renders markup in `build_*` anymore — composition
+  decisions (card-then-table-then-cross-section in HTML, summary-then-
+  details in text, etc.) live in `publish()`.
+- **Cross-reporter shared projections** in
+  `src/adapters/report/projections/{srp, coupling, dry, tq}.rs`:
+  text/html/sarif/json/ai/findings_list reporters all consume the
+  same dimension-bucket projections (`SrpBuckets`, `CouplingBuckets`,
+  `DryBuckets`, etc.). Removed twelve transitional cross-reporter
+  duplicate findings via these helpers.
+- **Pipeline.rs** (`src/app/pipeline.rs`): every output-format branch
+  follows the unified `<Reporter>.render(&findings, &data)` shape.
+  Print wrappers stay as the boundary entry points.
+
+### Removed
+
+- Legacy `DeprecatedReporter` + `DeprecatedAnalysisReporter` traits
+  and the `deprecated_render_findings` / `deprecated_render_analysis_data`
+  helpers — fully replaced by the sealed design.
+
+### Internal
+
+- 1551 tests, 100% quality across all seven dimensions, 0 findings,
+  0 clippy warnings.
+- All `qual:allow(dry)` and `qual:allow(srp)` markers added during
+  the migration phases removed: github helpers refactored to a
+  generic `GithubDetailRow<D>` + `build_detail_view` /
+  `format_detail_view`, html dry tables share a generic
+  `render_table<T>`, sarif `SarifResultRow` holds the whole `Finding`
+  (single clone) instead of destructured fields, html coupling
+  introduces a private `format_subsections` helper to merge the three
+  sub-formatters into one cluster, and ai is split into
+  `ai/{mod, rows, format, details, output}.rs`.
+- New regression test `helper_reached_via_trait_blanket_dispatch_is_not_dead_code`
+  in `src/adapters/analyzers/dry/tests/dead_code.rs` documents that
+  the `call_targets` visitor handles the trait-blanket-dispatch case
+  via flat method-name capture; the v1.2.2 `sarif_rules` workaround
+  was unnecessary and has been reverted.
+
 ## [1.2.1] - 2026-04-27
 
 Patch release: **`call_parity` boundary semantic + new Checks C/D**.
@@ -72,6 +137,70 @@ If you want to detect "internal application helpers reached
 asymmetrically through other application code", that semantic is no
 longer covered by `call_parity`; use `DRY-002` (dead code) plus the
 existing per-target visibility audit in code review.
+
+### Architecture refactor: typed per-dimension Findings
+
+Alongside the call_parity bugfix, v1.2.1 introduces a **typed
+per-dimension Finding architecture** that fixes a long-standing
+"shotgun surgery" pattern: when a new dimension was added, every
+reporter had to be touched manually and gaps went unnoticed (e.g.
+`architecture_findings` only appeared in JSON/SARIF/findings_list,
+silently missing from HTML/AI/text/github).
+
+#### Added
+
+- `domain::findings::*` — seven typed Finding structs (`IospFinding`,
+  `ComplexityFinding`, `DryFinding`, `SrpFinding`, `CouplingFinding`,
+  `TqFinding`, `ArchitectureFinding`) plus `AnalysisFindings`
+  aggregate. Each typed Finding embeds `domain::Finding` as `common`
+  for shared metadata (file/line/column/dimension/rule_id/message/
+  severity/suppressed) and adds dimension-specific detail.
+- `domain::analysis_data::*` — typed state structures (`FunctionRecord`,
+  `ModuleCouplingRecord`) that carry per-function classification +
+  complexity metrics and per-module coupling metrics for reporters.
+- `ports::reporter::Reporter` trait with one method per dimension
+  (no default implementations). The compile-time guarantee: when a new
+  dimension is added, every reporter that hasn't been migrated fails
+  to compile. `render_report` helper visits all dimensions in
+  canonical order.
+- `app::projection` module with per-dimension projection adapters that
+  build typed Findings + AnalysisData from the analyzer outputs.
+  Pipeline populates `AnalysisResult.findings` and
+  `AnalysisResult.data` directly.
+- Architecture findings now visible in **all reporters** (HTML, AI,
+  JSON, SARIF, findings_list, text-verbose, github). Previously
+  rendered only by JSON/SARIF/findings_list.
+- AI reporter: `map_category("ARCHITECTURE") → "architecture"`
+  (previously fell through unmapped).
+- Per-kind metadata helpers consolidate label lookups: `DryFindingKind::meta()`,
+  `TqFindingKind::meta()`, `ComplexityFindingKind::meta()`,
+  `Severity::levels()` — replaces the kind→string match statements
+  that used to be duplicated across reporters.
+
+#### Changed
+
+- `AnalysisResult` reduced to 5 fields: `results` (FunctionAnalysis
+  records), `summary`, `orphan_suppressions`, `findings` (typed
+  per-dimension), `data` (typed per-dimension state). The legacy
+  per-dimension fields (`coupling`, `duplicates`, `dead_code`,
+  `fragments`, `boilerplate`, `wildcard_warnings`, `repeated_matches`,
+  `srp`, `tq`, `structural`, `architecture_findings`) are removed —
+  every reporter now consumes the typed findings/data exclusively.
+
+#### Migration notes
+
+For consumers of the JSON output: no breaking changes — JSON shape is
+unchanged. The typed `findings` and `data` aggregates are the internal
+input the pipeline projects from; the JSON envelope is built from
+them with the same shape as before.
+
+For maintainers: when adding a new dimension, the migration path is
+now (1) define the typed `*Finding` struct in `domain::findings`,
+(2) add the projection adapter in `app::projection`, (3) extend the
+`Reporter` trait with `report_<new_dim>`, (4) every reporter
+implementing the trait fails to compile until updated. This replaces
+the old practice of grepping for "where do reporters consume this
+dimension?" and hoping nothing was missed.
 
 ## [1.2.0] - 2026-04-24
 

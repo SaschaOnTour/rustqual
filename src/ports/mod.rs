@@ -23,7 +23,7 @@ pub mod source_loader;
 pub mod suppression_parser;
 
 pub use dimension_analyzer::{AnalysisContext, DimensionAnalyzer, ParsedFile};
-pub use reporter::{ReportError, ReportPayload, Reporter};
+pub use reporter::{ReportError, Reporter};
 pub use source_loader::{LoadError, SourceLoader};
 pub use suppression_parser::{SuppressionParseError, SuppressionParser};
 

@@ -36,18 +36,9 @@ fn make_analysis(results: Vec<FunctionAnalysis>) -> AnalysisResult {
     AnalysisResult {
         results,
         summary,
-        coupling: None,
-        duplicates: vec![],
-        dead_code: vec![],
-        fragments: vec![],
-        boilerplate: vec![],
-        wildcard_warnings: vec![],
-        repeated_matches: vec![],
-        srp: None,
-        tq: None,
-        structural: None,
-        architecture_findings: vec![],
         orphan_suppressions: vec![],
+        findings: crate::domain::AnalysisFindings::default(),
+        data: crate::domain::AnalysisData::default(),
     }
 }
 
@@ -254,10 +245,12 @@ fn make_arch_finding(rule_id: &str, severity: crate::domain::Severity) -> crate:
 #[test]
 fn sarif_emits_architecture_call_parity_finding() {
     let mut analysis = make_analysis(vec![]);
-    analysis.architecture_findings = vec![make_arch_finding(
-        "architecture/call_parity/no_delegation",
-        crate::domain::Severity::Medium,
-    )];
+    analysis.findings.architecture = vec![crate::domain::findings::ArchitectureFinding {
+        common: make_arch_finding(
+            "architecture/call_parity/no_delegation",
+            crate::domain::Severity::Medium,
+        ),
+    }];
     let value = build_sarif_value(&analysis);
     let results = value["runs"][0]["results"]
         .as_array()
@@ -280,19 +273,25 @@ fn sarif_emits_architecture_call_parity_finding() {
 #[test]
 fn sarif_maps_architecture_severities() {
     let mut analysis = make_analysis(vec![]);
-    analysis.architecture_findings = vec![
-        make_arch_finding(
-            "architecture/call_parity/multi_touchpoint",
-            crate::domain::Severity::Low,
-        ),
-        make_arch_finding(
-            "architecture/call_parity/missing_adapter",
-            crate::domain::Severity::Medium,
-        ),
-        make_arch_finding(
-            "architecture/trait_contract/object_safety",
-            crate::domain::Severity::High,
-        ),
+    analysis.findings.architecture = vec![
+        crate::domain::findings::ArchitectureFinding {
+            common: make_arch_finding(
+                "architecture/call_parity/multi_touchpoint",
+                crate::domain::Severity::Low,
+            ),
+        },
+        crate::domain::findings::ArchitectureFinding {
+            common: make_arch_finding(
+                "architecture/call_parity/missing_adapter",
+                crate::domain::Severity::Medium,
+            ),
+        },
+        crate::domain::findings::ArchitectureFinding {
+            common: make_arch_finding(
+                "architecture/trait_contract/object_safety",
+                crate::domain::Severity::High,
+            ),
+        },
     ];
     let value = build_sarif_value(&analysis);
     let results = value["runs"][0]["results"]
@@ -328,7 +327,8 @@ fn sarif_skips_suppressed_architecture_findings() {
         crate::domain::Severity::Medium,
     );
     suppressed.suppressed = true;
-    analysis.architecture_findings = vec![suppressed];
+    analysis.findings.architecture =
+        vec![crate::domain::findings::ArchitectureFinding { common: suppressed }];
     let value = build_sarif_value(&analysis);
     let results = value["runs"][0]["results"]
         .as_array()
