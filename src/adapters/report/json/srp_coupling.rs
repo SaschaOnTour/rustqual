@@ -142,30 +142,36 @@ pub(super) fn build_structural(
     srp_findings: &[SrpFinding],
     coupling_findings: &[CouplingFinding],
 ) -> Vec<JsonStructuralWarning> {
-    let srp_rows = srp_findings.iter().filter_map(|f| {
-        if let SrpFindingDetails::Structural {
-            item_name,
-            code,
-            detail,
-        } = &f.details
-        {
-            Some(make_row(&f.common, item_name, code, detail, "srp"))
-        } else {
-            None
-        }
-    });
-    let coupling_rows = coupling_findings.iter().filter_map(|f| {
-        if let CouplingFindingDetails::Structural {
-            item_name,
-            code,
-            detail,
-        } = &f.details
-        {
-            Some(make_row(&f.common, item_name, code, detail, "coupling"))
-        } else {
-            None
-        }
-    });
+    let srp_rows = srp_findings
+        .iter()
+        .filter(|f| !f.common.suppressed)
+        .filter_map(|f| {
+            if let SrpFindingDetails::Structural {
+                item_name,
+                code,
+                detail,
+            } = &f.details
+            {
+                Some(make_row(&f.common, item_name, code, detail, "srp"))
+            } else {
+                None
+            }
+        });
+    let coupling_rows = coupling_findings
+        .iter()
+        .filter(|f| !f.common.suppressed)
+        .filter_map(|f| {
+            if let CouplingFindingDetails::Structural {
+                item_name,
+                code,
+                detail,
+            } = &f.details
+            {
+                Some(make_row(&f.common, item_name, code, detail, "coupling"))
+            } else {
+                None
+            }
+        });
     srp_rows.chain(coupling_rows).collect()
 }
 

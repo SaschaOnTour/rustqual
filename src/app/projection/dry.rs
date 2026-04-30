@@ -90,6 +90,7 @@ fn project_fragment_group(group: &FragmentGroup) -> Vec<DryFinding> {
             function_name: e.qualified_name.clone(),
             file: e.file.clone(),
             line: e.start_line,
+            end_line: e.end_line,
         })
         .collect();
     group

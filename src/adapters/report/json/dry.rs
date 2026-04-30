@@ -96,7 +96,7 @@ pub(super) fn build_fragments(findings: &[DryFinding]) -> Vec<JsonFragmentGroup>
                             qualified_name: p.function_name.clone(),
                             file: p.file.clone(),
                             start_line: p.line,
-                            end_line: p.line,
+                            end_line: p.end_line,
                         })
                         .collect(),
                 });
@@ -123,6 +123,7 @@ pub(super) fn build_wildcards(findings: &[DryFinding]) -> Vec<JsonWildcardWarnin
 pub(super) fn build_boilerplate(findings: &[DryFinding]) -> Vec<JsonBoilerplateFind> {
     findings
         .iter()
+        .filter(|f| !f.common.suppressed)
         .filter_map(|f| match &f.details {
             DryFindingDetails::Boilerplate {
                 pattern_id,
@@ -144,28 +145,31 @@ pub(super) fn build_boilerplate(findings: &[DryFinding]) -> Vec<JsonBoilerplateF
 pub(super) fn build_repeated_matches(findings: &[DryFinding]) -> Vec<JsonRepeatedMatchGroup> {
     let mut seen: HashSet<String> = HashSet::new();
     let mut groups = Vec::new();
-    findings.iter().for_each(|f| {
-        if let DryFindingDetails::RepeatedMatch {
-            enum_name,
-            participants,
-        } = &f.details
-        {
-            if !seen.insert(enum_name.clone()) {
-                return;
+    findings
+        .iter()
+        .filter(|f| !f.common.suppressed)
+        .for_each(|f| {
+            if let DryFindingDetails::RepeatedMatch {
+                enum_name,
+                participants,
+            } = &f.details
+            {
+                if !seen.insert(enum_name.clone()) {
+                    return;
+                }
+                groups.push(JsonRepeatedMatchGroup {
+                    enum_name: enum_name.clone(),
+                    entries: participants
+                        .iter()
+                        .map(|p| JsonRepeatedMatchEntry {
+                            file: p.file.clone(),
+                            line: p.line,
+                            function_name: p.function_name.clone(),
+                            arm_count: 0,
+                        })
+                        .collect(),
+                });
             }
-            groups.push(JsonRepeatedMatchGroup {
-                enum_name: enum_name.clone(),
-                entries: participants
-                    .iter()
-                    .map(|p| JsonRepeatedMatchEntry {
-                        file: p.file.clone(),
-                        line: p.line,
-                        function_name: p.function_name.clone(),
-                        arm_count: 0,
-                    })
-                    .collect(),
-            });
-        }
-    });
+        });
     groups
 }

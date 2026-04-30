@@ -30,7 +30,7 @@ pub(super) fn complexity_detail(f: &ComplexityFinding) -> String {
         ComplexityFindingKind::MagicNumber => f
             .common
             .message
-            .splitn(2, ' ')
+            .split_whitespace()
             .nth(2)
             .unwrap_or(&f.common.message)
             .to_string(),

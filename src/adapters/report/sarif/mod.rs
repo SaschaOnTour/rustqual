@@ -8,7 +8,7 @@
 
 mod rules;
 
-use rules::sarif_rules;
+use rules::{complexity_rule, coupling_rule, dry_rule, sarif_rules, srp_rule, tq_rule};
 use serde_json::{json, Value};
 
 use crate::domain::analysis_data::{FunctionRecord, ModuleCouplingRecord};
@@ -70,7 +70,7 @@ impl<'a> ReporterImpl for SarifReporter<'a> {
         findings
             .iter()
             .filter(|f| !f.common.suppressed)
-            .map(|f| row_from_common(&f.common, dry_rule(&f.kind)))
+            .map(|f| row_from_common(&f.common, dry_rule(f)))
             .collect()
     }
 
@@ -132,15 +132,17 @@ impl<'a> ReporterImpl for SarifReporter<'a> {
             test_quality,
             architecture,
         ];
-        let cap =
-            chunks.iter().map(|c| c.len()).sum::<usize>() + self.orphan_suppressions.len() + 1;
-        let mut sarif_results: Vec<Value> = Vec::with_capacity(cap);
+        let total_rows: usize = chunks.iter().map(|c| c.len()).sum();
+        let mut all_rows: Vec<SarifResultRow> = Vec::with_capacity(total_rows);
         for chunk in chunks {
-            sarif_results.extend(chunk.into_iter().map(row_to_sarif_value));
+            all_rows.extend(chunk);
         }
+        let rules = build_rules_for(&all_rows);
+        let cap = all_rows.len() + self.orphan_suppressions.len() + 1;
+        let mut sarif_results: Vec<Value> = Vec::with_capacity(cap);
+        sarif_results.extend(all_rows.into_iter().map(row_to_sarif_value));
         sarif_results.extend(orphan_suppression_results(self.orphan_suppressions));
         sarif_results.extend(suppression_ratio_result(self.summary));
-        let rules = sarif_rules();
         let envelope = json!({
             "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
             "version": "2.1.0",
@@ -158,6 +160,28 @@ impl<'a> ReporterImpl for SarifReporter<'a> {
         serde_json::to_string_pretty(&envelope)
             .unwrap_or_else(|e| format!("{{\"error\":\"SARIF serialization failed: {e}\"}}"))
     }
+}
+
+/// Build the rules array: static catalogue + any rule_ids actually
+/// emitted that are not in the catalogue (dynamic Architecture sub-IDs
+/// like `architecture/pattern/forbid_x` or unknown structural codes).
+/// SARIF Code Scanning ignores results whose ruleId is not present in
+/// the rules table — this guarantees every emitted ruleId is covered.
+fn build_rules_for(rows: &[SarifResultRow]) -> Vec<Value> {
+    let mut rules = sarif_rules();
+    let mut registered: std::collections::HashSet<String> = rules
+        .iter()
+        .filter_map(|v| v["id"].as_str().map(|s| s.to_string()))
+        .collect();
+    for row in rows {
+        if registered.insert(row.rule_id.clone()) {
+            rules.push(json!({
+                "id": row.rule_id,
+                "shortDescription": { "text": row.rule_id.clone() }
+            }));
+        }
+    }
+    rules
 }
 
 // ── Row construction ────────────────────────────────────────────────
@@ -191,69 +215,6 @@ fn row_to_sarif_value(r: SarifResultRow) -> Value {
             }]
         })
     }
-}
-
-// ── Rule-id mapping per dimension ───────────────────────────────────
-
-fn complexity_rule(kind: ComplexityFindingKind) -> &'static str {
-    match kind {
-        ComplexityFindingKind::Cognitive => "CX-001",
-        ComplexityFindingKind::Cyclomatic => "CX-002",
-        ComplexityFindingKind::MagicNumber => "CX-003",
-        ComplexityFindingKind::FunctionLength => "CX-004",
-        ComplexityFindingKind::NestingDepth => "CX-005",
-        ComplexityFindingKind::Unsafe => "CX-006",
-        ComplexityFindingKind::ErrorHandling => "A20",
-    }
-}
-
-fn dry_rule(kind: &DryFindingKind) -> &'static str {
-    match kind {
-        DryFindingKind::DuplicateExact | DryFindingKind::DuplicateSimilar => "DRY-001",
-        DryFindingKind::DeadCodeUncalled | DryFindingKind::DeadCodeTestOnly => "DRY-002",
-        DryFindingKind::Fragment => "DRY-003",
-        DryFindingKind::Boilerplate => "DRY-004",
-        DryFindingKind::RepeatedMatch => "DRY-005",
-        DryFindingKind::Wildcard => "DRY-006",
-    }
-}
-
-fn srp_rule(f: &SrpFinding) -> &'static str {
-    match (&f.kind, &f.details) {
-        (SrpFindingKind::StructCohesion, _) => "SRP-001",
-        (SrpFindingKind::ModuleLength, _) => "SRP-002",
-        (SrpFindingKind::ParameterCount, _) => "SRP-003",
-        (SrpFindingKind::Structural, SrpFindingDetails::Structural { code, .. }) => {
-            structural_rule(code)
-        }
-        _ => "SRP-001",
-    }
-}
-
-fn coupling_rule(f: &CouplingFinding) -> &'static str {
-    match &f.details {
-        CouplingFindingDetails::Cycle { .. } => "CP-001",
-        CouplingFindingDetails::SdpViolation { .. } => "CP-002",
-        CouplingFindingDetails::ThresholdExceeded { .. } => "CP-003",
-        CouplingFindingDetails::Structural { code, .. } => structural_rule(code),
-    }
-}
-
-fn structural_rule(code: &str) -> &'static str {
-    match code {
-        "BTC" => "ST-BTC",
-        "SLM" => "ST-SLM",
-        "NMS" => "ST-NMS",
-        "OI" => "ST-OI",
-        "SIT" => "ST-SIT",
-        "DEH" => "ST-DEH",
-        "IET" => "ST-IET",
-        _ => "ST-UNKNOWN",
-    }
-}
-
-fn tq_rule(kind: &TqFindingKind) -> &'static str {
-    kind.meta().sarif_rule
 }
 
 // ── Orphan + suppression-ratio rows (extra results, not findings) ───

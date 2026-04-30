@@ -71,6 +71,7 @@ pub struct FragmentParticipant {
     pub function_name: String,
     pub file: String,
     pub line: usize,
+    pub end_line: usize,
 }
 
 /// One participant in a repeated-match group.

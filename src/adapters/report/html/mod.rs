@@ -206,6 +206,7 @@ fn html_dashboard(summary: &Summary) -> String {
         "SRP",
         "Coupling",
         "Test Quality",
+        "Architecture",
     ];
     let scores = &summary.dimension_scores;
     let q = summary.quality_score;
