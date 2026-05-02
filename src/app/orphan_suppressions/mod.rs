@@ -358,8 +358,11 @@ fn collect_structural_positions<F>(
 }
 
 /// Positions for Architecture-dimension findings. Architecture
-/// suppressions are file-scoped (mark_architecture_suppressions
-/// accepts any `qual:allow(architecture)` anywhere in the file).
+/// suppressions are window-scoped (mark_architecture_suppressions
+/// accepts a `qual:allow(architecture)` only within the marker's
+/// annotation window above the finding) — orphan detection mirrors
+/// that semantic so a marker for one helper is reported as stale
+/// when the only architecture finding in the file lives elsewhere.
 /// Operation: iterates architecture findings pushing each entry.
 fn collect_architecture_positions<F>(
     analysis: &crate::report::AnalysisResult,
@@ -372,12 +375,10 @@ fn collect_architecture_positions<F>(
     if !config.architecture.enabled {
         return;
     }
-    analysis.findings.architecture.iter().for_each(|f| {
-        push(
-            &f.common.file,
-            f.common.line,
-            Dimension::Architecture,
-            MatchMode::FileScope,
-        )
-    });
+    let mode = MatchMode::LineWindow(windows::DEFAULT);
+    analysis
+        .findings
+        .architecture
+        .iter()
+        .for_each(|f| push(&f.common.file, f.common.line, Dimension::Architecture, mode));
 }

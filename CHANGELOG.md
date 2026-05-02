@@ -396,12 +396,6 @@ fallback markers rather than fabricate edges:
   Workaround: write the impl at the file-level qualified path
   (`impl outer::Hidden { … }`) so impl-canonical and caller-canonical
   agree, or `qual:allow(architecture)` at the call-site.
-- `mod private { pub type Public = Hidden; … } pub use private::Public;`
-  — re-exported type aliases declared inside private modules are
-  *not* followed into their target. The visibility pass skips private
-  modules wholesale, so `Public`'s target type never enters the
-  visible-canonicals set. Workaround: lift the type alias to the
-  parent module (`pub use private::Hidden; pub type Public = Hidden;`).
 - `pub type Public = private::Hidden; impl Public { pub fn op() }` —
   the impl method is indexed under `crate::…::Public::op` (impl
   self-type via path canonicaliser), but a caller `fn h(x: Public)

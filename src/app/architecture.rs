@@ -62,8 +62,14 @@ fn run_architecture_dimension(
     findings
 }
 
-/// Mark findings whose file carries a `// qual:allow(architecture)` suppression.
-/// Operation: per-finding lookup over the suppression map.
+/// Mark findings whose annotation window contains a
+/// `// qual:allow(architecture)` suppression.
+///
+/// Window-scoped (not file-scoped): a suppression at line N covers
+/// findings at lines `N..=N+ANNOTATION_WINDOW`. Otherwise a single
+/// `qual:allow(architecture)` for one helper would silence unrelated
+/// call-parity, layer, or forbidden-edge findings elsewhere in the
+/// same file. Operation: per-finding lookup over the suppression map.
 fn mark_architecture_suppressions(
     findings: &mut [Finding],
     suppression_lines: &HashMap<String, Vec<Suppression>>,
@@ -71,7 +77,12 @@ fn mark_architecture_suppressions(
     findings.iter_mut().for_each(|f| {
         let suppressed = suppression_lines
             .get(&f.file)
-            .map(|sups| sups.iter().any(|s| s.covers(Dimension::Architecture)))
+            .map(|sups| {
+                sups.iter().any(|s| {
+                    s.covers(Dimension::Architecture)
+                        && crate::findings::is_within_window(s.line, f.line)
+                })
+            })
             .unwrap_or(false);
         if suppressed {
             f.suppressed = true;

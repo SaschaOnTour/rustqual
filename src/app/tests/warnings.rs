@@ -1279,9 +1279,13 @@ fn structural_marker_within_5_line_window_is_not_orphan() {
 }
 
 #[test]
-fn architecture_marker_anywhere_in_file_is_not_orphan() {
-    // Architecture findings are suppressed file-globally by
-    // `mark_architecture_suppressions`.
+fn architecture_marker_only_matches_findings_in_window() {
+    // Architecture suppressions must be scoped to the marker's
+    // annotation window, not the whole file. A `qual:allow(architecture)`
+    // for one helper must not silence unrelated layer / forbidden /
+    // call-parity findings elsewhere in the same file, and the orphan
+    // checker must report a stale marker whose only architecture
+    // finding lives outside the window.
     use crate::findings::Suppression;
     let mut sups = HashMap::new();
     sups.insert(
@@ -1302,8 +1306,9 @@ fn architecture_marker_anywhere_in_file_is_not_orphan() {
     let orphans =
         crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &config);
     assert!(
-        orphans.is_empty(),
-        "Architecture marker at any line must match file-global finding, got: {orphans:?}"
+        !orphans.is_empty(),
+        "Architecture marker at line 1 with only a finding at line 500 must \
+         be reported as orphan (window-scoped, not file-scoped); got: {orphans:?}"
     );
 }
 

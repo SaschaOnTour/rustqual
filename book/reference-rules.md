@@ -1,6 +1,13 @@
 # Reference: rule catalog
 
-Every rule rustqual emits, grouped by dimension. Codes are stable — they appear in JSON output, SARIF, GitHub annotations, and `// qual:allow` rationales.
+Every rule rustqual emits, grouped by dimension. Codes are stable
+identifiers used in **SARIF** `ruleId` fields, **GitHub** annotations,
+the **text** / **findings-list** category column, and `// qual:allow`
+rationales. The typed **JSON** reporter groups findings by dimension
+section (`duplicates`, `dead_code`, `tq_warnings`, `architecture_findings`,
+…) instead of repeating the catalog code on each row — pivot on the
+section, not on a `code` field. Architecture findings carry their full
+`rule_id` (e.g. `architecture/call_parity/no_delegation`).
 
 For dimension intent and refactor patterns, see the use-case guides linked at the bottom.
 
