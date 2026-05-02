@@ -173,6 +173,15 @@ pub(crate) use super::local_symbols::{
 /// references, tuples). Callers must skip method recording in that
 /// case — pushing an empty segment list would cause `canonical_fn_name`
 /// to drop the type segment entirely and collide with free fns.
+///
+/// Known limitation: alias-chained self-types are not expanded. For
+/// `pub type Public = private::Hidden; impl Public { fn op() {} }`,
+/// the impl is keyed under `Public::op` but receiver-type inference
+/// resolves `x: Public` callers to `Hidden::op`, leaving the edge
+/// disconnected. A correct fix would chase `alias_chain` here and
+/// register the method under every alias-equivalent canonical
+/// (touching the `impl_stack` shape and the four call sites of
+/// this function); deferred until a real workspace exhibits the bug.
 pub(crate) fn resolve_impl_self_type(
     self_ty: &syn::Type,
     scope: &CanonScope<'_>,

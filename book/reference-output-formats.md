@@ -120,14 +120,20 @@ Findings show up in the **Security** tab as Code Scanning alerts. Each rule has 
 
 ## `dot`
 
-Module dependency graph in Graphviz format:
+Per-function IOSP call graph in Graphviz format. Nodes are functions
+(coloured by classification: integrations blue, operations green,
+violations red, trivial grey); edges follow `own_calls` from each
+function's body.
 
 ```bash
-rustqual --format dot | dot -Tpng -o deps.png
-rustqual --format dot | dot -Tsvg -o deps.svg
+rustqual --format dot | dot -Tpng -o callgraph.png
+rustqual --format dot | dot -Tsvg -o callgraph.svg
 ```
 
-Useful for spotting cycles or visualising layer separation. Pair with `coupling-quality.md`.
+Useful for spotting integrations that orchestrate too much, violations
+clustered around a hub, or trivial leaves that could be inlined. For
+module-level dependency cycles use the `coupling` section in the text
+or HTML report instead.
 
 ## `html`
 

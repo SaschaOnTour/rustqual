@@ -328,13 +328,16 @@ fn walk_use_tree(
     let recurse = |sub: &syn::UseTree, prefix: &mut Vec<String>, out: &mut HashSet<String>| {
         walk_use_tree(sub, prefix, file_scope, mod_stack, out);
     };
-    let resolve_source = |segs: &[String], out: &mut HashSet<String>| {
+    let resolve_source = |segs: &[String], out: &mut HashSet<String>| -> bool {
         let scope = CanonScope {
             file: file_scope,
             mod_stack,
         };
         if let Some(canonical) = canonicalise_type_segments_in_scope(segs, &scope) {
             out.insert(canonical.join("::"));
+            true
+        } else {
+            false
         }
     };
     let add_export = |exported: &str, out: &mut HashSet<String>| {
@@ -347,17 +350,27 @@ fn walk_use_tree(
             prefix.pop();
         }
         syn::UseTree::Name(n) => {
+            // Only register the export-canonical if the source leaf
+            // actually resolves to a *type* in the workspace. A value
+            // re-export like `pub use internal::helper as Foo;` would
+            // otherwise leak `crate::…::Foo` into the visible-types
+            // set and inadvertently pull a same-named private type's
+            // impl methods into the call-parity surface.
             let leaf = n.ident.to_string();
             prefix.push(leaf.clone());
-            resolve_source(prefix, out);
+            let is_type = resolve_source(prefix, out);
             prefix.pop();
-            add_export(&leaf, out);
+            if is_type {
+                add_export(&leaf, out);
+            }
         }
         syn::UseTree::Rename(r) => {
             prefix.push(r.ident.to_string());
-            resolve_source(prefix, out);
+            let is_type = resolve_source(prefix, out);
             prefix.pop();
-            add_export(&r.rename.to_string(), out);
+            if is_type {
+                add_export(&r.rename.to_string(), out);
+            }
         }
         syn::UseTree::Group(g) => {
             for sub in &g.items {

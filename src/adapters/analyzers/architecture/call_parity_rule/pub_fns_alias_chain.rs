@@ -95,7 +95,15 @@ fn walk_alias_chain(
 /// Peel-and-canonicalise an alias's target type, returning the
 /// resolved canonical path joined as a string. Shared by the
 /// chain-builder and the visibility walker so both agree on what
-/// `pub type Public = Box<private::Hidden>` reduces to. Operation.
+/// `pub type Public = Box<private::Hidden>` reduces to.
+///
+/// Known limitation: generic-identity aliases such as `type Id<T> = T;`
+/// are not substituted at use sites. `pub type Public = Id<Hidden>;`
+/// records `Id` only — `Hidden` is missed by the visibility set even
+/// though receiver-type inference resolves callers to it. A correct
+/// fix would track each alias's generic parameters and substitute
+/// at use sites, distinguishing identity aliases from nominal generic
+/// types (which legitimately must NOT expose their inner). Operation.
 pub(super) fn resolve_alias_target_canonical(
     ty: &syn::Type,
     file_scope: &FileScope<'_>,
