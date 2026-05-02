@@ -323,3 +323,36 @@ fn test_github_render_emits_iosp_annotation_then_summary() {
         "per-dim chunks must come before summary annotation in render output",
     );
 }
+
+#[test]
+fn architecture_message_with_special_chars_is_escaped() {
+    // GitHub workflow commands break on `%`, CR, LF in message bodies
+    // and on `,`/`:` in property values. The annotation must escape
+    // them so config-provided reason text or path fragments cannot
+    // corrupt the output or split it into a second workflow command.
+    let mut common = Finding {
+        file: "src/foo,with,comma.rs".into(),
+        line: 7,
+        column: 0,
+        dimension: crate::findings::Dimension::Architecture,
+        rule_id: "architecture/custom".into(),
+        message: "100% bad\nline2".into(),
+        severity: crate::domain::Severity::Medium,
+        suppressed: false,
+    };
+    common.severity = crate::domain::Severity::Medium;
+    let arch = vec![ArchitectureFinding { common }];
+    let out = render_architecture_chunk(&arch);
+    assert!(
+        out.contains("100%25 bad%0Aline2"),
+        "message must escape % and LF; got: {out}"
+    );
+    assert!(
+        out.contains("file=src/foo%2Cwith%2Ccomma.rs"),
+        "property must escape commas; got: {out}"
+    );
+    assert!(
+        !out.contains("\nline2"),
+        "no raw LF must remain in the annotation; got: {out}"
+    );
+}

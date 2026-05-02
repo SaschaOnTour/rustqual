@@ -93,7 +93,7 @@ pub(super) fn srp_category_detail(f: &SrpFinding) -> (&'static str, String) {
             },
         ) => ("SRP_PARAMS", format!("{parameter_count} params")),
         (SrpFindingKind::Structural, SrpFindingDetails::Structural { code, .. }) => {
-            ("STRUCTURAL", code.clone())
+            ("SRP_STRUCTURAL", code.clone())
         }
         _ => ("UNKNOWN", f.common.message.clone()),
     }
@@ -112,7 +112,7 @@ pub(super) fn coupling_category_detail(f: &CouplingFinding) -> (&'static str, St
             instability,
             ..
         } => ("COUPLING", format!("{module_name} I={instability:.2}")),
-        CouplingFindingDetails::Structural { code, .. } => ("STRUCTURAL", code.clone()),
+        CouplingFindingDetails::Structural { code, .. } => ("COUPLING_STRUCTURAL", code.clone()),
     }
 }
 

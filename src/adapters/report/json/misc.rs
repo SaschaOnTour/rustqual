@@ -43,6 +43,9 @@ pub(super) fn build_summary(s: &super::super::Summary) -> JsonSummary {
         structural_srp_warnings: s.structural_srp_warnings,
         structural_coupling_warnings: s.structural_coupling_warnings,
         repeated_match_groups: s.repeated_match_groups,
+        architecture_warnings: s.architecture_warnings,
+        orphan_suppressions: s.orphan_suppressions,
+        dimension_scores: s.dimension_scores,
         suppression_ratio_exceeded: s.suppression_ratio_exceeded,
     }
 }

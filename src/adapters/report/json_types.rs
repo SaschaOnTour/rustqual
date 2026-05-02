@@ -98,6 +98,9 @@ pub(crate) struct JsonSummary {
     pub(crate) structural_srp_warnings: usize,
     pub(crate) structural_coupling_warnings: usize,
     pub(crate) repeated_match_groups: usize,
+    pub(crate) architecture_warnings: usize,
+    pub(crate) orphan_suppressions: usize,
+    pub(crate) dimension_scores: [f64; 7],
     pub(crate) suppression_ratio_exceeded: bool,
 }
 

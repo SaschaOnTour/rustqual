@@ -194,8 +194,27 @@ fn complexity_level(kind: ComplexityFindingKind) -> &'static str {
 
 fn located(level: &str, file: &str, line: usize, msg: &str) -> String {
     if file.is_empty() || line == 0 {
-        format!("::{level}::{msg}\n")
+        format!("::{level}::{}\n", escape_data(msg))
     } else {
-        format!("::{level} file={file},line={line}::{msg}\n")
+        format!(
+            "::{level} file={},line={line}::{}\n",
+            escape_property(file),
+            escape_data(msg),
+        )
     }
+}
+
+/// Escape a message body so GitHub Actions does not parse it as a
+/// further workflow-command boundary. `%`, CR, LF must be encoded.
+/// Reference: https://docs.github.com/en/actions/learn-github-actions/workflow-commands-for-github-actions
+fn escape_data(s: &str) -> String {
+    s.replace('%', "%25")
+        .replace('\r', "%0D")
+        .replace('\n', "%0A")
+}
+
+/// Escape a property value (between `file=` and the next `,` or `::`).
+/// In addition to data escaping, `,` and `:` must be encoded.
+fn escape_property(s: &str) -> String {
+    escape_data(s).replace(',', "%2C").replace(':', "%3A")
 }

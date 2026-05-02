@@ -1,6 +1,6 @@
 use crate::domain::findings::{
     ArchitectureFinding, CouplingFinding, CouplingFindingDetails, CouplingFindingKind, DryFinding,
-    DryFindingDetails, DryFindingKind, SrpFinding, SrpFindingDetails, SrpFindingKind,
+    DryFindingDetails, DryFindingKind, IospFinding, SrpFinding, SrpFindingDetails, SrpFindingKind,
 };
 use crate::domain::{AnalysisData, AnalysisFindings, Finding, Severity};
 use crate::report::sarif::build_sarif_value;
@@ -105,7 +105,14 @@ fn every_emitted_rule_id_is_registered_in_rules_table() {
             "architecture/pattern/forbid_path_prefix",
         ),
     }];
+    let iosp = vec![IospFinding {
+        common: common(crate::findings::Dimension::Iosp, "iosp/violation"),
+        logic_locations: vec![],
+        call_locations: vec![],
+        effort_score: None,
+    }];
     let analysis = make_analysis_for(AnalysisFindings {
+        iosp,
         dry,
         srp,
         coupling,
@@ -137,5 +144,12 @@ fn every_emitted_rule_id_is_registered_in_rules_table() {
     assert!(
         registered.contains("architecture/pattern/forbid_path_prefix"),
         "dynamic architecture id should be added to rules table"
+    );
+    // IOSP must use the canonical `iosp/violation` rule_id (not the
+    // historical `A01` shorthand) so the static `helpUri` from the
+    // catalogue is reachable.
+    assert!(
+        emitted.contains("iosp/violation"),
+        "IOSP findings must emit canonical rule_id `iosp/violation`"
     );
 }

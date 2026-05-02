@@ -54,7 +54,7 @@ impl<'a> ReporterImpl for SarifReporter<'a> {
         findings
             .iter()
             .filter(|f| !f.common.suppressed)
-            .map(|f| row_from_common(&f.common, "A01"))
+            .map(|f| row_from_common(&f.common, &f.common.rule_id))
             .collect()
     }
 
@@ -150,7 +150,7 @@ impl<'a> ReporterImpl for SarifReporter<'a> {
                 "tool": {
                     "driver": {
                         "name": "rustqual",
-                        "informationUri": "https://github.com/DEIN-USERNAME/rustqual",
+                        "informationUri": "https://github.com/SaschaOnTour/rustqual",
                         "rules": rules,
                     }
                 },

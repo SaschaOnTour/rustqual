@@ -46,10 +46,8 @@ pub(super) fn srp_rule(f: &SrpFinding) -> &'static str {
 pub(super) fn coupling_rule(f: &CouplingFinding) -> &'static str {
     match &f.details {
         CouplingFindingDetails::Cycle { .. } => "CP-001",
-        // Threshold breach shares the SDP rule — both are coupling-graph
-        // violations; there is no separate rule for the threshold variant.
-        CouplingFindingDetails::SdpViolation { .. }
-        | CouplingFindingDetails::ThresholdExceeded { .. } => "CP-002",
+        CouplingFindingDetails::SdpViolation { .. } => "CP-002",
+        CouplingFindingDetails::ThresholdExceeded { .. } => "CP-003",
         CouplingFindingDetails::Structural { code, .. } => structural_rule(code),
     }
 }
@@ -101,6 +99,7 @@ pub(super) fn sarif_rules() -> Vec<serde_json::Value> {
         rule("A20", "Error handling issue (unwrap/expect/panic/todo)"),
         rule("DRY-004", "Wildcard import (use module::*)"),
         rule("CP-002", "Stable Dependencies Principle violation"),
+        rule("CP-003", "Module instability exceeds configured threshold"),
         rule("TQ-001", "Test function has no assertions"),
         rule(
             "TQ-002",

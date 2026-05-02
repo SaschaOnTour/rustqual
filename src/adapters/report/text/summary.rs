@@ -92,6 +92,7 @@ fn build_dimensions(s: &Summary) -> Vec<DimensionEntry> {
                 (s.dead_code_warnings, "dead code"),
                 (s.boilerplate_warnings, "boilerplate"),
                 (s.wildcard_import_warnings, "wildcards"),
+                (s.repeated_match_groups, "repeated match"),
             ],
         ),
         (
@@ -101,6 +102,7 @@ fn build_dimensions(s: &Summary) -> Vec<DimensionEntry> {
                 (s.srp_struct_warnings, "struct"),
                 (s.srp_module_warnings, "module"),
                 (s.srp_param_warnings, "params"),
+                (s.structural_srp_warnings, "structural"),
             ],
         ),
         (
@@ -110,6 +112,7 @@ fn build_dimensions(s: &Summary) -> Vec<DimensionEntry> {
                 (s.coupling_warnings, "instability"),
                 (s.coupling_cycles, "cycles"),
                 (s.sdp_violations, "SDP"),
+                (s.structural_coupling_warnings, "structural"),
             ],
         ),
         (
@@ -199,8 +202,8 @@ fn dimension_categories(dim_name: &str) -> &[&str] {
             "WILDCARD",
             "REPEATED_MATCH",
         ],
-        "SRP" => &["SRP_STRUCT", "SRP_MODULE", "SRP_PARAMS", "STRUCTURAL"],
-        "Coupling" => &["COUPLING", "CYCLE", "SDP"],
+        "SRP" => &["SRP_STRUCT", "SRP_MODULE", "SRP_PARAMS", "SRP_STRUCTURAL"],
+        "Coupling" => &["COUPLING", "CYCLE", "SDP", "COUPLING_STRUCTURAL"],
         "Test Quality" => &[
             "TQ_NO_ASSERT",
             "TQ_NO_SUT",
