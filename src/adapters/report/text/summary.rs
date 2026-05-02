@@ -211,6 +211,7 @@ fn dimension_categories(dim_name: &str) -> &[&str] {
             "TQ_UNCOVERED",
             "TQ_UNTESTED_LOGIC",
         ],
+        "Architecture" => &["ARCHITECTURE"],
         _ => &[],
     }
 }

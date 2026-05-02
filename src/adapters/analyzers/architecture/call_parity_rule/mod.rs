@@ -50,7 +50,7 @@ use crate::domain::{Finding, Severity};
 use crate::ports::AnalysisContext;
 use pub_fns::PubFnInfo;
 use std::collections::{HashMap, HashSet};
-use touchpoints::compute_touchpoints;
+use touchpoints::{compute_touchpoints, TouchpointContext};
 use workspace_graph::{canonical_name_for_pub_fn, CallGraph};
 
 pub(crate) const RULE_NO_DELEGATION: &str = "architecture/call_parity/no_delegation";
@@ -135,8 +135,15 @@ pub(crate) fn build_handler_touchpoints(
     let canonicals = collect_active_handler_canonicals(pub_fns_by_layer, cp);
     canonicals
         .into_par_iter()
-        .map(|canonical| {
-            let tps = compute_touchpoints(&canonical, graph, &cp.target, cp.call_depth);
+        .map(|(canonical, origin_adapter)| {
+            let ctx = TouchpointContext {
+                graph,
+                target_layer: &cp.target,
+                call_depth: cp.call_depth,
+                origin_adapter: &origin_adapter,
+                adapter_layers: &cp.adapters,
+            };
+            let tps = compute_touchpoints(&canonical, &ctx);
             (canonical, tps)
         })
         .collect()
@@ -150,8 +157,8 @@ pub(crate) fn build_handler_touchpoints(
 fn collect_active_handler_canonicals(
     pub_fns_by_layer: &HashMap<String, Vec<PubFnInfo<'_>>>,
     cp: &CompiledCallParity,
-) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
+) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
     for adapter in &cp.adapters {
         let Some(handlers) = pub_fns_by_layer.get(adapter) else {
             continue;
@@ -160,7 +167,7 @@ fn collect_active_handler_canonicals(
             if info.deprecated {
                 continue;
             }
-            out.push(canonical_name_for_pub_fn(info));
+            out.push((canonical_name_for_pub_fn(info), adapter.clone()));
         }
     }
     out

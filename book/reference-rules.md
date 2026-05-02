@@ -63,6 +63,7 @@ For dimension intent and refactor patterns, see the use-case guides linked at th
 |---|---|
 | `CP-001` | Circular module dependency |
 | `CP-002` | Stable Dependencies Principle violation |
+| `CP-003` | Module instability exceeds configured threshold |
 
 ## Structural binary checks
 

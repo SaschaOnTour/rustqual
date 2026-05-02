@@ -23,58 +23,76 @@
 use super::workspace_graph::{CallGraph, WalkState};
 use std::collections::HashSet;
 
+/// Static inputs for one touchpoint walk. Bundling them keeps
+/// `compute_touchpoints` at a manageable parameter count while making
+/// the adapter context explicit at every call site.
+pub(crate) struct TouchpointContext<'a> {
+    pub graph: &'a CallGraph,
+    pub target_layer: &'a str,
+    pub call_depth: usize,
+    /// Layer of the handler the walk starts from.
+    pub origin_adapter: &'a str,
+    /// All adapter-layer names from config. Layers in this list other
+    /// than `origin_adapter` are peers and the walk refuses to descend
+    /// into them (otherwise a `cli` handler that calls into an `mcp`
+    /// handler would inherit MCP's touchpoints and mask Check A/B/D
+    /// even though CLI never crossed into the target layer itself).
+    pub adapter_layers: &'a [String],
+}
+
 // qual:api
 /// Compute the set of target-layer canonical names reached from `handler`
-/// by a forward BFS that stops on first target-layer entry per path.
-///
-/// `call_depth` bounds the number of adapter-internal hops the walk
-/// will traverse. Hops within the target layer are not traversed at
-/// all — once a target-layer node is hit, it joins the touchpoint set
-/// and the walk does not enqueue its callees.
+/// by a forward BFS that stops on first target-layer entry per path
+/// and refuses to descend into peer adapter layers.
 ///
 /// Integration: seeds the BFS scaffold and delegates to `TouchpointWalk::run`.
-pub(crate) fn compute_touchpoints(
-    handler: &str,
-    graph: &CallGraph,
-    target_layer: &str,
-    call_depth: usize,
-) -> HashSet<String> {
-    TouchpointWalk {
-        graph,
-        target_layer,
-        call_depth,
-    }
-    .run(handler)
+pub(crate) fn compute_touchpoints(handler: &str, ctx: &TouchpointContext<'_>) -> HashSet<String> {
+    TouchpointWalk { ctx }.run(handler)
 }
 
 /// Read-only BFS driver: bundles static inputs so the step logic
 /// stays off `compute_touchpoints`'s IOSP budget.
 struct TouchpointWalk<'a> {
-    graph: &'a CallGraph,
-    target_layer: &'a str,
-    call_depth: usize,
+    ctx: &'a TouchpointContext<'a>,
 }
 
 impl TouchpointWalk<'_> {
     /// BFS forward from `start`. Returns the set of target-layer
-    /// canonicals encountered; does not traverse past the boundary.
+    /// canonicals encountered; does not traverse past the boundary
+    /// or into peer adapter layers.
     fn run(&self, start: &str) -> HashSet<String> {
         let mut touchpoints = HashSet::new();
-        let Some(direct) = self.graph.forward.get(start) else {
+        let Some(direct) = self.ctx.graph.forward.get(start) else {
             return touchpoints;
         };
         let mut state = WalkState::seeded(start, direct);
         while let Some((node, depth)) = state.queue.pop_front() {
-            if self.graph.layer_of(&node) == Some(self.target_layer) {
+            if self.ctx.graph.layer_of(&node) == Some(self.ctx.target_layer) {
                 touchpoints.insert(node);
                 continue;
             }
-            if depth < self.call_depth {
-                if let Some(callees) = self.graph.forward.get(&node) {
+            if self.is_peer_adapter(&node) {
+                continue;
+            }
+            if depth < self.ctx.call_depth {
+                if let Some(callees) = self.ctx.graph.forward.get(&node) {
                     state.enqueue_unvisited(callees, depth + 1);
                 }
             }
         }
         touchpoints
+    }
+
+    /// True if `node` lives in an adapter layer that is not the origin
+    /// adapter — those are peers and must not be traversed, otherwise
+    /// the walk would inherit a peer's touchpoints.
+    fn is_peer_adapter(&self, node: &str) -> bool {
+        let Some(layer) = self.ctx.graph.layer_of(node) else {
+            return false;
+        };
+        if layer == self.ctx.origin_adapter {
+            return false;
+        }
+        self.ctx.adapter_layers.iter().any(|a| a == layer)
     }
 }

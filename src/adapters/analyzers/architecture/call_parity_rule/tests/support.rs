@@ -233,19 +233,30 @@ pub(super) fn compute_touchpoints_for(
     cfg_test: &HashSet<String>,
 ) -> HashSet<String> {
     let (pub_fns, graph) = build_pub_fns_and_graph(ws, layers, cp, cfg_test);
-    let matches: Vec<_> = pub_fns
-        .values()
-        .flatten()
-        .filter(|i| i.fn_name == handler_fn_name)
+    let matches: Vec<(&str, _)> = pub_fns
+        .iter()
+        .flat_map(|(layer, infos)| {
+            infos
+                .iter()
+                .filter(|i| i.fn_name == handler_fn_name)
+                .map(move |i| (layer.as_str(), i))
+        })
         .collect();
-    let info = match matches.as_slice() {
+    let (origin_adapter, info) = match matches.as_slice() {
         [] => panic!("handler `{handler_fn_name}` not found in pub_fns"),
-        [info] => *info,
+        [m] => *m,
         _ => panic!(
             "handler `{handler_fn_name}` is ambiguous in pub_fns ({} matches); pass a more specific name or extend this helper to take a layer hint",
             matches.len()
         ),
     };
     let canonical = canonical_name_for_pub_fn(info);
-    compute_touchpoints(&canonical, &graph, &cp.target, cp.call_depth)
+    let ctx = crate::adapters::analyzers::architecture::call_parity_rule::touchpoints::TouchpointContext {
+        graph: &graph,
+        target_layer: &cp.target,
+        call_depth: cp.call_depth,
+        origin_adapter,
+        adapter_layers: &cp.adapters,
+    };
+    compute_touchpoints(&canonical, &ctx)
 }

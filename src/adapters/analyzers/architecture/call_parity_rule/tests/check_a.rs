@@ -215,10 +215,10 @@ fn test_adapter_fn_cross_adapter_call_does_not_count() {
 }
 
 #[test]
-fn test_adapter_fn_cross_adapter_call_counted_at_deeper_depth() {
-    // Sanity check: at depth 2 we reach through mcp into app → passes.
-    // This exercises that the graph DOES traverse cross-adapter edges;
-    // the prior test ensures one-hop only sees the adapter target.
+fn test_adapter_fn_cross_adapter_call_blocked_even_at_deeper_depth() {
+    // Even at greater call_depth the CLI walk must not inherit MCP's
+    // application touchpoints. CLI never crosses into the target
+    // layer itself — cmd_stats must therefore still flag NoDelegation.
     let ws = build_workspace(&[
         ("src/application/stats.rs", "pub fn get_stats() {}"),
         (
@@ -239,8 +239,8 @@ fn test_adapter_fn_cross_adapter_call_counted_at_deeper_depth() {
     let findings = run_check_a(&ws, &three_layer(), &cli_mcp_config(2), &empty_cfg_test());
     let names = assert_no_delegation_fn_names(&findings);
     assert!(
-        !names.contains(&"cmd_stats".to_string()),
-        "depth=2 reaches app::get_stats transitively, should pass"
+        names.contains(&"cmd_stats".to_string()),
+        "peer-adapter walks must not inherit touchpoints; expected cmd_stats in {names:?}"
     );
 }
 

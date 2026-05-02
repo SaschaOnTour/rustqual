@@ -267,7 +267,10 @@ fn test_github_render_includes_summary_annotation() {
         quality_score: 1.0,
         ..Default::default()
     };
-    let reporter = GithubReporter { summary: &summary };
+    let reporter = GithubReporter {
+        summary: &summary,
+        orphan_suppressions: &[],
+    };
     let findings = crate::domain::AnalysisFindings::default();
     let data = crate::domain::AnalysisData::default();
     let out = reporter.render(&findings, &data);
@@ -310,7 +313,10 @@ fn test_github_render_emits_iosp_annotation_then_summary() {
         }],
         effort_score: None,
     });
-    let reporter = GithubReporter { summary: &summary };
+    let reporter = GithubReporter {
+        summary: &summary,
+        orphan_suppressions: &[],
+    };
     let out = reporter.render(&findings, &crate::domain::AnalysisData::default());
     let iosp_pos = out
         .find("file=src/lib.rs")

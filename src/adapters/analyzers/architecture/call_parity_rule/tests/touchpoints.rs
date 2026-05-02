@@ -280,3 +280,39 @@ fn touchpoints_call_depth_just_inside() {
     );
     assert_set(touchpoints, &["crate::application::session::search"]);
 }
+
+// ── Peer-adapter blocking ────────────────────────────────────────
+
+#[test]
+fn touchpoints_do_not_traverse_peer_adapter() {
+    // CLI handler `cmd_via_mcp` calls into an MCP handler `mcp_search`,
+    // which itself crosses into the application layer. The CLI walk
+    // must NOT inherit MCP's touchpoint — otherwise Check A/B/D would
+    // be masked even though the CLI adapter never crossed into the
+    // target itself.
+    let ws = build_workspace(&[
+        ("src/application/session.rs", "pub fn search() {}"),
+        (
+            "src/mcp/handlers.rs",
+            r#"
+            use crate::application::session::search;
+            pub fn mcp_search() { search(); }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::mcp::handlers::mcp_search;
+            pub fn cmd_via_mcp() { mcp_search(); }
+            "#,
+        ),
+    ]);
+    let touchpoints = compute_touchpoints_for(
+        &ws,
+        &three_layer(),
+        &cli_mcp_config(3),
+        "cmd_via_mcp",
+        &empty_cfg_test(),
+    );
+    assert_set(touchpoints, &[]);
+}

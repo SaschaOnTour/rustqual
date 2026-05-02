@@ -173,6 +173,31 @@ pub(crate) fn format_architecture(view: &GithubArchitectureView) -> String {
     out
 }
 
+pub(crate) fn format_orphan_suppressions(
+    orphans: &[crate::report::OrphanSuppressionWarning],
+) -> String {
+    let mut out = String::new();
+    orphans.iter().for_each(|w| {
+        let dims: String = if w.dimensions.is_empty() {
+            "<all>".into()
+        } else {
+            w.dimensions
+                .iter()
+                .map(|d| d.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        let msg = match &w.reason {
+            Some(r) => {
+                format!("Stale qual:allow({dims}) marker — no finding in window. Reason: {r}")
+            }
+            None => format!("Stale qual:allow({dims}) marker — no finding in window."),
+        };
+        out.push_str(&located("warning", &w.file, w.line, &msg));
+    });
+    out
+}
+
 fn level_of(s: &Severity) -> &'static str {
     s.levels().github
 }

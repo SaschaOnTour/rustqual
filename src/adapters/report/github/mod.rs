@@ -24,12 +24,13 @@ use crate::domain::findings::{
 };
 use crate::ports::reporter::{ReporterImpl, Snapshot};
 use crate::ports::Reporter;
-use crate::report::{AnalysisResult, Summary};
+use crate::report::{AnalysisResult, OrphanSuppressionWarning, Summary};
 
 /// GitHub Actions reporter — produces `::level file=,line=::message`
 /// annotations plus a trailing summary annotation.
 pub struct GithubReporter<'a> {
     pub(crate) summary: &'a Summary,
+    pub(crate) orphan_suppressions: &'a [OrphanSuppressionWarning],
 }
 
 impl<'a> ReporterImpl for GithubReporter<'a> {
@@ -92,6 +93,9 @@ impl<'a> ReporterImpl for GithubReporter<'a> {
         out.push_str(&format_coupling(&coupling));
         out.push_str(&format_tq(&test_quality));
         out.push_str(&format_architecture(&architecture));
+        out.push_str(&format::format_orphan_suppressions(
+            self.orphan_suppressions,
+        ));
         out.push_str(&render_summary_annotation(self.summary));
         out
     }
@@ -128,6 +132,7 @@ pub fn render_summary_annotation(summary: &Summary) -> String {
 pub fn print_github(analysis: &AnalysisResult) {
     let reporter = GithubReporter {
         summary: &analysis.summary,
+        orphan_suppressions: &analysis.orphan_suppressions,
     };
     print!("{}", reporter.render(&analysis.findings, &analysis.data));
 }
