@@ -65,7 +65,7 @@ check_iet = true
 ⚠ IET     src/payment/mod.rs uses MyError (4×) and anyhow::Error (3×)
 ```
 
-`--format dot` produces a Graphviz module dependency graph — useful for visualising cycles or eyeballing dependency direction.
+`--format dot` produces a Graphviz **per-function IOSP call graph** (nodes are functions, coloured by classification; edges follow `own_calls`). For module-level cycles and dependency direction, use the `coupling` table in the text or HTML report instead.
 
 ## Refactor patterns
 

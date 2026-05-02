@@ -402,12 +402,6 @@ fallback markers rather than fabricate edges:
   modules wholesale, so `Public`'s target type never enters the
   visible-canonicals set. Workaround: lift the type alias to the
   parent module (`pub use private::Hidden; pub type Public = Hidden;`).
-- `pub use internal::helper as Hidden;` where `helper` is a function —
-  the visibility pass treats every `pub use` leaf as a type export,
-  so a same-named private `struct Hidden` collides with the function
-  re-export and its impl methods get recorded as adapter surface.
-  Workaround: rename to avoid the collision, or
-  `qual:allow(architecture)` on the affected impl.
 - `pub type Public = private::Hidden; impl Public { pub fn op() }` —
   the impl method is indexed under `crate::…::Public::op` (impl
   self-type via path canonicaliser), but a caller `fn h(x: Public)

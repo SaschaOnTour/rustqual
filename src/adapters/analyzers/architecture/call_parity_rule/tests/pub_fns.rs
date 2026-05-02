@@ -854,6 +854,44 @@ fn test_collect_pub_fns_records_renamed_reexport_impl_methods() {
 }
 
 #[test]
+fn test_collect_pub_fns_chases_reexported_type_alias_to_target() {
+    // `pub use private::Public;` where `Public` is a type alias for
+    // `private::Hidden` and `op` is defined on `Hidden`. Receiver-type
+    // inference resolves callers `x: Public` to `Hidden::op`, so the
+    // visibility set must contain BOTH `Public` (the alias) and
+    // `Hidden` (its target) — otherwise Check B would drop `Hidden::op`
+    // even though it is reachable through the public alias.
+    let file = parse(
+        r#"
+        mod private {
+            pub struct Hidden;
+            pub type Public = Hidden;
+            impl Hidden {
+                pub fn op(&self) {}
+            }
+        }
+        pub use private::Public;
+        "#,
+    );
+    let files = vec![("src/cli/handlers.rs", &file)];
+    let by_layer = {
+        let aliases = aliases_from_files(&files);
+        collect_pub_fns_by_layer(
+            &files,
+            &aliases,
+            &three_layer(),
+            &HashSet::new(),
+            &HashSet::new(),
+        )
+    };
+    let cli = names_for_layer(&by_layer, "cli");
+    assert!(
+        cli.contains("op"),
+        "re-exported type alias must surface its target's impl methods, got {cli:?}"
+    );
+}
+
+#[test]
 fn test_collect_pub_fns_records_pub_use_reexport_with_qualified_impl() {
     // `pub use private::Hidden;` with the impl at file level
     // (qualified `impl private::Hidden { … }`) — the re-export

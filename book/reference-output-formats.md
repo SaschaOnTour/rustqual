@@ -151,19 +151,54 @@ Self-contained HTML report — no external CSS/JS, no network required. Embed in
 
 The HTML report includes:
 
-- Per-dimension scores with sparklines.
-- Sortable / filterable findings table.
-- Per-file drilldown.
-- Per-function metrics.
+- Per-dimension score cards (one per dimension) at the top.
+- Collapsible `<details>` sections per dimension with the full
+  finding tables (IOSP, Complexity, DRY, SRP, Coupling, Test Quality,
+  Architecture).
+- Per-module coupling table (afferent / efferent / instability).
+- Orphan-suppression table when stale `qual:allow` markers exist.
+
+The artifact is fully self-contained — no external CSS, no scripts,
+no sortable/filterable interactions. Open it in a browser or embed
+it as a CI artifact and read top-to-bottom.
 
 ## `ai` / `ai-json`
 
-Compact representations tuned for LLM consumption — fewer tokens than full JSON, focused on what an agent needs to act:
+Compact representations tuned for LLM consumption — fewer tokens than
+full JSON, focused on what an agent needs to act:
 
-- `ai` — token-efficient text format. Findings only, with file:line, code, and a one-line description.
-- `ai-json` — minimal JSON: code, file, line, function, message. No metadata, no per-file tables.
+- `ai` — TOON-encoded version of the same envelope as `ai-json`.
+  Token-efficient indented form for prompt embedding.
+- `ai-json` — pretty JSON envelope:
 
-Useful when you're piping rustqual output into a coding agent (Claude Code, Cursor, etc.) and want to keep the prompt small.
+  ```jsonc
+  {
+    "version": "1.2.2",
+    "findings": 2,
+    "findings_by_file": {
+      "src/order.rs": [
+        { "category": "violation", "line": 48,
+          "fn": "order::process_payment",
+          "detail": "logic + calls (logic lines 50, call lines 53)" }
+      ],
+      "<workspace>": [
+        { "category": "cycle", "line": 0, "fn": "",
+          "detail": "a -> b -> a" }
+      ]
+    }
+  }
+  ```
+
+  The grouping key is the file path (`<workspace>` for findings
+  without a file location). Each entry has `category` (a stable
+  per-dim slug like `violation`, `cognitive_complexity`, `cycle`,
+  `architecture`, `orphan_suppression`), `line`, `fn` (qualified
+  function name, empty for module-level findings), and `detail`
+  (one-line description of the finding). Same content as `ai`,
+  different encoding.
+
+Useful when you're piping rustqual output into a coding agent
+(Claude Code, Cursor, etc.) and want to keep the prompt small.
 
 ```bash
 rustqual --format ai | claude code "Fix these findings"

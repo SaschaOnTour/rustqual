@@ -155,6 +155,7 @@ fn collect_in_items(
             file_scope,
             mod_stack,
             type_canonicals: ctx.type_canonicals,
+            alias_chain: ctx.alias_chain,
         };
         super::pub_fns_use_tree::walk_use_tree(tree, &mut Vec::new(), &use_ctx, out);
     };

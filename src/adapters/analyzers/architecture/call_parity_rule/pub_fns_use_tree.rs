@@ -2,18 +2,26 @@
 //! source/export canonical registration plus the workspace-type-only
 //! filter stay together, off the visibility module's SRP budget.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
 use super::local_symbols::FileScope;
+use super::pub_fns_alias_chain::chase_alias_chain;
 use super::pub_fns_visibility::canonical_for_decl;
 
 /// Bundled inputs for the `pub use`-tree walker. Carries the per-file
-/// scope, current mod stack, and the workspace type-canonical filter.
+/// scope, current mod stack, the workspace type-canonical filter, and
+/// the workspace alias-chain map.
 pub(super) struct UseTreeCtx<'a> {
     pub file_scope: &'a FileScope<'a>,
     pub mod_stack: &'a [String],
     pub type_canonicals: &'a HashSet<String>,
+    /// Workspace-wide alias chain. Used so `pub use private::Public;`
+    /// — where `Public = private::Hidden` — also registers `Hidden`
+    /// in the visible-types set; otherwise impls written against the
+    /// underlying type stay outside the call-parity surface even
+    /// though receiver inference resolves callers to `Hidden`.
+    pub alias_chain: &'a HashMap<String, String>,
 }
 
 /// Recursive walk over a `pub use` tree. For each leaf, register the
@@ -94,7 +102,13 @@ fn resolve_use_source_type(
     let joined = canonical.join("::");
     let is_type = ctx.type_canonicals.contains(&joined);
     if is_type {
-        out.insert(joined);
+        out.insert(joined.clone());
+        // Re-exported type aliases must also expose their target.
+        // `pub use private::Public;` with `pub type Public = Hidden;`
+        // resolves to `Public` here, but receiver-type inference
+        // resolves callers to `Hidden::op` — chase the alias chain so
+        // both sides agree on what the public surface contains.
+        chase_alias_chain(&joined, ctx.alias_chain, out);
     }
     is_type
 }
