@@ -40,28 +40,54 @@
 
 ## `json`
 
-Full structured output. Top-level keys:
+Full structured output. Each finding type has its own dimension-specific
+section so consumers can pivot per dimension instead of filtering one
+flat array. Top-level keys:
 
 ```jsonc
 {
-  "version": "1.2.0",
-  "summary": { "score": 82.3, "functions": 24, "findings": 4, "warnings": 0,
-               "dimensions": { "iosp": 85.7, "complexity": 90.0, /* ... */ } },
-  "findings": [
-    { "code": "iosp/violation", "severity": "medium",
-      "file": "src/order.rs", "line": 48, "function": "process_payment",
-      "message": "function mixes orchestration with logic" }
+  "summary": {
+    "total": 24, "integrations": 12, "operations": 8, "violations": 2, "trivial": 2,
+    "iosp_score": 0.91, "quality_score": 0.823,
+    "dimension_scores": [0.91, 0.95, 0.88, 1.0, 1.0, 1.0, 1.0],
+    "complexity_warnings": 1, "duplicate_groups": 1, "dead_code_warnings": 1,
+    "tq_no_assertion_warnings": 1, "architecture_warnings": 0,
+    "orphan_suppressions": 0, "all_suppressions": 3,
+    "suppression_ratio_exceeded": false
+    /* ... per-dimension counters ... */
+  },
+  "functions": [
+    { "name": "process_payment", "qualified_name": "payment::process_payment",
+      "file": "src/order.rs", "line": 48, "classification": "violation",
+      "logic_locations": [{ "kind": "if", "line": 50 }],
+      "call_locations": [{ "name": "log", "line": 53 }] }
   ],
-  "files": [ /* per-file analysis */ ],
-  "config": { /* effective config */ }
+  "coupling": { "modules": [/* … */], "cycles": [], "sdp_violations": [] },
+  "duplicates": [/* … */],
+  "dead_code":  [/* … */],
+  "fragments":  [/* … */],
+  "boilerplate": [/* … */],
+  "wildcard_warnings": [/* … */],
+  "tq_warnings": [/* … */],
+  "structural_warnings": [/* … */],
+  "repeated_matches": [/* … */],
+  "srp": { "struct_warnings": [/* … */], "module_warnings": [/* … */],
+           "param_warnings": [/* … */] },
+  "architecture_findings": [
+    { "rule_id": "architecture/call_parity/no_delegation",
+      "severity": "medium", "file": "src/cli/handlers.rs", "line": 17,
+      "message": "cli pub fn delegates to no application function",
+      "suppressed": false }
+  ],
+  "orphan_suppressions": [/* … */]
 }
 ```
 
 Use this for custom dashboards, regression tracking, or piping into shell tooling:
 
 ```bash
-rustqual --format json | jq '.summary.score'
-rustqual --format json | jq '.findings[] | select(.severity == "high")'
+rustqual --format json | jq '.summary.quality_score'
+rustqual --format json | jq '.architecture_findings[] | select(.severity == "high")'
 ```
 
 ## `github`

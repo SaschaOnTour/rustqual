@@ -101,20 +101,22 @@ impl<'a> ReporterImpl for GithubReporter<'a> {
     }
 }
 
-/// Render the trailing summary annotation: `::error` if violations,
-/// `::notice` otherwise; plus a `::warning` if the suppression ratio
-/// threshold is exceeded.
+/// Render the trailing summary annotation: `::error` whenever the run
+/// has any finding (matches the default-fail criterion in `lib::run`);
+/// `::notice` only on a clean run. Plus a `::warning` if the
+/// suppression ratio threshold is exceeded.
 pub fn render_summary_annotation(summary: &Summary) -> String {
     let mut out = String::new();
     if summary.suppression_ratio_exceeded {
         out.push_str(&format!(
-            "::warning::Suppression ratio exceeds configured maximum ({} of {} functions suppressed)\n",
-            summary.suppressed, summary.total,
+            "::warning::Suppression ratio exceeds configured maximum ({} suppressions across {} functions)\n",
+            summary.all_suppressions, summary.total,
         ));
     }
-    if summary.violations > 0 {
+    let total = summary.total_findings();
+    if total > 0 {
         out.push_str(&format!(
-            "::error::Quality analysis: {} violation(s), {:.1}% quality score\n",
+            "::error::Quality analysis: {total} finding(s) ({} IOSP violation(s)), {:.1}% quality score\n",
             summary.violations,
             summary.quality_score * crate::domain::PERCENTAGE_MULTIPLIER,
         ));

@@ -241,7 +241,28 @@ fn summary_annotation_with_violations_emits_error() {
     };
     let out = render_summary_annotation(&summary);
     assert!(out.contains("::error"));
-    assert!(out.contains("3 violation"));
+    assert!(out.contains("3 finding"));
+    assert!(out.contains("3 IOSP violation"));
+}
+
+#[test]
+fn summary_annotation_with_only_architecture_findings_emits_error() {
+    // Default-fail exits nonzero for any finding; the GitHub summary
+    // must reflect that and not say "::notice" when an architecture
+    // finding alone fails the run.
+    let summary = Summary {
+        total: 100,
+        violations: 0,
+        architecture_warnings: 2,
+        quality_score: 0.99,
+        ..Default::default()
+    };
+    let out = render_summary_annotation(&summary);
+    assert!(
+        out.contains("::error"),
+        "non-IOSP findings must still produce ::error so the GitHub summary \
+         agrees with the default-fail exit code; got: {out}"
+    );
 }
 
 #[test]

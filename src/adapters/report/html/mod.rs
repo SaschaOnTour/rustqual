@@ -3,6 +3,7 @@ mod complexity;
 mod coupling;
 mod dry;
 mod iosp;
+mod orphan_suppressions;
 mod srp_tables;
 mod structural_table;
 mod tq_table;
@@ -13,6 +14,7 @@ use complexity::{build_complexity_data_view, build_complexity_view, format_compl
 use coupling::{build_coupling_data_view, build_coupling_view, format_coupling_section};
 use dry::{build_dry_view, format_dry_section};
 use iosp::{build_iosp_data_view, build_iosp_view, format_iosp_section};
+use orphan_suppressions::format_orphan_suppressions_section;
 use srp_tables::{build_srp_view, format_srp_section};
 use structural_table::format_structural_section;
 use tq_table::{build_tq_view, format_tq_section};
@@ -22,7 +24,7 @@ use views::{
     HtmlCouplingView, HtmlDryView, HtmlIospDataView, HtmlIospView, HtmlSrpView, HtmlTqView,
 };
 
-use super::{AnalysisResult, Summary};
+use super::{AnalysisResult, OrphanSuppressionWarning, Summary};
 use crate::domain::analysis_data::{FunctionRecord, ModuleCouplingRecord};
 use crate::domain::findings::{
     ArchitectureFinding, ComplexityFinding, CouplingFinding, DryFinding, IospFinding, SrpFinding,
@@ -46,6 +48,7 @@ pub(crate) fn html_escape(s: &str) -> String {
 /// their respective collapsible sections.
 pub struct HtmlReporter<'a> {
     pub(crate) summary: &'a Summary,
+    pub(crate) orphan_suppressions: &'a [OrphanSuppressionWarning],
 }
 
 impl<'a> ReporterImpl for HtmlReporter<'a> {
@@ -120,6 +123,9 @@ impl<'a> ReporterImpl for HtmlReporter<'a> {
         ));
         html.push_str(&format_coupling_section(&coupling, &coupling_data));
         html.push_str(&format_architecture_section(&architecture));
+        html.push_str(&format_orphan_suppressions_section(
+            self.orphan_suppressions,
+        ));
         html.push_str(&html_footer());
         html
     }
@@ -130,6 +136,7 @@ impl<'a> ReporterImpl for HtmlReporter<'a> {
 pub fn print_html(analysis: &AnalysisResult) {
     let reporter = HtmlReporter {
         summary: &analysis.summary,
+        orphan_suppressions: &analysis.orphan_suppressions,
     };
     println!("{}", reporter.render(&analysis.findings, &analysis.data));
 }

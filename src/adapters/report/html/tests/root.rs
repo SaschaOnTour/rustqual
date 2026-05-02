@@ -12,6 +12,7 @@ use crate::report::Summary;
 fn build_html_string(analysis: &AnalysisResult) -> String {
     HtmlReporter {
         summary: &analysis.summary,
+        orphan_suppressions: &analysis.orphan_suppressions,
     }
     .render(&analysis.findings, &analysis.data)
 }
