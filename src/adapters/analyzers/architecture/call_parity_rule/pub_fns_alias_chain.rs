@@ -14,6 +14,62 @@ use crate::adapters::shared::cfg_test::has_cfg_test;
 use crate::adapters::shared::use_tree::gather_alias_map_scoped;
 use std::collections::{HashMap, HashSet};
 
+/// Collect every type-item canonical (struct/enum/union/trait/type) in
+/// the workspace. The visibility walker uses this to distinguish a
+/// `pub use foo::Bar as Baz;` over a *type* (which exposes its impl
+/// methods to call-parity) from one over a *value* — function, const,
+/// static — which must not bleed a same-named private type's impls
+/// into the public surface. Operation.
+pub(super) fn collect_workspace_type_canonicals(
+    files: &[(&str, &syn::File)],
+    cfg_test_files: &HashSet<String>,
+) -> HashSet<String> {
+    let mut out = HashSet::new();
+    for (path, ast) in files {
+        if cfg_test_files.contains(*path) {
+            continue;
+        }
+        walk_type_canonicals(&ast.items, path, &[], &mut out);
+    }
+    out
+}
+
+// qual:recursive
+fn walk_type_canonicals(
+    items: &[syn::Item],
+    file_path: &str,
+    mod_stack: &[String],
+    out: &mut HashSet<String>,
+) {
+    let recurse = |inner: &[syn::Item], next: &[String], out: &mut HashSet<String>| {
+        walk_type_canonicals(inner, file_path, next, out);
+    };
+    let add = |ident: &syn::Ident, out: &mut HashSet<String>| {
+        out.insert(super::pub_fns_visibility::canonical_for_decl(
+            file_path,
+            mod_stack,
+            &ident.to_string(),
+        ));
+    };
+    for item in items {
+        match item {
+            syn::Item::Struct(s) => add(&s.ident, out),
+            syn::Item::Enum(e) => add(&e.ident, out),
+            syn::Item::Union(u) => add(&u.ident, out),
+            syn::Item::Trait(t) => add(&t.ident, out),
+            syn::Item::Type(t) => add(&t.ident, out),
+            syn::Item::Mod(m) if !has_cfg_test(&m.attrs) => {
+                if let Some((_, inner)) = m.content.as_ref() {
+                    let mut next = mod_stack.to_vec();
+                    next.push(m.ident.to_string());
+                    recurse(inner, &next, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Build the workspace-wide alias-chain map. Per-file delegate to the
 /// unconditional walker. Operation.
 pub(super) fn collect_alias_chain(

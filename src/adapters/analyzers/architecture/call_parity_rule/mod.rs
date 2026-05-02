@@ -32,6 +32,7 @@ pub mod check_d;
 pub(crate) mod local_symbols;
 pub mod pub_fns;
 mod pub_fns_alias_chain;
+mod pub_fns_use_tree;
 mod pub_fns_visibility;
 pub(crate) mod signature_params;
 pub mod touchpoints;

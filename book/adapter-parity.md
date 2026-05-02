@@ -55,6 +55,36 @@ phased out shouldn't drag the parity report.
 pub fn cmd_grep(args: ClapArgs) { /* … */ }   // skipped from parity
 ```
 
+### Limitations: type aliases
+
+The visibility pass and the receiver-type inference agree on most
+alias shapes (`pub type Public = Box<private::Hidden>`, multi-step
+chains, transparent-wrapper peeling), but two alias patterns currently
+disagree and can produce false-negative Check-B coverage:
+
+1. **Generic-identity aliases at use sites.** A `type Id<T> = T;` and
+   then `pub type Public = Id<private::Hidden>;` registers `Id` in
+   the visible-types set, but receiver inference resolves callers
+   `x: Public` directly to `Hidden`. Methods on `Hidden` therefore
+   stay outside the public surface even though they are reachable
+   through `Public`. Workaround: declare the inner type publicly, or
+   alias without the generic identity wrapper. A correct fix would
+   substitute alias generic parameters at use sites while still
+   refusing to peel nominal generic types like `struct Wrapper<T>`.
+
+2. **Impl blocks keyed under an alias.** `pub type Public =
+   private::Hidden; impl Public { pub fn op(&self) {} }` keys the
+   impl method under `Public::op`, but a caller with `x: Public`
+   resolves to `Hidden::op` after alias expansion. Workaround: write
+   the impl block against the underlying type (`impl Hidden`). A
+   correct fix would chase the alias chain in `resolve_impl_self_type`
+   and register methods under every alias-equivalent canonical.
+
+If you hit either pattern in practice, please open an issue with the
+exact alias shape — the fixes touch several call sites in the call-
+parity pipeline and we'd like a real-world example to drive the
+substitution semantics rather than guessing.
+
 ## Why this is unusual
 
 Static analyzers traditionally fall into two camps:

@@ -8,7 +8,7 @@
 | `json` | Machine-readable, full detail. Pipe to `jq`, custom dashboards. |
 | `github` | `::error::` / `::warning::` annotations on the GitHub PR diff. |
 | `sarif` | GitHub Code Scanning, Azure DevOps, any SARIF v2.1.0 consumer. |
-| `dot` | Graphviz module dependency graph. |
+| `dot` | Graphviz per-function IOSP call graph (coloured by classification). |
 | `html` | Self-contained HTML report. Publishable as CI artifact. |
 | `ai`, `ai-json` | Compact representations tuned for LLM agents. |
 
@@ -57,10 +57,12 @@ flat array. Top-level keys:
     /* ... per-dimension counters ... */
   },
   "functions": [
-    { "name": "process_payment", "qualified_name": "payment::process_payment",
-      "file": "src/order.rs", "line": 48, "classification": "violation",
-      "logic_locations": [{ "kind": "if", "line": 50 }],
-      "call_locations": [{ "name": "log", "line": 53 }] }
+    { "name": "process_payment", "file": "src/order.rs", "line": 48,
+      "parent_type": null, "classification": "violation",
+      "severity": "medium", "suppressed": false,
+      "logic": [{ "kind": "if", "line": "50" }],
+      "calls": [{ "name": "log", "line": "53" }],
+      "parameter_count": 2, "is_trait_impl": false }
   ],
   "coupling": { "modules": [/* … */], "cycles": [], "sdp_violations": [] },
   "duplicates": [/* … */],
