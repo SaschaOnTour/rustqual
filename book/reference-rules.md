@@ -1,13 +1,24 @@
 # Reference: rule catalog
 
 Every rule rustqual emits, grouped by dimension. Codes are stable
-identifiers used in **SARIF** `ruleId` fields, **GitHub** annotations,
-the **text** / **findings-list** category column, and `// qual:allow`
-rationales. The typed **JSON** reporter groups findings by dimension
-section (`duplicates`, `dead_code`, `tq_warnings`, `architecture_findings`,
-…) instead of repeating the catalog code on each row — pivot on the
-section, not on a `code` field. Architecture findings carry their full
-`rule_id` (e.g. `architecture/call_parity/no_delegation`).
+identifiers — but where they actually surface differs by reporter:
+
+- **SARIF**: every result carries the catalog code as `ruleId` and is
+  registered in `tool.driver.rules` (architecture also registers
+  dynamic sub-IDs like `architecture/call_parity/no_delegation`).
+- **JSON**: findings are grouped by dimension section (`duplicates`,
+  `dead_code`, `tq_warnings`, `architecture_findings`, …) — pivot on
+  the section, not on a `code` field. Only `architecture_findings`
+  rows carry their full `rule_id`.
+- **GitHub** workflow-command annotations: emitted as
+  `::level file=...,line=...::message`. Catalog codes are not
+  written to a structured `title` property today; if you need them
+  in CI for filtering, use the SARIF format with Code Scanning.
+- **Text** / **findings-list**: the category column shows
+  human-readable labels (`COGNITIVE`, `DUPLICATE`, `ARCHITECTURE`,
+  `BOILERPLATE`, …), not the catalog codes.
+- **`// qual:allow`** rationales: cite the catalog code in the
+  `reason:` text — it is the canonical reference users grep for.
 
 For dimension intent and refactor patterns, see the use-case guides linked at the bottom.
 

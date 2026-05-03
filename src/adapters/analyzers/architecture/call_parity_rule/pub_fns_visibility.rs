@@ -73,6 +73,7 @@ pub(super) fn collect_visible_type_canonicals_workspace(
         transparent_wrappers,
     );
     let type_canonicals = collect_workspace_type_canonicals(files, cfg_test_files);
+    let file_root_visibility = super::file_visibility::collect_file_root_visibility(files);
     let ctx = WalkCtx {
         transparent_wrappers,
         alias_chain: &alias_chain,
@@ -85,6 +86,17 @@ pub(super) fn collect_visible_type_canonicals_workspace(
         aliases_per_file,
         crate_root_modules,
         |file_scope, ast| {
+            // File-backed private modules (`mod internal;` without
+            // `pub` in the parent) keep their items out of the public
+            // surface — skip them entirely so a `pub fn helper()`
+            // inside `internal.rs` doesn't enter the visible-type set.
+            if !file_root_visibility
+                .get(file_scope.path)
+                .copied()
+                .unwrap_or(true)
+            {
+                return;
+            }
             collect_in_items(&ast.items, &[], file_scope, &ctx, &mut out);
         },
     );

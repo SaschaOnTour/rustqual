@@ -80,10 +80,22 @@ disagree and can produce false-negative Check-B coverage:
    correct fix would chase the alias chain in `resolve_impl_self_type`
    and register methods under every alias-equivalent canonical.
 
-If you hit either pattern in practice, please open an issue with the
-exact alias shape — the fixes touch several call sites in the call-
-parity pipeline and we'd like a real-world example to drive the
-substitution semantics rather than guessing.
+3. **Nested re-exports in receiver position.** `pub mod outer { …
+   pub use self::private::Hidden; }` followed by `fn h(x: outer::Hidden)
+   { x.op() }` — the receiver-type resolver does not chase workspace
+   `pub use` re-exports inside nested modules, so the parameter
+   resolves to `crate::…::outer::Hidden` while the impl method lives
+   under `crate::…::outer::private::Hidden`. Visibility recognises
+   both paths, but the call-graph edge ends up under the short
+   `<method>:op` form. Workaround: write the impl at the file-level
+   qualified path (`impl outer::Hidden { … }`) so impl-canonical
+   and caller-canonical agree, or `qual:allow(architecture)` at the
+   call-site.
+
+If you hit any of these patterns in practice, please open an issue
+with the exact alias / re-export shape — the fixes touch several
+call sites in the call-parity pipeline and we'd like a real-world
+example to drive the substitution semantics rather than guessing.
 
 ## Why this is unusual
 

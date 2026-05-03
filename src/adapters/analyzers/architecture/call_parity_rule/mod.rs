@@ -29,6 +29,7 @@ pub mod check_a;
 pub mod check_b;
 pub mod check_c;
 pub mod check_d;
+mod file_visibility;
 pub(crate) mod local_symbols;
 pub mod pub_fns;
 mod pub_fns_alias_chain;

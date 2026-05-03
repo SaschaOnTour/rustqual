@@ -18,6 +18,7 @@
 //! See Task 2 in the v1.1.0 plan for the full test list.
 
 use super::bindings::CanonScope;
+use super::file_visibility::collect_file_root_visibility;
 use super::local_symbols::{collect_local_symbols_scoped, FileScope, LocalSymbols};
 use super::pub_fns_visibility::{collect_visible_type_canonicals_workspace, is_visible};
 use super::signature_params::extract_signature_params;
@@ -64,6 +65,7 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
     transparent_wrappers: &HashSet<String>,
 ) -> HashMap<String, Vec<PubFnInfo<'ast>>> {
     let crate_root_modules = collect_crate_root_modules(files);
+    let file_root_visibility = collect_file_root_visibility(files);
     let visible_canonicals = collect_visible_type_canonicals_workspace(
         files,
         cfg_test_files,
@@ -98,6 +100,7 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
             local_decl_scopes: &by_name,
             crate_root_modules: &crate_root_modules,
         };
+        let file_visible = file_root_visibility.get(*path).copied().unwrap_or(true);
         let mut collector = PubFnCollector {
             file_path: path.to_string(),
             file: &file,
@@ -105,7 +108,7 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
             visible_canonicals: &visible_canonicals,
             impl_stack: Vec::new(),
             mod_stack: Vec::new(),
-            enclosing_mod_visible: true,
+            enclosing_mod_visible: file_visible,
         };
         collector.visit_file(ast);
         out.entry(layer).or_default().extend(collector.found);

@@ -97,9 +97,18 @@ rustqual --format json | jq '.architecture_findings[] | select(.severity == "hig
 GitHub Actions workflow-command annotations. Inline on the PR diff:
 
 ```
-::error file=src/order.rs,line=48,title=IOSP::function mixes orchestration with logic
-::warning file=src/utils/legacy.rs,line=12,title=DRY-002::dead code
+::error file=src/order.rs,line=48::IOSP violation: logic=[if (line 50)], calls=[helper (line 53)]
+::warning file=src/utils/legacy.rs,line=12::Dead code detected: legacy::unused
+::warning file=src/payment.rs,line=88::Stale qual:allow(complexity) marker — no finding in window.
 ```
+
+The annotation format is `::{level} file=<path>,line=<n>::{message}` —
+GitHub does not show a structured rule-code title for these formats,
+so the rule context is folded into the message text. The trailing
+summary annotation (`::error::Quality analysis: N finding(s)…` or
+`::notice::Quality score: …`) reflects the **default-fail** outcome
+of the run. For per-rule filtering in CI, use `--format sarif` and
+upload to Code Scanning instead.
 
 Combine with `--diff origin/main` for PR-only analysis:
 

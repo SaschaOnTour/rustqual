@@ -931,6 +931,58 @@ fn test_collect_pub_fns_records_pub_use_reexport_with_qualified_impl() {
 }
 
 #[test]
+fn test_collect_pub_fns_excludes_pub_fn_in_file_backed_private_module() {
+    // `mod internal;` (without `pub`) keeps `src/application/internal.rs`
+    // private to the parent. `pub fn helper()` inside that file must
+    // NOT be recorded as a target-layer pub fn — otherwise Check B/D
+    // would require adapter coverage for a private helper.
+    let parent = parse("mod internal;");
+    let child = parse("pub fn helper() {}");
+    let files = vec![
+        ("src/application/mod.rs", &parent),
+        ("src/application/internal.rs", &child),
+    ];
+    let aliases = aliases_from_files(&files);
+    let by_layer = collect_pub_fns_by_layer(
+        &files,
+        &aliases,
+        &three_layer(),
+        &HashSet::new(),
+        &HashSet::new(),
+    );
+    let app = names_for_layer(&by_layer, "application");
+    assert!(
+        !app.contains("helper"),
+        "pub fn in a file-backed private module must not enter the target-layer surface, got {app:?}"
+    );
+}
+
+#[test]
+fn test_collect_pub_fns_includes_pub_fn_in_file_backed_public_module() {
+    // Sanity counterpart: `pub mod internal;` makes the file public,
+    // so `pub fn helper()` IS recorded.
+    let parent = parse("pub mod internal;");
+    let child = parse("pub fn helper() {}");
+    let files = vec![
+        ("src/application/mod.rs", &parent),
+        ("src/application/internal.rs", &child),
+    ];
+    let aliases = aliases_from_files(&files);
+    let by_layer = collect_pub_fns_by_layer(
+        &files,
+        &aliases,
+        &three_layer(),
+        &HashSet::new(),
+        &HashSet::new(),
+    );
+    let app = names_for_layer(&by_layer, "application");
+    assert!(
+        app.contains("helper"),
+        "pub fn in a file-backed public module must be recorded, got {app:?}"
+    );
+}
+
+#[test]
 fn test_collect_pub_fns_skips_impl_methods_under_short_name_collision() {
     // Two distinct types named `Session` (one public, one in a
     // private inline mod) must NOT collide. The canonical-path-based
