@@ -931,6 +931,72 @@ fn test_collect_pub_fns_records_pub_use_reexport_with_qualified_impl() {
 }
 
 #[test]
+fn test_collect_pub_fns_excludes_orphan_file_not_declared_in_crate_root() {
+    // `src/lib.rs` doesn't declare `mod application;`, but
+    // `src/application/mod.rs` exists with a `pub fn helper()`.
+    // The file is not actually part of any module tree — its pub
+    // fns must NOT be recorded as adapter/target surface.
+    let lib = parse("mod cli;");
+    let cli = parse("pub fn cmd() {}");
+    let app = parse("pub fn helper() {}");
+    let files = vec![
+        ("src/lib.rs", &lib),
+        ("src/cli/mod.rs", &cli),
+        ("src/application/mod.rs", &app),
+    ];
+    let aliases = aliases_from_files(&files);
+    let by_layer = collect_pub_fns_by_layer(
+        &files,
+        &aliases,
+        &three_layer(),
+        &HashSet::new(),
+        &HashSet::new(),
+    );
+    let app_fns = names_for_layer(&by_layer, "application");
+    assert!(
+        !app_fns.contains("helper"),
+        "orphan file (no `mod application;` decl in lib.rs) must not contribute pub fns, got {app_fns:?}"
+    );
+}
+
+#[test]
+fn test_collect_pub_fns_unions_lib_and_main_root_trees() {
+    // Workspace with both `src/lib.rs` and `src/main.rs`. `lib.rs`
+    // declares `mod application;` privately (visible at crate-root
+    // level per the relaxation), `main.rs` declares `mod cli;`
+    // privately. A file is visible in its respective tree; the two
+    // trees stay independent.
+    let lib = parse("mod application;");
+    let main = parse("mod cli;");
+    let app = parse("pub fn search() {}");
+    let cli = parse("pub fn cmd() {}");
+    let files = vec![
+        ("src/lib.rs", &lib),
+        ("src/main.rs", &main),
+        ("src/application/mod.rs", &app),
+        ("src/cli/mod.rs", &cli),
+    ];
+    let aliases = aliases_from_files(&files);
+    let by_layer = collect_pub_fns_by_layer(
+        &files,
+        &aliases,
+        &three_layer(),
+        &HashSet::new(),
+        &HashSet::new(),
+    );
+    let app_fns = names_for_layer(&by_layer, "application");
+    let cli_fns = names_for_layer(&by_layer, "cli");
+    assert!(
+        app_fns.contains("search"),
+        "application module declared in lib.rs root must surface its pub fns, got {app_fns:?}"
+    );
+    assert!(
+        cli_fns.contains("cmd"),
+        "cli module declared in main.rs root must surface its pub fns, got {cli_fns:?}"
+    );
+}
+
+#[test]
 fn test_collect_pub_fns_includes_crate_root_mod_decl_without_pub() {
     // `src/lib.rs` typically writes `mod cli; mod application;` —
     // sibling modules still reach them via `crate::cli::…`, and
