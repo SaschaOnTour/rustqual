@@ -999,13 +999,15 @@ fn trait_dispatch_skips_unrelated_methods() {
 }
 
 #[test]
-fn trait_dispatch_routes_default_method_to_trait_not_impl() {
+fn trait_dispatch_leaves_default_method_unresolved() {
     // `trait Handler { fn handle(&self) {} } impl Handler for AppHandler {}`
-    // — the impl block has no `handle` body, so the call inherits the
-    // trait's default. Dispatch must emit `Handler::handle` (where the
-    // body lives), NOT `AppHandler::handle` (which doesn't exist as a
-    // graph node). Otherwise Check A/B/D would reason about a phantom
-    // touchpoint.
+    // — the impl has no `handle` body, the call inherits the trait's
+    // default. Neither edge is emitted: `AppHandler::handle` would be
+    // a phantom (no graph node), and `Handler::handle` would be a
+    // phantom sink (the workspace graph doesn't model trait-default
+    // bodies as nodes). Conservative drop: this dispatch contributes
+    // no touchpoint until the graph walker is extended to collect
+    // trait-default bodies as real nodes.
     let fx = parse(
         r#"
         use crate::ports::Handler;
@@ -1035,8 +1037,8 @@ fn trait_dispatch_routes_default_method_to_trait_not_impl() {
         .insert("crate::ports::Handler".to_string(), by_impl);
     let calls = run(&fx, &index, "dispatch");
     assert!(
-        calls.contains("crate::ports::Handler::handle"),
-        "default-method dispatch must route to trait body, got {calls:?}"
+        !calls.contains("crate::ports::Handler::handle"),
+        "must not emit phantom trait-method sink, got {calls:?}"
     );
     assert!(
         !calls.contains("crate::app::AppHandler::handle"),

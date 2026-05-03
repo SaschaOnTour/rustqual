@@ -1,6 +1,6 @@
 # Reference: output formats
 
-`--format <FMT>` switches the output format. All formats render the same underlying analysis — they differ only in serialisation.
+`--format <FMT>` switches the output format. All formats except `dot` render the same underlying findings + summary — they differ only in serialisation. **`dot` is data-only**: it ignores findings and orphan suppressions and renders the per-function call graph. A run can therefore exit non-zero on architecture findings or `ORPHAN-001` while the DOT artifact carries no diagnostic; pair `--format dot` with a second run in `text` / `sarif` / `json` for the diagnostic surface.
 
 | Format | Use case |
 |---|---|

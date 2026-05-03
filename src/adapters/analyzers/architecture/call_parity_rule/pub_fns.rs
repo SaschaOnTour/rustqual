@@ -132,7 +132,13 @@ struct PubFnCollector<'ast, 'vis> {
     /// output. Shared across files.
     visible_canonicals: &'vis HashSet<String>,
     /// Stack of enclosing `impl` blocks: `(self-type segments, is-visible)`.
-    impl_stack: Vec<(Vec<String>, bool)>,
+    /// Each entry: `(self_type_segments, self_type_visible,
+    /// is_visible_trait_impl)`. The third flag is `true` iff this
+    /// `impl Trait for X` is for a workspace-visible trait — needed
+    /// because trait-impl items inherit the trait's visibility, not
+    /// the impl-item's own `vis` modifier (which is `Inherited` in
+    /// the typical `impl T for X { fn m() {} }` shape).
+    impl_stack: Vec<(Vec<String>, bool, bool)>,
     /// Names of enclosing inline `mod inner { ... }` blocks.
     mod_stack: Vec<String>,
     /// True when every enclosing inline `mod` carries a visibility
@@ -145,11 +151,15 @@ struct PubFnCollector<'ast, 'vis> {
 
 impl<'ast, 'vis> PubFnCollector<'ast, 'vis> {
     fn current_self_type(&self) -> Option<Vec<String>> {
-        self.impl_stack.last().map(|(segs, _)| segs.clone())
+        self.impl_stack.last().map(|(segs, _, _)| segs.clone())
     }
 
     fn current_impl_visible(&self) -> bool {
-        self.impl_stack.last().map(|(_, v)| *v).unwrap_or(false)
+        self.impl_stack.last().map(|(_, v, _)| *v).unwrap_or(false)
+    }
+
+    fn current_impl_is_visible_trait(&self) -> bool {
+        self.impl_stack.last().map(|(_, _, t)| *t).unwrap_or(false)
     }
 
     fn record_fn(
@@ -208,27 +218,30 @@ impl<'ast, 'vis> Visit<'ast> for PubFnCollector<'ast, 'vis> {
         // Unresolved self-types (trait objects, references) bring an
         // empty segment list with `visible=false` and the methods
         // are skipped regardless.
-        let canonical_segs = resolve_impl_self_type(
-            &node.self_ty,
-            &CanonScope {
-                file: self.file,
-                mod_stack: &self.mod_stack,
-            },
-        )
-        .unwrap_or_default();
+        let scope = CanonScope {
+            file: self.file,
+            mod_stack: &self.mod_stack,
+        };
+        let canonical_segs = resolve_impl_self_type(&node.self_ty, &scope).unwrap_or_default();
         let visible = !canonical_segs.is_empty()
             && self.visible_canonicals.contains(&canonical_segs.join("::"));
-        self.impl_stack.push((canonical_segs, visible));
+        let is_visible_trait_impl =
+            is_impl_for_visible_trait(node, &scope, self.visible_canonicals);
+        self.impl_stack
+            .push((canonical_segs, visible, is_visible_trait_impl));
         syn::visit::visit_item_impl(self, node);
         self.impl_stack.pop();
     }
 
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
-        // No enclosing-mod-visible gate here: `visible_canonicals`
-        // already encodes whether the type is reachable, so impls in
-        // private modules for publicly named types record correctly
-        // and impls on private types are filtered uniformly.
-        if self.current_impl_visible() && is_visible(&node.vis) && !is_test_fn(&node.attrs) {
+        // Trait-impl items inherit the trait's visibility — `fn m() {}`
+        // inside `impl PubTrait for X { ... }` is part of the public
+        // surface even though `node.vis == Inherited`. Without this
+        // relaxation, `impl_overrides_method`-routed dispatch could
+        // emit `X::m` as a touchpoint while `X::m` never enters the
+        // target pub-fn set, hiding peer-adapter coverage gaps.
+        let method_visible = is_visible(&node.vis) || self.current_impl_is_visible_trait();
+        if self.current_impl_visible() && method_visible && !is_test_fn(&node.attrs) {
             let line = syn::spanned::Spanned::span(&node.sig.ident).start().line;
             let name = node.sig.ident.to_string();
             self.record_fn(name, line, &node.block, &node.sig, &node.attrs);
@@ -250,4 +263,29 @@ impl<'ast, 'vis> Visit<'ast> for PubFnCollector<'ast, 'vis> {
         self.mod_stack.pop();
         self.enclosing_mod_visible = parent_visible;
     }
+}
+
+/// True iff `node` is `impl Trait for X { … }` and the resolved trait
+/// canonical is in the workspace `visible_canonicals` set. The trait's
+/// visibility carries through to its impl items — `fn m()` inside
+/// `impl PubTrait for X {}` is part of the public surface even when
+/// the impl-item `vis` is the syntactic `Inherited`.
+fn is_impl_for_visible_trait(
+    node: &syn::ItemImpl,
+    scope: &CanonScope<'_>,
+    visible_canonicals: &HashSet<String>,
+) -> bool {
+    use crate::adapters::analyzers::architecture::call_parity_rule::bindings::canonicalise_type_segments_in_scope;
+    let Some((_, trait_path, _)) = node.trait_.as_ref() else {
+        return false;
+    };
+    let segs: Vec<String> = trait_path
+        .segments
+        .iter()
+        .map(|s| s.ident.to_string())
+        .collect();
+    let Some(canonical) = canonicalise_type_segments_in_scope(&segs, scope) else {
+        return false;
+    };
+    visible_canonicals.contains(&canonical.join("::"))
 }

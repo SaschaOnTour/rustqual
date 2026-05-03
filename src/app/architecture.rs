@@ -6,7 +6,9 @@
 //!   1. Project the parsed workspace into `ParsedFile`s.
 //!   2. Build an `AnalysisContext` and hand it to `app::analyze_codebase`
 //!      with the Architecture adapter in the analyzer list.
-//!   3. Apply file-level `qual:allow(architecture)` suppressions.
+//!   3. Apply window-scoped `qual:allow(architecture)` suppressions —
+//!      a marker at line N covers findings in `N..=N+ANNOTATION_WINDOW`,
+//!      not the whole file.
 //!   4. Sort the findings stably and update the `Summary` counter.
 
 use crate::adapters::analyzers::architecture::ArchitectureAnalyzer;

@@ -931,6 +931,41 @@ fn test_collect_pub_fns_records_pub_use_reexport_with_qualified_impl() {
 }
 
 #[test]
+fn test_collect_pub_fns_records_inherited_trait_impl_methods() {
+    // `impl PubTrait for X { fn handle(&self) {} }` — the impl-item
+    // `vis` is `Inherited`, but the method is part of the public
+    // surface because the trait is public. Otherwise dispatch could
+    // emit `X::handle` as a touchpoint while `X::handle` never enters
+    // the target pub-fn set, hiding peer-adapter coverage gaps in
+    // Check B/D.
+    let file = parse(
+        r#"
+        pub trait PubTrait {
+            fn handle(&self);
+        }
+        pub struct X;
+        impl PubTrait for X {
+            fn handle(&self) {}
+        }
+        "#,
+    );
+    let files = vec![("src/application/mod.rs", &file)];
+    let aliases = aliases_from_files(&files);
+    let by_layer = collect_pub_fns_by_layer(
+        &files,
+        &aliases,
+        &three_layer(),
+        &HashSet::new(),
+        &HashSet::new(),
+    );
+    let app = names_for_layer(&by_layer, "application");
+    assert!(
+        app.contains("handle"),
+        "trait-impl method must be recorded as pub fn even with Inherited vis, got {app:?}"
+    );
+}
+
+#[test]
 fn test_collect_pub_fns_excludes_orphan_file_not_declared_in_crate_root() {
     // `src/lib.rs` doesn't declare `mod application;`, but
     // `src/application/mod.rs` exists with a `pub fn helper()`.
