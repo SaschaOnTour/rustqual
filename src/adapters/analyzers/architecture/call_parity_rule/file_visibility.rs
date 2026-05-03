@@ -1,110 +1,168 @@
 //! Per-file root-visibility pre-pass.
 //!
 //! Whether a file like `src/foo/internal.rs` participates in the
-//! call-parity public surface depends on the **chain** of `mod X;`
-//! declarations from the crate root down. Two semantic refinements:
+//! call-parity public surface depends on the **chain** of `mod X`
+//! declarations from the crate root down. The chain may mix
+//! file-backed mods (`mod X;`) and inline mods (`mod X { … }`) at
+//! every level — both kinds gate visibility.
+//!
+//! Two semantic refinements:
 //!
 //! 1. **Crate-root `mod X;` is crate-visible**, even without `pub`.
-//!    `src/lib.rs` typically writes `mod cli; mod application;` —
-//!    sibling modules still reach them via `crate::cli::…`, and
-//!    call-parity is an *internal* architecture check, not an
-//!    external-API surface check. Only nested non-root `mod foo;`
-//!    (no `pub`) marks the subtree as a private helper.
+//!    Call-parity is an *internal* architecture check, not an
+//!    external-API surface check. Only nested non-root `mod foo`
+//!    (inline or file-backed, no `pub`) marks the subtree as a
+//!    private helper.
 //!
-//! 2. **Visibility composes recursively along the ancestor chain.**
-//!    `mod internal;` (private) at depth 1 + `pub mod deep;` at depth
-//!    2 → `deep` is hidden because the `internal` ancestor is private,
-//!    even though its direct parent says `pub`. The pre-pass walks
-//!    every ancestor and short-circuits to `false` on the first
-//!    non-visible link.
+//! 2. **Visibility composes recursively along the ancestor chain**,
+//!    crossing inline/file-backed boundaries seamlessly. `mod
+//!    internal { pub mod deep; }` (inline + private at depth 1)
+//!    plus `src/foo/internal/deep.rs` → `deep.rs` is hidden
+//!    because its inline `internal` ancestor is private, even
+//!    though the inline `pub mod deep;` says public.
 
 use std::collections::HashMap;
 
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
 
 /// Map every workspace file to whether its file-root contents are
-/// reachable as call-parity public surface.
-///
-/// Crate-root files (`src/lib.rs`, `src/main.rs`) are always visible.
-/// Files with no parent in the workspace (orphaned) default to
-/// visible — the call-parity layer config decides whether they
-/// participate at all.
+/// reachable as call-parity public surface. Files with no ancestor
+/// in the workspace default to visible.
 pub(crate) fn collect_file_root_visibility(files: &[(&str, &syn::File)]) -> HashMap<String, bool> {
     let segs_to_path: HashMap<Vec<String>, &str> = files
         .iter()
         .map(|(path, _)| (file_to_module_segments(path), *path))
         .collect();
+    let ctx = WalkCtx {
+        files,
+        segs_to_path: &segs_to_path,
+    };
     files
         .iter()
         .map(|(path, _)| {
             let segs = file_to_module_segments(path);
-            let visible = ancestor_chain_visible(&segs, files, &segs_to_path);
-            ((*path).to_string(), visible)
+            ((*path).to_string(), visible_for_file(&segs, &ctx))
         })
         .collect()
 }
 
-/// True iff every `mod` link from the crate root down to `segs`
-/// resolves to a visible declaration. Short-circuits on the first
-/// private ancestor link.
-fn ancestor_chain_visible(
-    segs: &[String],
-    files: &[(&str, &syn::File)],
-    segs_to_path: &HashMap<Vec<String>, &str>,
-) -> bool {
+struct WalkCtx<'a> {
+    files: &'a [(&'a str, &'a syn::File)],
+    segs_to_path: &'a HashMap<Vec<String>, &'a str>,
+}
+
+impl<'a> WalkCtx<'a> {
+    fn items_for(&self, segs: &[String]) -> Option<&'a [syn::Item]> {
+        let path = self.segs_to_path.get(segs)?;
+        let (_, ast) = self.files.iter().find(|(p, _)| p == path)?;
+        Some(ast.items.as_slice())
+    }
+}
+
+/// Trivial: closure-hidden own calls.
+fn visible_for_file(segs: &[String], ctx: &WalkCtx<'_>) -> bool {
+    let walk = || {
+        let (start_segs, start_items) = highest_file_backed_ancestor(segs, ctx)?;
+        let remaining: Vec<String> = segs[start_segs.len()..].to_vec();
+        let is_root = start_segs.is_empty();
+        Some(walk_segments(
+            start_items,
+            &remaining,
+            &start_segs,
+            ctx,
+            is_root,
+        ))
+    };
     if segs.is_empty() {
-        return true; // crate root
+        return true;
     }
-    let mut current = segs.to_vec();
-    while !current.is_empty() {
-        if !direct_link_visible(&current, files, segs_to_path) {
-            return false;
-        }
-        current.pop();
-    }
-    true
+    walk().unwrap_or(true)
 }
 
-/// True iff the parent of `segs` declares `mod <leaf>` with adequate
-/// visibility for an internal call-parity check. Crate-root parents
-/// (`src/lib.rs` / `src/main.rs`) treat any `mod X;` as visible —
-/// `Inherited` visibility there still lets sibling modules reach the
-/// declared module via `crate::X::…`. Nested parents demand an
-/// explicit visibility modifier.
-fn direct_link_visible(
+/// Find the *highest* file-backed ancestor (shortest segments prefix)
+/// of `segs` that exists in the workspace. Walking from the highest
+/// ancestor — not the nearest — is essential: the nearest ancestor
+/// would skip private-mod links at higher levels and let a hidden
+/// subtree leak into the public surface. Operation: prefix iteration
+/// with closure-hidden lookup.
+fn highest_file_backed_ancestor<'a>(
     segs: &[String],
-    files: &[(&str, &syn::File)],
-    segs_to_path: &HashMap<Vec<String>, &str>,
-) -> bool {
-    let Some(leaf) = segs.last() else {
-        return true;
+    ctx: &WalkCtx<'a>,
+) -> Option<(Vec<String>, &'a [syn::Item])> {
+    let try_lookup = |candidate: &[String]| -> Option<(Vec<String>, &'a [syn::Item])> {
+        ctx.items_for(candidate)
+            .map(|items| (candidate.to_vec(), items))
     };
-    let parent_segs: Vec<String> = segs[..segs.len() - 1].to_vec();
-    let Some(parent_path) = segs_to_path.get(&parent_segs) else {
-        return true; // parent not in workspace — default visible
-    };
-    let Some((_, parent_ast)) = files.iter().find(|(p, _)| p == parent_path) else {
-        return true;
-    };
-    let parent_is_crate_root = parent_segs.is_empty();
-    parent_mod_decl_visible(&parent_ast.items, leaf, parent_is_crate_root).unwrap_or(true)
+    if let Some(found) = try_lookup(&[]) {
+        return Some(found);
+    }
+    let mut candidate: Vec<String> = Vec::new();
+    for seg in &segs[..segs.len() - 1] {
+        candidate.push(seg.clone());
+        if let Some(found) = try_lookup(&candidate) {
+            return Some(found);
+        }
+    }
+    None
 }
 
-fn parent_mod_decl_visible(
+/// Trivial: closure-hidden own calls. Walk one level of the `mod`
+/// chain at `items`, descending into `remaining[0]`.
+fn walk_segments(
     items: &[syn::Item],
-    target: &str,
-    parent_is_crate_root: bool,
-) -> Option<bool> {
-    items.iter().find_map(|item| match item {
-        syn::Item::Mod(m) if m.ident == target && m.content.is_none() => {
-            if parent_is_crate_root {
-                // Crate-root `mod X;` is crate-visible regardless of
-                // its `pub` modifier — sibling modules still reach X.
-                Some(true)
-            } else {
-                Some(super::pub_fns_visibility::is_visible(&m.vis))
-            }
+    remaining: &[String],
+    seen_so_far: &[String],
+    ctx: &WalkCtx<'_>,
+    is_crate_root_level: bool,
+) -> bool {
+    let step = || -> Option<bool> {
+        let first = remaining.first()?;
+        let m = find_mod_decl(items, first)?;
+        if !mod_decl_visible(m, is_crate_root_level) {
+            return Some(false);
         }
+        let rest = &remaining[1..];
+        if rest.is_empty() {
+            return Some(true);
+        }
+        Some(descend_into_mod(m, rest, seen_so_far, first, ctx))
+    };
+    step().unwrap_or(true)
+}
+
+fn find_mod_decl<'a>(items: &'a [syn::Item], target: &str) -> Option<&'a syn::ItemMod> {
+    items.iter().find_map(|item| match item {
+        syn::Item::Mod(m) if m.ident == target => Some(m),
         _ => None,
     })
+}
+
+fn mod_decl_visible(m: &syn::ItemMod, is_crate_root_level: bool) -> bool {
+    if is_crate_root_level {
+        true
+    } else {
+        super::pub_fns_visibility::is_visible(&m.vis)
+    }
+}
+
+/// Trivial: closure-hidden own calls. Descend into either an inline
+/// `mod m { … }`'s items or the corresponding file-backed `mod m;`
+/// child file's items, then continue the walk.
+fn descend_into_mod(
+    m: &syn::ItemMod,
+    rest: &[String],
+    seen_so_far: &[String],
+    first: &str,
+    ctx: &WalkCtx<'_>,
+) -> bool {
+    let descend = || -> Option<bool> {
+        let mut next_seen = seen_so_far.to_vec();
+        next_seen.push(first.to_string());
+        if let Some((_, inner)) = m.content.as_ref() {
+            return Some(walk_segments(inner, rest, &next_seen, ctx, false));
+        }
+        let child_items = ctx.items_for(&next_seen)?;
+        Some(walk_segments(child_items, rest, &next_seen, ctx, false))
+    };
+    descend().unwrap_or(true)
 }

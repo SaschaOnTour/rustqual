@@ -55,5 +55,7 @@ escape for intentionally asymmetric features.
 
 `rustqual.toml` configures `[architecture.layers]` plus a single
 `[architecture.call_parity]` section. No per-function annotation needed
-— both checks piggy-back on the layer definitions already in place for
-the architecture dimension.
+— all four checks (A/B/C/D) piggy-back on the layer definitions
+already in place for the architecture dimension. This fixture
+exercises the A and B findings; C and D fire on different shapes
+that this minimal example doesn't include.

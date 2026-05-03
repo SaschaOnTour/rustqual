@@ -233,4 +233,4 @@ Most CI configurations use `github` or `sarif` (or both). Local development: `te
 
 - [reference-cli.md](./reference-cli.md) — `--format` and other flags
 - [ci-integration.md](./ci-integration.md) — CI examples for each format
-- [reference-rules.md](./reference-rules.md) — codes referenced in every format
+- [reference-rules.md](./reference-rules.md) — catalog of stable rule codes and where each surface emits them
