@@ -1,19 +1,29 @@
 //! Per-file root-visibility pre-pass.
 //!
-//! A file like `src/foo/internal.rs` is reachable as public surface
-//! iff its parent file (`src/foo.rs` or `src/foo/mod.rs`) declares
-//! `pub mod internal;`. A bare `mod internal;` (without `pub`) keeps
-//! the whole file private to the parent module — without this gate,
-//! `pub fn helper()` inside `internal.rs` would be recorded as a
-//! target-layer pub fn and Check B/D would require adapter coverage
-//! for a private helper.
+//! Whether a file like `src/foo/internal.rs` participates in the
+//! call-parity public surface depends on the **chain** of `mod X;`
+//! declarations from the crate root down. Two semantic refinements:
+//!
+//! 1. **Crate-root `mod X;` is crate-visible**, even without `pub`.
+//!    `src/lib.rs` typically writes `mod cli; mod application;` —
+//!    sibling modules still reach them via `crate::cli::…`, and
+//!    call-parity is an *internal* architecture check, not an
+//!    external-API surface check. Only nested non-root `mod foo;`
+//!    (no `pub`) marks the subtree as a private helper.
+//!
+//! 2. **Visibility composes recursively along the ancestor chain.**
+//!    `mod internal;` (private) at depth 1 + `pub mod deep;` at depth
+//!    2 → `deep` is hidden because the `internal` ancestor is private,
+//!    even though its direct parent says `pub`. The pre-pass walks
+//!    every ancestor and short-circuits to `false` on the first
+//!    non-visible link.
 
 use std::collections::HashMap;
 
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
 
 /// Map every workspace file to whether its file-root contents are
-/// reachable as public surface from the crate root.
+/// reachable as call-parity public surface.
 ///
 /// Crate-root files (`src/lib.rs`, `src/main.rs`) are always visible.
 /// Files with no parent in the workspace (orphaned) default to
@@ -28,20 +38,44 @@ pub(crate) fn collect_file_root_visibility(files: &[(&str, &syn::File)]) -> Hash
         .iter()
         .map(|(path, _)| {
             let segs = file_to_module_segments(path);
-            let visible = file_root_visibility(&segs, files, &segs_to_path);
+            let visible = ancestor_chain_visible(&segs, files, &segs_to_path);
             ((*path).to_string(), visible)
         })
         .collect()
 }
 
-fn file_root_visibility(
+/// True iff every `mod` link from the crate root down to `segs`
+/// resolves to a visible declaration. Short-circuits on the first
+/// private ancestor link.
+fn ancestor_chain_visible(
     segs: &[String],
     files: &[(&str, &syn::File)],
     segs_to_path: &HashMap<Vec<String>, &str>,
 ) -> bool {
     if segs.is_empty() {
-        return true; // crate root file
+        return true; // crate root
     }
+    let mut current = segs.to_vec();
+    while !current.is_empty() {
+        if !direct_link_visible(&current, files, segs_to_path) {
+            return false;
+        }
+        current.pop();
+    }
+    true
+}
+
+/// True iff the parent of `segs` declares `mod <leaf>` with adequate
+/// visibility for an internal call-parity check. Crate-root parents
+/// (`src/lib.rs` / `src/main.rs`) treat any `mod X;` as visible —
+/// `Inherited` visibility there still lets sibling modules reach the
+/// declared module via `crate::X::…`. Nested parents demand an
+/// explicit visibility modifier.
+fn direct_link_visible(
+    segs: &[String],
+    files: &[(&str, &syn::File)],
+    segs_to_path: &HashMap<Vec<String>, &str>,
+) -> bool {
     let Some(leaf) = segs.last() else {
         return true;
     };
@@ -52,13 +86,24 @@ fn file_root_visibility(
     let Some((_, parent_ast)) = files.iter().find(|(p, _)| p == parent_path) else {
         return true;
     };
-    parent_mod_decl_is_visible(&parent_ast.items, leaf).unwrap_or(true)
+    let parent_is_crate_root = parent_segs.is_empty();
+    parent_mod_decl_visible(&parent_ast.items, leaf, parent_is_crate_root).unwrap_or(true)
 }
 
-fn parent_mod_decl_is_visible(items: &[syn::Item], target: &str) -> Option<bool> {
+fn parent_mod_decl_visible(
+    items: &[syn::Item],
+    target: &str,
+    parent_is_crate_root: bool,
+) -> Option<bool> {
     items.iter().find_map(|item| match item {
         syn::Item::Mod(m) if m.ident == target && m.content.is_none() => {
-            Some(super::pub_fns_visibility::is_visible(&m.vis))
+            if parent_is_crate_root {
+                // Crate-root `mod X;` is crate-visible regardless of
+                // its `pub` modifier — sibling modules still reach X.
+                Some(true)
+            } else {
+                Some(super::pub_fns_visibility::is_visible(&m.vis))
+            }
         }
         _ => None,
     })

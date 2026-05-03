@@ -931,6 +931,70 @@ fn test_collect_pub_fns_records_pub_use_reexport_with_qualified_impl() {
 }
 
 #[test]
+fn test_collect_pub_fns_includes_crate_root_mod_decl_without_pub() {
+    // `src/lib.rs` typically writes `mod cli; mod application;` —
+    // sibling modules still reach them via `crate::cli::…`, and
+    // call-parity is an internal architecture check. The visibility
+    // pass must therefore treat crate-root `mod X;` (without `pub`)
+    // as visible so adapter handlers in `src/cli/handlers.rs` are
+    // recorded as pub-fns and Checks A/B/C/D run against them.
+    let lib = parse("mod cli; mod application;");
+    let cli_mod = parse("pub fn cmd_search() {}");
+    let app_mod = parse("pub fn search() {}");
+    let files = vec![
+        ("src/lib.rs", &lib),
+        ("src/cli/mod.rs", &cli_mod),
+        ("src/application/mod.rs", &app_mod),
+    ];
+    let aliases = aliases_from_files(&files);
+    let by_layer = collect_pub_fns_by_layer(
+        &files,
+        &aliases,
+        &three_layer(),
+        &HashSet::new(),
+        &HashSet::new(),
+    );
+    let cli = names_for_layer(&by_layer, "cli");
+    let app = names_for_layer(&by_layer, "application");
+    assert!(
+        cli.contains("cmd_search"),
+        "crate-root `mod cli;` (no pub) must still expose adapter pub-fns, got {cli:?}"
+    );
+    assert!(
+        app.contains("search"),
+        "crate-root `mod application;` (no pub) must still expose target pub-fns, got {app:?}"
+    );
+}
+
+#[test]
+fn test_collect_pub_fns_excludes_pub_fn_under_private_ancestor_chain() {
+    // `mod internal;` at depth 1 (private) + `pub mod deep;` at depth 2.
+    // Even though deep's direct parent says `pub`, the `internal`
+    // ancestor is private — the whole subtree must be excluded.
+    let app = parse("mod internal;");
+    let internal = parse("pub mod deep;");
+    let deep = parse("pub fn helper() {}");
+    let files = vec![
+        ("src/application/mod.rs", &app),
+        ("src/application/internal/mod.rs", &internal),
+        ("src/application/internal/deep.rs", &deep),
+    ];
+    let aliases = aliases_from_files(&files);
+    let by_layer = collect_pub_fns_by_layer(
+        &files,
+        &aliases,
+        &three_layer(),
+        &HashSet::new(),
+        &HashSet::new(),
+    );
+    let app_fns = names_for_layer(&by_layer, "application");
+    assert!(
+        !app_fns.contains("helper"),
+        "private ancestor `mod internal;` must hide pub fns in deep descendants, got {app_fns:?}"
+    );
+}
+
+#[test]
 fn test_collect_pub_fns_excludes_pub_fn_in_file_backed_private_module() {
     // `mod internal;` (without `pub`) keeps `src/application/internal.rs`
     // private to the parent. `pub fn helper()` inside that file must

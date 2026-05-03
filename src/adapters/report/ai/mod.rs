@@ -1,4 +1,4 @@
-//! AI-targeted output (TOON-encoded or pretty JSON).
+//! AI-targeted output (TOON-encoded or compact JSON).
 
 mod details;
 mod format;
@@ -26,7 +26,9 @@ use crate::ports::Reporter;
 use crate::report::AnalysisResult;
 
 /// Output format for `AiReporter`. TOON is the default human/LLM-friendly
-/// compact encoding; JSON is the standard pretty form.
+/// compact encoding; JSON is the same envelope as a single-line compact
+/// JSON string (no pretty-printing — both formats prioritise token
+/// efficiency for LLM prompts).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AiOutputFormat {
     Toon,

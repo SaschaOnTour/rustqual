@@ -1,11 +1,23 @@
 # `architecture.call_parity` — Golden Example
 
-A toy workspace that demonstrates the two checks `[architecture.call_parity]` runs:
+A toy workspace that demonstrates `[architecture.call_parity]`. The
+rule actually runs **four checks** A/B/C/D — this fixture exercises
+A and B (the two coverage checks); Check C (`single_touchpoint`,
+default `"warn"`) emits at `Severity::Low` if a handler reaches more
+than one target node, and Check D (`multiplicity_mismatch`) flags
+divergent per-adapter handler counts:
 
 - **no_delegation (Check A)** — every `pub fn` in an adapter layer
-  must transitively delegate into the target (application) layer.
-- **missing_adapter (Check B)** — every `pub fn` in the target
-  layer must be reached from every adapter layer.
+  must reach the target (application) layer at the boundary
+  (forward BFS, stops on first target hit).
+- **missing_adapter (Check B)** — every `pub fn` in the target layer
+  must be reached from every adapter layer (or be transitively
+  reachable from some adapter touchpoint via target-internal callers).
+- **multi_touchpoint (Check C)** — `single_touchpoint = "warn"` by
+  default, so a handler that orchestrates across more than one
+  target capability emits a low-severity finding.
+- **multiplicity_mismatch (Check D)** — a target reached by every
+  adapter must be reached with the same handler count from each.
 
 ## Layout
 

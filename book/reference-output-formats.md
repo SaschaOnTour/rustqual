@@ -178,7 +178,9 @@ full JSON, focused on what an agent needs to act:
 
 - `ai` — TOON-encoded version of the same envelope as `ai-json`.
   Token-efficient indented form for prompt embedding.
-- `ai-json` — pretty JSON envelope:
+- `ai-json` — compact (single-line) JSON envelope. Same content as
+  the TOON form, just JSON-encoded; both prioritise token efficiency
+  for LLM prompts. Example expanded for readability:
 
   ```jsonc
   {
