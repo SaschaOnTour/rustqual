@@ -118,6 +118,7 @@ impl<'a> ReporterImpl for TextReporter<'a> {
                 &coupling.structural_rows,
             ));
             out.push_str(&format_architecture_section(&architecture));
+            out.push_str(&format_orphan_suppressions_section(self.findings_entries));
         } else {
             out.push_str(&format_findings_list(self.findings_entries));
         }
@@ -150,6 +151,32 @@ fn format_findings_list(entries: &[FindingEntry]) -> String {
         } else {
             let _ = writeln!(out, "  {}:{}  {}  {}", e.file, e.line, e.category, detail);
         }
+    });
+    out
+}
+
+/// Verbose path renders one section per dimension; orphan suppressions
+/// have no dedicated dimension section, so without this filtered list
+/// a verbose run would fail (default-fail counts orphans) without
+/// printing the file/line/reason needed to fix them.
+fn format_orphan_suppressions_section(entries: &[FindingEntry]) -> String {
+    let orphans: Vec<&FindingEntry> = entries
+        .iter()
+        .filter(|e| e.category == "ORPHAN_SUPPRESSION")
+        .collect();
+    if orphans.is_empty() {
+        return String::new();
+    }
+    let n = orphans.len();
+    let heading = format!(
+        "\n═══ {} Orphan Suppression{} ═══",
+        n,
+        if n == 1 { "" } else { "s" }
+    );
+    let mut out = String::new();
+    let _ = writeln!(out, "{}", heading.bold());
+    orphans.iter().for_each(|e| {
+        let _ = writeln!(out, "  {}:{}  {}", e.file, e.line, e.detail);
     });
     out
 }

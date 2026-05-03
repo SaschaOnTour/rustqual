@@ -999,6 +999,52 @@ fn trait_dispatch_skips_unrelated_methods() {
 }
 
 #[test]
+fn trait_dispatch_routes_default_method_to_trait_not_impl() {
+    // `trait Handler { fn handle(&self) {} } impl Handler for AppHandler {}`
+    // — the impl block has no `handle` body, so the call inherits the
+    // trait's default. Dispatch must emit `Handler::handle` (where the
+    // body lives), NOT `AppHandler::handle` (which doesn't exist as a
+    // graph node). Otherwise Check A/B/D would reason about a phantom
+    // touchpoint.
+    let fx = parse(
+        r#"
+        use crate::ports::Handler;
+        pub fn dispatch(h: &dyn Handler) {
+            h.handle();
+        }
+        "#,
+    );
+    let mut index = WorkspaceTypeIndex::new();
+    index.trait_methods.insert(
+        "crate::ports::Handler".to_string(),
+        std::iter::once("handle".to_string()).collect(),
+    );
+    index.trait_impls.insert(
+        "crate::ports::Handler".to_string(),
+        vec!["crate::app::AppHandler".to_string()],
+    );
+    // Empty override set ⇒ `AppHandler` inherits the default body.
+    let mut by_impl: std::collections::HashMap<String, std::collections::HashSet<String>> =
+        std::collections::HashMap::new();
+    by_impl.insert(
+        "crate::app::AppHandler".to_string(),
+        std::collections::HashSet::new(),
+    );
+    index
+        .trait_impl_overrides
+        .insert("crate::ports::Handler".to_string(), by_impl);
+    let calls = run(&fx, &index, "dispatch");
+    assert!(
+        calls.contains("crate::ports::Handler::handle"),
+        "default-method dispatch must route to trait body, got {calls:?}"
+    );
+    assert!(
+        !calls.contains("crate::app::AppHandler::handle"),
+        "must not fabricate impl-method edge for non-overriding impl, got {calls:?}"
+    );
+}
+
+#[test]
 fn trait_dispatch_with_send_marker_still_resolves() {
     // `dyn Handler + Send + 'static` — marker traits skipped, Handler wins.
     let fx = parse(

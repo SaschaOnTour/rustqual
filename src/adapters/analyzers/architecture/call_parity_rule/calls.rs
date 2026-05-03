@@ -676,7 +676,13 @@ fn canonical_edges_for_method(
 
 /// Enumerate one edge per workspace impl of the trait. Filters on
 /// `trait_has_method` so `dyn Trait.unrelated_method()` still falls
-/// through to `<method>:name`. Operation: index lookup + map.
+/// through to `<method>:name`. Default-method dispatch routes to
+/// `<trait>::<method>` (the default body lives on the trait); only
+/// impls that actually override the method get an `<impl>::<method>`
+/// edge. Without that split, every `impl Trait for X {}` (no
+/// override) would fabricate an `X::method` graph node that doesn't
+/// exist, and Check A/B/D would reason about a phantom touchpoint.
+/// Operation: index lookup + map.
 fn trait_dispatch_edges(
     trait_segs: &[String],
     method: &str,
@@ -686,11 +692,20 @@ fn trait_dispatch_edges(
     if !workspace.trait_has_method(&trait_canonical, method) {
         return Vec::new();
     }
-    workspace
-        .impls_of_trait(&trait_canonical)
-        .iter()
-        .map(|impl_type| format!("{impl_type}::{method}"))
-        .collect()
+    let impls = workspace.impls_of_trait(&trait_canonical);
+    let mut edges: Vec<String> = Vec::new();
+    let mut any_uses_default = false;
+    for impl_type in impls {
+        if workspace.impl_overrides_method(&trait_canonical, impl_type, method) {
+            edges.push(format!("{impl_type}::{method}"));
+        } else {
+            any_uses_default = true;
+        }
+    }
+    if any_uses_default {
+        edges.push(format!("{trait_canonical}::{method}"));
+    }
+    edges
 }
 
 /// Adapter that exposes the collector's `Vec<HashMap<String, Vec<String>>>`

@@ -31,8 +31,9 @@ enum MatchMode {
     /// `sup.line <= line && line - sup.line <= n`.
     LineWindow(usize),
     /// File-global match: any marker anywhere in the file accepts.
-    /// Used for SRP module warnings and Architecture findings whose
-    /// marking logic is file-scoped.
+    /// Used for SRP module warnings (line 1, file-level marker) — the
+    /// remaining dimensions, including Architecture, use line-window
+    /// matching that mirrors their `mark_*_suppressions` semantics.
     FileScope,
 }
 

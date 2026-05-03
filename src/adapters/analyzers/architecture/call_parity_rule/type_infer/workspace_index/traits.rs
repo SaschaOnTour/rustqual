@@ -115,11 +115,24 @@ fn record_trait_impl(
         return;
     };
     let impl_canonical = canonical_impl_type(&impl_segs, ctx, mod_stack);
+    let overridden: std::collections::HashSet<String> = node
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            syn::ImplItem::Fn(f) => Some(f.sig.ident.to_string()),
+            _ => None,
+        })
+        .collect();
     index
         .trait_impls
+        .entry(trait_canonical.clone())
+        .or_default()
+        .push(impl_canonical.clone());
+    index
+        .trait_impl_overrides
         .entry(trait_canonical)
         .or_default()
-        .push(impl_canonical);
+        .insert(impl_canonical, overridden);
 }
 
 /// Resolve a trait path (the `T` in `impl T for X`) to its canonical

@@ -115,6 +115,14 @@ pub struct WorkspaceTypeIndex {
     /// trait-dispatch so `dyn Trait.unrelated_method()` stays
     /// unresolved.
     pub trait_methods: HashMap<String, std::collections::HashSet<String>>,
+    /// `trait_canonical → {impl_type_canonical → {overridden_method, …}}`.
+    /// For every `impl Trait for X { … }`, records which methods the
+    /// impl block actually defines. Default-method dispatch routes
+    /// to `<trait>::<method>` when the impl doesn't override —
+    /// otherwise to `<impl>::<method>`. Without this, dispatch
+    /// would fabricate an `impl::method` graph node that doesn't
+    /// exist (the body lives on the trait).
+    pub trait_impl_overrides: HashMap<String, HashMap<String, std::collections::HashSet<String>>>,
     /// `alias_canonical → AliasDef`. Use-sites substitute generic args
     /// into `target` and resolve the result against the alias's own
     /// `decl_file` / `decl_mod_stack` scope (not the use-site's).
@@ -198,6 +206,33 @@ impl WorkspaceTypeIndex {
         self.trait_methods
             .get(trait_canonical)
             .is_some_and(|methods| methods.contains(method_name))
+    }
+
+    // qual:api
+    /// True iff `impl_type_canonical` overrides `method_name` in its
+    /// `impl trait_canonical for impl_type_canonical { … }` block.
+    /// Returns false when the impl inherits the trait's default body
+    /// for that method. Returns **true** when there's no record at
+    /// all — preserves the original "assume override" behaviour for
+    /// hand-built test indices that populate `trait_impls` without
+    /// `trait_impl_overrides`. The production builder
+    /// (`traits.rs::record_trait_impl`) always populates both, so a
+    /// real-world `impl Trait for X {}` (no method bodies) records
+    /// an empty set and routes the call to the trait default. Operation.
+    pub fn impl_overrides_method(
+        &self,
+        trait_canonical: &str,
+        impl_type_canonical: &str,
+        method_name: &str,
+    ) -> bool {
+        match self
+            .trait_impl_overrides
+            .get(trait_canonical)
+            .and_then(|by_impl| by_impl.get(impl_type_canonical))
+        {
+            Some(methods) => methods.contains(method_name),
+            None => true,
+        }
     }
 }
 
