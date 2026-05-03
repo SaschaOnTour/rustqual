@@ -16,7 +16,7 @@ use crate::adapters::analyzers::architecture::call_parity_rule::bindings::{
 };
 use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::resolve_impl_self_type;
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
-use crate::adapters::shared::cfg_test::has_cfg_test;
+use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
 use std::collections::HashSet;
 use syn::visit::Visit;
 
@@ -115,11 +115,18 @@ fn record_trait_impl(
         return;
     };
     let impl_canonical = canonical_impl_type(&impl_segs, ctx, mod_stack);
+    // Skip cfg-test / #[test]-gated impl items so `dispatch_edges` does
+    // not emit a phantom touchpoint for a test-only override of a
+    // default method (the workspace graph and `method_returns` index
+    // both skip those items, so the production call still inherits
+    // the trait default and stays unresolved).
     let overridden: std::collections::HashSet<String> = node
         .items
         .iter()
         .filter_map(|item| match item {
-            syn::ImplItem::Fn(f) => Some(f.sig.ident.to_string()),
+            syn::ImplItem::Fn(f) if !has_cfg_test(&f.attrs) && !has_test_attr(&f.attrs) => {
+                Some(f.sig.ident.to_string())
+            }
             _ => None,
         })
         .collect();

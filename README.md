@@ -198,7 +198,7 @@ pub fn build_test_session() -> Session { /* … */ }
 
 ## Output formats
 
-`--format <FMT>` — `text` (default), `json`, `github`, `sarif`, `dot`, `html`, `ai`, `ai-json`. Same analysis, different serialisation. Full reference: [book/reference-output-formats.md](./book/reference-output-formats.md).
+`--format <FMT>` — `text` (default), `json`, `github`, `sarif`, `html`, `ai`, `ai-json` all serialise the same findings + summary. `dot` is data-only: it renders the per-function call graph and skips findings / orphan suppressions, so pair it with another format if the run might have diagnostics. Full reference: [book/reference-output-formats.md](./book/reference-output-formats.md).
 
 ## Self-compliance
 

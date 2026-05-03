@@ -51,9 +51,47 @@ observing 18 compile errors across all 9 reporter sites.
   and the `deprecated_render_findings` / `deprecated_render_analysis_data`
   helpers — fully replaced by the sealed design.
 
+### Fixed
+
+- **Trait-dispatch conservative drop for non-overriding impls.**
+  `calls::trait_dispatch_edges` previously emitted `<impl>::<method>`
+  for every workspace impl of a dispatched trait method, including
+  impls that inherit the default body. The default body lives on the
+  trait, not the impl — so the emitted node had no graph entry,
+  no return type, no callees. Check A was falsely satisfied and
+  Check B/D were blind to default-body callees. Non-overriding impls
+  now produce no edge; calls fall through to "unresolved" in line
+  with rustqual's no-phantom-edges guarantee. Documented as
+  Limitation #5 in `book/adapter-parity.md`.
+- **`record_trait_impl` filters cfg-test / `#[test]` overrides.**
+  `WorkspaceTypeIndex.trait_impl_overrides` used to record every
+  `ImplItem::Fn`, including test-only methods. Production dispatch
+  then routed to a phantom `Type::method` for a test-only override
+  while the workspace call graph + `method_returns` index correctly
+  skipped those items. The override set is now filtered with
+  `has_cfg_test` + `has_test_attr`, mirroring `methods.rs`.
+- **PubFnCollector relaxes self-type visibility for visible-trait
+  impls.** `impl PubTrait for Hidden { fn handle() {} }` registers
+  `Hidden::handle` as a target pub-fn even when `Hidden` is private,
+  because trait-dispatch can emit `Hidden::handle` as a touchpoint
+  via an intra-crate factory producing `dyn PubTrait`. Without this,
+  Check B/D had a dispatch-emitted touchpoint with no corresponding
+  target pub-fn — silent coverage gap. Regression test
+  `test_collect_pub_fns_records_trait_impl_method_on_private_self_type`
+  added.
+
+### Documented limitations
+
+- Function re-exports (`pub use private::op` for `pub fn op()`) are
+  intentionally filtered from the visible-types set so private
+  same-named types don't leak. The trade-off — pub-use-only
+  functions are blind to Check B/D — is documented as Limitation #4
+  in `book/adapter-parity.md`. Workaround: declare the function at
+  a publicly-reachable path directly.
+
 ### Internal
 
-- 1551 tests, 100% quality across all seven dimensions, 0 findings,
+- 1565 tests, 100% quality across all seven dimensions, 0 findings,
   0 clippy warnings.
 - All `qual:allow(dry)` and `qual:allow(srp)` markers added during
   the migration phases removed: github helpers refactored to a

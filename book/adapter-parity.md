@@ -92,10 +92,32 @@ disagree and can produce false-negative Check-B coverage:
    and caller-canonical agree, or `qual:allow(architecture)` at the
    call-site.
 
+4. **Public function re-exports.** `mod private { pub fn op() {} }
+   pub use private::op;` — the visibility pass chases type
+   re-exports through `chase_alias_chain` in `walk_use_tree`, but
+   value re-exports (functions, consts, statics) are intentionally
+   filtered out (they would otherwise leak same-named private types
+   into the visible-type set). The trade-off: a function exposed
+   only via `pub use` is missed by the target pub-fn set, so Check
+   B/D may not require adapter coverage for it. Workaround: declare
+   the function at a publicly-reachable path directly, or wrap it
+   in a public struct method.
+
+5. **Trait default-method bodies.** `trait Handler { fn handle(&self) {} }
+   impl Handler for X {}` — the impl inherits the default body, but
+   the workspace call graph doesn't model `TraitItemFn::default` as
+   a node. Dispatch on `dyn Handler.handle()` for non-overriding
+   impls is intentionally left **unresolved** (no edge emitted)
+   rather than fabricating a phantom sink. Calls inside the default
+   body are therefore invisible to Check A/B/D. Workaround:
+   override the method explicitly in each impl, or move the body
+   into a free function the trait method delegates to.
+
 If you hit any of these patterns in practice, please open an issue
-with the exact alias / re-export shape — the fixes touch several
-call sites in the call-parity pipeline and we'd like a real-world
-example to drive the substitution semantics rather than guessing.
+with the exact alias / re-export / dispatch shape — the fixes
+touch several call sites in the call-parity pipeline and we'd like
+a real-world example to drive the substitution semantics rather
+than guessing.
 
 ## Why this is unusual
 
@@ -121,7 +143,7 @@ A naive analyzer sees `.diff()` on something it can't name and gives up — that
 
 - Method-chain constructors and stdlib combinator returns (`Result::map_err`, `Option::ok`, `Future::await`, `Result::inspect`, …)
 - Field access chains (`ctx.session.diff()`)
-- Trait dispatch on `dyn Trait` and `impl Trait` (over-approximated to every workspace impl)
+- Trait dispatch on `dyn Trait` and `impl Trait` (over-approximated to every workspace impl that **overrides** the called method — non-overriding impls inherit the trait default body, which is not modeled as a graph node, so those calls are intentionally left unresolved; see Limitations)
 - Type aliases — including chains, wrappers (`Box<Hidden>`), and re-exports
 - Renamed imports (`use std::sync::Arc as Shared;`) — with shadow detection so a local `crate::wrap::Arc` doesn't masquerade as stdlib
 - `Self` substitution across all resolver paths so impl-internal delegation works

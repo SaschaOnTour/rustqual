@@ -218,7 +218,10 @@ impl WorkspaceTypeIndex {
     /// `trait_impl_overrides`. The production builder
     /// (`traits.rs::record_trait_impl`) always populates both, so a
     /// real-world `impl Trait for X {}` (no method bodies) records
-    /// an empty set and routes the call to the trait default. Operation.
+    /// an empty set and the dispatch edge is dropped — non-overriding
+    /// impls inherit the trait default body, which is not modeled as
+    /// a graph node, so those calls stay unresolved (no phantom edge).
+    /// Operation.
     pub fn impl_overrides_method(
         &self,
         trait_canonical: &str,

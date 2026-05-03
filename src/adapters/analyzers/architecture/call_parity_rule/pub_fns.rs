@@ -240,8 +240,17 @@ impl<'ast, 'vis> Visit<'ast> for PubFnCollector<'ast, 'vis> {
         // relaxation, `impl_overrides_method`-routed dispatch could
         // emit `X::m` as a touchpoint while `X::m` never enters the
         // target pub-fn set, hiding peer-adapter coverage gaps.
-        let method_visible = is_visible(&node.vis) || self.current_impl_is_visible_trait();
-        if self.current_impl_visible() && method_visible && !is_test_fn(&node.attrs) {
+        //
+        // Self-type visibility is intentionally relaxed for trait
+        // impls: `impl PubTrait for Hidden { fn m() {} }` is still
+        // recorded because intra-crate factories can produce a
+        // `dyn PubTrait` backed by `Hidden`, and dispatch emits the
+        // `Hidden::m` edge accordingly. Pub-fn-set must agree with
+        // dispatch to keep Check B/D coverage consistent.
+        let trait_visible = self.current_impl_is_visible_trait();
+        let surface_visible = self.current_impl_visible() || trait_visible;
+        let method_visible = is_visible(&node.vis) || trait_visible;
+        if surface_visible && method_visible && !is_test_fn(&node.attrs) {
             let line = syn::spanned::Spanned::span(&node.sig.ident).start().line;
             let name = node.sig.ident.to_string();
             self.record_fn(name, line, &node.block, &node.sig, &node.attrs);

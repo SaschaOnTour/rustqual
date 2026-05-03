@@ -931,6 +931,40 @@ fn test_collect_pub_fns_records_pub_use_reexport_with_qualified_impl() {
 }
 
 #[test]
+fn test_collect_pub_fns_records_trait_impl_method_on_private_self_type() {
+    // `impl PubTrait for Hidden { fn handle() }` — `Hidden` is private,
+    // but intra-crate factories can produce a `dyn PubTrait` backed by
+    // it. Dispatch emits `Hidden::handle` as a touchpoint, so the
+    // pub-fn set must include it too — otherwise Check B/D would have
+    // a dispatch-emitted touchpoint with no corresponding target pub-fn.
+    let file = parse(
+        r#"
+        pub trait PubTrait {
+            fn handle(&self);
+        }
+        struct Hidden;
+        impl PubTrait for Hidden {
+            fn handle(&self) {}
+        }
+        "#,
+    );
+    let files = vec![("src/application/mod.rs", &file)];
+    let aliases = aliases_from_files(&files);
+    let by_layer = collect_pub_fns_by_layer(
+        &files,
+        &aliases,
+        &three_layer(),
+        &HashSet::new(),
+        &HashSet::new(),
+    );
+    let app = names_for_layer(&by_layer, "application");
+    assert!(
+        app.contains("handle"),
+        "trait-impl method on private self type must enter pub-fn set so dispatch + target surface agree, got {app:?}"
+    );
+}
+
+#[test]
 fn test_collect_pub_fns_records_inherited_trait_impl_methods() {
     // `impl PubTrait for X { fn handle(&self) {} }` — the impl-item
     // `vis` is `Inherited`, but the method is part of the public
