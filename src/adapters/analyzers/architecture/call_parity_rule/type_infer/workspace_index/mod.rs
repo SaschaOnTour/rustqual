@@ -36,6 +36,15 @@ pub(super) struct BuildContext<'a> {
     pub type_aliases: Option<&'a HashMap<String, AliasDef>>,
 }
 
+/// Source location of a recorded type-index entry (currently used for
+/// trait-method declarations). 1-based line, 0-based column.
+#[derive(Debug, Clone)]
+pub struct MethodLocation {
+    pub file: String,
+    pub line: usize,
+    pub column: usize,
+}
+
 /// Workspace type-alias entry, keyed under the alias's canonical name.
 /// `target` is resolved against the alias's *own* declaring scope, not
 /// the use-site's, so cross-module aliases (`use crate::store::Store;
@@ -109,12 +118,28 @@ pub struct WorkspaceTypeIndex {
     pub fn_returns: HashMap<String, CanonicalType>,
     /// `trait_canonical → [impl_type_canonical, …]`. Every
     /// `impl Trait for X` in the workspace contributes one entry so
-    /// trait-dispatch can over-approximate edges to every impl.
+    /// the anchor index can populate `AnchorInfo.impl_layers` and
+    /// `AnchorInfo.impl_method_canonicals` (the unified target-
+    /// capability rule reads both).
     pub trait_impls: HashMap<String, Vec<String>>,
     /// `trait_canonical → {method_name, …}`. Gates
     /// trait-dispatch so `dyn Trait.unrelated_method()` stays
     /// unresolved.
     pub trait_methods: HashMap<String, std::collections::HashSet<String>>,
+    /// `(trait_canonical, method_name) → source location` (file +
+    /// 1-based line + column). Carried alongside `trait_methods` so
+    /// synthetic anchor findings can attach a real source location
+    /// (suppression windows, orphan detector, SARIF).
+    pub trait_method_locations: HashMap<(String, String), MethodLocation>,
+    /// `(trait_canonical, method_name)` for every trait method that
+    /// declares a default body (`fn m(&self) { … }` inside the trait
+    /// itself, not just a signature). Drives the unified target-
+    /// capability rule: a trait declared in the target layer is a
+    /// capability iff the method either has a default body OR an
+    /// overriding impl in the target — methods that are pure
+    /// signatures (no default, no impl) are uncallable and not a
+    /// capability.
+    pub trait_methods_with_default_body: HashSet<(String, String)>,
     /// `trait_canonical → {impl_type_canonical → {overridden_method, …}}`.
     /// For every `impl Trait for X { … }`, records which methods the
     /// impl block actually defines. Default-method dispatch routes
@@ -214,6 +239,30 @@ impl WorkspaceTypeIndex {
     /// index. Operation.
     pub fn trait_methods_iter(&self) -> impl Iterator<Item = (&String, &HashSet<String>)> {
         self.trait_methods.iter()
+    }
+
+    // qual:api
+    /// True iff the trait method declares a default body in the trait
+    /// itself. Used by the unified anchor-as-target-capability rule to
+    /// distinguish callable defaults from pure signatures. Operation.
+    pub fn trait_method_has_default_body(&self, trait_canonical: &str, method_name: &str) -> bool {
+        self.trait_methods_with_default_body
+            .contains(&(trait_canonical.to_string(), method_name.to_string()))
+    }
+
+    // qual:api
+    /// Look up the source location of a trait-method declaration.
+    /// Returns `None` for traits / methods not recorded in the index
+    /// (e.g. test-only items, synthetic test fixtures). Used by the
+    /// call-graph builder to attach a real location to synthetic
+    /// trait-method anchors. Operation.
+    pub fn trait_method_location(
+        &self,
+        trait_canonical: &str,
+        method_name: &str,
+    ) -> Option<&MethodLocation> {
+        self.trait_method_locations
+            .get(&(trait_canonical.to_string(), method_name.to_string()))
     }
 
     // qual:api

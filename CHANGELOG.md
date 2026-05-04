@@ -12,6 +12,42 @@ Patch release: **Reporter-Trait sealed two-trait + Snapshot pattern**,
 
 Late-cycle additions (post 2026-04-30 tag):
 
+### Anchor model — unified target-capability rule (Codex 2026-05-04 P1-P4)
+
+- **Single rule for walker + Check B/D**: `is_anchor_target_capability`
+  in `anchor_index` is the only source of truth for "is this anchor
+  a target capability". Walker (`is_target_boundary`) and Check B/D
+  (`target_anchor_capabilities`) share it; previously each side
+  re-implemented the rule and drifted (parallel-path inconsistency).
+  Rule: anchor passes iff (a) declaring layer is NOT a peer adapter,
+  AND (b) declaring layer IS the target with a callable body
+  (default OR overriding impl), OR at least one overriding impl
+  lives in the target layer.
+- **Peer-adapter anchor rejection** (P2): anchors whose declaring
+  trait lives in a configured peer-adapter layer are excluded from
+  target capabilities. Prevents `cli` from inheriting `mcp::Handler`
+  coverage via the anchor side-channel.
+- **Default-only target-layer anchors** (P3): trait declared in
+  target with a default body and no overriding impls is now
+  enumerated as a capability — Check A used to accept the touchpoint
+  (anchor in target layer) while Check B/D refused to enumerate
+  ("no overriding impl"). Pure-signature trait methods (no default,
+  no impl) stay rejected (uncallable).
+- **Concrete impl-method skip in Check B/D** (P1): when an anchor is
+  enumerated as target capability, its overriding impl-method
+  canonicals (`<Impl>::<method>`) are skipped in the concrete
+  pub-fn iteration. Adapters that dispatch via `dyn Trait.method()`
+  reach only the anchor — without the skip, every concrete impl
+  would be flagged as orphan.
+- **Anchor findings carry real source line** (P4): `AnchorInfo` now
+  stores the trait method's source location captured at
+  type-index-build time (`MethodLocation { file, line, column }`).
+  Anchor findings (Check B `CallParityMissingAdapter`, Check D
+  `CallParityMultiplicityMismatch`) report the trait method's
+  declaration line instead of `line: 0`. Suppression-window
+  matching, the orphan detector's window scan, and SARIF
+  `startLine` validity all work for anchor-level findings.
+
 ### Added
 
 - **Trait-method anchor model for call-parity dispatch**: `dyn

@@ -70,7 +70,10 @@ fn record_trait_impl_excludes_cfg_test_overrides_from_overridden_set() {
         "#,
     )]);
     let graph = build_graph_only(&ws, &three_layer(), &empty_cfg_test(), &HashSet::new());
-    let caps = graph.target_anchor_capabilities("application");
+    let caps: std::collections::HashSet<&str> = graph
+        .target_anchor_capabilities("application", &[])
+        .map(|(name, _)| name)
+        .collect();
     assert!(
         caps.contains("crate::application::h::Handler::handle"),
         "production method must be present as anchor capability, got {caps:?}"

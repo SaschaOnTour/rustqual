@@ -782,6 +782,52 @@ fn check_b_silent_when_anchor_covered_by_all_adapters() {
 }
 
 #[test]
+fn check_b_silent_for_concrete_impl_when_only_anchor_reached() {
+    // Both adapters dispatch via `dyn Handler.handle()`. The walker
+    // registers ONLY the anchor `Handler::handle` as touchpoint —
+    // concrete impl methods like `LoggingHandler::handle` never enter
+    // the touchpoint set via dispatch. Without F5's anchor-backed-
+    // concrete skip, Check B would flag `LoggingHandler::handle` as
+    // an orphan even though the trait-method anchor IS covered by
+    // both adapters.
+    let ws = build_workspace(&[
+        (
+            "src/ports/handler.rs",
+            "pub trait Handler { fn handle(&self); }",
+        ),
+        (
+            "src/application/logging.rs",
+            r#"
+            use crate::ports::handler::Handler;
+            pub struct LoggingHandler;
+            impl Handler for LoggingHandler { fn handle(&self) {} }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::ports::handler::Handler;
+            pub fn cmd_dispatch(h: &dyn Handler) { h.handle(); }
+            "#,
+        ),
+        (
+            "src/mcp/handlers.rs",
+            r#"
+            use crate::ports::handler::Handler;
+            pub fn mcp_dispatch(h: &dyn Handler) { h.handle(); }
+            "#,
+        ),
+    ]);
+    let findings = run_check_b(&ws, &ports_app_cli_mcp(), &ports_cp(), &empty_cfg_test());
+    let pairs = missing_pairs(&findings);
+    let concrete = "crate::application::logging::LoggingHandler::handle";
+    assert!(
+        !pairs.iter().any(|(target, _)| target == concrete),
+        "concrete impl-method must NOT be flagged as orphan when its anchor is covered; got {pairs:?}"
+    );
+}
+
+#[test]
 fn check_b_flags_anchor_orphan_when_no_adapter_reaches_it() {
     // Trait `Orphan` in ports with overriding impl in application.
     // No adapter dispatches through it. The anchor is a target
@@ -810,5 +856,54 @@ fn check_b_flags_anchor_orphan_when_no_adapter_reaches_it() {
     assert!(
         pairs.iter().any(|(target, _)| target == anchor),
         "anchor reached by NO adapter must be flagged as orphan, got {pairs:?}"
+    );
+}
+
+#[test]
+fn anchor_finding_carries_trait_method_source_line() {
+    // Anchor findings must carry the trait method's real file + line
+    // (1-based) — line=0 placeholders break suppression-window matching,
+    // the orphan detector's window scan, and SARIF startLine validity.
+    let ws = build_workspace(&[
+        (
+            // Lines: 1=blank, 2=trait header, 3=method decl
+            "src/ports/orphan.rs",
+            "\npub trait Orphan {\n    fn handle(&self);\n}\n",
+        ),
+        (
+            "src/application/orphan_impl.rs",
+            r#"
+            use crate::ports::orphan::Orphan;
+            pub struct OrphanImpl;
+            impl Orphan for OrphanImpl { fn handle(&self) {} }
+            "#,
+        ),
+        ("src/cli/handlers.rs", "pub fn cmd_other() {}"),
+        ("src/mcp/handlers.rs", "pub fn mcp_other() {}"),
+    ]);
+    let findings = run_check_b(&ws, &ports_app_cli_mcp(), &ports_cp(), &empty_cfg_test());
+    let anchor = "crate::ports::orphan::Orphan::handle";
+    let hit = findings
+        .iter()
+        .find(|f| match &f.kind {
+            ViolationKind::CallParityMissingAdapter { target_fn, .. } => target_fn == anchor,
+            _ => false,
+        })
+        .unwrap_or_else(|| panic!("anchor orphan finding missing, got {findings:?}"));
+    assert_eq!(
+        hit.file, "src/ports/orphan.rs",
+        "anchor finding must carry the trait method's source file, got {hit:?}"
+    );
+    assert_eq!(
+        hit.line, 3,
+        "anchor finding must carry the trait method's 1-based line number, got {hit:?}"
+    );
+    // F6.3 cross-check: anchor finding line is non-zero AND a
+    // valid 1-based line number, matching SARIF startLine
+    // requirements and what suppression-window matchers expect.
+    assert!(
+        hit.line >= 1,
+        "anchor finding line must be 1-based (>=1), got {}",
+        hit.line
     );
 }

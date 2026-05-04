@@ -33,7 +33,9 @@ pub use infer::{infer_type, BindingLookup, FlatBindings, InferContext};
 pub use patterns::{extract_bindings, extract_for_bindings};
 
 // qual:api
-pub use workspace_index::{build_workspace_type_index, WorkspaceIndexInputs, WorkspaceTypeIndex};
+pub use workspace_index::{
+    build_workspace_type_index, MethodLocation, WorkspaceIndexInputs, WorkspaceTypeIndex,
+};
 
 #[cfg(test)]
 mod tests;

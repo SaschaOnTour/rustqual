@@ -32,11 +32,12 @@
 //! - `// qual:allow(architecture)` above the target fn — handled by the
 //!   architecture-dimension suppression pipeline.
 
+use super::anchor_index::AnchorInfo;
 use super::check_b_coverage::{
     build_adapter_coverage, build_adapter_reachable_targets, AdapterCoverage,
 };
 use super::pub_fns::PubFnInfo;
-use super::workspace_graph::{anchor_canonical_to_file_path, canonical_name_for_pub_fn, CallGraph};
+use super::workspace_graph::{canonical_name_for_pub_fn, CallGraph};
 use super::HandlerTouchpoints;
 use crate::adapters::analyzers::architecture::compiled::CompiledCallParity;
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
@@ -65,12 +66,22 @@ pub(crate) fn check_missing_adapter<'ast>(
     };
     let mut out = Vec::new();
     for info in targets {
+        // Concrete impl-methods of a trait whose anchor is enumerated
+        // as target capability are skipped: the anchor takes
+        // capability responsibility, otherwise an adapter that only
+        // dispatches via `dyn Trait.method()` would silently produce
+        // a false orphan finding for every concrete impl-method that
+        // never appears in the touchpoint set.
+        let canonical = canonical_name_for_pub_fn(info);
+        if graph.is_anchor_backed_concrete(&canonical, &cp.target, &cp.adapters) {
+            continue;
+        }
         if let Some(hit) = inspect_target(info, &ctx) {
             out.push(hit);
         }
     }
-    for anchor in graph.target_anchor_capabilities(&cp.target) {
-        if let Some(hit) = inspect_anchor(anchor, &ctx) {
+    for (anchor, info) in graph.target_anchor_capabilities(&cp.target, &cp.adapters) {
+        if let Some(hit) = inspect_anchor(anchor, info, &ctx) {
             out.push(hit);
         }
     }
@@ -92,7 +103,7 @@ pub(crate) fn check_missing_adapter<'ast>(
 /// Cross-form synonym handling is intentionally left out — it would
 /// require a graph-level synonym index and design discussion before
 /// implementation. Operation: probe coverage on the anchor canonical.
-fn inspect_anchor(anchor: &str, ctx: &TargetCtx<'_>) -> Option<MatchLocation> {
+fn inspect_anchor(anchor: &str, info: &AnchorInfo, ctx: &TargetCtx<'_>) -> Option<MatchLocation> {
     if is_excluded(anchor, ctx.cp) {
         return None;
     }
@@ -104,35 +115,25 @@ fn inspect_anchor(anchor: &str, ctx: &TargetCtx<'_>) -> Option<MatchLocation> {
     if reached.is_empty() && ctx.reachable.contains(anchor) {
         return None;
     }
-    Some(build_anchor_finding(
-        anchor.to_string(),
-        reached,
-        missing,
-        &ctx.cp.target,
-    ))
-}
-
-/// Construct a `CallParityMissingAdapter` MatchLocation for an anchor.
-/// File/line are derived from the anchor's canonical (trait declaration
-/// path) — column is 0. Operation: data construction.
-fn build_anchor_finding(
-    canonical: String,
-    mut reached: Vec<String>,
-    missing: Vec<String>,
-    target_layer: &str,
-) -> MatchLocation {
+    // Anchor findings need a real source location for suppression-window
+    // matching, the orphan detector, and SARIF `startLine` validity. If
+    // the type index didn't capture a span (synthetic fixtures, edge
+    // cases), suppressing the finding is preferable to emitting one
+    // with line=0 that silently won't match any `qual:allow` window.
+    let location = info.location.as_ref()?;
+    let mut reached = reached;
     reached.sort();
-    MatchLocation {
-        file: anchor_canonical_to_file_path(&canonical),
-        line: 0,
-        column: 0,
+    Some(MatchLocation {
+        file: location.file.clone(),
+        line: location.line,
+        column: location.column,
         kind: ViolationKind::CallParityMissingAdapter {
-            target_fn: canonical,
-            target_layer: target_layer.to_string(),
+            target_fn: anchor.to_string(),
+            target_layer: ctx.cp.target.clone(),
             reached_adapters: reached,
             missing_adapters: missing,
         },
-    }
+    })
 }
 
 /// Read-only context bundle threaded into `inspect_target`. Operation:

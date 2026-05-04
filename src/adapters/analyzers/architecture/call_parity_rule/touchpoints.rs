@@ -20,6 +20,7 @@
 //! `record_operation` → `impact_count`) are NOT inspected. Only the
 //! first crossing into the target layer counts.
 
+use super::anchor_index::is_anchor_target_capability;
 use super::workspace_graph::{CallGraph, WalkState};
 use std::collections::HashSet;
 
@@ -100,12 +101,22 @@ impl TouchpointWalk<'_> {
     ///    into one canonical capability so Check C doesn't fire on a
     ///    single boundary call.
     fn is_target_boundary(&self, node: &str) -> bool {
-        if self.ctx.graph.layer_of(node) == Some(self.ctx.target_layer) {
-            return true;
+        // Anchor check first, with the unified rule. If `node` is an
+        // anchor, the rule applies (peer-adapter rejection,
+        // default-only-target acceptance, target-impl acceptance) —
+        // we MUST NOT fall through to the layer-of-canonical check,
+        // which would otherwise accept peer-adapter-declared anchors
+        // or default-only-target anchors that the unified rule
+        // already handled. Single map lookup; pattern-matches the
+        // result instead of checking-then-getting twice.
+        if let Some(info) = self.ctx.graph.trait_method_anchors.get(node) {
+            return is_anchor_target_capability(
+                info,
+                self.ctx.target_layer,
+                self.ctx.adapter_layers,
+            );
         }
-        self.ctx
-            .graph
-            .anchor_reaches_target(node, self.ctx.target_layer)
+        self.ctx.graph.layer_of(node) == Some(self.ctx.target_layer)
     }
 
     /// True if `node` lives in an adapter layer that is not the origin

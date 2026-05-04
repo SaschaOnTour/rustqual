@@ -35,7 +35,10 @@ fn target_capabilities_include_trait_anchor_when_overriding_impl_in_target_layer
         &empty_cfg_test(),
         &HashSet::new(),
     );
-    let caps = graph.target_anchor_capabilities("application");
+    let caps: std::collections::HashSet<&str> = graph
+        .target_anchor_capabilities("application", &[])
+        .map(|(name, _)| name)
+        .collect();
     assert!(
         caps.contains("crate::ports::handler::Handler::handle"),
         "anchor for trait with overriding impl in target layer must appear in target capabilities; got {caps:?}"
@@ -80,15 +83,16 @@ fn populate_anchor_index_resolves_impl_layers_for_cross_file_impls() {
         &HashSet::new(),
     );
     let anchor = "crate::ports::handler::Handler::handle";
-    let layers = graph.trait_method_anchors.get(anchor).unwrap_or_else(|| {
+    let info = graph.trait_method_anchors.get(anchor).unwrap_or_else(|| {
         panic!(
             "anchor not registered, got {:?}",
             graph.trait_method_anchors
         )
     });
     assert!(
-        layers.contains("application"),
-        "cross-file impls in application must resolve to layer `application`, got {layers:?}"
+        info.impl_layers.contains("application"),
+        "cross-file impls in application must resolve to layer `application`, got {:?}",
+        info.impl_layers
     );
 }
 
@@ -119,9 +123,105 @@ fn target_capabilities_exclude_trait_anchor_without_target_layer_impl() {
         &empty_cfg_test(),
         &HashSet::new(),
     );
-    let caps = graph.target_anchor_capabilities("application");
+    let caps: std::collections::HashSet<&str> = graph
+        .target_anchor_capabilities("application", &[])
+        .map(|(name, _)| name)
+        .collect();
     assert!(
         !caps.contains("crate::ports::cli_only::CliOnly::handle"),
         "anchor with no impl in target layer must NOT appear in target capabilities; got {caps:?}"
+    );
+}
+
+#[test]
+fn target_anchor_capabilities_rejects_peer_adapter_declared_anchor() {
+    // Trait declared INSIDE a peer-adapter layer (`mcp`), with an
+    // overriding impl in `application` (target). Without the
+    // peer-adapter filter, a `cli` walk could enumerate this anchor
+    // as a target capability and fire false missing-adapter findings
+    // for an MCP-internal contract that has no business in CLI's
+    // surface.
+    let ws = build_workspace(&[
+        (
+            "src/mcp/handler.rs",
+            "pub trait Handler { fn handle(&self); }",
+        ),
+        (
+            "src/application/logging.rs",
+            r#"
+            use crate::mcp::handler::Handler;
+            pub struct LoggingHandler;
+            impl Handler for LoggingHandler { fn handle(&self) {} }
+            "#,
+        ),
+    ]);
+    let graph = build_graph_only(
+        &ws,
+        &ports_app_cli_mcp(),
+        &empty_cfg_test(),
+        &HashSet::new(),
+    );
+    let adapters = ["cli".to_string(), "mcp".to_string()];
+    let caps: std::collections::HashSet<&str> = graph
+        .target_anchor_capabilities("application", &adapters)
+        .map(|(name, _)| name)
+        .collect();
+    assert!(
+        !caps.contains("crate::mcp::handler::Handler::handle"),
+        "peer-adapter-declared anchor must NOT appear in target capabilities; got {caps:?}"
+    );
+}
+
+#[test]
+fn target_anchor_capabilities_includes_default_only_target_layer_trait() {
+    // Trait declared in the target layer with a default body, no
+    // overriding impls anywhere. The default body IS the capability —
+    // the anchor must be enumerated as target capability so Check B/D
+    // require adapter coverage.
+    let ws = build_workspace(&[(
+        "src/application/handler.rs",
+        // Default body in the trait itself; no impls.
+        "pub trait Handler { fn handle(&self) {} }",
+    )]);
+    let graph = build_graph_only(
+        &ws,
+        &ports_app_cli_mcp(),
+        &empty_cfg_test(),
+        &HashSet::new(),
+    );
+    let caps: std::collections::HashSet<&str> = graph
+        .target_anchor_capabilities("application", &[])
+        .map(|(name, _)| name)
+        .collect();
+    assert!(
+        caps.contains("crate::application::handler::Handler::handle"),
+        "default-only trait method in target layer must be a target capability; got {caps:?}"
+    );
+}
+
+#[test]
+fn target_anchor_capabilities_excludes_signature_only_target_layer_trait() {
+    // Trait declared in target layer but with NO default body and NO
+    // overriding impls. Pure signature is uncallable — must NOT count
+    // as a capability (regression guard for the cfg-test scenario
+    // that tripped during F1 design).
+    let ws = build_workspace(&[(
+        "src/application/handler.rs",
+        // Signature only — no default body.
+        "pub trait Handler { fn handle(&self); }",
+    )]);
+    let graph = build_graph_only(
+        &ws,
+        &ports_app_cli_mcp(),
+        &empty_cfg_test(),
+        &HashSet::new(),
+    );
+    let caps: std::collections::HashSet<&str> = graph
+        .target_anchor_capabilities("application", &[])
+        .map(|(name, _)| name)
+        .collect();
+    assert!(
+        !caps.contains("crate::application::handler::Handler::handle"),
+        "pure-signature trait method (no default, no impl) must NOT be a target capability; got {caps:?}"
     );
 }

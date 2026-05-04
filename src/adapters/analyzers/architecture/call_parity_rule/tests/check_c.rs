@@ -70,7 +70,7 @@ fn check_c_silent_for_single_trait_dispatch_with_multiple_impls() {
     // warning for what is semantically a single boundary call.
     // Anchor semantics collapses the dispatch into one capability
     // (`crate::application::handler::Handler::handle`) so Check C is
-    // silent. Regression guard for review pass 2026-05-04 P2 #3.
+    // silent.
     let ws = build_workspace(&[
         (
             "src/application/handler.rs",

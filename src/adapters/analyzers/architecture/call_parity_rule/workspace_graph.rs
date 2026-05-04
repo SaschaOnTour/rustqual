@@ -19,6 +19,7 @@
 //! file-local helpers — walking only pub fns would under-count delegation
 //! chains and trigger false positives in Check A.
 
+use super::anchor_index::{build_anchor_info, is_anchor_target_capability, AnchorInfo};
 use super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
 use super::file_fn_collector::FileFnCollector;
 use super::type_infer::{build_workspace_type_index, WorkspaceIndexInputs, WorkspaceTypeIndex};
@@ -44,11 +45,12 @@ pub(crate) struct CallGraph {
     /// Synthetic trait-method anchors emitted by `dyn Trait.method()`
     /// dispatch — `<Trait>::<method>` for every `(trait, method)` where
     /// the trait is workspace-known and the method is declared on it.
-    /// Map value: set of layer names where overriding impls live. Used
-    /// by the touchpoint walker to decide whether the anchor counts as
-    /// a target boundary (impl in target layer ⇒ yes). Layers are
-    /// resolved at graph-build time so the walker hot-path stays O(1).
-    pub trait_method_anchors: HashMap<String, HashSet<String>>,
+    /// Each `AnchorInfo` carries impl-layer set, impl-method canonicals,
+    /// the trait's declaring layer, and the source location, so the
+    /// touchpoint walker, Check B/D capability rule, the
+    /// concrete-impl-skip filter, and finding-location rendering can
+    /// all share one consistent data source.
+    pub trait_method_anchors: HashMap<String, AnchorInfo>,
 }
 
 impl CallGraph {
@@ -71,29 +73,47 @@ impl CallGraph {
         self.layer_of.get(canonical).and_then(Option::as_deref)
     }
 
-    /// True if `canonical` is a synthetic trait-method anchor AND any of
-    /// its overriding impls live in `target_layer`. The boundary walker
-    /// uses this to recognise dispatch into target-layer impls when the
-    /// trait itself lives in a non-target layer (e.g. `ports`).
-    pub fn anchor_reaches_target(&self, canonical: &str, target_layer: &str) -> bool {
-        self.trait_method_anchors
-            .get(canonical)
-            .is_some_and(|layers| layers.contains(target_layer))
-    }
-
-    /// Set of synthetic trait-method anchor canonicals whose trait has
-    /// at least one overriding impl in `target_layer`. These are
-    /// **target capabilities** — Check B/D enumerate them alongside
-    /// concrete `pub_fns_by_layer[target]` entries, so adapter coverage
-    /// of `dyn Trait.method()` dispatch is checked against the anchor
-    /// (the touchpoint walker registers) rather than against per-impl
-    /// concrete fns (which dispatch never emits anymore).
-    pub fn target_anchor_capabilities(&self, target_layer: &str) -> HashSet<&str> {
+    /// Iterate over `(anchor_canonical, AnchorInfo)` pairs for every
+    /// trait-method anchor that passes the unified target-capability
+    /// rule. These are **target capabilities** — Check B/D enumerate
+    /// them alongside concrete `pub_fns_by_layer[target]` entries,
+    /// and the boundary walker registers them as touchpoints. The
+    /// walker and Check B/D MUST share the same rule (via
+    /// `is_anchor_target_capability`) — otherwise an adapter could
+    /// reach an anchor the walker accepts but Check B doesn't
+    /// enumerate, producing silent false-negatives, or vice versa.
+    /// Returning the `&AnchorInfo` alongside the canonical avoids the
+    /// defensive re-lookup callers would otherwise need.
+    pub(crate) fn target_anchor_capabilities<'a>(
+        &'a self,
+        target_layer: &'a str,
+        adapter_layers: &'a [String],
+    ) -> impl Iterator<Item = (&'a str, &'a AnchorInfo)> + 'a {
         self.trait_method_anchors
             .iter()
-            .filter(|(_, layers)| layers.contains(target_layer))
-            .map(|(anchor, _)| anchor.as_str())
-            .collect()
+            .filter(move |(_, info)| {
+                is_anchor_target_capability(info, target_layer, adapter_layers)
+            })
+            .map(|(anchor, info)| (anchor.as_str(), info))
+    }
+
+    /// True iff `canonical` is the impl-method canonical of a trait
+    /// whose anchor is enumerated as target capability under the same
+    /// rules. Used by Check B/D to skip concrete trait-impl-method
+    /// pub-fns that the anchor already covers — without this, an
+    /// adapter that dispatches via `dyn Trait.method()` and reaches
+    /// only the anchor would produce a false orphan finding for every
+    /// concrete impl-method.
+    pub(crate) fn is_anchor_backed_concrete(
+        &self,
+        canonical: &str,
+        target_layer: &str,
+        adapter_layers: &[String],
+    ) -> bool {
+        self.trait_method_anchors.values().any(|info| {
+            is_anchor_target_capability(info, target_layer, adapter_layers)
+                && info.impl_method_canonicals.contains(canonical)
+        })
     }
 
     pub(super) fn add_edge(&mut self, caller: &str, callee: &str) {
@@ -110,22 +130,6 @@ impl CallGraph {
     pub(super) fn add_node(&mut self, canonical: &str) {
         self.forward.entry(canonical.to_string()).or_default();
     }
-}
-
-/// Heuristically derive a file path from an anchor canonical
-/// `crate::<file_module_segs>::<Trait>::<method>`. The trait
-/// declaration lives at `src/<file_module_segs>.rs` (or `…/mod.rs`);
-/// we pick the `.rs` form. Used by Check B/D to attach a finding
-/// location for anchor-level orphan / multiplicity findings until
-/// span info is carried through `WorkspaceTypeIndex.trait_methods`.
-pub(crate) fn anchor_canonical_to_file_path(canonical: &str) -> String {
-    const MIN_ANCHOR_SEGS: usize = 4; // crate::<mod>::<Trait>::<method>
-    let segs: Vec<&str> = canonical.split("::").collect();
-    if segs.len() < MIN_ANCHOR_SEGS || segs[0] != "crate" {
-        return String::new();
-    }
-    let file_segs = &segs[1..segs.len() - 2];
-    format!("src/{}.rs", file_segs.join("/"))
 }
 
 /// Shared canonical-name builder used by both Check A and Check B.
@@ -350,24 +354,25 @@ pub(crate) fn build_call_graph<'ast>(
 }
 
 /// Mirror `WorkspaceTypeIndex.trait_methods` + `trait_impls` into the
-/// graph as synthetic anchors `<Trait>::<method>`. Each anchor maps to
-/// the set of layer names where overriding impls live, resolved against
-/// `LayerDefinitions` at build time so the walker hot-path stays O(1).
-/// Operation: index transcription with eager layer resolution.
+/// graph as synthetic anchors `<Trait>::<method>` with full
+/// `AnchorInfo` metadata: impl-layer set (walker hot-path), impl-method
+/// canonicals (Check B/D concrete-skip), declaring layer (peer-adapter
+/// rejection + default-only-target rule), and source location
+/// (anchor-finding rendering). Resolved eagerly at build time so the
+/// hot-path stays O(1). Integration: delegate per-method anchor build.
 fn populate_anchor_index(
     graph: &mut CallGraph,
     type_index: &WorkspaceTypeIndex,
     layers: &LayerDefinitions,
 ) {
     for (trait_canonical, methods) in type_index.trait_methods_iter() {
+        let decl_layer = layers
+            .layer_of_crate_path(trait_canonical)
+            .map(String::from);
         for method in methods {
             let anchor = format!("{trait_canonical}::{method}");
-            let impl_layers: HashSet<String> = type_index
-                .overriding_impls_for(trait_canonical, method)
-                .iter()
-                .filter_map(|impl_canon| layers.layer_of_crate_path(impl_canon).map(String::from))
-                .collect();
-            graph.trait_method_anchors.insert(anchor, impl_layers);
+            let info = build_anchor_info(type_index, layers, trait_canonical, method, &decl_layer);
+            graph.trait_method_anchors.insert(anchor, info);
         }
     }
 }

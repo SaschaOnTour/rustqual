@@ -939,8 +939,7 @@ fn test_collect_pub_fns_skips_trait_impl_method_on_private_self_type() {
     // `<PubTrait>::handle` which represents the capability.
     // Registering private-self-type impl-methods as target pub-fns
     // would force adapter coverage checks for implementation details
-    // that are unreachable through the public API (false-positive
-    // class P2 #2 from 2026-05-04 review pass).
+    // that are unreachable through the public API.
     let file = parse(
         r#"
         pub trait PubTrait {

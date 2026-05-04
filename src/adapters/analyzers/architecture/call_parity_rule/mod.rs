@@ -23,6 +23,7 @@
 //! RlmSession`) resolve via `calls::collect_canonical_calls` so
 //! Session/Service-pattern architectures aren't wholesale False-Positive.
 
+pub(crate) mod anchor_index;
 mod bindings;
 pub mod calls;
 pub mod check_a;
