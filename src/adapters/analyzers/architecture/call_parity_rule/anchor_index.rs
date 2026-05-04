@@ -34,6 +34,12 @@ pub(crate) struct AnchorInfo {
     /// uncallable signatures and do NOT count as a target capability
     /// just because the trait happens to live in the target layer.
     pub(crate) has_default_body: bool,
+    /// True iff the trait declaration carried a `pub` visibility
+    /// modifier (and is thus part of the public architectural surface).
+    /// Private traits (`trait Internal { … }`) are implementation
+    /// detail and must not surface as Check B/D capabilities, even
+    /// when they have a default body or a target-layer impl.
+    pub(crate) trait_visible: bool,
     /// Source location of the trait method declaration. `None` when
     /// the trait was registered without a captured span (synthetic
     /// test fixtures).
@@ -41,17 +47,25 @@ pub(crate) struct AnchorInfo {
 }
 
 /// **Unified target-capability rule for trait-method anchors.** Both
-/// the boundary walker (`TouchpointWalk::is_target_boundary`) and the
-/// Check B/D enumeration (`CallGraph::target_anchor_capabilities`)
-/// MUST consult this same predicate, otherwise the two sides drift
-/// (parallel-path inconsistency — see memory pattern A18).
+/// the boundary walker (`TouchpointWalk::is_target_boundary`), the
+/// Check B/D enumeration (`CallGraph::target_anchor_capabilities`),
+/// and the post-boundary reachable-targets BFS in
+/// `check_b_coverage::build_adapter_reachable_targets` MUST consult
+/// this same predicate, otherwise the three sides drift (parallel-path
+/// inconsistency — see memory pattern A18).
 ///
-/// Returns `true` iff: (1) the trait's declaring layer is NOT a peer
-/// adapter (a configured adapter that isn't the target), AND (2) the
-/// trait's declaring layer IS the target layer AND the method has a
-/// callable body (default OR overriding impl), OR at least one
+/// Returns `true` iff: (0) the trait declaration carries `pub`
+/// visibility (private traits are implementation detail, not
+/// architectural surface), AND (1) the trait's declaring layer is NOT
+/// a peer adapter (a configured adapter that isn't the target), AND
+/// (2) the trait's declaring layer IS the target layer AND the method
+/// has a callable body (default OR overriding impl), OR at least one
 /// overriding impl lives in the target layer.
 ///
+/// Rule 0 stops `trait Internal { fn run(&self) {} }` (no `pub`) and
+/// `trait Hidden { fn run(&self); } impl Hidden for X { … }` (private
+/// trait + target impl) from surfacing as Check B/D capabilities —
+/// they aren't part of the public contract, only the implementation.
 /// Rule 1 prevents `cli` from inheriting `mcp::Handler`-backed coverage
 /// when the trait is declared in the `mcp` peer adapter. Rule 2 covers
 /// the Hexagonal layout (trait in `ports`, impls in `application`),
@@ -64,6 +78,9 @@ pub(crate) fn is_anchor_target_capability(
     target_layer: &str,
     adapter_layers: &[String],
 ) -> bool {
+    if !info.trait_visible {
+        return false;
+    }
     if let Some(decl) = info.decl_layer.as_deref() {
         if decl != target_layer && adapter_layers.iter().any(|a| a == decl) {
             return false;
@@ -101,11 +118,13 @@ pub(crate) fn build_anchor_info(
         .trait_method_location(trait_canonical, method)
         .cloned();
     let has_default_body = type_index.trait_method_has_default_body(trait_canonical, method);
+    let trait_visible = type_index.trait_is_visible(trait_canonical);
     AnchorInfo {
         impl_layers,
         impl_method_canonicals,
         decl_layer: decl_layer.clone(),
         has_default_body,
+        trait_visible,
         location,
     }
 }

@@ -91,6 +91,49 @@ Second-pass review (Codex 2026-05-04 round 2):
   `trait_has_method` would accept dispatch calls that should stay
   unresolved.
 
+Third-pass review (Codex 2026-05-04 round 3):
+
+- **Private trait anchor exclusion** (P1): `WorkspaceTypeIndex` now
+  captures the trait declaration's effective workspace visibility in
+  `trait_visibility: HashMap<String, bool>`, threaded into
+  `AnchorInfo.trait_visible`, and consulted as a precondition by
+  `is_anchor_target_capability`. Without this, `trait Internal { fn
+  run(&self) {} }` (no `pub`) and `trait Hidden { fn run(&self); }
+  impl Hidden for X` (private trait + target impl) surfaced as
+  Check B/D capabilities and produced orphan findings for what is
+  architecturally implementation detail. Effective visibility is the
+  trait's own `vis == Public` ANDed with the trait collector's
+  `enclosing_mod_visible` (mirroring `pub_fns::PubFnCollector`'s mod
+  visibility tracking) — so a `pub trait T { … }` declared inside a
+  private `mod inner { … }` is also rejected, since it isn't
+  reachable from outside its own module and thus isn't part of the
+  architectural surface.
+- **Anchor orphan suppression for direct-concrete coverage** (P1):
+  `check_b::inspect_anchor` adds a second arm to the
+  `reached.is_empty()` suppression: when at least one of
+  `info.impl_method_canonicals` is in some adapter's coverage or in
+  the reachable set, the anchor finding is silenced. Closes the
+  all-direct-concrete false-positive — every adapter calls
+  `LoggingHandler::handle()` via UFCS, none dispatches via
+  `dyn Trait`, the concrete pass is silent (all reach concrete),
+  and the anchor pass no longer fires "missing all adapters" since
+  the concrete coverage IS the capability coverage.
+- **`exclude_targets` matches impl path on anchor findings** (P2):
+  new `is_anchor_excluded` helper tests the configured globs against
+  the anchor canonical AND every `impl_method_canonical` it backs.
+  A user-friendly `exclude_targets = ["application::admin::*"]`
+  glob now silences the matching anchor finding (e.g.
+  `ports::handler::Handler::handle`) when the impl lives in
+  `application::admin::*`, instead of requiring a parallel
+  ports-path entry. Concrete-pass exclusion is unchanged (already
+  matched against the concrete canonical).
+- **Stale `line=0` anchor wording** (P3): the v1.2.2 "Added —
+  Anchors as target capabilities for Check B/D" entry promised a
+  heuristic file path with `line=0` until span info was added —
+  contradicting the round-2 P4 fix that already captures the trait
+  method's source location. Wording updated to reference the
+  round-2 P4 entry that delivered real `MethodLocation` capture.
+
 ### Added
 
 - **Trait-method anchor model for call-parity dispatch**: `dyn
@@ -107,10 +150,10 @@ Second-pass review (Codex 2026-05-04 round 2):
   trait-method anchors with overriding impls in the target layer.
   Check B iterates them alongside concrete `pub_fns_by_layer[target]`,
   so dispatch-only adapter coverage is checked for parity and orphan
-  status; Check D counts handlers per anchor for multiplicity.
-  Anchor findings carry a heuristic file path
-  (`src/<file_module_segs>.rs`) derived from the canonical, line=0
-  until span info is carried through `WorkspaceTypeIndex.trait_methods`.
+  status; Check D counts handlers per anchor for multiplicity. Anchor
+  findings carry the trait method's actual source location (file +
+  1-based line + column) — see the round-2 P4 entry above for the
+  `MethodLocation` capture path.
 - **Walker peer-adapter check before anchor promotion**:
   `TouchpointWalk::run` now checks `is_peer_adapter` BEFORE
   `is_target_boundary`. A trait anchor declared in a peer-adapter

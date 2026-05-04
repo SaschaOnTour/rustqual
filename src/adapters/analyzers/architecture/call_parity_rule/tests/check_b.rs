@@ -828,6 +828,104 @@ fn check_b_silent_for_concrete_impl_when_only_anchor_reached() {
 }
 
 #[test]
+fn check_b_anchor_finding_excluded_via_impl_path_glob() {
+    // Codex round 3 P2 (2026-05-04): users naturally write
+    // `exclude_targets = ["application::admin::*"]` to silence drift
+    // on a target-layer feature. For concrete target pub-fns this
+    // works because `is_excluded` matches the concrete canonical
+    // (`application::admin::AdminHandler::handle`). But the anchor
+    // pass tests `is_excluded` only against the ANCHOR canonical
+    // (`ports::handler::Handler::handle`) — the impl-path glob
+    // never matches → anchor finding fires anyway.
+    //
+    // Fix: anchor `is_excluded` checks the anchor canonical AND each
+    // backed `impl_method_canonical` — if any matches the glob, the
+    // anchor finding is silenced. Users now have one consistent
+    // exclude form (impl path) that covers both the concrete and the
+    // anchor pass, mirroring how `is_anchor_backed_concrete` ties
+    // the two together.
+    let ws = build_workspace(&[
+        (
+            "src/ports/handler.rs",
+            "pub trait Handler { fn handle(&self); }",
+        ),
+        (
+            "src/application/admin.rs",
+            r#"
+            use crate::ports::handler::Handler;
+            pub struct AdminHandler;
+            impl Handler for AdminHandler { fn handle(&self) {} }
+            "#,
+        ),
+        ("src/cli/handlers.rs", "pub fn cmd_other() {}"),
+        ("src/mcp/handlers.rs", "pub fn mcp_other() {}"),
+    ]);
+    let mut cp = ports_cp();
+    cp.exclude_targets = globset(&["application::admin::*"]);
+    let findings = run_check_b(&ws, &ports_app_cli_mcp(), &cp, &empty_cfg_test());
+    let pairs = missing_pairs(&findings);
+    let anchor = "crate::ports::handler::Handler::handle";
+    assert!(
+        !pairs.iter().any(|(target, _)| target == anchor),
+        "anchor finding must be silenced when exclude_targets matches an impl_method_canonical (`application::admin::*` matches `application::admin::AdminHandler::handle`); got {pairs:?}"
+    );
+}
+
+#[test]
+fn check_b_silent_anchor_when_all_adapters_cover_via_direct_concrete() {
+    // Codex round 3 P1 (2026-05-04): with the conditional concrete
+    // skip, all-direct-concrete scenarios already make the concrete
+    // pass silent (every adapter covers the concrete target). But
+    // the anchor pass in `inspect_anchor` still sees `reached = []`
+    // (no adapter has the anchor in coverage) and the reachable BFS
+    // doesn't contain the anchor (concrete impl bodies don't call
+    // the anchor — they ARE the anchor's implementation). Result:
+    // a false-positive anchor orphan finding "missing from all
+    // adapters" even though every adapter exercises the capability
+    // via direct concrete.
+    //
+    // Fix: in `inspect_anchor`, when `reached.is_empty()`, also
+    // suppress when at least one of `info.impl_method_canonicals`
+    // is in some adapter's coverage (or in the reachable set) —
+    // the capability IS exercised, just via the concrete form.
+    let ws = build_workspace(&[
+        (
+            "src/ports/handler.rs",
+            "pub trait Handler { fn handle(&self); }",
+        ),
+        (
+            "src/application/logging.rs",
+            r#"
+            use crate::ports::handler::Handler;
+            pub struct LoggingHandler;
+            impl Handler for LoggingHandler { fn handle(&self) {} }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::logging::LoggingHandler;
+            pub fn cmd_log() { LoggingHandler::handle(&LoggingHandler); }
+            "#,
+        ),
+        (
+            "src/mcp/handlers.rs",
+            r#"
+            use crate::application::logging::LoggingHandler;
+            pub fn mcp_log() { LoggingHandler::handle(&LoggingHandler); }
+            "#,
+        ),
+    ]);
+    let findings = run_check_b(&ws, &ports_app_cli_mcp(), &ports_cp(), &empty_cfg_test());
+    let pairs = missing_pairs(&findings);
+    let anchor = "crate::ports::handler::Handler::handle";
+    assert!(
+        !pairs.iter().any(|(target, _)| target == anchor),
+        "anchor must be silent when the capability is covered via direct concrete by every adapter; got {pairs:?}"
+    );
+}
+
+#[test]
 fn check_b_does_not_skip_concrete_when_an_adapter_calls_it_directly() {
     // Codex P1 #2 (2026-05-04 review): when one adapter reaches the
     // capability via direct concrete call (`LoggingHandler::handle()`)

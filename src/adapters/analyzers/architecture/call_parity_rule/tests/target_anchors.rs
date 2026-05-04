@@ -200,6 +200,110 @@ fn target_anchor_capabilities_includes_default_only_target_layer_trait() {
 }
 
 #[test]
+fn target_anchor_capabilities_excludes_private_target_layer_trait() {
+    // Codex round 3 P1 (2026-05-04): a private (non-`pub`) trait
+    // declared in the target layer is not part of the public
+    // architecture surface. Even with a default body it cannot be
+    // dispatched to from outside its declaring module — so it must
+    // NOT be enumerated as a target capability, otherwise Check B
+    // would falsely demand adapter coverage for an implementation
+    // detail.
+    let ws = build_workspace(&[(
+        "src/application/internal.rs",
+        // `trait`, not `pub trait` — private.
+        "trait Internal { fn run(&self) {} }",
+    )]);
+    let graph = build_graph_only(
+        &ws,
+        &ports_app_cli_mcp(),
+        &empty_cfg_test(),
+        &HashSet::new(),
+    );
+    let caps: std::collections::HashSet<&str> = graph
+        .target_anchor_capabilities("application", &[])
+        .map(|(name, _)| name)
+        .collect();
+    assert!(
+        !caps.contains("crate::application::internal::Internal::run"),
+        "private target-layer trait must NOT be a target capability anchor; got {caps:?}"
+    );
+}
+
+#[test]
+fn target_anchor_capabilities_excludes_private_ports_trait_with_target_impl() {
+    // Codex round 3 P1 (2026-05-04): a private trait declared in
+    // ports with an impl in the target layer is not architecturally
+    // exposed — the trait isn't usable from outside ports' module.
+    // It must NOT be promoted to a target capability via the
+    // overriding-impl branch of the unified rule.
+    let ws = build_workspace(&[
+        (
+            "src/ports/internal.rs",
+            // `trait`, not `pub trait` — private.
+            "trait Hidden { fn run(&self); }",
+        ),
+        (
+            "src/application/impls.rs",
+            r#"
+            use crate::ports::internal::Hidden;
+            pub struct Impl;
+            impl Hidden for Impl { fn run(&self) {} }
+            "#,
+        ),
+    ]);
+    let graph = build_graph_only(
+        &ws,
+        &ports_app_cli_mcp(),
+        &empty_cfg_test(),
+        &HashSet::new(),
+    );
+    let caps: std::collections::HashSet<&str> = graph
+        .target_anchor_capabilities("application", &[])
+        .map(|(name, _)| name)
+        .collect();
+    assert!(
+        !caps.contains("crate::ports::internal::Hidden::run"),
+        "private ports trait (even with target-layer impl) must NOT be a target capability anchor; got {caps:?}"
+    );
+}
+
+#[test]
+fn target_anchor_capabilities_excludes_pub_trait_inside_private_mod() {
+    // Round-3 follow-up (A14 visibility-pre-pass gap class):
+    // `pub trait T { ... }` inside a private `mod inner { … }` is
+    // syntactically `Public`, but workspace-invisible — the enclosing
+    // mod has no `pub`, so external code can't reach the trait via
+    // `use crate::application::wrapper::inner::T;`. The simple
+    // `matches!(node.vis, Public(_))` check accepts this trait as
+    // visible, which lets a private-mod trait surface as a Check B/D
+    // capability anchor. The trait-collector must track enclosing-mod
+    // visibility (mirroring `pub_fns::PubFnCollector::enclosing_mod_visible`)
+    // so a pub trait inside any private ancestor mod is rejected.
+    let ws = build_workspace(&[(
+        "src/application/wrapper.rs",
+        r#"
+        mod inner {
+            pub trait T { fn run(&self) {} }
+        }
+        "#,
+    )]);
+    let graph = build_graph_only(
+        &ws,
+        &ports_app_cli_mcp(),
+        &empty_cfg_test(),
+        &HashSet::new(),
+    );
+    let caps: std::collections::HashSet<&str> = graph
+        .target_anchor_capabilities("application", &[])
+        .map(|(name, _)| name)
+        .collect();
+    assert!(
+        !caps.contains("crate::application::wrapper::inner::T::run"),
+        "pub trait inside a private mod must NOT be a target capability anchor (workspace-invisible); got {caps:?}"
+    );
+}
+
+#[test]
 fn target_anchor_capabilities_excludes_signature_only_target_layer_trait() {
     // Trait declared in target layer but with NO default body and NO
     // overriding impls. Pure signature is uncallable — must NOT count

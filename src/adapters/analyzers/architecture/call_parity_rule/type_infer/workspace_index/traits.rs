@@ -41,6 +41,7 @@ pub(super) fn collect_from_file(
         index,
         ctx,
         mod_stack: Vec::new(),
+        enclosing_mod_visible: true,
     };
     collector.visit_file(ast);
 }
@@ -49,6 +50,14 @@ struct TraitCollector<'i, 'c> {
     index: &'i mut WorkspaceTypeIndex,
     ctx: &'c BuildContext<'c>,
     mod_stack: Vec<String>,
+    /// True when every enclosing inline `mod` carries a `pub`
+    /// visibility modifier. False as soon as any ancestor is private.
+    /// Top-level traits are always considered to live under a visible
+    /// path. Mirrors `pub_fns::PubFnCollector::enclosing_mod_visible`
+    /// so a `pub trait T` inside a private `mod inner { … }` doesn't
+    /// surface as workspace-visible (and thus not as a Check B/D
+    /// target-capability anchor).
+    enclosing_mod_visible: bool,
 }
 
 impl<'ast, 'i, 'c> Visit<'ast> for TraitCollector<'i, 'c> {
@@ -56,7 +65,13 @@ impl<'ast, 'i, 'c> Visit<'ast> for TraitCollector<'i, 'c> {
         if has_cfg_test(&node.attrs) {
             return;
         }
-        record_trait_methods(self.index, self.ctx, &self.mod_stack, node);
+        record_trait_methods(
+            self.index,
+            self.ctx,
+            &self.mod_stack,
+            self.enclosing_mod_visible,
+            node,
+        );
     }
 
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
@@ -70,9 +85,13 @@ impl<'ast, 'i, 'c> Visit<'ast> for TraitCollector<'i, 'c> {
         if has_cfg_test(&node.attrs) {
             return;
         }
+        let parent_visible = self.enclosing_mod_visible;
+        self.enclosing_mod_visible =
+            parent_visible && matches!(node.vis, syn::Visibility::Public(_));
         self.mod_stack.push(node.ident.to_string());
         syn::visit::visit_item_mod(self, node);
         self.mod_stack.pop();
+        self.enclosing_mod_visible = parent_visible;
     }
 }
 
@@ -88,6 +107,7 @@ fn record_trait_methods(
     index: &mut WorkspaceTypeIndex,
     ctx: &BuildContext<'_>,
     mod_stack: &[String],
+    enclosing_mod_visible: bool,
     node: &syn::ItemTrait,
 ) {
     let canonical = canonical_type_key(&[node.ident.to_string()], ctx, mod_stack);
@@ -104,6 +124,12 @@ fn record_trait_methods(
         methods.insert(method);
     }
     if !methods.is_empty() {
+        // A trait counts as workspace-visible iff its own `vis` is
+        // `pub` AND every enclosing inline `mod` is `pub`. A
+        // `pub trait T` inside a private mod is reachable only from
+        // its own module, not the architectural surface.
+        let visible = enclosing_mod_visible && matches!(node.vis, syn::Visibility::Public(_));
+        index.trait_visibility.insert(canonical.clone(), visible);
         index.trait_methods.insert(canonical, methods);
     }
 }

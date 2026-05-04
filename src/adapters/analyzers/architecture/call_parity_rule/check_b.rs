@@ -121,7 +121,7 @@ pub(crate) fn check_missing_adapter<'ast>(
 /// require a graph-level synonym index and design discussion before
 /// implementation. Operation: probe coverage on the anchor canonical.
 fn inspect_anchor(anchor: &str, info: &AnchorInfo, ctx: &TargetCtx<'_>) -> Option<MatchLocation> {
-    if is_excluded(anchor, ctx.cp) {
+    if is_anchor_excluded(anchor, info, ctx.cp) {
         return None;
     }
     let reached = adapters_reaching(anchor, ctx.coverage, &ctx.cp.adapters);
@@ -129,7 +129,22 @@ fn inspect_anchor(anchor: &str, info: &AnchorInfo, ctx: &TargetCtx<'_>) -> Optio
     if missing.is_empty() {
         return None;
     }
-    if reached.is_empty() && ctx.reachable.contains(anchor) {
+    // Suppress orphan-style anchor findings (`reached.is_empty()`) when
+    // the capability is exercised via the concrete form by some
+    // adapter — either directly (impl-method canonical in coverage) or
+    // transitively (impl-method canonical in the reachable set). Without
+    // this, an all-direct-concrete scenario (every adapter calls
+    // `LoggingHandler::handle()` via UFCS, none dispatches via
+    // `dyn Trait`) produces a false-positive "anchor missing from all
+    // adapters" finding even though every adapter covers the
+    // capability. Mixed-form drift still surfaces as the documented
+    // paired findings (the concrete pass + this anchor pass with
+    // `reached` non-empty); only the fully-orphan-looking all-direct
+    // case is silenced here.
+    if reached.is_empty()
+        && (ctx.reachable.contains(anchor)
+            || any_impl_canonical_covered_or_reachable(info, ctx.coverage, ctx.reachable))
+    {
         return None;
     }
     // Anchor findings need a real source location for suppression-window
@@ -197,11 +212,45 @@ fn any_adapter_reaches_concrete(concrete: &str, coverage: &AdapterCoverage) -> b
     coverage.values().any(|set| set.contains(concrete))
 }
 
+/// True iff at least one of the anchor's overriding impl-method
+/// canonicals is covered by some adapter (`coverage` contains it) or
+/// transitively reachable (`reachable` contains it). Used by the
+/// anchor-orphan suppression branch so an all-direct-concrete
+/// workspace doesn't produce a false orphan finding for the trait
+/// anchor — the capability IS covered, just via the concrete form.
+/// Operation: set-membership scan over `info.impl_method_canonicals`.
+fn any_impl_canonical_covered_or_reachable(
+    info: &AnchorInfo,
+    coverage: &AdapterCoverage,
+    reachable: &HashSet<String>,
+) -> bool {
+    info.impl_method_canonicals.iter().any(|impl_canon| {
+        reachable.contains(impl_canon) || coverage.values().any(|set| set.contains(impl_canon))
+    })
+}
+
 /// True iff the canonical target matches an `exclude_targets` glob.
 /// Operation: prefix strip + globset probe.
 fn is_excluded(canonical: &str, cp: &CompiledCallParity) -> bool {
     let stripped = canonical.strip_prefix("crate::").unwrap_or(canonical);
     cp.exclude_targets.is_match(stripped)
+}
+
+/// True iff an anchor finding should be silenced by `exclude_targets`.
+/// Tests the anchor canonical AND every backed `impl_method_canonical`,
+/// so a glob aimed at the impl path (e.g. `application::admin::*`)
+/// silences both the concrete pass for the impl method and the anchor
+/// pass for the trait method that backs it. Without this, users would
+/// have to maintain two parallel exclude entries — one for the impl
+/// path, one for the trait path — to silence drift on a single feature.
+/// Operation: predicate composition over `is_excluded`.
+fn is_anchor_excluded(anchor: &str, info: &AnchorInfo, cp: &CompiledCallParity) -> bool {
+    if is_excluded(anchor, cp) {
+        return true;
+    }
+    info.impl_method_canonicals
+        .iter()
+        .any(|impl_canon| is_excluded(impl_canon, cp))
 }
 
 /// Adapters whose coverage set contains `target`. Operation: filter.

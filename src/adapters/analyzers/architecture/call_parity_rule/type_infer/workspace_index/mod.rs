@@ -126,6 +126,15 @@ pub struct WorkspaceTypeIndex {
     /// trait-dispatch so `dyn Trait.unrelated_method()` stays
     /// unresolved.
     pub trait_methods: HashMap<String, std::collections::HashSet<String>>,
+    /// `trait_canonical → bool` carrying the trait's `pub` visibility
+    /// modifier. A `false` entry means the trait was declared without
+    /// `pub` (`trait Internal { … }`) and isn't part of the public
+    /// architectural surface — the unified target-capability rule
+    /// rejects such anchors so they don't trigger Check B/D findings
+    /// for implementation-detail traits. Missing entries default to
+    /// `false` (defensive — synthetic test fixtures or future
+    /// builders without visibility capture stay invisible).
+    pub trait_visibility: HashMap<String, bool>,
     /// `(trait_canonical, method_name) → source location` (file +
     /// 1-based line + column). Carried alongside `trait_methods` so
     /// synthetic anchor findings can attach a real source location
@@ -248,6 +257,22 @@ impl WorkspaceTypeIndex {
     pub fn trait_method_has_default_body(&self, trait_canonical: &str, method_name: &str) -> bool {
         self.trait_methods_with_default_body
             .contains(&(trait_canonical.to_string(), method_name.to_string()))
+    }
+
+    // qual:api
+    /// True iff the trait was declared with a `pub` visibility modifier
+    /// (and thus is part of the public architectural surface). Returns
+    /// `false` for traits without `pub` and for traits not recorded in
+    /// the index — defensive default so synthetic fixtures or future
+    /// build paths without visibility capture treat the trait as
+    /// invisible. The unified target-capability rule consults this so
+    /// private implementation-detail traits don't surface as Check B/D
+    /// targets. Operation.
+    pub fn trait_is_visible(&self, trait_canonical: &str) -> bool {
+        self.trait_visibility
+            .get(trait_canonical)
+            .copied()
+            .unwrap_or(false)
     }
 
     // qual:api
