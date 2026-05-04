@@ -651,10 +651,14 @@ fn parse_macro_tokens(tokens: proc_macro2::TokenStream) -> Vec<syn::Expr> {
 }
 
 /// Project an inferred receiver type to the canonical call-graph
-/// edge(s) for a method call. `Path` yields one edge. `TraitBound`
-/// (Stage 2) yields one edge per workspace impl of the trait,
-/// provided the method is declared on the trait — the over-approximation
-/// that makes call-parity sound for Ports&Adapters architectures.
+/// edge(s) for a method call. `Path` yields one concrete edge.
+/// `TraitBound` (Stage 2) yields one synthetic anchor edge
+/// `<Trait>::<method>` provided the method is declared on the trait —
+/// the touchpoint walker recognises the anchor as a target boundary
+/// when at least one overriding impl lives in the target layer, so
+/// call-parity stays sound for Ports&Adapters architectures without
+/// fanning out N per-impl edges (which would otherwise turn one
+/// boundary call into N false-positive Check C touchpoints).
 /// Wrapper variants (`Result`/`Option`/…) yield no direct edge — the
 /// combinator table already unwrapped them in the method-return lookup.
 /// Operation: variant dispatch.
@@ -674,9 +678,15 @@ fn canonical_edges_for_method(
     }
 }
 
-/// Enumerate one edge per workspace impl of the trait. Filters on
-/// `trait_has_method` so `dyn Trait.unrelated_method()` still falls
-/// through to `<method>:name`. Operation: index lookup + map.
+/// Emit a single synthetic trait-method anchor `<Trait>::<method>` for
+/// `dyn Trait.method()` dispatch. The anchor represents the logical
+/// capability; concrete impls are NOT fanned out as separate edges
+/// here — fanout would build N-element touchpoint sets that fire
+/// Check C false-positives for a single boundary call. Reachability
+/// from anchor to impl bodies (overriding impls only) is wired in a
+/// separate graph pass (`workspace_graph::add_anchor_to_impl_edges`).
+/// Filters on `trait_has_method` so `dyn Trait.unrelated_method()`
+/// still falls through to `<method>:name`. Operation: index lookup.
 fn trait_dispatch_edges(
     trait_segs: &[String],
     method: &str,
@@ -686,11 +696,7 @@ fn trait_dispatch_edges(
     if !workspace.trait_has_method(&trait_canonical, method) {
         return Vec::new();
     }
-    workspace
-        .impls_of_trait(&trait_canonical)
-        .iter()
-        .map(|impl_type| format!("{impl_type}::{method}"))
-        .collect()
+    vec![format!("{trait_canonical}::{method}")]
 }
 
 /// Adapter that exposes the collector's `Vec<HashMap<String, Vec<String>>>`

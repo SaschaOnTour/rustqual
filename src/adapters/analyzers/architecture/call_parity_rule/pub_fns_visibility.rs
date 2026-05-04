@@ -10,7 +10,8 @@
 use super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
 use super::local_symbols::{collect_local_symbols_scoped, FileScope, LocalSymbols};
 use super::pub_fns_alias_chain::{
-    chase_alias_chain, collect_alias_chain, resolve_alias_target_canonical,
+    chase_alias_chain, collect_alias_chain, collect_workspace_type_canonicals,
+    resolve_alias_target_canonical,
 };
 use super::type_infer::resolve::is_stdlib_prefixed;
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
@@ -43,6 +44,13 @@ fn is_self_restricted(path: &syn::Path) -> bool {
 struct WalkCtx<'a> {
     transparent_wrappers: &'a HashSet<String>,
     alias_chain: &'a HashMap<String, String>,
+    /// Workspace-wide set of canonicals that resolve to a *type* item
+    /// (struct/enum/union/trait/type). `walk_use_tree` checks each
+    /// resolved source-canonical against this set before registering
+    /// the export-canonical; otherwise a value re-export
+    /// (`pub use crate::other::helper as Foo;`) would mark a same-
+    /// named private type's impl methods as part of the public surface.
+    type_canonicals: &'a HashSet<String>,
 }
 
 // qual:api
@@ -64,9 +72,12 @@ pub(super) fn collect_visible_type_canonicals_workspace(
         crate_root_modules,
         transparent_wrappers,
     );
+    let type_canonicals = collect_workspace_type_canonicals(files, cfg_test_files);
+    let file_root_visibility = super::file_visibility::collect_file_root_visibility(files);
     let ctx = WalkCtx {
         transparent_wrappers,
         alias_chain: &alias_chain,
+        type_canonicals: &type_canonicals,
     };
     let mut out = HashSet::new();
     for_each_file_scope(
@@ -75,6 +86,17 @@ pub(super) fn collect_visible_type_canonicals_workspace(
         aliases_per_file,
         crate_root_modules,
         |file_scope, ast| {
+            // File-backed private modules (`mod internal;` without
+            // `pub` in the parent) keep their items out of the public
+            // surface — skip them entirely so a `pub fn helper()`
+            // inside `internal.rs` doesn't enter the visible-type set.
+            if !file_root_visibility
+                .get(file_scope.path)
+                .copied()
+                .unwrap_or(true)
+            {
+                return;
+            }
             collect_in_items(&ast.items, &[], file_scope, &ctx, &mut out);
         },
     );
@@ -141,7 +163,13 @@ fn collect_in_items(
         ));
     };
     let collect_use = |tree: &syn::UseTree, out: &mut HashSet<String>| {
-        walk_use_tree(tree, &mut Vec::new(), file_scope, mod_stack, out);
+        let use_ctx = super::pub_fns_use_tree::UseTreeCtx {
+            file_scope,
+            mod_stack,
+            type_canonicals: ctx.type_canonicals,
+            alias_chain: ctx.alias_chain,
+        };
+        super::pub_fns_use_tree::walk_use_tree(tree, &mut Vec::new(), &use_ctx, out);
     };
     let add_alias_target = |ty: &syn::Type, out: &mut HashSet<String>| {
         register_alias_target(ty, file_scope, mod_stack, ctx, out);
@@ -303,67 +331,4 @@ pub(super) fn canonical_for_decl(file_path: &str, mod_stack: &[String], ident: &
     segs.extend(mod_stack.iter().cloned());
     segs.push(ident.to_string());
     segs.join("::")
-}
-
-/// Recursive walk over a `pub use` tree. For each leaf, register
-/// *two* canonicals in `out`:
-/// - The source-canonical: the leaf's full source path resolved
-///   through the workspace alias / local-symbol pipeline. Catches
-///   impls written against the original declaration site.
-/// - The export-canonical: the current scope plus the exported name
-///   (rename target if present). Catches impls written against the
-///   re-export path (`impl outer::Hidden` after `pub use
-///   self::private::Hidden`).
-///
-/// Operation: closure-hidden descent into nested `Group`s and
-/// `Path`s.
-// qual:recursive
-fn walk_use_tree(
-    tree: &syn::UseTree,
-    prefix: &mut Vec<String>,
-    file_scope: &FileScope<'_>,
-    mod_stack: &[String],
-    out: &mut HashSet<String>,
-) {
-    let recurse = |sub: &syn::UseTree, prefix: &mut Vec<String>, out: &mut HashSet<String>| {
-        walk_use_tree(sub, prefix, file_scope, mod_stack, out);
-    };
-    let resolve_source = |segs: &[String], out: &mut HashSet<String>| {
-        let scope = CanonScope {
-            file: file_scope,
-            mod_stack,
-        };
-        if let Some(canonical) = canonicalise_type_segments_in_scope(segs, &scope) {
-            out.insert(canonical.join("::"));
-        }
-    };
-    let add_export = |exported: &str, out: &mut HashSet<String>| {
-        out.insert(canonical_for_decl(file_scope.path, mod_stack, exported));
-    };
-    match tree {
-        syn::UseTree::Path(p) => {
-            prefix.push(p.ident.to_string());
-            recurse(&p.tree, prefix, out);
-            prefix.pop();
-        }
-        syn::UseTree::Name(n) => {
-            let leaf = n.ident.to_string();
-            prefix.push(leaf.clone());
-            resolve_source(prefix, out);
-            prefix.pop();
-            add_export(&leaf, out);
-        }
-        syn::UseTree::Rename(r) => {
-            prefix.push(r.ident.to_string());
-            resolve_source(prefix, out);
-            prefix.pop();
-            add_export(&r.rename.to_string(), out);
-        }
-        syn::UseTree::Group(g) => {
-            for sub in &g.items {
-                recurse(sub, prefix, out);
-            }
-        }
-        syn::UseTree::Glob(_) => {}
-    }
 }

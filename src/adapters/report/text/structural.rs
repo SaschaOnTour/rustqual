@@ -1,30 +1,39 @@
+//! Cross-dimension Structural-Checks section.
+//!
+//! Reads `structural_rows` from both `SrpView` and `CouplingView` —
+//! each side projects its `Structural` variant into the same
+//! `StructuralRow` shape, this formatter merges them into one section.
+
+use std::fmt::Write;
+
 use colored::Colorize;
 
-use crate::adapters::analyzers::structural::StructuralAnalysis;
+use super::views::StructuralRow;
 
-/// Print structural warnings grouped by rule code.
-/// Operation: formatting logic with iteration, no own calls.
-pub(crate) fn print_structural_section(structural: &StructuralAnalysis) {
-    let warnings: Vec<_> = structural
-        .warnings
-        .iter()
-        .filter(|w| !w.suppressed)
-        .collect();
-    if warnings.is_empty() {
-        return;
+/// Format the Structural-Checks section from the SRP and Coupling
+/// structural-row collections. Empty if both are empty.
+pub(super) fn format_structural_section(
+    srp_rows: &[StructuralRow],
+    coupling_rows: &[StructuralRow],
+) -> String {
+    if srp_rows.is_empty() && coupling_rows.is_empty() {
+        return String::new();
     }
-    println!();
-    println!("{}", "═══ Structural Checks ═══".bold());
+    let mut out = String::new();
+    let _ = writeln!(out);
+    let _ = writeln!(out, "{}", "═══ Structural Checks ═══".bold());
 
-    warnings.iter().for_each(|w| {
-        let (code, detail) = (w.kind.code(), w.kind.detail());
-        println!(
-            "  {} {code}  {} ({}:{}) — {}",
+    srp_rows.iter().chain(coupling_rows.iter()).for_each(|r| {
+        let _ = writeln!(
+            out,
+            "  {} {}  {} ({}:{}) — {}",
             "\u{26a0}".yellow(),
-            w.name,
-            w.file,
-            w.line,
-            detail,
+            r.code,
+            r.name,
+            r.file,
+            r.line,
+            r.detail,
         );
     });
+    out
 }

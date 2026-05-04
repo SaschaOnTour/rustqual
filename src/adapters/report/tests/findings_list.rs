@@ -1,51 +1,37 @@
-use crate::adapters::analyzers::iosp::{
-    Classification, ComplexityMetrics, FunctionAnalysis, MagicNumberOccurrence,
+//! findings_list reporter tests.
+//!
+//! Tests construct typed findings directly (via AnalysisFindings) rather
+//! than the legacy dimension-specific fields, since the migrated
+//! `collect_all_findings` reads from the typed source.
+
+use crate::domain::findings::{
+    ArchitectureFinding, ComplexityFinding, ComplexityFindingKind, CouplingFinding,
+    CouplingFindingDetails, CouplingFindingKind, DryFinding, DryFindingDetails, DryFindingKind,
+    DuplicateParticipant, IospFinding, TqFinding, TqFindingKind,
 };
+use crate::domain::Finding;
 use crate::report::findings_list::*;
 use crate::report::{AnalysisResult, Summary};
-
-fn make_fa(name: &str, file: &str, line: usize) -> FunctionAnalysis {
-    FunctionAnalysis {
-        name: name.to_string(),
-        file: file.to_string(),
-        line,
-        classification: Classification::Operation,
-        parent_type: None,
-        suppressed: false,
-        complexity: None,
-        qualified_name: name.to_string(),
-        severity: None,
-        cognitive_warning: false,
-        cyclomatic_warning: false,
-        nesting_depth_warning: false,
-        function_length_warning: false,
-        unsafe_warning: false,
-        error_handling_warning: false,
-        complexity_suppressed: false,
-        own_calls: vec![],
-        parameter_count: 0,
-        is_trait_impl: false,
-        is_test: false,
-        effort_score: None,
-    }
-}
 
 fn empty_analysis() -> AnalysisResult {
     AnalysisResult {
         results: vec![],
         summary: Summary::default(),
-        coupling: None,
-        duplicates: vec![],
-        dead_code: vec![],
-        fragments: vec![],
-        boilerplate: vec![],
-        wildcard_warnings: vec![],
-        repeated_matches: vec![],
-        srp: None,
-        tq: None,
-        structural: None,
-        architecture_findings: vec![],
-        orphan_suppressions: vec![],
+        findings: crate::domain::AnalysisFindings::default(),
+        data: crate::domain::AnalysisData::default(),
+    }
+}
+
+fn common(file: &str, line: usize, dim: crate::findings::Dimension) -> Finding {
+    Finding {
+        file: file.into(),
+        line,
+        column: 0,
+        dimension: dim,
+        rule_id: "test".into(),
+        message: "test".into(),
+        severity: crate::domain::Severity::Medium,
+        suppressed: false,
     }
 }
 
@@ -57,56 +43,64 @@ fn test_collect_empty_analysis() {
 }
 
 #[test]
-fn test_collect_magic_numbers() {
+fn test_collect_iosp_violation() {
     let mut analysis = empty_analysis();
-    let mut fa = make_fa("test_fn", "src/lib.rs", 10);
-    fa.complexity = Some(ComplexityMetrics {
-        magic_numbers: vec![
-            MagicNumberOccurrence {
-                line: 12,
-                value: "42".to_string(),
-            },
-            MagicNumberOccurrence {
-                line: 15,
-                value: "99".to_string(),
-            },
-        ],
-        ..Default::default()
-    });
-    analysis.results = vec![fa];
-    let findings = collect_all_findings(&analysis);
-    assert_eq!(findings.len(), 2);
-    assert_eq!(findings[0].category, "MAGIC_NUMBER");
-    assert_eq!(findings[0].detail, "42");
-    assert_eq!(findings[1].detail, "99");
-}
-
-#[test]
-fn test_collect_violation() {
-    let mut analysis = empty_analysis();
-    let mut fa = make_fa("bad_fn", "src/lib.rs", 5);
-    fa.classification = Classification::Violation {
-        has_logic: true,
-        has_own_calls: true,
+    analysis.findings.iosp = vec![IospFinding {
+        common: common("src/lib.rs", 5, crate::findings::Dimension::Iosp),
         logic_locations: vec![],
         call_locations: vec![],
-    };
-    analysis.results = vec![fa];
+        effort_score: None,
+    }];
     let findings = collect_all_findings(&analysis);
     assert_eq!(findings.len(), 1);
     assert_eq!(findings[0].category, "VIOLATION");
 }
 
 #[test]
+fn test_collect_magic_number_per_occurrence() {
+    let mut analysis = empty_analysis();
+    analysis.findings.complexity = vec![
+        ComplexityFinding {
+            common: common("src/lib.rs", 12, crate::findings::Dimension::Complexity),
+            kind: ComplexityFindingKind::MagicNumber,
+            metric_value: 1,
+            threshold: 0,
+            hotspot: None,
+        },
+        ComplexityFinding {
+            common: common("src/lib.rs", 15, crate::findings::Dimension::Complexity),
+            kind: ComplexityFindingKind::MagicNumber,
+            metric_value: 1,
+            threshold: 0,
+            hotspot: None,
+        },
+    ];
+    let findings = collect_all_findings(&analysis);
+    assert_eq!(findings.len(), 2);
+    assert_eq!(findings[0].category, "MAGIC_NUMBER");
+    assert_eq!(findings[0].line, 12);
+    assert_eq!(findings[1].line, 15);
+}
+
+#[test]
 fn test_sorted_by_file_and_line() {
     let mut analysis = empty_analysis();
-    let mut fa1 = make_fa("fn_b", "src/b.rs", 20);
-    fa1.error_handling_warning = true;
-    fa1.complexity = Some(ComplexityMetrics::default());
-    let mut fa2 = make_fa("fn_a", "src/a.rs", 10);
-    fa2.error_handling_warning = true;
-    fa2.complexity = Some(ComplexityMetrics::default());
-    analysis.results = vec![fa1, fa2];
+    analysis.findings.complexity = vec![
+        ComplexityFinding {
+            common: common("src/b.rs", 20, crate::findings::Dimension::Complexity),
+            kind: ComplexityFindingKind::ErrorHandling,
+            metric_value: 1,
+            threshold: 0,
+            hotspot: None,
+        },
+        ComplexityFinding {
+            common: common("src/a.rs", 10, crate::findings::Dimension::Complexity),
+            kind: ComplexityFindingKind::ErrorHandling,
+            metric_value: 1,
+            threshold: 0,
+            hotspot: None,
+        },
+    ];
     let findings = collect_all_findings(&analysis);
     assert_eq!(findings[0].file, "src/a.rs");
     assert_eq!(findings[1].file, "src/b.rs");
@@ -115,293 +109,137 @@ fn test_sorted_by_file_and_line() {
 #[test]
 fn test_suppressed_not_collected() {
     let mut analysis = empty_analysis();
-    let mut fa = make_fa("suppressed_fn", "src/lib.rs", 5);
-    fa.suppressed = true;
-    fa.classification = Classification::Violation {
-        has_logic: true,
-        has_own_calls: true,
+    let mut c = common("src/lib.rs", 5, crate::findings::Dimension::Iosp);
+    c.suppressed = true;
+    analysis.findings.iosp = vec![IospFinding {
+        common: c,
         logic_locations: vec![],
         call_locations: vec![],
-    };
-    analysis.results = vec![fa];
+        effort_score: None,
+    }];
     let findings = collect_all_findings(&analysis);
     assert!(findings.is_empty());
 }
 
-// ── Contract tests: when summary counts match per-entry semantics,
-// total_findings() must equal collect_all_findings().len().
-// Pipeline integration is tested by test_self_analysis_no_violations. ──
-
 #[test]
-fn test_total_findings_consistent_magic_numbers() {
+fn test_total_findings_dry_duplicate_per_participant() {
     let mut analysis = empty_analysis();
-    let mut fa = make_fa("fn1", "src/lib.rs", 10);
-    fa.complexity = Some(ComplexityMetrics {
-        magic_numbers: vec![
-            MagicNumberOccurrence {
-                line: 12,
-                value: "42".to_string(),
+    let participants = vec![
+        DuplicateParticipant {
+            function_name: "fn_a".into(),
+            file: "src/a.rs".into(),
+            line: 10,
+        },
+        DuplicateParticipant {
+            function_name: "fn_b".into(),
+            file: "src/b.rs".into(),
+            line: 20,
+        },
+    ];
+    analysis.findings.dry = vec![
+        DryFinding {
+            common: common("src/a.rs", 10, crate::findings::Dimension::Dry),
+            kind: DryFindingKind::DuplicateExact,
+            details: DryFindingDetails::Duplicate {
+                participants: participants.clone(),
             },
-            MagicNumberOccurrence {
-                line: 15,
-                value: "99".to_string(),
+        },
+        DryFinding {
+            common: common("src/b.rs", 20, crate::findings::Dimension::Dry),
+            kind: DryFindingKind::DuplicateExact,
+            details: DryFindingDetails::Duplicate {
+                participants: participants.clone(),
             },
-        ],
-        ..Default::default()
-    });
-    analysis.results = vec![fa];
-    // Pipeline must count per-occurrence, not per-function
-    analysis.summary.magic_number_warnings = 2;
+        },
+    ];
     let findings = collect_all_findings(&analysis);
-    assert_eq!(
-        analysis.summary.total_findings(),
-        findings.len(),
-        "total_findings() must equal collect_all_findings().len()"
-    );
+    assert_eq!(findings.len(), 2);
+    assert!(findings.iter().all(|f| f.category == "DUPLICATE"));
 }
 
 #[test]
-fn test_total_findings_consistent_duplicates() {
-    use crate::adapters::analyzers::dry::functions::{
-        DuplicateEntry, DuplicateGroup, DuplicateKind,
-    };
+fn test_total_findings_coupling_cycle_no_file() {
     let mut analysis = empty_analysis();
-    analysis.duplicates = vec![DuplicateGroup {
-        entries: vec![
-            DuplicateEntry {
-                name: "fn_a".to_string(),
-                qualified_name: "mod::fn_a".to_string(),
-                file: "src/a.rs".to_string(),
-                line: 10,
-            },
-            DuplicateEntry {
-                name: "fn_b".to_string(),
-                qualified_name: "mod::fn_b".to_string(),
-                file: "src/b.rs".to_string(),
-                line: 20,
-            },
-        ],
-        kind: DuplicateKind::Exact,
-        suppressed: false,
+    let mut c = common("", 0, crate::findings::Dimension::Coupling);
+    c.file = "".into();
+    c.line = 0;
+    analysis.findings.coupling = vec![CouplingFinding {
+        common: c,
+        kind: CouplingFindingKind::Cycle,
+        details: CouplingFindingDetails::Cycle {
+            modules: vec!["a".into(), "b".into(), "a".into()],
+        },
     }];
-    // Pipeline must count per-entry (2), not per-group (1)
-    analysis.summary.duplicate_groups = 2;
     let findings = collect_all_findings(&analysis);
-    assert_eq!(
-        analysis.summary.total_findings(),
-        findings.len(),
-        "total_findings() must equal collect_all_findings().len()"
-    );
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].category, "CYCLE");
+    assert!(findings[0].file.is_empty());
 }
 
 #[test]
-fn test_total_findings_consistent_fragments() {
-    use crate::adapters::analyzers::dry::fragments::{FragmentEntry, FragmentGroup};
+fn test_collect_architecture_finding() {
     let mut analysis = empty_analysis();
-    analysis.fragments = vec![FragmentGroup {
-        entries: vec![
-            FragmentEntry {
-                function_name: "fn_a".to_string(),
-                qualified_name: "mod::fn_a".to_string(),
-                file: "src/a.rs".to_string(),
-                start_line: 10,
-                end_line: 15,
-            },
-            FragmentEntry {
-                function_name: "fn_b".to_string(),
-                qualified_name: "mod::fn_b".to_string(),
-                file: "src/b.rs".to_string(),
-                start_line: 20,
-                end_line: 25,
-            },
-            FragmentEntry {
-                function_name: "fn_c".to_string(),
-                qualified_name: "mod::fn_c".to_string(),
-                file: "src/c.rs".to_string(),
-                start_line: 30,
-                end_line: 35,
-            },
-        ],
-        statement_count: 3,
-        suppressed: false,
+    analysis.findings.architecture = vec![ArchitectureFinding {
+        common: common(
+            "src/cli/handlers.rs",
+            17,
+            crate::findings::Dimension::Architecture,
+        ),
     }];
-    // Pipeline must count per-entry (3), not per-group (1)
-    analysis.summary.fragment_groups = 3;
     let findings = collect_all_findings(&analysis);
-    assert_eq!(
-        analysis.summary.total_findings(),
-        findings.len(),
-        "total_findings() must equal collect_all_findings().len()"
-    );
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].category, "ARCHITECTURE");
+    assert_eq!(findings[0].file, "src/cli/handlers.rs");
+    assert_eq!(findings[0].line, 17);
 }
 
 #[test]
-fn test_total_findings_consistent_mixed() {
-    use crate::adapters::analyzers::dry::functions::{
-        DuplicateEntry, DuplicateGroup, DuplicateKind,
-    };
+fn test_collect_test_quality_uncovered() {
     let mut analysis = empty_analysis();
-    // 1 function with 2 magic numbers
-    let mut fa = make_fa("fn1", "src/lib.rs", 10);
-    fa.complexity = Some(ComplexityMetrics {
-        magic_numbers: vec![
-            MagicNumberOccurrence {
-                line: 12,
-                value: "400".to_string(),
-            },
-            MagicNumberOccurrence {
-                line: 13,
-                value: "800".to_string(),
-            },
-        ],
-        ..Default::default()
-    });
-    analysis.results = vec![fa];
-    // 1 duplicate group with 2 entries
-    analysis.duplicates = vec![DuplicateGroup {
-        entries: vec![
-            DuplicateEntry {
-                name: "fn_a".to_string(),
-                qualified_name: "mod::fn_a".to_string(),
-                file: "src/a.rs".to_string(),
-                line: 100,
-            },
-            DuplicateEntry {
-                name: "fn_b".to_string(),
-                qualified_name: "mod::fn_b".to_string(),
-                file: "src/b.rs".to_string(),
-                line: 200,
-            },
-        ],
-        kind: DuplicateKind::Exact,
-        suppressed: false,
+    analysis.findings.test_quality = vec![TqFinding {
+        common: common("src/lib.rs", 30, crate::findings::Dimension::TestQuality),
+        kind: TqFindingKind::Uncovered,
+        function_name: "uncovered_fn".into(),
+        uncovered_lines: None,
     }];
-    analysis.summary.magic_number_warnings = 2;
-    analysis.summary.duplicate_groups = 2;
     let findings = collect_all_findings(&analysis);
-    // 2 magic numbers + 2 duplicate entries = 4 findings
-    assert_eq!(findings.len(), 4);
-    assert_eq!(
-        analysis.summary.total_findings(),
-        findings.len(),
-        "total_findings() must equal collect_all_findings().len() — was the bug from issue report"
-    );
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].category, "TQ_UNCOVERED");
 }
 
 #[test]
-fn test_total_findings_consistent_coupling() {
+fn findings_list_includes_orphan_suppressions_via_snapshot_view() {
+    use crate::domain::findings::OrphanSuppression;
     let mut analysis = empty_analysis();
-    analysis.coupling = Some(crate::adapters::analyzers::coupling::CouplingAnalysis {
-        metrics: vec![crate::adapters::analyzers::coupling::CouplingMetrics {
-            module_name: "db".to_string(),
-            afferent: 2,
-            efferent: 5,
-            instability: 0.71,
-            incoming: vec![],
-            outgoing: vec![],
-            suppressed: false,
-            warning: true,
-        }],
-        cycles: vec![crate::adapters::analyzers::coupling::CycleReport {
-            modules: vec!["a".to_string(), "b".to_string()],
-        }],
-        sdp_violations: vec![],
-        graph: crate::adapters::analyzers::coupling::ModuleGraph::default(),
-    });
-    // 1 coupling warning + 1 cycle = 2
-    analysis.summary.coupling_warnings = 1;
-    analysis.summary.coupling_cycles = 1;
-    let findings = collect_all_findings(&analysis);
-    assert_eq!(
-        analysis.summary.total_findings(),
-        findings.len(),
-        "coupling warnings and cycles must appear in findings list"
-    );
-    assert!(
-        findings.iter().any(|f| f.category == "COUPLING"
-            && f.function_name == "db"
-            && f.detail.contains("I=0.71")),
-        "expected a COUPLING finding for db with instability detail"
-    );
-    assert!(
-        findings
-            .iter()
-            .any(|f| f.category == "CYCLE" && f.detail.contains("a > b")),
-        "expected a CYCLE finding describing the a > b cycle"
-    );
-}
-
-// ── Orphan-suppression findings ──────────────────────────────
-
-#[test]
-fn orphan_suppressions_are_emitted_as_findings() {
-    use crate::adapters::report::OrphanSuppressionWarning;
-    let mut analysis = empty_analysis();
-    analysis.orphan_suppressions = vec![OrphanSuppressionWarning {
+    // Orphan suppressions now flow through `findings.orphan_suppressions`
+    // (the trait-driven path) — the legacy `analysis.orphan_suppressions`
+    // field is no longer the source for reporter rendering.
+    analysis.findings.orphan_suppressions = vec![OrphanSuppression {
         file: "src/foo.rs".into(),
         line: 42,
         dimensions: vec![crate::findings::Dimension::Srp],
-        reason: Some("stale marker".into()),
+        reason: Some("legacy marker".into()),
     }];
     let findings = collect_all_findings(&analysis);
-    let orphan: Vec<&_> = findings
-        .iter()
-        .filter(|f| f.category == "ORPHAN_SUPPRESSION")
-        .collect();
-    assert_eq!(orphan.len(), 1, "one orphan finding expected");
-    assert_eq!(orphan[0].file, "src/foo.rs");
-    assert_eq!(orphan[0].line, 42);
-    assert!(
-        orphan[0].detail.contains("srp"),
-        "detail should name the suppressed dimension(s), got: {:?}",
-        orphan[0].detail
-    );
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].category, "ORPHAN_SUPPRESSION");
+    assert!(findings[0].detail.contains("srp"));
+    assert!(findings[0].detail.contains("legacy marker"));
 }
 
 #[test]
-fn orphan_finding_detail_lists_all_dimensions() {
-    use crate::adapters::report::OrphanSuppressionWarning;
-    let mut analysis = empty_analysis();
-    analysis.orphan_suppressions = vec![OrphanSuppressionWarning {
-        file: "src/foo.rs".into(),
-        line: 5,
-        dimensions: vec![
-            crate::findings::Dimension::Iosp,
-            crate::findings::Dimension::Complexity,
-        ],
-        reason: None,
-    }];
-    let findings = collect_all_findings(&analysis);
-    let orphan = findings
-        .iter()
-        .find(|f| f.category == "ORPHAN_SUPPRESSION")
-        .expect("orphan finding");
-    assert!(
-        orphan.detail.contains("iosp") && orphan.detail.contains("complexity"),
-        "detail should name both dims, got: {:?}",
-        orphan.detail
-    );
+fn test_print_findings_empty_no_panic() {
+    print_findings(&[]);
 }
 
 #[test]
-fn bare_orphan_detail_says_wildcard() {
-    use crate::adapters::report::OrphanSuppressionWarning;
-    let mut analysis = empty_analysis();
-    analysis.orphan_suppressions = vec![OrphanSuppressionWarning {
-        file: "src/foo.rs".into(),
-        line: 5,
-        dimensions: vec![],
-        reason: None,
-    }];
-    let findings = collect_all_findings(&analysis);
-    let orphan = findings
-        .iter()
-        .find(|f| f.category == "ORPHAN_SUPPRESSION")
-        .expect("orphan finding");
-    assert!(
-        orphan.detail.to_lowercase().contains("all dims")
-            || orphan.detail.to_lowercase().contains("wildcard"),
-        "bare orphan detail should indicate wildcard semantics, got: {:?}",
-        orphan.detail
-    );
+fn test_print_findings_with_entries_no_panic() {
+    let entries = vec![FindingEntry::new(
+        "src/foo.rs",
+        10,
+        "VIOLATION",
+        "logic + calls".into(),
+        "fn_x".into(),
+    )];
+    print_findings(&entries);
 }

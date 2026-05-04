@@ -1,65 +1,49 @@
-use crate::report::html::html_escape;
+//! HTML Test-Quality section.
 
-/// Build the Test Quality analysis section.
-/// Trivial: single delegation to html_section_wrapper.
-pub(super) fn html_tq_section(tq: Option<&crate::adapters::analyzers::tq::TqAnalysis>) -> String {
-    let count = tq
-        .map(|t| t.warnings.iter().filter(|w| !w.suppressed).count())
-        .unwrap_or(0);
+use super::html_escape;
+use super::views::HtmlTqView;
+use crate::adapters::report::projections::tq::{project_tq_rows, TqRow};
+use crate::domain::findings::TqFinding;
+
+pub(super) fn build_tq_view(findings: &[TqFinding]) -> HtmlTqView {
+    HtmlTqView {
+        warnings: project_tq_rows(findings),
+    }
+}
+
+pub(super) fn format_tq_section(view: &HtmlTqView) -> String {
+    let count = view.warnings.len();
     super::html_section_wrapper("Test Quality", count, "No test quality warnings.", || {
-        html_tq_table(tq)
+        format_tq_table(view)
     })
 }
 
-/// Build HTML table rows for TQ warnings.
-/// Operation: iteration and formatting logic, no own calls (html_escape via closure).
-fn html_tq_table(tq: Option<&crate::adapters::analyzers::tq::TqAnalysis>) -> String {
-    let warnings: Vec<_> = tq
-        .map(|t| t.warnings.iter().filter(|w| !w.suppressed).collect())
-        .unwrap_or_default();
-    if warnings.is_empty() {
+fn format_tq_table(view: &HtmlTqView) -> String {
+    if view.warnings.is_empty() {
         return String::new();
     }
-    let esc = |s: &str| html_escape(s);
-    let kind_label = |kind: &crate::adapters::analyzers::tq::TqWarningKind| -> &str {
-        match kind {
-            crate::adapters::analyzers::tq::TqWarningKind::NoAssertion => "TQ-001 No assertion",
-            crate::adapters::analyzers::tq::TqWarningKind::NoSut => "TQ-002 No SUT call",
-            crate::adapters::analyzers::tq::TqWarningKind::Untested => "TQ-003 Untested",
-            crate::adapters::analyzers::tq::TqWarningKind::Uncovered => "TQ-004 Uncovered",
-            crate::adapters::analyzers::tq::TqWarningKind::UntestedLogic { .. } => {
-                "TQ-005 Untested logic"
-            }
-        }
-    };
     let mut html = String::from(
         "<table>\n<thead><tr>\
          <th>Function</th><th>File</th><th>Line</th>\
          <th>Kind</th><th>Detail</th>\
          </tr></thead>\n<tbody>\n",
     );
-    warnings.iter().for_each(|w| {
-        let detail = match &w.kind {
-            crate::adapters::analyzers::tq::TqWarningKind::UntestedLogic { uncovered_lines } => {
-                let lines: Vec<String> = uncovered_lines
-                    .iter()
-                    .map(|(kind, line)| format!("{} at line {line}", esc(kind)))
-                    .collect();
-                esc(&lines.join(", "))
-            }
-            _ => String::from("\u{2014}"),
-        };
-        html.push_str(&format!(
-            "<tr><td>{}</td><td>{}</td><td>{}</td>\
-             <td><span class=\"tag tag-warning\">{}</span></td>\
-             <td>{}</td></tr>\n",
-            esc(&w.function_name),
-            esc(&w.file),
-            w.line,
-            kind_label(&w.kind),
-            detail,
-        ));
+    view.warnings.iter().for_each(|w| {
+        html.push_str(&format_tq_row(w));
     });
     html.push_str("</tbody></table>\n");
     html
+}
+
+fn format_tq_row(w: &TqRow) -> String {
+    format!(
+        "<tr><td>{}</td><td>{}</td><td>{}</td>\
+         <td><span class=\"tag tag-warning\">{}</span></td>\
+         <td>{}</td></tr>\n",
+        html_escape(&w.function_name),
+        html_escape(&w.file),
+        w.line,
+        w.display_label,
+        html_escape(&w.detail),
+    )
 }

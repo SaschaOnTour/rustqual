@@ -226,10 +226,11 @@ Single-instance section.
 |---|---|---|
 | `adapters` | (required) | List of adapter layer names |
 | `target` | (required) | Target layer name |
-| `call_depth` | `3` | Transitive walk depth |
+| `call_depth` | `3` | Adapter-internal traversal depth — max helper hops the boundary BFS walks before giving up. Does not constrain post-boundary application chain depth. |
 | `exclude_targets` | `[]` | Globs (module-path form) to skip from Check B |
 | `transparent_wrappers` | `[]` | Wrapper type names to peel during receiver-type inference |
 | `transparent_macros` | (default list) | Attribute macros treated as transparent |
+| `single_touchpoint` | `"warn"` | Check C severity: `"off"` skips, `"warn"` emits as `Severity::Low`, `"error"` as `Severity::Medium` |
 
 ```toml
 [architecture.call_parity]
@@ -238,7 +239,11 @@ target   = "application"
 call_depth = 3
 exclude_targets = ["application::admin::*"]
 transparent_wrappers = ["State", "Extension", "Json", "Data"]
+single_touchpoint = "warn"
 ```
+
+**Deprecated handlers** (`#[deprecated]` on adapter `pub fn`s) are
+excluded from Checks A/B/C/D automatically — no config knob.
 
 ## `[report]`
 

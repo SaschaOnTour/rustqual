@@ -152,22 +152,21 @@ Plus the structural binary check `BTC` (broken trait contract) flags impls that 
 
 ## What you'll see
 
+In `--findings` (one-line) output, real findings look like:
+
 ```
-✗ ARCH-LAYER  src/domain/order.rs imports src/adapters/source/io.rs
-              domain (rank 0) cannot import infrastructure (rank 2)
-
-✗ ARCH-FORBID src/adapters/analyzers/iosp/visitor.rs imports
-              src/adapters/analyzers/dry/mod.rs
-              reason: Dimension analyzers don't know each other
-
-✗ ARCH-PATTERN src/auth/session.rs uses unwrap() (line 88)
-              rule: no_panic_helpers_in_production
-              reason: Production propagates errors typed instead of panicking
-
-✗ ARCH-TRAIT  src/ports/storage.rs trait Storage::write returns anyhow::Result
-              rule: port_traits
-              reason: forbidden_return_type_contains: anyhow::
+src/domain/order.rs:5  ARCHITECTURE  layer rank 0 ↛ rank 2 via crate::adapters::source::io: layer rule
+src/adapters/analyzers/iosp/visitor.rs:3  ARCHITECTURE  forbidden import crate::adapters::analyzers::dry::mod: forbidden edge
+src/auth/session.rs:88  ARCHITECTURE  shared method call unwrap: Production propagates errors typed instead of panicking
+src/ports/storage.rs:42  ARCHITECTURE  trait Storage [forbidden_return_type_contains]: anyhow::: trait contract
 ```
+
+JSON / SARIF / `--format github` use machine-readable rule IDs:
+`architecture/layer`, `architecture/forbidden`,
+`architecture/pattern/<rule-name>` (e.g.
+`architecture/pattern/no_panic_helpers_in_production`),
+`architecture/trait_contract/<check>`. See
+[reference-rules.md](./reference-rules.md) for the full list.
 
 ## Diagnostic mode
 

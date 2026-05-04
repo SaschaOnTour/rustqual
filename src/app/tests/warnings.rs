@@ -351,18 +351,180 @@ fn empty_analysis() -> crate::report::AnalysisResult {
     crate::report::AnalysisResult {
         results: vec![],
         summary: Summary::default(),
-        coupling: None,
-        duplicates: vec![],
-        dead_code: vec![],
-        fragments: vec![],
-        boilerplate: vec![],
-        wildcard_warnings: vec![],
-        repeated_matches: vec![],
-        srp: None,
-        tq: None,
-        structural: None,
-        architecture_findings: vec![],
-        orphan_suppressions: vec![],
+        findings: crate::domain::AnalysisFindings::default(),
+        data: crate::domain::AnalysisData::default(),
+    }
+}
+
+fn make_finding(
+    file: &str,
+    line: usize,
+    dimension: crate::findings::Dimension,
+    rule_id: &str,
+) -> crate::domain::Finding {
+    crate::domain::Finding {
+        file: file.into(),
+        line,
+        column: 0,
+        dimension,
+        rule_id: rule_id.into(),
+        message: String::new(),
+        severity: crate::domain::Severity::Medium,
+        suppressed: false,
+    }
+}
+
+fn make_srp_struct_finding(file: &str, line: usize) -> crate::domain::findings::SrpFinding {
+    crate::domain::findings::SrpFinding {
+        common: make_finding(
+            file,
+            line,
+            crate::findings::Dimension::Srp,
+            "srp/struct_cohesion",
+        ),
+        kind: crate::domain::findings::SrpFindingKind::StructCohesion,
+        details: crate::domain::findings::SrpFindingDetails::StructCohesion {
+            struct_name: "Foo".into(),
+            lcom4: 3,
+            field_count: 5,
+            method_count: 5,
+            fan_out: 2,
+        },
+    }
+}
+
+fn make_srp_module_finding(file: &str) -> crate::domain::findings::SrpFinding {
+    crate::domain::findings::SrpFinding {
+        common: make_finding(
+            file,
+            1,
+            crate::findings::Dimension::Srp,
+            "srp/module_length",
+        ),
+        kind: crate::domain::findings::SrpFindingKind::ModuleLength,
+        details: crate::domain::findings::SrpFindingDetails::ModuleLength {
+            module: file.into(),
+            production_lines: 900,
+            independent_clusters: 1,
+            cluster_names: vec![],
+        },
+    }
+}
+
+fn make_srp_param_finding(
+    file: &str,
+    line: usize,
+    suppressed: bool,
+) -> crate::domain::findings::SrpFinding {
+    let mut common = make_finding(
+        file,
+        line,
+        crate::findings::Dimension::Srp,
+        "srp/parameter_count",
+    );
+    common.suppressed = suppressed;
+    crate::domain::findings::SrpFinding {
+        common,
+        kind: crate::domain::findings::SrpFindingKind::ParameterCount,
+        details: crate::domain::findings::SrpFindingDetails::ParameterCount {
+            function_name: "big_factory".into(),
+            parameter_count: 7,
+        },
+    }
+}
+
+fn make_tq_finding(
+    file: &str,
+    line: usize,
+    kind: crate::domain::findings::TqFindingKind,
+) -> crate::domain::findings::TqFinding {
+    crate::domain::findings::TqFinding {
+        common: make_finding(
+            file,
+            line,
+            crate::findings::Dimension::TestQuality,
+            "tq/no_assertion",
+        ),
+        kind,
+        function_name: "test_it".into(),
+        uncovered_lines: None,
+    }
+}
+
+fn make_dry_dead_code_finding(file: &str, line: usize) -> crate::domain::findings::DryFinding {
+    crate::domain::findings::DryFinding {
+        common: make_finding(
+            file,
+            line,
+            crate::findings::Dimension::Dry,
+            "dry/dead_code/uncalled",
+        ),
+        kind: crate::domain::findings::DryFindingKind::DeadCodeUncalled,
+        details: crate::domain::findings::DryFindingDetails::DeadCode {
+            qualified_name: "helper".into(),
+            suggestion: None,
+        },
+    }
+}
+
+fn make_dry_wildcard_finding(file: &str, line: usize) -> crate::domain::findings::DryFinding {
+    crate::domain::findings::DryFinding {
+        common: make_finding(file, line, crate::findings::Dimension::Dry, "dry/wildcard"),
+        kind: crate::domain::findings::DryFindingKind::Wildcard,
+        details: crate::domain::findings::DryFindingDetails::Wildcard {
+            module_path: "foo::*".into(),
+        },
+    }
+}
+
+fn make_structural_srp_finding(file: &str, line: usize) -> crate::domain::findings::SrpFinding {
+    crate::domain::findings::SrpFinding {
+        common: make_finding(
+            file,
+            line,
+            crate::findings::Dimension::Srp,
+            "srp/structural/SLM",
+        ),
+        kind: crate::domain::findings::SrpFindingKind::Structural,
+        details: crate::domain::findings::SrpFindingDetails::Structural {
+            item_name: "Foo::bar".into(),
+            code: "SLM".into(),
+            detail: "selfless method".into(),
+        },
+    }
+}
+
+fn make_structural_coupling_finding(
+    file: &str,
+    line: usize,
+) -> crate::domain::findings::CouplingFinding {
+    crate::domain::findings::CouplingFinding {
+        common: make_finding(
+            file,
+            line,
+            crate::findings::Dimension::Coupling,
+            "coupling/structural/SIT",
+        ),
+        kind: crate::domain::findings::CouplingFindingKind::Structural,
+        details: crate::domain::findings::CouplingFindingDetails::Structural {
+            item_name: "Foo".into(),
+            code: "SIT".into(),
+            detail: "single-impl trait".into(),
+        },
+    }
+}
+
+fn make_architecture_finding(
+    file: &str,
+    line: usize,
+) -> crate::domain::findings::ArchitectureFinding {
+    crate::domain::findings::ArchitectureFinding {
+        common: make_finding(
+            file,
+            line,
+            crate::findings::Dimension::Architecture,
+            "architecture::layer",
+        ),
     }
 }
 
@@ -394,7 +556,6 @@ fn orphan_suppression_without_matching_finding_is_counted() {
 fn suppression_covering_finding_in_window_is_not_orphan() {
     // SRP struct finding at line 8; suppression marker at line 5 with
     // ANNOTATION_WINDOW=3 reaches line 8. Must NOT be orphan.
-    use crate::adapters::analyzers::srp::{SrpAnalysis, SrpWarning};
     use crate::findings::Suppression;
     let mut sups = HashMap::new();
     sups.insert(
@@ -406,22 +567,10 @@ fn suppression_covering_finding_in_window_is_not_orphan() {
         }],
     );
     let mut analysis = empty_analysis();
-    analysis.srp = Some(SrpAnalysis {
-        struct_warnings: vec![SrpWarning {
-            struct_name: "Foo".into(),
-            file: "src/foo.rs".into(),
-            line: 8,
-            lcom4: 3,
-            field_count: 5,
-            method_count: 5,
-            fan_out: 2,
-            composite_score: 0.9,
-            clusters: vec![],
-            suppressed: false,
-        }],
-        module_warnings: vec![],
-        param_warnings: vec![],
-    });
+    analysis
+        .findings
+        .srp
+        .push(make_srp_struct_finding("src/foo.rs", 8));
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
         &analysis,
@@ -435,7 +584,6 @@ fn suppression_covering_finding_in_window_is_not_orphan() {
 fn suppression_with_wrong_dimension_is_orphan() {
     // Finding is SRP, but marker suppresses only DRY → no dimension
     // match → orphan.
-    use crate::adapters::analyzers::srp::{SrpAnalysis, SrpWarning};
     use crate::findings::Suppression;
     let mut sups = HashMap::new();
     sups.insert(
@@ -447,22 +595,10 @@ fn suppression_with_wrong_dimension_is_orphan() {
         }],
     );
     let mut analysis = empty_analysis();
-    analysis.srp = Some(SrpAnalysis {
-        struct_warnings: vec![SrpWarning {
-            struct_name: "Foo".into(),
-            file: "src/foo.rs".into(),
-            line: 7,
-            lcom4: 3,
-            field_count: 5,
-            method_count: 5,
-            fan_out: 2,
-            composite_score: 0.9,
-            clusters: vec![],
-            suppressed: false,
-        }],
-        module_warnings: vec![],
-        param_warnings: vec![],
-    });
+    analysis
+        .findings
+        .srp
+        .push(make_srp_struct_finding("src/foo.rs", 7));
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
         &analysis,
@@ -476,7 +612,6 @@ fn suppression_with_wrong_dimension_is_orphan() {
 fn bare_qual_allow_is_wildcard_and_matches_any_dim() {
     // Suppression has empty dimensions (bare `// qual:allow`) → matches
     // any dimension. A finding in window must clear the orphan.
-    use crate::adapters::analyzers::srp::{SrpAnalysis, SrpWarning};
     use crate::findings::Suppression;
     let mut sups = HashMap::new();
     sups.insert(
@@ -488,22 +623,10 @@ fn bare_qual_allow_is_wildcard_and_matches_any_dim() {
         }],
     );
     let mut analysis = empty_analysis();
-    analysis.srp = Some(SrpAnalysis {
-        struct_warnings: vec![SrpWarning {
-            struct_name: "Foo".into(),
-            file: "src/foo.rs".into(),
-            line: 6,
-            lcom4: 3,
-            field_count: 5,
-            method_count: 5,
-            fan_out: 2,
-            composite_score: 0.9,
-            clusters: vec![],
-            suppressed: false,
-        }],
-        module_warnings: vec![],
-        param_warnings: vec![],
-    });
+    analysis
+        .findings
+        .srp
+        .push(make_srp_struct_finding("src/foo.rs", 6));
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
         &analysis,
@@ -778,7 +901,6 @@ fn suppressed_srp_param_over_threshold_is_not_orphan() {
     // `apply_parameter_warnings` now records the warning with
     // suppressed=true (it used to filter them out), so the orphan
     // checker finds a matching SRP position.
-    use crate::adapters::analyzers::srp::{ParamSrpWarning, SrpAnalysis};
     use crate::findings::Suppression;
     let mut sups = HashMap::new();
     sups.insert(
@@ -790,17 +912,10 @@ fn suppressed_srp_param_over_threshold_is_not_orphan() {
         }],
     );
     let mut analysis = empty_analysis();
-    analysis.srp = Some(SrpAnalysis {
-        struct_warnings: vec![],
-        module_warnings: vec![],
-        param_warnings: vec![ParamSrpWarning {
-            function_name: "big_factory".into(),
-            file: "src/x.rs".into(),
-            line: 6,
-            parameter_count: 7,
-            suppressed: true,
-        }],
-    });
+    analysis
+        .findings
+        .srp
+        .push(make_srp_param_finding("src/x.rs", 6, true));
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
         &analysis,
@@ -819,9 +934,6 @@ fn coupling_marker_is_not_orphan_for_structural_coupling_finding() {
     // qual:allow(coupling) window DOES suppress them. The orphan
     // checker must treat coupling-only markers as verifiable when a
     // line-anchored coupling position is available in the file.
-    use crate::adapters::analyzers::structural::{
-        StructuralAnalysis, StructuralWarning, StructuralWarningKind,
-    };
     use crate::findings::Suppression;
     let mut sups = HashMap::new();
     sups.insert(
@@ -833,18 +945,10 @@ fn coupling_marker_is_not_orphan_for_structural_coupling_finding() {
         }],
     );
     let mut analysis = empty_analysis();
-    analysis.structural = Some(StructuralAnalysis {
-        warnings: vec![StructuralWarning {
-            file: "src/foo.rs".into(),
-            line: 12,
-            name: "Foo".into(),
-            kind: StructuralWarningKind::SingleImplTrait {
-                impl_type: "FooImpl".into(),
-            },
-            dimension: crate::findings::Dimension::Coupling,
-            suppressed: false,
-        }],
-    });
+    analysis
+        .findings
+        .coupling
+        .push(make_structural_coupling_finding("src/foo.rs", 12));
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
         &analysis,
@@ -891,7 +995,6 @@ fn dry_marker_on_dead_code_only_is_orphan() {
     // qual:api / qual:test_helper / is_test / has_allow_dead_code).
     // So a qual:allow(dry) marker whose only nearby finding is
     // DEAD_CODE should be reported as orphan.
-    use crate::adapters::analyzers::dry::dead_code::{DeadCodeKind, DeadCodeWarning};
     use crate::findings::Suppression;
     let mut sups = HashMap::new();
     sups.insert(
@@ -903,14 +1006,10 @@ fn dry_marker_on_dead_code_only_is_orphan() {
         }],
     );
     let mut analysis = empty_analysis();
-    analysis.dead_code = vec![DeadCodeWarning {
-        function_name: "helper".into(),
-        qualified_name: "helper".into(),
-        file: "src/foo.rs".into(),
-        line: 7,
-        kind: DeadCodeKind::Uncalled,
-        suggestion: String::new(),
-    }];
+    analysis
+        .findings
+        .dry
+        .push(make_dry_dead_code_finding("src/foo.rs", 7));
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
         &analysis,
@@ -928,7 +1027,6 @@ fn dry_marker_two_lines_above_wildcard_is_orphan() {
     // `mark_wildcard_suppressions` accepts markers only on the same
     // line or one line above. A marker two lines above the wildcard
     // would NOT suppress it, so the orphan checker must report it.
-    use crate::adapters::analyzers::dry::wildcards::WildcardImportWarning;
     use crate::findings::Suppression;
     let mut sups = HashMap::new();
     sups.insert(
@@ -940,12 +1038,10 @@ fn dry_marker_two_lines_above_wildcard_is_orphan() {
         }],
     );
     let mut analysis = empty_analysis();
-    analysis.wildcard_warnings = vec![WildcardImportWarning {
-        file: "src/foo.rs".into(),
-        line: 7,
-        module_path: "foo::*".into(),
-        suppressed: false,
-    }];
+    analysis
+        .findings
+        .dry
+        .push(make_dry_wildcard_finding("src/foo.rs", 7));
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
         &analysis,
@@ -962,7 +1058,6 @@ fn dry_marker_two_lines_above_wildcard_is_orphan() {
 fn dry_marker_one_line_above_wildcard_is_not_orphan() {
     // Guard: the wildcard window is exactly 0 or 1 — same line or
     // line above. 1-line distance must still count as non-orphan.
-    use crate::adapters::analyzers::dry::wildcards::WildcardImportWarning;
     use crate::findings::Suppression;
     let mut sups = HashMap::new();
     sups.insert(
@@ -974,12 +1069,10 @@ fn dry_marker_one_line_above_wildcard_is_not_orphan() {
         }],
     );
     let mut analysis = empty_analysis();
-    analysis.wildcard_warnings = vec![WildcardImportWarning {
-        file: "src/foo.rs".into(),
-        line: 7,
-        module_path: "foo::*".into(),
-        suppressed: false,
-    }];
+    analysis
+        .findings
+        .dry
+        .push(make_dry_wildcard_finding("src/foo.rs", 7));
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
         &analysis,
@@ -1033,7 +1126,6 @@ fn srp_marker_is_orphan_when_srp_dimension_disabled() {
     // Same pattern for SRP: disable the dimension, a qual:allow(srp)
     // can't suppress anything → orphan even if a SrpWarning is in
     // the analysis struct (stale from a previous run, or leftover).
-    use crate::adapters::analyzers::srp::{SrpAnalysis, SrpWarning};
     use crate::findings::Suppression;
     let mut sups = HashMap::new();
     sups.insert(
@@ -1045,22 +1137,10 @@ fn srp_marker_is_orphan_when_srp_dimension_disabled() {
         }],
     );
     let mut analysis = empty_analysis();
-    analysis.srp = Some(SrpAnalysis {
-        struct_warnings: vec![SrpWarning {
-            struct_name: "Foo".into(),
-            file: "src/foo.rs".into(),
-            line: 7,
-            lcom4: 3,
-            field_count: 5,
-            method_count: 5,
-            fan_out: 2,
-            composite_score: 0.9,
-            clusters: vec![],
-            suppressed: false,
-        }],
-        module_warnings: vec![],
-        param_warnings: vec![],
-    });
+    analysis
+        .findings
+        .srp
+        .push(make_srp_struct_finding("src/foo.rs", 7));
     let mut config = Config::default();
     config.srp.enabled = false;
     let orphans =
@@ -1079,7 +1159,6 @@ fn srp_struct_marker_within_5_line_window_is_not_orphan() {
     // attributes can push the marker further from the struct. A
     // marker at line 2 matching a struct at line 7 (diff=5) must not
     // be flagged as orphan.
-    use crate::adapters::analyzers::srp::{SrpAnalysis, SrpWarning};
     use crate::findings::Suppression;
     let mut sups = HashMap::new();
     sups.insert(
@@ -1091,22 +1170,10 @@ fn srp_struct_marker_within_5_line_window_is_not_orphan() {
         }],
     );
     let mut analysis = empty_analysis();
-    analysis.srp = Some(SrpAnalysis {
-        struct_warnings: vec![SrpWarning {
-            struct_name: "Foo".into(),
-            file: "src/foo.rs".into(),
-            line: 7,
-            lcom4: 3,
-            field_count: 5,
-            method_count: 5,
-            fan_out: 2,
-            composite_score: 0.9,
-            clusters: vec![],
-            suppressed: false,
-        }],
-        module_warnings: vec![],
-        param_warnings: vec![],
-    });
+    analysis
+        .findings
+        .srp
+        .push(make_srp_struct_finding("src/foo.rs", 7));
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
         &analysis,
@@ -1124,7 +1191,6 @@ fn srp_module_marker_anywhere_in_file_is_not_orphan() {
     // `mark_srp_suppressions` — any qual:allow(srp) anywhere in the
     // file matches. The orphan checker must not require line
     // proximity for module-level SRP findings.
-    use crate::adapters::analyzers::srp::{ModuleSrpWarning, SrpAnalysis};
     use crate::findings::Suppression;
     let mut sups = HashMap::new();
     sups.insert(
@@ -1136,19 +1202,10 @@ fn srp_module_marker_anywhere_in_file_is_not_orphan() {
         }],
     );
     let mut analysis = empty_analysis();
-    analysis.srp = Some(SrpAnalysis {
-        struct_warnings: vec![],
-        module_warnings: vec![ModuleSrpWarning {
-            module: "src/big.rs".into(),
-            file: "src/big.rs".into(),
-            production_lines: 900,
-            length_score: 1.0,
-            independent_clusters: 1,
-            cluster_names: vec![],
-            suppressed: false,
-        }],
-        param_warnings: vec![],
-    });
+    analysis
+        .findings
+        .srp
+        .push(make_srp_module_finding("src/big.rs"));
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
         &analysis,
@@ -1163,7 +1220,6 @@ fn srp_module_marker_anywhere_in_file_is_not_orphan() {
 #[test]
 fn tq_marker_within_5_line_window_is_not_orphan() {
     // TQ suppressions use a 5-line window (mark_tq_suppressions).
-    use crate::adapters::analyzers::tq::{TqAnalysis, TqWarning, TqWarningKind};
     use crate::findings::Suppression;
     let mut sups = HashMap::new();
     sups.insert(
@@ -1175,15 +1231,11 @@ fn tq_marker_within_5_line_window_is_not_orphan() {
         }],
     );
     let mut analysis = empty_analysis();
-    analysis.tq = Some(TqAnalysis {
-        warnings: vec![TqWarning {
-            file: "src/foo.rs".into(),
-            line: 15,
-            function_name: "test_it".into(),
-            kind: TqWarningKind::NoAssertion,
-            suppressed: false,
-        }],
-    });
+    analysis.findings.test_quality.push(make_tq_finding(
+        "src/foo.rs",
+        15,
+        crate::domain::findings::TqFindingKind::NoAssertion,
+    ));
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
         &analysis,
@@ -1199,9 +1251,6 @@ fn tq_marker_within_5_line_window_is_not_orphan() {
 fn structural_marker_within_5_line_window_is_not_orphan() {
     // Structural binary checks use a 5-line window
     // (mark_structural_suppressions).
-    use crate::adapters::analyzers::structural::{
-        StructuralAnalysis, StructuralWarning, StructuralWarningKind,
-    };
     use crate::findings::Suppression;
     let mut sups = HashMap::new();
     sups.insert(
@@ -1213,16 +1262,10 @@ fn structural_marker_within_5_line_window_is_not_orphan() {
         }],
     );
     let mut analysis = empty_analysis();
-    analysis.structural = Some(StructuralAnalysis {
-        warnings: vec![StructuralWarning {
-            file: "src/foo.rs".into(),
-            line: 15,
-            name: "Foo::bar".into(),
-            kind: StructuralWarningKind::SelflessMethod,
-            dimension: crate::findings::Dimension::Srp,
-            suppressed: false,
-        }],
-    });
+    analysis
+        .findings
+        .srp
+        .push(make_structural_srp_finding("src/foo.rs", 15));
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
         &analysis,
@@ -1235,9 +1278,13 @@ fn structural_marker_within_5_line_window_is_not_orphan() {
 }
 
 #[test]
-fn architecture_marker_anywhere_in_file_is_not_orphan() {
-    // Architecture findings are suppressed file-globally by
-    // `mark_architecture_suppressions`.
+fn architecture_marker_only_matches_findings_in_window() {
+    // Architecture suppressions must be scoped to the marker's
+    // annotation window, not the whole file. A `qual:allow(architecture)`
+    // for one helper must not silence unrelated layer / forbidden /
+    // call-parity findings elsewhere in the same file, and the orphan
+    // checker must report a stale marker whose only architecture
+    // finding lives outside the window.
     use crate::findings::Suppression;
     let mut sups = HashMap::new();
     sups.insert(
@@ -1249,23 +1296,18 @@ fn architecture_marker_anywhere_in_file_is_not_orphan() {
         }],
     );
     let mut analysis = empty_analysis();
-    analysis.architecture_findings = vec![crate::domain::Finding {
-        file: "src/foo.rs".into(),
-        line: 500,
-        column: 0,
-        rule_id: "architecture::layer".into(),
-        message: "layer violation".into(),
-        dimension: crate::findings::Dimension::Architecture,
-        severity: crate::domain::Severity::Medium,
-        suppressed: false,
-    }];
+    analysis
+        .findings
+        .architecture
+        .push(make_architecture_finding("src/foo.rs", 500));
     let mut config = Config::default();
     config.architecture.enabled = true;
     let orphans =
         crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &config);
     assert!(
-        orphans.is_empty(),
-        "Architecture marker at any line must match file-global finding, got: {orphans:?}"
+        !orphans.is_empty(),
+        "Architecture marker at line 1 with only a finding at line 500 must \
+         be reported as orphan (window-scoped, not file-scoped); got: {orphans:?}"
     );
 }
 

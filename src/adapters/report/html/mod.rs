@@ -1,15 +1,38 @@
-mod sections;
+mod architecture_table;
+mod complexity;
+mod coupling;
+mod dry;
+mod iosp;
+mod orphan_suppressions;
 mod srp_tables;
 mod structural_table;
-mod tables;
 mod tq_table;
+mod views;
 
-use sections::{html_complexity_section, html_coupling_section, html_iosp_section};
-use structural_table::html_structural_section;
-use tables::{html_dry_section, html_srp_section, html_tq_section};
+use architecture_table::{build_architecture_view, format_architecture_section};
+use complexity::{build_complexity_data_view, build_complexity_view, format_complexity_section};
+use coupling::{build_coupling_data_view, build_coupling_view, format_coupling_section};
+use dry::{build_dry_view, format_dry_section};
+use iosp::{build_iosp_data_view, build_iosp_view, format_iosp_section};
+use orphan_suppressions::format_orphan_suppressions_section;
+use srp_tables::{build_srp_view, format_srp_section};
+use structural_table::format_structural_section;
+use tq_table::{build_tq_view, format_tq_section};
+
+use views::{
+    HtmlArchitectureView, HtmlComplexityDataView, HtmlComplexityView, HtmlCouplingDataView,
+    HtmlCouplingView, HtmlDryView, HtmlIospDataView, HtmlIospView, HtmlSrpView, HtmlTqView,
+};
 
 use super::{AnalysisResult, Summary};
+use crate::domain::analysis_data::{FunctionRecord, ModuleCouplingRecord};
+use crate::domain::findings::{
+    ArchitectureFinding, ComplexityFinding, CouplingFinding, DryFinding, IospFinding,
+    OrphanSuppression, SrpFinding, TqFinding,
+};
 use crate::domain::PERCENTAGE_MULTIPLIER;
+use crate::ports::reporter::{ReporterImpl, Snapshot};
+use crate::ports::Reporter;
 
 /// Escape HTML-special characters in user content.
 /// Operation: string replacement logic.
@@ -20,32 +43,109 @@ pub(crate) fn html_escape(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
+/// HTML reporter — produces a self-contained HTML report. Holds
+/// `&Summary` for the dashboard composition; per-dim views handle
+/// their respective collapsible sections, including orphan
+/// suppressions which flow through the trait via `build_orphans` →
+/// `Snapshot::orphans` → `publish`.
+pub struct HtmlReporter<'a> {
+    pub(crate) summary: &'a Summary,
+}
+
+impl<'a> ReporterImpl for HtmlReporter<'a> {
+    type Output = String;
+
+    type IospView = HtmlIospView;
+    type ComplexityView = HtmlComplexityView;
+    type DryView = HtmlDryView;
+    type SrpView = HtmlSrpView;
+    type CouplingView = HtmlCouplingView;
+    type TestQualityView = HtmlTqView;
+    type ArchitectureView = HtmlArchitectureView;
+    type OrphanView = String;
+    type IospDataView = HtmlIospDataView;
+    type ComplexityDataView = HtmlComplexityDataView;
+    type CouplingDataView = HtmlCouplingDataView;
+
+    fn build_iosp(&self, findings: &[IospFinding]) -> HtmlIospView {
+        build_iosp_view(findings)
+    }
+    fn build_complexity(&self, findings: &[ComplexityFinding]) -> HtmlComplexityView {
+        build_complexity_view(findings)
+    }
+    fn build_dry(&self, findings: &[DryFinding]) -> HtmlDryView {
+        build_dry_view(findings)
+    }
+    fn build_srp(&self, findings: &[SrpFinding]) -> HtmlSrpView {
+        build_srp_view(findings)
+    }
+    fn build_coupling(&self, findings: &[CouplingFinding]) -> HtmlCouplingView {
+        build_coupling_view(findings)
+    }
+    fn build_test_quality(&self, findings: &[TqFinding]) -> HtmlTqView {
+        build_tq_view(findings)
+    }
+    fn build_architecture(&self, findings: &[ArchitectureFinding]) -> HtmlArchitectureView {
+        build_architecture_view(findings)
+    }
+    fn build_iosp_data(&self, fns: &[FunctionRecord]) -> HtmlIospDataView {
+        build_iosp_data_view(fns)
+    }
+    fn build_complexity_data(&self, fns: &[FunctionRecord]) -> HtmlComplexityDataView {
+        build_complexity_data_view(fns)
+    }
+    fn build_coupling_data(&self, modules: &[ModuleCouplingRecord]) -> HtmlCouplingDataView {
+        build_coupling_data_view(modules)
+    }
+    fn build_orphans(&self, suppressions: &[OrphanSuppression]) -> String {
+        format_orphan_suppressions_section(suppressions)
+    }
+
+    fn publish(&self, snapshot: Snapshot<Self>) -> String {
+        let Snapshot {
+            iosp,
+            complexity,
+            dry,
+            srp,
+            coupling,
+            test_quality,
+            architecture,
+            orphans,
+            iosp_data,
+            complexity_data,
+            coupling_data,
+        } = snapshot;
+        let mut html = String::with_capacity(HTML_INITIAL_CAPACITY);
+        html.push_str(&html_header());
+        html.push_str(&html_dashboard(self.summary));
+        html.push_str(&format_iosp_section(&iosp, &iosp_data, self.summary));
+        html.push_str(&format_complexity_section(&complexity, &complexity_data));
+        html.push_str(&format_dry_section(&dry));
+        html.push_str(&format_srp_section(&srp));
+        html.push_str(&format_tq_section(&test_quality));
+        html.push_str(&format_structural_section(
+            &srp.structural_rows,
+            &coupling.structural_rows,
+        ));
+        html.push_str(&format_coupling_section(&coupling, &coupling_data));
+        html.push_str(&format_architecture_section(&architecture));
+        html.push_str(&orphans);
+        html.push_str(&html_footer());
+        html
+    }
+}
+
 /// Print the analysis results as a self-contained HTML report.
-/// Trivial: single call to build_html_string + println.
+/// Trivial: render via the Reporter trait + println.
 pub fn print_html(analysis: &AnalysisResult) {
-    let html = build_html_string(analysis);
-    println!("{html}");
+    let reporter = HtmlReporter {
+        summary: &analysis.summary,
+    };
+    println!("{}", reporter.render(&analysis.findings, &analysis.data));
 }
 
 /// Initial capacity for the HTML output buffer.
 const HTML_INITIAL_CAPACITY: usize = 32768;
-
-/// Build the complete HTML string by assembling all sections.
-/// Integration: calls section builders, no logic.
-pub(crate) fn build_html_string(analysis: &AnalysisResult) -> String {
-    let mut html = String::with_capacity(HTML_INITIAL_CAPACITY);
-    html.push_str(&html_header());
-    html.push_str(&html_dashboard(&analysis.summary));
-    html.push_str(&html_iosp_section(&analysis.results, &analysis.summary));
-    html.push_str(&html_complexity_section(&analysis.results));
-    html.push_str(&html_dry_section(analysis));
-    html.push_str(&html_srp_section(analysis.srp.as_ref()));
-    html.push_str(&html_tq_section(analysis.tq.as_ref()));
-    html.push_str(&html_structural_section(analysis.structural.as_ref()));
-    html.push_str(&html_coupling_section(analysis.coupling.as_ref()));
-    html.push_str(&html_footer());
-    html
-}
 
 /// Build the HTML header with DOCTYPE, meta tags, and all CSS.
 /// Operation: string building, no own calls.
@@ -116,6 +216,7 @@ fn html_dashboard(summary: &Summary) -> String {
         "SRP",
         "Coupling",
         "Test Quality",
+        "Architecture",
     ];
     let scores = &summary.dimension_scores;
     let q = summary.quality_score;

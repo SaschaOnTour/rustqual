@@ -34,21 +34,12 @@ fn make_result(name: &str, classification: Classification) -> FunctionAnalysis {
 
 fn make_analysis(results: Vec<FunctionAnalysis>) -> AnalysisResult {
     let summary = Summary::from_results(&results);
+    let data = crate::app::projection::project_data(&results, None);
     AnalysisResult {
         results,
         summary,
-        coupling: None,
-        duplicates: vec![],
-        dead_code: vec![],
-        fragments: vec![],
-        boilerplate: vec![],
-        wildcard_warnings: vec![],
-        repeated_matches: vec![],
-        srp: None,
-        tq: None,
-        structural: None,
-        architecture_findings: vec![],
-        orphan_suppressions: vec![],
+        findings: crate::domain::AnalysisFindings::default(),
+        data,
     }
 }
 
@@ -273,10 +264,14 @@ fn test_json_complexity_has_extended_fields() {
 }
 
 #[test]
-fn test_json_serializes_orphan_suppressions() {
-    use crate::adapters::report::OrphanSuppressionWarning;
+fn json_reporter_includes_orphan_suppressions_via_snapshot_view() {
+    // Populate `findings.orphan_suppressions` ONLY (not the legacy
+    // `analysis.orphan_suppressions` field) and verify the JSON
+    // output still includes the orphans — proving the JSON reporter
+    // reads them from the trait-driven `Snapshot::orphans` view.
+    use crate::domain::findings::OrphanSuppression;
     let mut analysis = make_analysis(vec![]);
-    analysis.orphan_suppressions = vec![OrphanSuppressionWarning {
+    analysis.findings.orphan_suppressions = vec![OrphanSuppression {
         file: "src/foo.rs".into(),
         line: 42,
         dimensions: vec![crate::findings::Dimension::Srp],

@@ -22,36 +22,36 @@ use super::tq_metrics::{compute_tq, count_tq_warnings, mark_tq_suppressions};
 use crate::adapters::source::filesystem as discovery;
 
 /// Results from coupling, DRY, SRP, TQ, and structural analysis passes.
-pub(super) struct SecondaryResults {
-    pub(super) coupling: Option<crate::adapters::analyzers::coupling::CouplingAnalysis>,
-    pub(super) duplicates: Vec<crate::adapters::analyzers::dry::functions::DuplicateGroup>,
-    pub(super) dead_code: Vec<crate::adapters::analyzers::dry::dead_code::DeadCodeWarning>,
-    pub(super) fragments: Vec<crate::adapters::analyzers::dry::fragments::FragmentGroup>,
-    pub(super) boilerplate: Vec<crate::adapters::analyzers::dry::boilerplate::BoilerplateFind>,
-    pub(super) wildcard_warnings:
+pub(crate) struct SecondaryResults {
+    pub(crate) coupling: Option<crate::adapters::analyzers::coupling::CouplingAnalysis>,
+    pub(crate) duplicates: Vec<crate::adapters::analyzers::dry::functions::DuplicateGroup>,
+    pub(crate) dead_code: Vec<crate::adapters::analyzers::dry::dead_code::DeadCodeWarning>,
+    pub(crate) fragments: Vec<crate::adapters::analyzers::dry::fragments::FragmentGroup>,
+    pub(crate) boilerplate: Vec<crate::adapters::analyzers::dry::boilerplate::BoilerplateFind>,
+    pub(crate) wildcard_warnings:
         Vec<crate::adapters::analyzers::dry::wildcards::WildcardImportWarning>,
-    pub(super) repeated_matches:
+    pub(crate) repeated_matches:
         Vec<crate::adapters::analyzers::dry::match_patterns::RepeatedMatchGroup>,
-    pub(super) srp: Option<crate::adapters::analyzers::srp::SrpAnalysis>,
-    pub(super) tq: Option<crate::adapters::analyzers::tq::TqAnalysis>,
-    pub(super) structural: Option<crate::adapters::analyzers::structural::StructuralAnalysis>,
+    pub(crate) srp: Option<crate::adapters::analyzers::srp::SrpAnalysis>,
+    pub(crate) tq: Option<crate::adapters::analyzers::tq::TqAnalysis>,
+    pub(crate) structural: Option<crate::adapters::analyzers::structural::StructuralAnalysis>,
 }
 
 /// Inputs the secondary passes share: parsed workspace, config,
 /// pre-computed suppression + cfg-test indexes, and the primary pass's
 /// IOSP results. Bundled to keep per-pass signatures narrow.
-pub(super) struct SecondaryContext<'a> {
-    pub(super) parsed: &'a [(String, String, syn::File)],
-    pub(super) config: &'a Config,
-    pub(super) all_results: &'a [FunctionAnalysis],
-    pub(super) suppression_lines:
+pub(crate) struct SecondaryContext<'a> {
+    pub(crate) parsed: &'a [(String, String, syn::File)],
+    pub(crate) config: &'a Config,
+    pub(crate) all_results: &'a [FunctionAnalysis],
+    pub(crate) suppression_lines:
         &'a std::collections::HashMap<String, Vec<crate::findings::Suppression>>,
-    pub(super) cfg_test_files: &'a std::collections::HashSet<String>,
+    pub(crate) cfg_test_files: &'a std::collections::HashSet<String>,
 }
 
 /// Run coupling, DRY, SRP, and TQ analysis passes, updating summary counts.
 /// Integration: orchestrates detection sub-functions, no logic.
-pub(super) fn run_secondary_analysis(
+pub(crate) fn run_secondary_analysis(
     ctx: &SecondaryContext<'_>,
     summary: &mut Summary,
 ) -> SecondaryResults {

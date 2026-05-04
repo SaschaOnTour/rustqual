@@ -36,18 +36,8 @@ fn make_analysis(results: Vec<FunctionAnalysis>) -> AnalysisResult {
     AnalysisResult {
         results,
         summary,
-        coupling: None,
-        duplicates: vec![],
-        dead_code: vec![],
-        fragments: vec![],
-        boilerplate: vec![],
-        wildcard_warnings: vec![],
-        repeated_matches: vec![],
-        srp: None,
-        tq: None,
-        structural: None,
-        architecture_findings: vec![],
-        orphan_suppressions: vec![],
+        findings: crate::domain::AnalysisFindings::default(),
+        data: crate::domain::AnalysisData::default(),
     }
 }
 
@@ -179,10 +169,12 @@ fn test_print_sarif_multiple_violations() {
 // ── Orphan-suppression SARIF coverage ─────────────────────────
 
 #[test]
-fn sarif_emits_orphan_suppression_finding() {
-    use crate::adapters::report::OrphanSuppressionWarning;
+fn sarif_reporter_emits_orphan_results_via_snapshot_view() {
+    use crate::domain::findings::OrphanSuppression;
     let mut analysis = make_analysis(vec![]);
-    analysis.orphan_suppressions = vec![OrphanSuppressionWarning {
+    // Trait-driven path — populate `findings.orphan_suppressions`
+    // (NOT the legacy `analysis.orphan_suppressions` field).
+    analysis.findings.orphan_suppressions = vec![OrphanSuppression {
         file: "src/foo.rs".into(),
         line: 42,
         dimensions: vec![crate::findings::Dimension::Srp],
@@ -233,5 +225,119 @@ fn sarif_rules_include_orphan_suppression() {
     assert!(
         desc.to_lowercase().contains("orphan") || desc.to_lowercase().contains("stale"),
         "rule description should name the orphan concept: {desc}"
+    );
+}
+
+// ── Architecture findings SARIF coverage (v1.2.1) ─────────────
+
+fn make_arch_finding(rule_id: &str, severity: crate::domain::Severity) -> crate::domain::Finding {
+    crate::domain::Finding {
+        file: "src/cli/handlers.rs".to_string(),
+        line: 17,
+        column: 0,
+        dimension: crate::findings::Dimension::Architecture,
+        rule_id: rule_id.to_string(),
+        severity,
+        message: format!("test message for {rule_id}"),
+        suppressed: false,
+    }
+}
+
+#[test]
+fn sarif_emits_architecture_call_parity_finding() {
+    let mut analysis = make_analysis(vec![]);
+    analysis.findings.architecture = vec![crate::domain::findings::ArchitectureFinding {
+        common: make_arch_finding(
+            "architecture/call_parity/no_delegation",
+            crate::domain::Severity::Medium,
+        ),
+    }];
+    let value = build_sarif_value(&analysis);
+    let results = value["runs"][0]["results"]
+        .as_array()
+        .expect("results array");
+    let hit = results
+        .iter()
+        .find(|r| r["ruleId"] == "architecture/call_parity/no_delegation")
+        .expect("call_parity finding emitted in SARIF");
+    assert_eq!(hit["level"], "warning");
+    assert_eq!(
+        hit["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+        "src/cli/handlers.rs"
+    );
+    assert_eq!(
+        hit["locations"][0]["physicalLocation"]["region"]["startLine"],
+        17
+    );
+}
+
+#[test]
+fn sarif_maps_architecture_severities() {
+    let mut analysis = make_analysis(vec![]);
+    analysis.findings.architecture = vec![
+        crate::domain::findings::ArchitectureFinding {
+            common: make_arch_finding(
+                "architecture/call_parity/multi_touchpoint",
+                crate::domain::Severity::Low,
+            ),
+        },
+        crate::domain::findings::ArchitectureFinding {
+            common: make_arch_finding(
+                "architecture/call_parity/missing_adapter",
+                crate::domain::Severity::Medium,
+            ),
+        },
+        crate::domain::findings::ArchitectureFinding {
+            common: make_arch_finding(
+                "architecture/trait_contract/object_safety",
+                crate::domain::Severity::High,
+            ),
+        },
+    ];
+    let value = build_sarif_value(&analysis);
+    let results = value["runs"][0]["results"]
+        .as_array()
+        .expect("results array");
+    let level_for = |rid: &str| -> &str {
+        results
+            .iter()
+            .find(|r| r["ruleId"] == rid)
+            .unwrap_or_else(|| panic!("missing {rid}"))["level"]
+            .as_str()
+            .expect("level string")
+    };
+    assert_eq!(
+        level_for("architecture/call_parity/multi_touchpoint"),
+        "note"
+    );
+    assert_eq!(
+        level_for("architecture/call_parity/missing_adapter"),
+        "warning"
+    );
+    assert_eq!(
+        level_for("architecture/trait_contract/object_safety"),
+        "error"
+    );
+}
+
+#[test]
+fn sarif_skips_suppressed_architecture_findings() {
+    let mut analysis = make_analysis(vec![]);
+    let mut suppressed = make_arch_finding(
+        "architecture/call_parity/no_delegation",
+        crate::domain::Severity::Medium,
+    );
+    suppressed.suppressed = true;
+    analysis.findings.architecture =
+        vec![crate::domain::findings::ArchitectureFinding { common: suppressed }];
+    let value = build_sarif_value(&analysis);
+    let results = value["runs"][0]["results"]
+        .as_array()
+        .expect("results array");
+    assert!(
+        !results
+            .iter()
+            .any(|r| r["ruleId"] == "architecture/call_parity/no_delegation"),
+        "suppressed architecture finding must not appear in SARIF"
     );
 }

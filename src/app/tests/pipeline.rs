@@ -237,18 +237,8 @@ fn test_output_results_text_no_panic() {
     let analysis = AnalysisResult {
         results,
         summary,
-        coupling: None,
-        duplicates: vec![],
-        dead_code: vec![],
-        fragments: vec![],
-        boilerplate: vec![],
-        wildcard_warnings: vec![],
-        repeated_matches: vec![],
-        srp: None,
-        tq: None,
-        structural: None,
-        architecture_findings: vec![],
-        orphan_suppressions: vec![],
+        findings: crate::domain::AnalysisFindings::default(),
+        data: crate::domain::AnalysisData::default(),
     };
     output_results(
         &analysis,
@@ -548,4 +538,149 @@ fn test_count_all_suppressions_allow_with_gap_counted() {
     let parsed = vec![("test.rs".to_string(), source.to_string(), syntax)];
     let supp = std::collections::HashMap::new();
     assert_eq!(count_all_suppressions(&supp, &parsed), 1);
+}
+
+// ── Pipeline integration: Analyzer → AnalysisResult per dimension (v1.2.1) ──
+//
+// Lock-in test for run_analysis: when the input contains code that triggers
+// each dimension, the corresponding AnalysisResult fields must be populated.
+// Today this passes — purpose is to catch silent regressions during the
+// per-dimension Finding-typing refactor (typed AnalysisFindings).
+
+#[test]
+fn test_run_analysis_populates_iosp_dimension() {
+    // IOSP violation: mutual recursion ensures neither function gets safe-
+    // target-reclassified back to Operation (each is the other's
+    // Violation-target). Pattern matches existing iosp/tests/root.rs:test_violation_mixed.
+    let code = r#"
+fn helper(x: i32) { if x > 0 { violator(x); } }
+fn violator(x: i32) {
+    let _y = x;
+    if _y > 0 {
+        helper(_y);
+    }
+}
+"#;
+    let syntax = syn::parse_file(code).unwrap();
+    let parsed = vec![("test.rs".to_string(), code.to_string(), syntax)];
+    let config = Config::default();
+    let analysis = run_analysis(&parsed, &config);
+    assert!(
+        analysis
+            .results
+            .iter()
+            .any(|f| matches!(f.classification, Classification::Violation { .. })),
+        "IOSP violation not found: {:?}",
+        analysis
+            .results
+            .iter()
+            .map(|f| (&f.name, &f.classification))
+            .collect::<Vec<_>>()
+    );
+    assert!(analysis.summary.violations >= 1, "summary.violations == 0");
+    // Typed projection: findings.iosp must mirror IOSP violations.
+    assert!(
+        !analysis.findings.iosp.is_empty(),
+        "findings.iosp empty despite IOSP violations present"
+    );
+    assert!(
+        analysis
+            .findings
+            .iosp
+            .iter()
+            .any(|f| f.common.rule_id == "iosp/violation"),
+        "expected iosp/violation rule_id on findings.iosp"
+    );
+}
+
+#[test]
+fn test_run_analysis_populates_dry_duplicates() {
+    // Two identical non-trivial functions should be flagged as duplicates.
+    // Body is large enough to clear the default min_tokens / min_lines /
+    // min_statements thresholds.
+    let source = r#"
+fn alpha(x: i32, y: i32) -> i32 {
+    let a = x + y + 1;
+    let b = a * 2;
+    let c = b - 3;
+    let d = c + a;
+    let e = d * b;
+    e + a + b + c
+}
+fn beta(x: i32, y: i32) -> i32 {
+    let a = x + y + 1;
+    let b = a * 2;
+    let c = b - 3;
+    let d = c + a;
+    let e = d * b;
+    e + a + b + c
+}
+"#;
+    let syntax = syn::parse_file(source).unwrap();
+    let parsed = vec![("test.rs".to_string(), source.to_string(), syntax)];
+    let config = Config::default();
+    let analysis = run_analysis(&parsed, &config);
+    assert!(
+        !analysis.findings.dry.is_empty(),
+        "findings.dry empty — duplicate not detected"
+    );
+    assert!(
+        analysis
+            .findings
+            .dry
+            .iter()
+            .any(|f| f.common.rule_id == "dry/duplicate/exact"),
+        "expected dry/duplicate/exact rule_id on findings.dry; got {:?}",
+        analysis
+            .findings
+            .dry
+            .iter()
+            .map(|f| f.common.rule_id.as_str())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_run_analysis_populates_complexity_metrics() {
+    // Function with measurable complexity must have complexity metrics filled.
+    let source = r#"
+fn measured(x: i32) -> i32 {
+    if x > 0 {
+        if x > 10 {
+            return x * 2;
+        }
+        return x + 1;
+    }
+    -x
+}
+"#;
+    let syntax = syn::parse_file(source).unwrap();
+    let parsed = vec![("test.rs".to_string(), source.to_string(), syntax)];
+    let config = Config::default();
+    let analysis = run_analysis(&parsed, &config);
+    let measured = analysis
+        .results
+        .iter()
+        .find(|f| f.name == "measured")
+        .expect("measured function missing from results");
+    assert!(
+        measured.complexity.is_some(),
+        "complexity metrics missing for non-trivial function"
+    );
+    let m = measured.complexity.as_ref().unwrap();
+    assert!(
+        m.cyclomatic_complexity > 1,
+        "cyclomatic_complexity should reflect branching"
+    );
+}
+
+#[test]
+fn test_run_analysis_findings_architecture_field_present() {
+    // Architecture is configured off by default; the typed
+    // `findings.architecture` field must exist and be empty.
+    let parsed: Vec<(String, String, syn::File)> = vec![];
+    let config = Config::default();
+    let analysis = run_analysis(&parsed, &config);
+    assert!(analysis.findings.architecture.is_empty());
+    let _len: usize = analysis.findings.architecture.len();
 }

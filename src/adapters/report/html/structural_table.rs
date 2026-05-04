@@ -1,27 +1,28 @@
-use crate::adapters::analyzers::structural::StructuralAnalysis;
-use crate::report::html::html_escape;
+//! HTML Structural Checks section: cross-dim section combining the
+//! `Structural`-variant rows from both SRP and Coupling views.
 
-/// Build the Structural Checks HTML section.
-/// Trivial: single delegation to html_section_wrapper.
-pub(super) fn html_structural_section(structural: Option<&StructuralAnalysis>) -> String {
-    let count = structural
-        .map(|s| s.warnings.iter().filter(|w| !w.suppressed).count())
-        .unwrap_or(0);
+use super::html_escape;
+use super::views::HtmlStructuralRow;
+
+/// Build the cross-dim Structural section. Empty input → empty section.
+pub(super) fn format_structural_section(
+    srp_rows: &[HtmlStructuralRow],
+    coupling_rows: &[HtmlStructuralRow],
+) -> String {
+    let total = srp_rows.len() + coupling_rows.len();
     super::html_section_wrapper(
         "Structural Checks",
-        count,
+        total,
         "No structural warnings.",
-        || html_structural_table(structural),
+        || format_structural_table(srp_rows, coupling_rows),
     )
 }
 
-/// Build HTML table rows for structural warnings.
-/// Operation: iteration and formatting logic, no own calls (html_escape via closure).
-fn html_structural_table(structural: Option<&StructuralAnalysis>) -> String {
-    let warnings: Vec<_> = structural
-        .map(|s| s.warnings.iter().filter(|w| !w.suppressed).collect())
-        .unwrap_or_default();
-    if warnings.is_empty() {
+fn format_structural_table(
+    srp_rows: &[HtmlStructuralRow],
+    coupling_rows: &[HtmlStructuralRow],
+) -> String {
+    if srp_rows.is_empty() && coupling_rows.is_empty() {
         return String::new();
     }
     let esc = |s: &str| html_escape(s);
@@ -31,23 +32,26 @@ fn html_structural_table(structural: Option<&StructuralAnalysis>) -> String {
          <th>Dimension</th><th>Detail</th>\
          </tr></thead>\n<tbody>\n",
     );
-    warnings.iter().for_each(|w| {
-        let code = w.kind.code();
-        let detail = esc(&w.kind.detail());
-        let dim_label = match w.dimension {
-            crate::findings::Dimension::Srp => "SRP",
-            crate::findings::Dimension::Coupling => "Coupling",
-            _ => "SRP",
-        };
-        html.push_str(&format!(
-            "<tr><td><span class=\"tag tag-warning\">{code}</span></td>\
-             <td>{}</td><td>{}</td><td>{}</td>\
-             <td>{dim_label}</td><td>{detail}</td></tr>\n",
-            esc(&w.name),
-            esc(&w.file),
-            w.line,
-        ));
+    srp_rows.iter().for_each(|r| {
+        html.push_str(&format_row(r, "SRP", &esc));
+    });
+    coupling_rows.iter().for_each(|r| {
+        html.push_str(&format_row(r, "Coupling", &esc));
     });
     html.push_str("</tbody></table>\n");
     html
+}
+
+fn format_row(r: &HtmlStructuralRow, dim: &str, esc: &dyn Fn(&str) -> String) -> String {
+    format!(
+        "<tr><td><span class=\"tag tag-warning\">{}</span></td>\
+         <td>{}</td><td>{}</td><td>{}</td>\
+         <td>{}</td><td>{}</td></tr>\n",
+        esc(&r.code),
+        esc(&r.name),
+        esc(&r.file),
+        r.line,
+        dim,
+        esc(&r.detail),
+    )
 }

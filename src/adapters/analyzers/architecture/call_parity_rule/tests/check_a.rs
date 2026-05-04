@@ -9,38 +9,10 @@
 //! existing `mark_architecture_suppressions` pipeline and doesn't need
 //! a separate unit test here.
 
-use super::support::{build_workspace, empty_cfg_test, globset, run_check_a, Workspace};
-use crate::adapters::analyzers::architecture::compiled::CompiledCallParity;
-use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
+use super::support::{
+    build_workspace, cli_mcp_config, empty_cfg_test, run_check_a, three_layer, Workspace,
+};
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
-use globset::GlobSet;
-
-/// Three-layer test setup: application + cli + mcp.
-fn three_layer() -> LayerDefinitions {
-    LayerDefinitions::new(
-        vec![
-            "application".to_string(),
-            "cli".to_string(),
-            "mcp".to_string(),
-        ],
-        vec![
-            ("application".to_string(), globset(&["src/application/**"])),
-            ("cli".to_string(), globset(&["src/cli/**"])),
-            ("mcp".to_string(), globset(&["src/mcp/**"])),
-        ],
-    )
-}
-
-fn call_parity_config(call_depth: usize) -> CompiledCallParity {
-    CompiledCallParity {
-        adapters: vec!["cli".to_string(), "mcp".to_string()],
-        target: "application".to_string(),
-        call_depth,
-        exclude_targets: GlobSet::empty(),
-        transparent_wrappers: std::collections::HashSet::new(),
-        transparent_macros: std::collections::HashSet::new(),
-    }
-}
 
 fn assert_no_delegation_fn_names(findings: &[MatchLocation]) -> Vec<String> {
     findings
@@ -69,7 +41,7 @@ fn test_adapter_fn_direct_delegation_passes() {
         ),
     ]);
     let layers = three_layer();
-    let cp = call_parity_config(3);
+    let cp = cli_mcp_config(3);
     let findings = run_check_a(&ws, &layers, &cp, &empty_cfg_test());
     assert!(
         assert_no_delegation_fn_names(&findings).is_empty(),
@@ -90,12 +62,7 @@ fn test_adapter_fn_inline_impl_fails() {
             "#,
         ),
     ]);
-    let findings = run_check_a(
-        &ws,
-        &three_layer(),
-        &call_parity_config(3),
-        &empty_cfg_test(),
-    );
+    let findings = run_check_a(&ws, &three_layer(), &cli_mcp_config(3), &empty_cfg_test());
     let names = assert_no_delegation_fn_names(&findings);
     assert!(
         names.contains(&"cmd_stats".to_string()),
@@ -126,12 +93,7 @@ fn test_adapter_fn_transitive_delegation_via_helper_passes() {
             "#,
         ),
     ]);
-    let findings = run_check_a(
-        &ws,
-        &three_layer(),
-        &call_parity_config(3),
-        &empty_cfg_test(),
-    );
+    let findings = run_check_a(&ws, &three_layer(), &cli_mcp_config(3), &empty_cfg_test());
     let names = assert_no_delegation_fn_names(&findings);
     assert!(
         !names.contains(&"cmd_stats".to_string()),
@@ -163,12 +125,7 @@ fn test_adapter_fn_transitive_depth_exceeds_limit_fails() {
             "#,
         ),
     ]);
-    let findings = run_check_a(
-        &ws,
-        &three_layer(),
-        &call_parity_config(3),
-        &empty_cfg_test(),
-    );
+    let findings = run_check_a(&ws, &three_layer(), &cli_mcp_config(3), &empty_cfg_test());
     let names = assert_no_delegation_fn_names(&findings);
     assert!(
         names.contains(&"cmd_stats".to_string()),
@@ -197,12 +154,7 @@ fn test_call_depth_1_only_direct_calls() {
             "#,
         ),
     ]);
-    let findings = run_check_a(
-        &ws,
-        &three_layer(),
-        &call_parity_config(1),
-        &empty_cfg_test(),
-    );
+    let findings = run_check_a(&ws, &three_layer(), &cli_mcp_config(1), &empty_cfg_test());
     let names = assert_no_delegation_fn_names(&findings);
     assert!(
         names.contains(&"cmd_stats".to_string()),
@@ -225,12 +177,7 @@ fn test_adapter_fn_method_call_does_not_count() {
             "#,
         ),
     ]);
-    let findings = run_check_a(
-        &ws,
-        &three_layer(),
-        &call_parity_config(3),
-        &empty_cfg_test(),
-    );
+    let findings = run_check_a(&ws, &three_layer(), &cli_mcp_config(3), &empty_cfg_test());
     let names = assert_no_delegation_fn_names(&findings);
     assert!(
         names.contains(&"cmd_stats".to_string()),
@@ -258,12 +205,7 @@ fn test_adapter_fn_cross_adapter_call_does_not_count() {
             "#,
         ),
     ]);
-    let findings = run_check_a(
-        &ws,
-        &three_layer(),
-        &call_parity_config(1),
-        &empty_cfg_test(),
-    );
+    let findings = run_check_a(&ws, &three_layer(), &cli_mcp_config(1), &empty_cfg_test());
     // At depth 1, cmd_stats only reaches handle_stats (in mcp, not app). → fail.
     let names = assert_no_delegation_fn_names(&findings);
     assert!(
@@ -273,10 +215,10 @@ fn test_adapter_fn_cross_adapter_call_does_not_count() {
 }
 
 #[test]
-fn test_adapter_fn_cross_adapter_call_counted_at_deeper_depth() {
-    // Sanity check: at depth 2 we reach through mcp into app → passes.
-    // This exercises that the graph DOES traverse cross-adapter edges;
-    // the prior test ensures one-hop only sees the adapter target.
+fn test_adapter_fn_cross_adapter_call_blocked_even_at_deeper_depth() {
+    // Even at greater call_depth the CLI walk must not inherit MCP's
+    // application touchpoints. CLI never crosses into the target
+    // layer itself — cmd_stats must therefore still flag NoDelegation.
     let ws = build_workspace(&[
         ("src/application/stats.rs", "pub fn get_stats() {}"),
         (
@@ -294,16 +236,11 @@ fn test_adapter_fn_cross_adapter_call_counted_at_deeper_depth() {
             "#,
         ),
     ]);
-    let findings = run_check_a(
-        &ws,
-        &three_layer(),
-        &call_parity_config(2),
-        &empty_cfg_test(),
-    );
+    let findings = run_check_a(&ws, &three_layer(), &cli_mcp_config(2), &empty_cfg_test());
     let names = assert_no_delegation_fn_names(&findings);
     assert!(
-        !names.contains(&"cmd_stats".to_string()),
-        "depth=2 reaches app::get_stats transitively, should pass"
+        names.contains(&"cmd_stats".to_string()),
+        "peer-adapter walks must not inherit touchpoints; expected cmd_stats in {names:?}"
     );
 }
 
@@ -322,7 +259,7 @@ fn test_adapter_fn_cfg_test_file_skipped() {
     ]);
     let mut cfg_test = std::collections::HashSet::new();
     cfg_test.insert("src/cli/handlers.rs".to_string());
-    let findings = run_check_a(&ws, &three_layer(), &call_parity_config(3), &cfg_test);
+    let findings = run_check_a(&ws, &three_layer(), &cli_mcp_config(3), &cfg_test);
     assert!(
         findings.is_empty(),
         "cfg-test adapter file must not produce findings, got {findings:?}"
@@ -343,12 +280,7 @@ fn test_adapter_fn_not_in_any_adapter_layer_ignored() {
             "#,
         ),
     ]);
-    let findings = run_check_a(
-        &ws,
-        &three_layer(),
-        &call_parity_config(3),
-        &empty_cfg_test(),
-    );
+    let findings = run_check_a(&ws, &three_layer(), &cli_mcp_config(3), &empty_cfg_test());
     assert!(
         findings.is_empty(),
         "non-adapter-layer fn must not be checked"
@@ -362,12 +294,7 @@ fn test_finding_line_is_fn_sig_line() {
         ("src/application/stats.rs", "pub fn get_stats() {}"),
         ("src/cli/handlers.rs", src),
     ]);
-    let findings = run_check_a(
-        &ws,
-        &three_layer(),
-        &call_parity_config(3),
-        &empty_cfg_test(),
-    );
+    let findings = run_check_a(&ws, &three_layer(), &cli_mcp_config(3), &empty_cfg_test());
     let finding = findings
         .iter()
         .find(|f| matches!(f.kind, ViolationKind::CallParityNoDelegation { .. }))
@@ -405,12 +332,7 @@ fn test_unparseable_impl_self_type_does_not_collapse_with_free_fns() {
             "#,
         ),
     ]);
-    let findings = run_check_a(
-        &ws,
-        &three_layer(),
-        &call_parity_config(3),
-        &empty_cfg_test(),
-    );
+    let findings = run_check_a(&ws, &three_layer(), &cli_mcp_config(3), &empty_cfg_test());
     let names = assert_no_delegation_fn_names(&findings);
     assert!(
         !names.contains(&"cmd_x".to_string()),
@@ -452,15 +374,35 @@ fn test_convergent_graph_does_not_double_enqueue() {
             "#,
         ),
     ]);
-    let findings = run_check_a(
-        &ws,
-        &three_layer(),
-        &call_parity_config(3),
-        &empty_cfg_test(),
-    );
+    let findings = run_check_a(&ws, &three_layer(), &cli_mcp_config(3), &empty_cfg_test());
     let names = assert_no_delegation_fn_names(&findings);
     assert!(
         !names.contains(&"cmd_x".to_string()),
         "convergent delegation must still resolve, got {names:?}"
+    );
+}
+
+// ── Deprecated-handler exclusion (v1.2.1) ─────────────────────
+
+#[test]
+fn check_a_skips_deprecated_handler() {
+    // A deprecated adapter pub-fn that doesn't delegate would normally
+    // fire Check A. Marked `#[deprecated]`, it must be skipped — alias
+    // being phased out shouldn't drag the parity report.
+    let ws = build_workspace(&[
+        ("src/application/stats.rs", "pub fn get_stats() {}"),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            #[deprecated]
+            pub fn cmd_old() { let _ = 42; }
+            "#,
+        ),
+    ]);
+    let findings = run_check_a(&ws, &three_layer(), &cli_mcp_config(3), &empty_cfg_test());
+    let names = assert_no_delegation_fn_names(&findings);
+    assert!(
+        !names.contains(&"cmd_old".to_string()),
+        "deprecated handler should be excluded from Check A, got {names:?}"
     );
 }

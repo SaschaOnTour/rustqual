@@ -76,10 +76,14 @@ adapters = ["cli", "mcp"]
 target   = "application"
 ```
 
-Two checks under one rule:
+Four checks under one rule, all anchored at the boundary (the first call from an adapter into the target layer):
 
 - **Check A** — every adapter must delegate. A CLI command that doesn't reach into the application layer is logic in the wrong place.
-- **Check B** — every application capability must reach every adapter. Add `app::ingest::run`, forget to wire it into CLI, and Check B reports it by name in CI before review.
+- **Check B** — every application capability touched by some adapter must be touched by every adapter (or be a genuine orphan).
+- **Check C** — each adapter handler should reach exactly one target touchpoint; multi-touchpoint handlers risk silent divergence between adapters. Configurable severity (`single_touchpoint = "off" | "warn" | "error"`, default `warn`).
+- **Check D** — when two adapters both reach a target, they must reach it with the same handler count. cli accumulating an alias `cmd_grep` for `cmd_search` while mcp has only `handle_search` is API-surface drift Check D catches.
+
+`#[deprecated]` adapter handlers are excluded from all four checks automatically.
 
 The hard part is making the call graph honest across method chains, field access, trait dispatch, type aliases, framework extractors, and `Self` substitution. rustqual ships a shallow type-inference engine that resolves these cases without fabricating edges. Full write-up: [book/adapter-parity.md](./book/adapter-parity.md).
 
@@ -194,7 +198,7 @@ pub fn build_test_session() -> Session { /* … */ }
 
 ## Output formats
 
-`--format <FMT>` — `text` (default), `json`, `github`, `sarif`, `dot`, `html`, `ai`, `ai-json`. Same analysis, different serialisation. Full reference: [book/reference-output-formats.md](./book/reference-output-formats.md).
+`--format <FMT>` — `text` (default), `json`, `github`, `sarif`, `html`, `ai`, `ai-json` all serialise the same findings + summary. `dot` is data-only: it renders the per-function call graph and skips findings / orphan suppressions, so pair it with another format if the run might have diagnostics. Full reference: [book/reference-output-formats.md](./book/reference-output-formats.md).
 
 ## Self-compliance
 

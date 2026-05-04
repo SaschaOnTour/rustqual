@@ -13,8 +13,8 @@ mod complexity_predicates;
 use std::collections::HashMap;
 
 use crate::adapters::analyzers::iosp::Classification;
+use crate::domain::findings::OrphanSuppression;
 use crate::findings::Suppression;
-use crate::report::OrphanSuppressionWarning;
 
 // Window widths come from the shared `app::suppression_windows`
 // module so the orphan detector and the `mark_*_suppressions`
@@ -31,8 +31,9 @@ enum MatchMode {
     /// `sup.line <= line && line - sup.line <= n`.
     LineWindow(usize),
     /// File-global match: any marker anywhere in the file accepts.
-    /// Used for SRP module warnings and Architecture findings whose
-    /// marking logic is file-scoped.
+    /// Used for SRP module warnings (line 1, file-level marker) — the
+    /// remaining dimensions, including Architecture, use line-window
+    /// matching that mirrors their `mark_*_suppressions` semantics.
     FileScope,
 }
 
@@ -52,15 +53,15 @@ pub(crate) fn detect_orphan_suppressions(
     suppression_lines: &HashMap<String, Vec<Suppression>>,
     analysis: &crate::report::AnalysisResult,
     config: &crate::config::Config,
-) -> Vec<OrphanSuppressionWarning> {
+) -> Vec<OrphanSuppression> {
     let positions = enumerate_finding_positions(analysis, config);
-    let mut orphans: Vec<OrphanSuppressionWarning> = suppression_lines
+    let mut orphans: Vec<OrphanSuppression> = suppression_lines
         .iter()
         .flat_map(|(file, sups)| {
             sups.iter()
                 .filter(|sup| is_verifiable(sup, file, &positions))
                 .filter(|sup| !has_matching_finding(file, sup, &positions))
-                .map(|sup| OrphanSuppressionWarning {
+                .map(|sup| OrphanSuppression {
                     file: file.clone(),
                     line: sup.line,
                     dimensions: sup.dimensions.clone(),
@@ -255,32 +256,24 @@ fn collect_dry_positions<F>(
     // at the declaration-collection layer. Including them here
     // would let an unrelated `qual:allow(dry)` marker falsely mask
     // a stale suppression as non-orphan.
+    use crate::domain::findings::DryFindingKind;
     let mode = MatchMode::LineWindow(windows::DEFAULT);
-    analysis.duplicates.iter().for_each(|g| {
-        g.entries
-            .iter()
-            .for_each(|e| push(&e.file, e.line, Dimension::Dry, mode));
-    });
-    analysis.fragments.iter().for_each(|g| {
-        g.entries
-            .iter()
-            .for_each(|e| push(&e.file, e.start_line, Dimension::Dry, mode));
-    });
-    analysis
-        .boilerplate
-        .iter()
-        .for_each(|b| push(&b.file, b.line, Dimension::Dry, mode));
     // Wildcards use a tighter window: `mark_wildcard_suppressions`
     // only accepts the marker on the same line or immediately above.
     let wildcard_mode = MatchMode::LineWindow(windows::WILDCARD);
-    analysis
-        .wildcard_warnings
-        .iter()
-        .for_each(|w| push(&w.file, w.line, Dimension::Dry, wildcard_mode));
-    analysis.repeated_matches.iter().for_each(|g| {
-        g.entries
-            .iter()
-            .for_each(|e| push(&e.file, e.line, Dimension::Dry, mode));
+    analysis.findings.dry.iter().for_each(|f| {
+        let m = match f.kind {
+            DryFindingKind::DuplicateExact
+            | DryFindingKind::DuplicateSimilar
+            | DryFindingKind::Fragment
+            | DryFindingKind::Boilerplate
+            | DryFindingKind::RepeatedMatch => mode,
+            DryFindingKind::Wildcard => wildcard_mode,
+            // Dead-code findings are intentionally *not* included: they are
+            // not suppressible via `qual:allow(dry)` (see comment above).
+            DryFindingKind::DeadCodeUncalled | DryFindingKind::DeadCodeTestOnly => return,
+        };
+        push(&f.common.file, f.common.line, Dimension::Dry, m);
     });
 }
 
@@ -296,21 +289,22 @@ fn collect_srp_positions<F>(
 ) where
     F: FnMut(&str, usize, crate::findings::Dimension, MatchMode),
 {
+    use crate::domain::findings::SrpFindingKind;
     use crate::findings::Dimension;
     if !config.srp.enabled {
         return;
     }
-    let Some(srp) = &analysis.srp else { return };
     let line_mode = MatchMode::LineWindow(windows::SRP_STRUCT_PARAM);
-    srp.struct_warnings
-        .iter()
-        .for_each(|w| push(&w.file, w.line, Dimension::Srp, line_mode));
-    srp.module_warnings
-        .iter()
-        .for_each(|w| push(&w.file, 1, Dimension::Srp, MatchMode::FileScope));
-    srp.param_warnings
-        .iter()
-        .for_each(|w| push(&w.file, w.line, Dimension::Srp, line_mode));
+    analysis.findings.srp.iter().for_each(|f| match f.kind {
+        SrpFindingKind::StructCohesion | SrpFindingKind::ParameterCount => {
+            push(&f.common.file, f.common.line, Dimension::Srp, line_mode);
+        }
+        SrpFindingKind::ModuleLength => {
+            push(&f.common.file, 1, Dimension::Srp, MatchMode::FileScope);
+        }
+        // Structural findings are handled by collect_structural_positions.
+        SrpFindingKind::Structural => {}
+    });
 }
 
 /// Positions for Test-Quality warnings. TQ suppressions use a 5-line
@@ -327,11 +321,10 @@ fn collect_tq_positions<F>(
     if !config.test_quality.enabled {
         return;
     }
-    let Some(tq) = &analysis.tq else { return };
     let mode = MatchMode::LineWindow(windows::TQ);
-    tq.warnings
-        .iter()
-        .for_each(|w| push(&w.file, w.line, Dimension::TestQuality, mode));
+    analysis.findings.test_quality.iter().for_each(|f| {
+        push(&f.common.file, f.common.line, Dimension::TestQuality, mode);
+    });
 }
 
 /// Positions for Structural binary-check warnings; each carries its
@@ -345,21 +338,32 @@ fn collect_structural_positions<F>(
 ) where
     F: FnMut(&str, usize, crate::findings::Dimension, MatchMode),
 {
+    use crate::domain::findings::{CouplingFindingKind, SrpFindingKind};
+    use crate::findings::Dimension;
     if !config.structural.enabled {
         return;
     }
-    let Some(st) = &analysis.structural else {
-        return;
-    };
     let mode = MatchMode::LineWindow(windows::STRUCTURAL);
-    st.warnings
+    analysis
+        .findings
+        .srp
         .iter()
-        .for_each(|w| push(&w.file, w.line, w.dimension, mode));
+        .filter(|f| matches!(f.kind, SrpFindingKind::Structural))
+        .for_each(|f| push(&f.common.file, f.common.line, Dimension::Srp, mode));
+    analysis
+        .findings
+        .coupling
+        .iter()
+        .filter(|f| matches!(f.kind, CouplingFindingKind::Structural))
+        .for_each(|f| push(&f.common.file, f.common.line, Dimension::Coupling, mode));
 }
 
 /// Positions for Architecture-dimension findings. Architecture
-/// suppressions are file-scoped (mark_architecture_suppressions
-/// accepts any `qual:allow(architecture)` anywhere in the file).
+/// suppressions are window-scoped (mark_architecture_suppressions
+/// accepts a `qual:allow(architecture)` only within the marker's
+/// annotation window above the finding) — orphan detection mirrors
+/// that semantic so a marker for one helper is reported as stale
+/// when the only architecture finding in the file lives elsewhere.
 /// Operation: iterates architecture findings pushing each entry.
 fn collect_architecture_positions<F>(
     analysis: &crate::report::AnalysisResult,
@@ -372,12 +376,10 @@ fn collect_architecture_positions<F>(
     if !config.architecture.enabled {
         return;
     }
-    analysis.architecture_findings.iter().for_each(|f| {
-        push(
-            &f.file,
-            f.line,
-            Dimension::Architecture,
-            MatchMode::FileScope,
-        )
-    });
+    let mode = MatchMode::LineWindow(windows::DEFAULT);
+    analysis
+        .findings
+        .architecture
+        .iter()
+        .for_each(|f| push(&f.common.file, f.common.line, Dimension::Architecture, mode));
 }

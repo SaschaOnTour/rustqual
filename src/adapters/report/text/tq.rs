@@ -1,48 +1,44 @@
+use std::fmt::Write;
+
 use colored::Colorize;
 
-use crate::adapters::analyzers::tq::{TqAnalysis, TqWarningKind};
+use super::views::TqView;
+use crate::adapters::report::projections::tq::{project_tq_rows, TqRow};
+use crate::domain::findings::TqFinding;
 
-/// Print test quality warnings grouped by kind.
-/// Operation: formatting logic with iteration, no own calls.
-pub(crate) fn print_tq_section(tq: &TqAnalysis) {
-    let warnings: Vec<_> = tq.warnings.iter().filter(|w| !w.suppressed).collect();
-    if warnings.is_empty() {
-        return;
+/// Project TQ findings into the typed text View via the shared
+/// `project_tq_rows` helper.
+pub(super) fn build_tq_view(findings: &[TqFinding]) -> TqView {
+    TqView {
+        warnings: project_tq_rows(findings),
     }
-    println!();
-    println!("{}", "═══ Test Quality ═══".bold());
+}
 
-    let kind_label = |kind: &TqWarningKind| -> &str {
-        match kind {
-            TqWarningKind::NoAssertion => "TQ-001  No assertion",
-            TqWarningKind::NoSut => "TQ-002  No SUT call",
-            TqWarningKind::Untested => "TQ-003  Untested",
-            TqWarningKind::Uncovered => "TQ-004  Uncovered",
-            TqWarningKind::UntestedLogic { .. } => "TQ-005  Untested logic",
-        }
-    };
-
-    warnings.iter().for_each(|w| {
-        let detail = match &w.kind {
-            TqWarningKind::UntestedLogic { uncovered_lines } => {
-                let lines: Vec<String> = uncovered_lines
-                    .iter()
-                    .map(|(kind, line)| format!("{kind} at line {line}"))
-                    .collect();
-                format!("    {}", lines.join(", "))
-            }
-            _ => String::new(),
-        };
-        println!(
-            "  {} {} ({}:{}) — {}",
-            "⚠".yellow(),
-            w.function_name,
-            w.file,
-            w.line,
-            kind_label(&w.kind),
-        );
-        if !detail.is_empty() {
-            println!("{detail}");
-        }
+/// Format the TQ section from the View.
+pub(super) fn format_tq_section(view: &TqView) -> String {
+    if view.warnings.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    let _ = writeln!(out);
+    let _ = writeln!(out, "{}", "═══ Test Quality ═══".bold());
+    view.warnings.iter().for_each(|w| {
+        push_tq_row(&mut out, w);
     });
+    out
+}
+
+fn push_tq_row(out: &mut String, w: &TqRow) {
+    let _ = writeln!(
+        out,
+        "  {} {} ({}:{}) — {}",
+        "⚠".yellow(),
+        w.function_name,
+        w.file,
+        w.line,
+        w.display_label,
+    );
+    if !w.detail.is_empty() {
+        let _ = writeln!(out, "    {}", w.detail);
+    }
 }
