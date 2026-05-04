@@ -932,8 +932,14 @@ fn negative_tuple_destructuring_is_limit() {
 // ═══════════════════════════════════════════════════════════════════
 
 #[test]
-fn trait_dispatch_fans_out_to_all_impls() {
-    // `dyn Handler.handle()` must record edges to EVERY impl's `handle`.
+fn trait_dispatch_emits_trait_method_anchor() {
+    // `dyn Handler.handle()` records ONE edge: the synthetic trait-method
+    // anchor `<Trait>::<method>`. Concrete impls (`LoggingHandler::handle`,
+    // …) are NOT emitted as separate edges from the dispatch site —
+    // fanout would create N-way touchpoint sets that fire Check C
+    // false-positives for a single boundary call. The anchor represents
+    // the logical capability; impl-level reachability is wired in a
+    // separate graph pass via `<Trait>::<method> → <Impl>::<method>`.
     let fx = parse(
         r#"
         use crate::ports::Handler;
@@ -943,12 +949,10 @@ fn trait_dispatch_fans_out_to_all_impls() {
         "#,
     );
     let mut index = WorkspaceTypeIndex::new();
-    // Set up the trait + its method name.
     index.trait_methods.insert(
         "crate::ports::Handler".to_string(),
         std::iter::once("handle".to_string()).collect(),
     );
-    // Three impls.
     index.trait_impls.insert(
         "crate::ports::Handler".to_string(),
         vec![
@@ -959,17 +963,21 @@ fn trait_dispatch_fans_out_to_all_impls() {
     );
     let calls = run(&fx, &index, "dispatch");
     assert!(
-        calls.contains("crate::app::LoggingHandler::handle"),
-        "expected LoggingHandler::handle edge, got {calls:?}"
+        calls.contains("crate::ports::Handler::handle"),
+        "expected single trait-method anchor edge, got {calls:?}"
     );
-    assert!(calls.contains("crate::app::MetricsHandler::handle"));
-    assert!(calls.contains("crate::app::AuditHandler::handle"));
+    assert!(
+        !calls.contains("crate::app::LoggingHandler::handle"),
+        "must not emit per-impl fanout edges from dispatch (Check C false-positive source), got {calls:?}"
+    );
+    assert!(!calls.contains("crate::app::MetricsHandler::handle"));
+    assert!(!calls.contains("crate::app::AuditHandler::handle"));
 }
 
 #[test]
 fn trait_dispatch_skips_unrelated_methods() {
     // `dyn Handler.unrelated()` — the method isn't on the trait, so no
-    // fan-out. Falls back to <method>:name.
+    // anchor is emitted. Falls back to <method>:name.
     let fx = parse(
         r#"
         use crate::ports::Handler;
@@ -999,15 +1007,16 @@ fn trait_dispatch_skips_unrelated_methods() {
 }
 
 #[test]
-fn trait_dispatch_leaves_default_method_unresolved() {
+fn trait_dispatch_emits_anchor_regardless_of_default_status() {
     // `trait Handler { fn handle(&self) {} } impl Handler for AppHandler {}`
-    // — the impl has no `handle` body, the call inherits the trait's
-    // default. Neither edge is emitted: `AppHandler::handle` would be
-    // a phantom (no graph node), and `Handler::handle` would be a
-    // phantom sink (the workspace graph doesn't model trait-default
-    // bodies as nodes). Conservative drop: this dispatch contributes
-    // no touchpoint until the graph walker is extended to collect
-    // trait-default bodies as real nodes.
+    // — the impl has no `handle` body and inherits the default. With
+    // the trait-method anchor model, the dispatch still emits the
+    // synthetic `<Trait>::<method>` anchor; whether the body lives in
+    // the impl or the trait is no longer the dispatch site's problem
+    // (the boundary walker treats the anchor as the capability the
+    // adapter reaches). Concrete impl-edges are NEVER emitted from
+    // dispatch — they would fabricate touchpoint fanout that fires
+    // Check C false-positives.
     let fx = parse(
         r#"
         use crate::ports::Handler;
@@ -1025,7 +1034,6 @@ fn trait_dispatch_leaves_default_method_unresolved() {
         "crate::ports::Handler".to_string(),
         vec!["crate::app::AppHandler".to_string()],
     );
-    // Empty override set ⇒ `AppHandler` inherits the default body.
     let mut by_impl: std::collections::HashMap<String, std::collections::HashSet<String>> =
         std::collections::HashMap::new();
     by_impl.insert(
@@ -1037,17 +1045,17 @@ fn trait_dispatch_leaves_default_method_unresolved() {
         .insert("crate::ports::Handler".to_string(), by_impl);
     let calls = run(&fx, &index, "dispatch");
     assert!(
-        !calls.contains("crate::ports::Handler::handle"),
-        "must not emit phantom trait-method sink, got {calls:?}"
+        calls.contains("crate::ports::Handler::handle"),
+        "expected trait-method anchor edge, got {calls:?}"
     );
     assert!(
         !calls.contains("crate::app::AppHandler::handle"),
-        "must not fabricate impl-method edge for non-overriding impl, got {calls:?}"
+        "must not fabricate impl-method edge from dispatch, got {calls:?}"
     );
 }
 
 #[test]
-fn trait_dispatch_with_send_marker_still_resolves() {
+fn trait_dispatch_with_send_marker_emits_anchor() {
     // `dyn Handler + Send + 'static` — marker traits skipped, Handler wins.
     let fx = parse(
         r#"
@@ -1067,11 +1075,15 @@ fn trait_dispatch_with_send_marker_still_resolves() {
         vec!["crate::app::X".to_string()],
     );
     let calls = run(&fx, &index, "dispatch");
-    assert!(calls.contains("crate::app::X::handle"));
+    assert!(
+        calls.contains("crate::ports::Handler::handle"),
+        "expected anchor edge, got {calls:?}"
+    );
+    assert!(!calls.contains("crate::app::X::handle"));
 }
 
 #[test]
-fn trait_dispatch_box_dyn_resolves() {
+fn trait_dispatch_box_dyn_emits_anchor() {
     // `Box<dyn Handler>` — Box is peeled, then dyn Handler → TraitBound.
     let fx = parse(
         r#"
@@ -1092,9 +1104,10 @@ fn trait_dispatch_box_dyn_resolves() {
     );
     let calls = run(&fx, &index, "dispatch");
     assert!(
-        calls.contains("crate::app::Y::handle"),
-        "Box<dyn Trait> must be peeled, got {calls:?}"
+        calls.contains("crate::ports::Handler::handle"),
+        "Box<dyn Trait> must be peeled and emit anchor, got {calls:?}"
     );
+    assert!(!calls.contains("crate::app::Y::handle"));
 }
 
 // ═══════════════════════════════════════════════════════════════════

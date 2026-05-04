@@ -20,6 +20,7 @@ pub mod complexity;
 pub mod coupling;
 pub mod dry;
 pub mod iosp;
+pub mod orphan;
 pub mod srp;
 pub mod tq;
 
@@ -32,5 +33,6 @@ pub use dry::{
     RepeatedMatchParticipant,
 };
 pub use iosp::{CallLocation, IospFinding, LogicLocation};
+pub use orphan::OrphanSuppression;
 pub use srp::{SrpFinding, SrpFindingDetails, SrpFindingKind};
 pub use tq::{TqFinding, TqFindingKind};

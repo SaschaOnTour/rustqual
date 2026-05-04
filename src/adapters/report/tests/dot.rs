@@ -121,3 +121,30 @@ fn test_dot_render_ignores_findings() {
     assert!(out_empty.starts_with("digraph rustqual {"));
     assert!(out_empty.ends_with("}\n"));
 }
+
+#[test]
+fn dot_reporter_intentionally_omits_orphan_rendering() {
+    // dot is data-only by design. Even with `findings.orphan_suppressions`
+    // populated, the dot output must NOT include orphan-suppression
+    // markers — its `OrphanView = ()` declares the conscious choice
+    // not to render them. This test locks in that intent so a future
+    // refactor doesn't accidentally start emitting orphan rows in dot.
+    use crate::domain::findings::OrphanSuppression;
+    let data = data_with(vec![make_record("f", FunctionClassification::Integration)]);
+    let mut findings = AnalysisFindings::default();
+    findings.orphan_suppressions = vec![OrphanSuppression {
+        file: "src/foo.rs".into(),
+        line: 42,
+        dimensions: vec![crate::findings::Dimension::Iosp],
+        reason: Some("legacy".into()),
+    }];
+    let out = DotReporter.render(&findings, &data);
+    assert!(
+        !out.to_lowercase().contains("orphan"),
+        "dot reporter must NOT render orphan markers (intentional no-op), got:\n{out}"
+    );
+    assert!(
+        !out.contains("qual:allow"),
+        "dot reporter must NOT render orphan reason text, got:\n{out}"
+    );
+}

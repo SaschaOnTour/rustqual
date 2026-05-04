@@ -351,7 +351,6 @@ fn empty_analysis() -> crate::report::AnalysisResult {
     crate::report::AnalysisResult {
         results: vec![],
         summary: Summary::default(),
-        orphan_suppressions: vec![],
         findings: crate::domain::AnalysisFindings::default(),
         data: crate::domain::AnalysisData::default(),
     }

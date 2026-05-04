@@ -4,7 +4,9 @@
 //! `missing_adapters` set produced by `check_missing_adapter` for each
 //! target-layer pub-fn. Suppression is covered end-to-end in Task 5.
 
-use super::support::{build_workspace, empty_cfg_test, four_layer, globset, run_check_b};
+use super::support::{
+    build_workspace, empty_cfg_test, four_layer, globset, ports_app_cli_mcp, run_check_b,
+};
 use crate::adapters::analyzers::architecture::compiled::CompiledCallParity;
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use std::collections::HashSet;
@@ -717,5 +719,96 @@ fn test_impl_in_separate_file_matches_receiver_tracked_calls() {
     assert!(
         missing_pairs(&findings).is_empty(),
         "cross-file impl via use should match receiver-tracked calls, got {findings:?}"
+    );
+}
+
+// ── Trait-method anchor coverage ──────────────────────────────
+
+fn ports_cp() -> CompiledCallParity {
+    CompiledCallParity {
+        adapters: vec!["cli".to_string(), "mcp".to_string()],
+        target: "application".to_string(),
+        call_depth: 3,
+        exclude_targets: globset(&[]),
+        transparent_wrappers: HashSet::new(),
+        transparent_macros: HashSet::new(),
+        single_touchpoint: crate::config::architecture::SingleTouchpointMode::default(),
+    }
+}
+
+#[test]
+fn check_b_silent_when_anchor_covered_by_all_adapters() {
+    // Trait in `ports`, impl in `application` (target). Both CLI and
+    // MCP dispatch via `dyn Handler.handle()` — anchor
+    // `crate::ports::handler::Handler::handle` is in both adapters'
+    // touchpoint sets. The anchor IS a target capability (its impl
+    // lives in application), and BOTH adapters reach it → Check B
+    // must be silent.
+    let ws = build_workspace(&[
+        (
+            "src/ports/handler.rs",
+            "pub trait Handler { fn handle(&self); }",
+        ),
+        (
+            "src/application/logging.rs",
+            r#"
+            use crate::ports::handler::Handler;
+            pub struct LoggingHandler;
+            impl Handler for LoggingHandler { fn handle(&self) {} }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::ports::handler::Handler;
+            pub fn cmd_dispatch(h: &dyn Handler) { h.handle(); }
+            "#,
+        ),
+        (
+            "src/mcp/handlers.rs",
+            r#"
+            use crate::ports::handler::Handler;
+            pub fn mcp_dispatch(h: &dyn Handler) { h.handle(); }
+            "#,
+        ),
+    ]);
+    let findings = run_check_b(&ws, &ports_app_cli_mcp(), &ports_cp(), &empty_cfg_test());
+    let pairs = missing_pairs(&findings);
+    let anchor = "crate::ports::handler::Handler::handle";
+    assert!(
+        !pairs.iter().any(|(target, _)| target == anchor),
+        "anchor covered by all adapters must not produce a finding, got {pairs:?}"
+    );
+}
+
+#[test]
+fn check_b_flags_anchor_orphan_when_no_adapter_reaches_it() {
+    // Trait `Orphan` in ports with overriding impl in application.
+    // No adapter dispatches through it. The anchor is a target
+    // capability that no adapter wires up → Check B must flag it
+    // as orphan/missing-from-all-adapters.
+    let ws = build_workspace(&[
+        (
+            "src/ports/orphan.rs",
+            "pub trait Orphan { fn handle(&self); }",
+        ),
+        (
+            "src/application/orphan_impl.rs",
+            r#"
+            use crate::ports::orphan::Orphan;
+            pub struct OrphanImpl;
+            impl Orphan for OrphanImpl { fn handle(&self) {} }
+            "#,
+        ),
+        // CLI and MCP exist but never dispatch via `dyn Orphan`.
+        ("src/cli/handlers.rs", "pub fn cmd_other() {}"),
+        ("src/mcp/handlers.rs", "pub fn mcp_other() {}"),
+    ]);
+    let findings = run_check_b(&ws, &ports_app_cli_mcp(), &ports_cp(), &empty_cfg_test());
+    let pairs = missing_pairs(&findings);
+    let anchor = "crate::ports::orphan::Orphan::handle";
+    assert!(
+        pairs.iter().any(|(target, _)| target == anchor),
+        "anchor reached by NO adapter must be flagged as orphan, got {pairs:?}"
     );
 }

@@ -37,7 +37,12 @@ Four checks run under one rule, all anchored at the **boundary** — the first c
 
 ### Touchpoints — what counts and what doesn't
 
-A **touchpoint** is the first node in the target layer reached when walking forward from an adapter pub-fn through adapter-internal helpers. The walk stops on first target hit and does not descend into target callees.
+A **touchpoint** is the first node in the target layer reached when walking forward from an adapter pub-fn through adapter-internal helpers. The walk stops on first target hit and does not descend into target callees. Two kinds of nodes count as target boundaries:
+
+- **Concrete target pub-fns** — direct calls into application-layer functions (`session.search`).
+- **Trait-method anchors** — synthetic `<Trait>::<method>` nodes emitted by `dyn Trait.method()` dispatch, recognised as a boundary when the trait has at least one overriding impl in the target layer. The anchor itself can live in any layer (typically `ports` for Hexagonal layouts); what matters is that target-layer impls back it. Check B/D enumerate anchors alongside concrete target pub-fns when computing coverage and multiplicity.
+
+The walker refuses to promote anchors declared in **peer-adapter layers** (e.g. `mcp::Handler` from a `cli`-origin walk) to target boundaries — otherwise `cli` could inherit `mcp`'s coverage by dispatching through MCP's port trait.
 
 This boundary stop is deliberate: application-internal call chains (`session.search → record_operation → impact_count`) aren't a parity concern. If two adapters both reach `session.search`, the parity question is answered. What `session.search` does internally is `DRY-002`'s job, not `call_parity`'s.
 
@@ -103,15 +108,14 @@ disagree and can produce false-negative Check-B coverage:
    the function at a publicly-reachable path directly, or wrap it
    in a public struct method.
 
-5. **Trait default-method bodies.** `trait Handler { fn handle(&self) {} }
-   impl Handler for X {}` — the impl inherits the default body, but
-   the workspace call graph doesn't model `TraitItemFn::default` as
-   a node. Dispatch on `dyn Handler.handle()` for non-overriding
-   impls is intentionally left **unresolved** (no edge emitted)
-   rather than fabricating a phantom sink. Calls inside the default
-   body are therefore invisible to Check A/B/D. Workaround:
-   override the method explicitly in each impl, or move the body
-   into a free function the trait method delegates to.
+5. **Calls inside trait default-method bodies.** `trait Handler {
+   fn handle(&self) { self.helper(); } }` — `dyn Handler.handle()`
+   resolves to the trait-method anchor `<Handler>::handle`, but the
+   workspace call graph doesn't model `TraitItemFn::default` as a
+   node, so calls **inside** the default body (`self.helper()`)
+   stay invisible to Check A/B/D. Workaround: override the method
+   explicitly in each impl, or move the body into a free function
+   the trait method delegates to.
 
 If you hit any of these patterns in practice, please open an issue
 with the exact alias / re-export / dispatch shape — the fixes
@@ -143,7 +147,7 @@ A naive analyzer sees `.diff()` on something it can't name and gives up — that
 
 - Method-chain constructors and stdlib combinator returns (`Result::map_err`, `Option::ok`, `Future::await`, `Result::inspect`, …)
 - Field access chains (`ctx.session.diff()`)
-- Trait dispatch on `dyn Trait` and `impl Trait` (over-approximated to every workspace impl that **overrides** the called method — non-overriding impls inherit the trait default body, which is not modeled as a graph node, so those calls are intentionally left unresolved; see Limitations)
+- Trait dispatch on `dyn Trait` and `impl Trait` collapses to a single synthetic anchor `<Trait>::<method>` representing the logical capability — the call graph **does not** fan out to per-impl edges, which would otherwise turn one boundary call into N touchpoints and falsely fire Check C. The walker recognises the anchor as a target boundary when at least one overriding impl lives in the target layer.
 - Type aliases — including chains, wrappers (`Box<Hidden>`), and re-exports
 - Renamed imports (`use std::sync::Arc as Shared;`) — with shadow detection so a local `crate::wrap::Arc` doesn't masquerade as stdlib
 - `Self` substitution across all resolver paths so impl-internal delegation works

@@ -14,12 +14,12 @@ use serde_json::{json, Value};
 use crate::domain::analysis_data::{FunctionRecord, ModuleCouplingRecord};
 use crate::domain::findings::{
     ArchitectureFinding, ComplexityFinding, ComplexityFindingKind, CouplingFinding,
-    CouplingFindingDetails, DryFinding, DryFindingDetails, DryFindingKind, IospFinding, SrpFinding,
-    SrpFindingDetails, SrpFindingKind, TqFinding, TqFindingKind,
+    CouplingFindingDetails, DryFinding, DryFindingDetails, DryFindingKind, IospFinding,
+    OrphanSuppression, SrpFinding, SrpFindingDetails, SrpFindingKind, TqFinding, TqFindingKind,
 };
 use crate::ports::reporter::{ReporterImpl, Snapshot};
 use crate::ports::Reporter;
-use crate::report::{AnalysisResult, OrphanSuppressionWarning, Summary};
+use crate::report::{AnalysisResult, Summary};
 
 /// One SARIF result, structured. Holds the borrowed finding plus the
 /// SARIF-specific `rule_id` mapping; converted to a SARIF JSON Value
@@ -29,11 +29,11 @@ pub struct SarifResultRow {
     pub(crate) finding: crate::domain::Finding,
 }
 
-/// SARIF reporter. Holds the borrowed bits that `publish` needs to
-/// finalise the envelope (orphan rows).
+/// SARIF reporter. Holds the borrowed `Summary` for the
+/// suppression-ratio result row; orphan rows flow through the trait
+/// via `build_orphans` → `Snapshot::orphans` → `publish`.
 pub struct SarifReporter<'a> {
     pub(crate) summary: &'a Summary,
-    pub(crate) orphan_suppressions: &'a [OrphanSuppressionWarning],
 }
 
 impl<'a> ReporterImpl for SarifReporter<'a> {
@@ -46,6 +46,7 @@ impl<'a> ReporterImpl for SarifReporter<'a> {
     type CouplingView = Vec<SarifResultRow>;
     type TestQualityView = Vec<SarifResultRow>;
     type ArchitectureView = Vec<SarifResultRow>;
+    type OrphanView = Vec<Value>;
     type IospDataView = ();
     type ComplexityDataView = ();
     type CouplingDataView = ();
@@ -106,6 +107,9 @@ impl<'a> ReporterImpl for SarifReporter<'a> {
             .collect()
     }
 
+    fn build_orphans(&self, suppressions: &[OrphanSuppression]) -> Vec<Value> {
+        orphan_suppression_results(suppressions)
+    }
     fn build_iosp_data(&self, _: &[FunctionRecord]) {}
     fn build_complexity_data(&self, _: &[FunctionRecord]) {}
     fn build_coupling_data(&self, _: &[ModuleCouplingRecord]) {}
@@ -119,6 +123,7 @@ impl<'a> ReporterImpl for SarifReporter<'a> {
             coupling,
             test_quality,
             architecture,
+            orphans,
             iosp_data: (),
             complexity_data: (),
             coupling_data: (),
@@ -138,10 +143,10 @@ impl<'a> ReporterImpl for SarifReporter<'a> {
             all_rows.extend(chunk);
         }
         let rules = build_rules_for(&all_rows);
-        let cap = all_rows.len() + self.orphan_suppressions.len() + 1;
+        let cap = all_rows.len() + orphans.len() + 1;
         let mut sarif_results: Vec<Value> = Vec::with_capacity(cap);
         sarif_results.extend(all_rows.into_iter().map(row_to_sarif_value));
-        sarif_results.extend(orphan_suppression_results(self.orphan_suppressions));
+        sarif_results.extend(orphans);
         sarif_results.extend(suppression_ratio_result(self.summary));
         let envelope = json!({
             "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/main/sarif-2.1/schema/sarif-schema-2.1.0.json",
@@ -219,7 +224,7 @@ fn row_to_sarif_value(r: SarifResultRow) -> Value {
 
 // ── Orphan + suppression-ratio rows (extra results, not findings) ───
 
-fn orphan_suppression_results(orphans: &[OrphanSuppressionWarning]) -> Vec<Value> {
+fn orphan_suppression_results(orphans: &[OrphanSuppression]) -> Vec<Value> {
     orphans
         .iter()
         .map(|w| {
@@ -281,7 +286,6 @@ pub fn print_sarif(analysis: &AnalysisResult) {
 pub fn build_sarif_string(analysis: &AnalysisResult) -> String {
     let reporter = SarifReporter {
         summary: &analysis.summary,
-        orphan_suppressions: &analysis.orphan_suppressions,
     };
     reporter.render(&analysis.findings, &analysis.data)
 }

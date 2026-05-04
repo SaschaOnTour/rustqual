@@ -17,8 +17,8 @@ use serde_json::{json, Value};
 use crate::config::Config;
 use crate::domain::analysis_data::{FunctionRecord, ModuleCouplingRecord};
 use crate::domain::findings::{
-    ArchitectureFinding, ComplexityFinding, CouplingFinding, DryFinding, IospFinding, SrpFinding,
-    TqFinding,
+    ArchitectureFinding, ComplexityFinding, CouplingFinding, DryFinding, IospFinding,
+    OrphanSuppression, SrpFinding, TqFinding,
 };
 use crate::domain::AnalysisData;
 use crate::ports::reporter::{ReporterImpl, Snapshot};
@@ -35,11 +35,11 @@ pub enum AiOutputFormat {
     Json,
 }
 
-/// AI-targeted reporter.
+/// AI-targeted reporter. Orphan entries flow through the trait via
+/// `build_orphans` → `Snapshot::orphans` → `publish`.
 pub struct AiReporter<'a> {
     pub(crate) config: &'a Config,
     pub(crate) data: &'a AnalysisData,
-    pub(crate) orphan_entries: &'a [Value],
     pub(crate) format: AiOutputFormat,
 }
 
@@ -64,6 +64,7 @@ impl<'a> ReporterImpl for AiReporter<'a> {
     type CouplingView = Vec<AiCouplingRow>;
     type TestQualityView = Vec<AiTqRow>;
     type ArchitectureView = Vec<AiArchRow>;
+    type OrphanView = Vec<Value>;
     type IospDataView = ();
     type ComplexityDataView = ();
     type CouplingDataView = ();
@@ -142,6 +143,9 @@ impl<'a> ReporterImpl for AiReporter<'a> {
             .collect()
     }
 
+    fn build_orphans(&self, suppressions: &[OrphanSuppression]) -> Vec<Value> {
+        output::orphan_suppression_entries(suppressions)
+    }
     fn build_iosp_data(&self, _: &[FunctionRecord]) {}
     fn build_complexity_data(&self, _: &[FunctionRecord]) {}
     fn build_coupling_data(&self, _: &[ModuleCouplingRecord]) {}
@@ -155,6 +159,7 @@ impl<'a> ReporterImpl for AiReporter<'a> {
             coupling,
             test_quality,
             architecture,
+            orphans,
             iosp_data: (),
             complexity_data: (),
             coupling_data: (),
@@ -166,7 +171,7 @@ impl<'a> ReporterImpl for AiReporter<'a> {
             + coupling.len()
             + test_quality.len()
             + architecture.len()
-            + self.orphan_entries.len();
+            + orphans.len();
         let mut all_entries: Vec<Value> = Vec::with_capacity(cap);
         all_entries.extend(iosp.into_iter().map(format_iosp_entry));
         all_entries.extend(complexity.into_iter().map(format_complexity_entry));
@@ -175,7 +180,7 @@ impl<'a> ReporterImpl for AiReporter<'a> {
         all_entries.extend(coupling.into_iter().map(format_coupling_entry));
         all_entries.extend(test_quality.into_iter().map(format_tq_entry));
         all_entries.extend(architecture.into_iter().map(format_arch_entry));
-        all_entries.extend(self.orphan_entries.iter().cloned());
+        all_entries.extend(orphans);
 
         let total = all_entries.len();
         let mut value = json!({
@@ -195,22 +200,18 @@ impl<'a> ReporterImpl for AiReporter<'a> {
 }
 
 pub fn print_ai(analysis: &AnalysisResult, config: &Config) {
-    let orphan_entries = output::orphan_suppression_entries(&analysis.orphan_suppressions);
     let reporter = AiReporter {
         config,
         data: &analysis.data,
-        orphan_entries: &orphan_entries,
         format: AiOutputFormat::Toon,
     };
     println!("{}", reporter.render(&analysis.findings, &analysis.data));
 }
 
 pub fn print_ai_json(analysis: &AnalysisResult, config: &Config) {
-    let orphan_entries = output::orphan_suppression_entries(&analysis.orphan_suppressions);
     let reporter = AiReporter {
         config,
         data: &analysis.data,
-        orphan_entries: &orphan_entries,
         format: AiOutputFormat::Json,
     };
     println!("{}", reporter.render(&analysis.findings, &analysis.data));

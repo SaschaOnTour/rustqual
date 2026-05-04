@@ -105,12 +105,13 @@ pub(crate) fn run_analysis(
         architecture_findings,
         config,
     );
-    result.orphan_suppressions = crate::app::orphan_suppressions::detect_orphan_suppressions(
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &suppression_lines,
         &result,
         config,
     );
-    result.summary.orphan_suppressions = result.orphan_suppressions.len();
+    result.summary.orphan_suppressions = orphans.len();
+    result.findings.orphan_suppressions = orphans;
     result
 }
 
@@ -135,12 +136,12 @@ fn build_result(
             secondary.structural.as_ref(),
         ),
         test_quality: super::projection::project_tq(secondary.tq.as_ref()),
+        orphan_suppressions: Vec::new(),
     };
     let data = super::projection::project_data(all_results, secondary.coupling.as_ref());
     AnalysisResult {
         results: std::mem::take(all_results),
         summary,
-        orphan_suppressions: Vec::new(),
         findings,
         data,
     }

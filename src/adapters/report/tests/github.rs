@@ -70,7 +70,6 @@ fn make_analysis(results: Vec<FunctionAnalysis>) -> AnalysisResult {
     AnalysisResult {
         results,
         summary,
-        orphan_suppressions: vec![],
         findings: crate::domain::AnalysisFindings::default(),
         data: crate::domain::AnalysisData::default(),
     }
@@ -288,10 +287,7 @@ fn test_github_render_includes_summary_annotation() {
         quality_score: 1.0,
         ..Default::default()
     };
-    let reporter = GithubReporter {
-        summary: &summary,
-        orphan_suppressions: &[],
-    };
+    let reporter = GithubReporter { summary: &summary };
     let findings = crate::domain::AnalysisFindings::default();
     let data = crate::domain::AnalysisData::default();
     let out = reporter.render(&findings, &data);
@@ -334,10 +330,7 @@ fn test_github_render_emits_iosp_annotation_then_summary() {
         }],
         effort_score: None,
     });
-    let reporter = GithubReporter {
-        summary: &summary,
-        orphan_suppressions: &[],
-    };
+    let reporter = GithubReporter { summary: &summary };
     let out = reporter.render(&findings, &crate::domain::AnalysisData::default());
     let iosp_pos = out
         .find("file=src/lib.rs")
@@ -381,5 +374,29 @@ fn architecture_message_with_special_chars_is_escaped() {
     assert!(
         !out.contains("\nline2"),
         "no raw LF must remain in the annotation; got: {out}"
+    );
+}
+
+#[test]
+fn github_reporter_emits_orphan_annotations_via_snapshot_view() {
+    use crate::domain::findings::OrphanSuppression;
+    use crate::ports::Reporter;
+    let summary = Summary {
+        total: 1,
+        quality_score: 1.0,
+        ..Default::default()
+    };
+    let mut findings = crate::domain::AnalysisFindings::default();
+    findings.orphan_suppressions = vec![OrphanSuppression {
+        file: "src/foo.rs".into(),
+        line: 42,
+        dimensions: vec![crate::findings::Dimension::Srp],
+        reason: Some("legacy".into()),
+    }];
+    let reporter = GithubReporter { summary: &summary };
+    let out = reporter.render(&findings, &crate::domain::AnalysisData::default());
+    assert!(
+        out.contains("file=src/foo.rs") && out.contains("line=42"),
+        "orphan annotation must reach output via snapshot.orphans; got: {out}"
     );
 }

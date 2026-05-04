@@ -174,7 +174,7 @@ pub(crate) fn format_architecture(view: &GithubArchitectureView) -> String {
 }
 
 pub(crate) fn format_orphan_suppressions(
-    orphans: &[crate::report::OrphanSuppressionWarning],
+    orphans: &[crate::domain::findings::OrphanSuppression],
 ) -> String {
     let mut out = String::new();
     orphans.iter().for_each(|w| {

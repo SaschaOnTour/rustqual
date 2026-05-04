@@ -1,9 +1,9 @@
 //! HTML rendering for the orphan-suppressions section.
 
 use super::html_escape;
-use crate::report::OrphanSuppressionWarning;
+use crate::domain::findings::OrphanSuppression;
 
-pub(super) fn format_orphan_suppressions_section(orphans: &[OrphanSuppressionWarning]) -> String {
+pub(super) fn format_orphan_suppressions_section(orphans: &[OrphanSuppression]) -> String {
     if orphans.is_empty() {
         return String::new();
     }
@@ -19,7 +19,7 @@ pub(super) fn format_orphan_suppressions_section(orphans: &[OrphanSuppressionWar
     html
 }
 
-fn render_row(w: &OrphanSuppressionWarning) -> String {
+fn render_row(w: &OrphanSuppression) -> String {
     let scope = if w.dimensions.is_empty() {
         "&lt;all&gt;".to_string()
     } else {

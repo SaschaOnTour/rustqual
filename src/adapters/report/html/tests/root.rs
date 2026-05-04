@@ -12,7 +12,6 @@ use crate::report::Summary;
 fn build_html_string(analysis: &AnalysisResult) -> String {
     HtmlReporter {
         summary: &analysis.summary,
-        orphan_suppressions: &analysis.orphan_suppressions,
     }
     .render(&analysis.findings, &analysis.data)
 }
@@ -57,7 +56,6 @@ fn make_analysis(results: Vec<FunctionAnalysis>) -> AnalysisResult {
     AnalysisResult {
         results,
         summary,
-        orphan_suppressions: vec![],
         findings,
         data,
     }
@@ -233,5 +231,35 @@ fn test_html_renders_architecture_findings() {
     assert!(
         html.contains("src/cli/handlers.rs"),
         "HTML must contain the architecture finding file path"
+    );
+}
+
+#[test]
+fn html_reporter_renders_orphans_via_snapshot_view() {
+    // Construct the reporter with NO orphan_suppressions struct-field
+    // bypass and populate `findings.orphan_suppressions`. Output must
+    // include the orphan section — proving render flows through
+    // `build_orphans` → `Snapshot::orphans` → `publish`.
+    use crate::domain::findings::OrphanSuppression;
+    let mut analysis = make_analysis(vec![]);
+    analysis.findings.orphan_suppressions = vec![OrphanSuppression {
+        file: "src/foo.rs".into(),
+        line: 42,
+        dimensions: vec![crate::findings::Dimension::Iosp],
+        reason: Some("legacy".into()),
+    }];
+    // Reporter struct WITHOUT the orphan_suppressions field — the
+    // bypass path is gone; only the trait-driven snapshot view is left.
+    let html = HtmlReporter {
+        summary: &analysis.summary,
+    }
+    .render(&analysis.findings, &analysis.data);
+    assert!(
+        html.contains("src/foo.rs"),
+        "HTML must include orphan file path from snapshot.orphans, got:\n{html}"
+    );
+    assert!(
+        html.contains("Orphan") || html.contains("ORPHAN"),
+        "HTML must include orphan section heading from snapshot.orphans, got:\n{html}"
     );
 }

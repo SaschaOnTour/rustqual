@@ -208,6 +208,16 @@ impl<'ast, 'vis> Visit<'ast> for PubFnCollector<'ast, 'vis> {
     }
 
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
+        // Skip `#[cfg(test)] impl X { … }` blocks entirely — the cfg
+        // attribute lives on the impl block, child methods have no
+        // attrs of their own. Without this guard test-only methods
+        // would enter the target pub-fn surface and force adapter
+        // coverage checks (Check B/D) for items that disappear in
+        // production builds. Mirror of the same guard in
+        // `file_fn_collector::visit_item_impl`.
+        if has_cfg_test(&node.attrs) {
+            return;
+        }
         // Resolve the impl's self-type through the same canonicalisation
         // pipeline used by receiver-tracked method calls, then probe
         // the workspace `visible_canonicals` set with the joined path.
@@ -234,23 +244,15 @@ impl<'ast, 'vis> Visit<'ast> for PubFnCollector<'ast, 'vis> {
     }
 
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
-        // Trait-impl items inherit the trait's visibility — `fn m() {}`
-        // inside `impl PubTrait for X { ... }` is part of the public
-        // surface even though `node.vis == Inherited`. Without this
-        // relaxation, `impl_overrides_method`-routed dispatch could
-        // emit `X::m` as a touchpoint while `X::m` never enters the
-        // target pub-fn set, hiding peer-adapter coverage gaps.
-        //
-        // Self-type visibility is intentionally relaxed for trait
-        // impls: `impl PubTrait for Hidden { fn m() {} }` is still
-        // recorded because intra-crate factories can produce a
-        // `dyn PubTrait` backed by `Hidden`, and dispatch emits the
-        // `Hidden::m` edge accordingly. Pub-fn-set must agree with
-        // dispatch to keep Check B/D coverage consistent.
-        let trait_visible = self.current_impl_is_visible_trait();
-        let surface_visible = self.current_impl_visible() || trait_visible;
-        let method_visible = is_visible(&node.vis) || trait_visible;
-        if surface_visible && method_visible && !is_test_fn(&node.attrs) {
+        // Trait-impl items inherit the trait's visibility for `node.vis`
+        // — `fn m() {}` inside `impl PubTrait for X { ... }` is part of
+        // the public surface even though `node.vis == Inherited`. The
+        // self-type still gates membership: a method on a private type
+        // is never registered, since dispatch into private impls is
+        // collapsed to the trait-method anchor (`<PubTrait>::<m>`) and
+        // the impl-method canonical never appears as a touchpoint.
+        let method_visible = is_visible(&node.vis) || self.current_impl_is_visible_trait();
+        if self.current_impl_visible() && method_visible && !is_test_fn(&node.attrs) {
             let line = syn::spanned::Spanned::span(&node.sig.ident).start().line;
             let name = node.sig.ident.to_string();
             self.record_fn(name, line, &node.block, &node.sig, &node.attrs);

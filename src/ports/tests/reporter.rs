@@ -4,8 +4,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::domain::analysis_data::{FunctionRecord, ModuleCouplingRecord};
 use crate::domain::findings::{
-    ArchitectureFinding, ComplexityFinding, CouplingFinding, DryFinding, IospFinding, SrpFinding,
-    TqFinding,
+    ArchitectureFinding, ComplexityFinding, CouplingFinding, DryFinding, IospFinding,
+    OrphanSuppression, SrpFinding, TqFinding,
 };
 use crate::domain::{AnalysisData, AnalysisFindings};
 use crate::ports::reporter::{ReporterImpl, Snapshot};
@@ -24,6 +24,7 @@ struct CountingReporter {
     coupling: AtomicUsize,
     test_quality: AtomicUsize,
     architecture: AtomicUsize,
+    orphans: AtomicUsize,
     iosp_data: AtomicUsize,
     complexity_data: AtomicUsize,
     coupling_data: AtomicUsize,
@@ -44,6 +45,7 @@ impl ReporterImpl for CountingReporter {
     type CouplingView = &'static str;
     type TestQualityView = &'static str;
     type ArchitectureView = &'static str;
+    type OrphanView = &'static str;
     type IospDataView = &'static str;
     type ComplexityDataView = &'static str;
     type CouplingDataView = &'static str;
@@ -76,6 +78,10 @@ impl ReporterImpl for CountingReporter {
         bump(&self.architecture);
         "architecture"
     }
+    fn build_orphans(&self, _: &[OrphanSuppression]) -> &'static str {
+        bump(&self.orphans);
+        "orphans"
+    }
     fn build_iosp_data(&self, _: &[FunctionRecord]) -> &'static str {
         bump(&self.iosp_data);
         "iosp_data"
@@ -101,6 +107,7 @@ impl ReporterImpl for CountingReporter {
             coupling,
             test_quality,
             architecture,
+            orphans,
             iosp_data,
             complexity_data,
             coupling_data,
@@ -113,6 +120,7 @@ impl ReporterImpl for CountingReporter {
             coupling,
             test_quality,
             architecture,
+            orphans,
             iosp_data,
             complexity_data,
             coupling_data,
@@ -148,6 +156,11 @@ fn render_calls_every_build_method_exactly_once() {
         "build_architecture must run once",
     );
     assert_eq!(
+        load(&reporter.orphans),
+        1,
+        "build_orphans must run once — compile-time guarantee for orphan-suppression rendering across all reporters",
+    );
+    assert_eq!(
         load(&reporter.iosp_data),
         1,
         "build_iosp_data must run once",
@@ -174,9 +187,9 @@ fn render_passes_views_to_publish_in_canonical_order() {
     let out = reporter.render(&AnalysisFindings::default(), &AnalysisData::default());
     assert_eq!(
         out,
-        "iosp|complexity|dry|srp|coupling|test_quality|architecture|\
+        "iosp|complexity|dry|srp|coupling|test_quality|architecture|orphans|\
          iosp_data|complexity_data|coupling_data",
-        "publish must receive all 10 views, snapshot fields populated by build_* in canonical order",
+        "publish must receive all 11 views, snapshot fields populated by build_* in canonical order",
     );
 }
 

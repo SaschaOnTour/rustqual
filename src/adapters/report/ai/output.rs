@@ -3,8 +3,6 @@
 
 use serde_json::{json, Value};
 
-use crate::report::OrphanSuppressionWarning;
-
 const GLOBAL_FILE_KEY: &str = "<workspace>";
 
 pub(super) fn group_by_file(entries: Vec<Value>) -> Value {
@@ -28,7 +26,9 @@ pub(super) fn group_by_file(entries: Vec<Value>) -> Value {
     Value::Object(map)
 }
 
-pub(super) fn orphan_suppression_entries(orphans: &[OrphanSuppressionWarning]) -> Vec<Value> {
+pub(super) fn orphan_suppression_entries(
+    orphans: &[crate::domain::findings::OrphanSuppression],
+) -> Vec<Value> {
     orphans
         .iter()
         .map(|w| {

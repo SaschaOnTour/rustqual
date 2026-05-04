@@ -931,12 +931,16 @@ fn test_collect_pub_fns_records_pub_use_reexport_with_qualified_impl() {
 }
 
 #[test]
-fn test_collect_pub_fns_records_trait_impl_method_on_private_self_type() {
+fn test_collect_pub_fns_skips_trait_impl_method_on_private_self_type() {
     // `impl PubTrait for Hidden { fn handle() }` — `Hidden` is private,
-    // but intra-crate factories can produce a `dyn PubTrait` backed by
-    // it. Dispatch emits `Hidden::handle` as a touchpoint, so the
-    // pub-fn set must include it too — otherwise Check B/D would have
-    // a dispatch-emitted touchpoint with no corresponding target pub-fn.
+    // so `Hidden::handle` is NOT registered as a target pub-fn.
+    // Dispatch through `dyn PubTrait` no longer emits `Hidden::handle`
+    // either; instead it emits the synthetic anchor
+    // `<PubTrait>::handle` which represents the capability.
+    // Registering private-self-type impl-methods as target pub-fns
+    // would force adapter coverage checks for implementation details
+    // that are unreachable through the public API (false-positive
+    // class P2 #2 from 2026-05-04 review pass).
     let file = parse(
         r#"
         pub trait PubTrait {
@@ -959,8 +963,8 @@ fn test_collect_pub_fns_records_trait_impl_method_on_private_self_type() {
     );
     let app = names_for_layer(&by_layer, "application");
     assert!(
-        app.contains("handle"),
-        "trait-impl method on private self type must enter pub-fn set so dispatch + target surface agree, got {app:?}"
+        !app.contains("handle"),
+        "trait-impl method on private self type must stay out of pub-fn set; dispatch reaches it via the trait-method anchor, not as a concrete target pub-fn. Got {app:?}"
     );
 }
 

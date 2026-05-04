@@ -20,12 +20,10 @@
 //! chains and trigger false positives in Check A.
 
 use super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
-use super::calls::{collect_canonical_calls, FnContext};
-use super::signature_params::extract_signature_params;
+use super::file_fn_collector::FileFnCollector;
 use super::type_infer::{build_workspace_type_index, WorkspaceIndexInputs, WorkspaceTypeIndex};
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
 use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
-use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
 use crate::adapters::shared::use_tree::gather_alias_map_scoped;
 use crate::adapters::shared::use_tree::ScopedAliasMap;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -43,6 +41,14 @@ pub(crate) struct CallGraph {
     /// Check A / Check B stay O(N) instead of paying a glob probe per
     /// visited node.
     pub layer_of: HashMap<String, Option<String>>,
+    /// Synthetic trait-method anchors emitted by `dyn Trait.method()`
+    /// dispatch — `<Trait>::<method>` for every `(trait, method)` where
+    /// the trait is workspace-known and the method is declared on it.
+    /// Map value: set of layer names where overriding impls live. Used
+    /// by the touchpoint walker to decide whether the anchor counts as
+    /// a target boundary (impl in target layer ⇒ yes). Layers are
+    /// resolved at graph-build time so the walker hot-path stays O(1).
+    pub trait_method_anchors: HashMap<String, HashSet<String>>,
 }
 
 impl CallGraph {
@@ -51,6 +57,7 @@ impl CallGraph {
             forward: HashMap::new(),
             reverse: HashMap::new(),
             layer_of: HashMap::new(),
+            trait_method_anchors: HashMap::new(),
         }
     }
 
@@ -64,7 +71,32 @@ impl CallGraph {
         self.layer_of.get(canonical).and_then(Option::as_deref)
     }
 
-    fn add_edge(&mut self, caller: &str, callee: &str) {
+    /// True if `canonical` is a synthetic trait-method anchor AND any of
+    /// its overriding impls live in `target_layer`. The boundary walker
+    /// uses this to recognise dispatch into target-layer impls when the
+    /// trait itself lives in a non-target layer (e.g. `ports`).
+    pub fn anchor_reaches_target(&self, canonical: &str, target_layer: &str) -> bool {
+        self.trait_method_anchors
+            .get(canonical)
+            .is_some_and(|layers| layers.contains(target_layer))
+    }
+
+    /// Set of synthetic trait-method anchor canonicals whose trait has
+    /// at least one overriding impl in `target_layer`. These are
+    /// **target capabilities** — Check B/D enumerate them alongside
+    /// concrete `pub_fns_by_layer[target]` entries, so adapter coverage
+    /// of `dyn Trait.method()` dispatch is checked against the anchor
+    /// (the touchpoint walker registers) rather than against per-impl
+    /// concrete fns (which dispatch never emits anymore).
+    pub fn target_anchor_capabilities(&self, target_layer: &str) -> HashSet<&str> {
+        self.trait_method_anchors
+            .iter()
+            .filter(|(_, layers)| layers.contains(target_layer))
+            .map(|(anchor, _)| anchor.as_str())
+            .collect()
+    }
+
+    pub(super) fn add_edge(&mut self, caller: &str, callee: &str) {
         self.forward
             .entry(caller.to_string())
             .or_default()
@@ -75,9 +107,25 @@ impl CallGraph {
             .insert(caller.to_string());
     }
 
-    fn add_node(&mut self, canonical: &str) {
+    pub(super) fn add_node(&mut self, canonical: &str) {
         self.forward.entry(canonical.to_string()).or_default();
     }
+}
+
+/// Heuristically derive a file path from an anchor canonical
+/// `crate::<file_module_segs>::<Trait>::<method>`. The trait
+/// declaration lives at `src/<file_module_segs>.rs` (or `…/mod.rs`);
+/// we pick the `.rs` form. Used by Check B/D to attach a finding
+/// location for anchor-level orphan / multiplicity findings until
+/// span info is carried through `WorkspaceTypeIndex.trait_methods`.
+pub(crate) fn anchor_canonical_to_file_path(canonical: &str) -> String {
+    const MIN_ANCHOR_SEGS: usize = 4; // crate::<mod>::<Trait>::<method>
+    let segs: Vec<&str> = canonical.split("::").collect();
+    if segs.len() < MIN_ANCHOR_SEGS || segs[0] != "crate" {
+        return String::new();
+    }
+    let file_segs = &segs[1..segs.len() - 2];
+    format!("src/{}.rs", file_segs.join("/"))
 }
 
 /// Shared canonical-name builder used by both Check A and Check B.
@@ -102,7 +150,7 @@ pub(crate) fn canonical_name_for_pub_fn(info: &super::pub_fns::PubFnInfo<'_>) ->
 /// header, we must not prepend the file's module segments or we'd
 /// produce `crate::<file_mod>::crate::foo::Bar::method`, which never
 /// matches receiver-tracked method targets.
-fn canonical_fn_name(
+pub(super) fn canonical_fn_name(
     file: &str,
     self_type: Option<&[String]>,
     mod_stack: &[String],
@@ -296,8 +344,32 @@ pub(crate) fn build_call_graph<'ast>(
         };
         collector.visit_file(ast);
     }
+    populate_anchor_index(&mut graph, &type_index, layers);
     populate_layer_cache(&mut graph, layers);
     graph
+}
+
+/// Mirror `WorkspaceTypeIndex.trait_methods` + `trait_impls` into the
+/// graph as synthetic anchors `<Trait>::<method>`. Each anchor maps to
+/// the set of layer names where overriding impls live, resolved against
+/// `LayerDefinitions` at build time so the walker hot-path stays O(1).
+/// Operation: index transcription with eager layer resolution.
+fn populate_anchor_index(
+    graph: &mut CallGraph,
+    type_index: &WorkspaceTypeIndex,
+    layers: &LayerDefinitions,
+) {
+    for (trait_canonical, methods) in type_index.trait_methods_iter() {
+        for method in methods {
+            let anchor = format!("{trait_canonical}::{method}");
+            let impl_layers: HashSet<String> = type_index
+                .overriding_impls_for(trait_canonical, method)
+                .iter()
+                .filter_map(|impl_canon| layers.layer_of_crate_path(impl_canon).map(String::from))
+                .collect();
+            graph.trait_method_anchors.insert(anchor, impl_layers);
+        }
+    }
 }
 
 /// Pre-compute `layer_of_crate_path` for every canonical that appears
@@ -312,109 +384,5 @@ fn populate_layer_cache(graph: &mut CallGraph, layers: &LayerDefinitions) {
     for canonical in canonicals {
         let layer = layers.layer_of_crate_path(&canonical).map(String::from);
         graph.layer_of.insert(canonical, layer);
-    }
-}
-
-struct FileFnCollector<'a> {
-    file: &'a FileScope<'a>,
-    workspace_files: &'a HashMap<String, FileScope<'a>>,
-    type_index: &'a WorkspaceTypeIndex,
-    /// `None` marks an unresolved self-type (trait object, `&T`, tuple)
-    /// whose methods we must not record.
-    impl_type_stack: Vec<Option<Vec<String>>>,
-    /// Enclosing inline-mod names so fns inside `mod inner { ... }`
-    /// record under `crate::<file>::inner::fn`.
-    mod_stack: Vec<String>,
-    graph: &'a mut CallGraph,
-}
-
-impl<'a> FileFnCollector<'a> {
-    fn record_fn<'ast>(
-        &mut self,
-        fn_name: &str,
-        sig: &'ast syn::Signature,
-        body: &'ast syn::Block,
-    ) {
-        let self_type = match self.impl_type_stack.last() {
-            // Free fn (no enclosing impl).
-            None => None,
-            // Resolved impl — use its canonical self-type.
-            Some(Some(segs)) => Some(segs.clone()),
-            // Unresolved impl (trait object / reference receiver) —
-            // don't record; see `resolve_impl_self_type`'s doc.
-            Some(None) => return,
-        };
-        let canonical = canonical_fn_name(
-            self.file.path,
-            self_type.as_deref(),
-            &self.mod_stack,
-            fn_name,
-        );
-        let ctx = FnContext {
-            file: self.file,
-            mod_stack: &self.mod_stack,
-            body,
-            signature_params: extract_signature_params(sig),
-            self_type,
-            workspace_index: Some(self.type_index),
-            workspace_files: Some(self.workspace_files),
-        };
-        let calls = collect_canonical_calls(&ctx);
-        self.graph.add_node(&canonical);
-        for callee in calls {
-            self.graph.add_edge(&canonical, &callee);
-        }
-    }
-}
-
-impl<'a, 'ast> Visit<'ast> for FileFnCollector<'a> {
-    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
-        if has_cfg_test(&node.attrs) || has_test_attr(&node.attrs) {
-            return;
-        }
-        let name = node.sig.ident.to_string();
-        self.record_fn(&name, &node.sig, &node.block);
-        syn::visit::visit_item_fn(self, node);
-    }
-
-    fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
-        // Canonicalise the impl's self-type through the file's alias
-        // map so `use crate::app::Session; impl Session { ... }` and
-        // `impl Session { ... }` in `src/app/session.rs` both produce
-        // the same `crate::app::Session` prefix the call collector sees
-        // from receiver-tracked method calls. `None` means the
-        // self-type isn't a plain path (trait object, `&T`, tuple) —
-        // `record_fn` skips method recording for those impls.
-        let resolved = resolve_impl_self_type(
-            &node.self_ty,
-            &CanonScope {
-                file: self.file,
-                mod_stack: &self.mod_stack,
-            },
-        );
-        self.impl_type_stack.push(resolved);
-        syn::visit::visit_item_impl(self, node);
-        self.impl_type_stack.pop();
-    }
-
-    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
-        if has_cfg_test(&node.attrs) || has_test_attr(&node.attrs) {
-            return;
-        }
-        let name = node.sig.ident.to_string();
-        self.record_fn(&name, &node.sig, &node.block);
-        syn::visit::visit_impl_item_fn(self, node);
-    }
-
-    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
-        // Skip inline `#[cfg(test)] mod tests { ... }` blocks entirely.
-        // Their fns are test-only and must not pollute the call graph
-        // (Check B could otherwise count a test as adapter coverage).
-        if has_cfg_test(&node.attrs) {
-            return;
-        }
-        self.mod_stack.push(node.ident.to_string());
-        syn::visit::visit_item_mod(self, node);
-        self.mod_stack.pop();
     }
 }

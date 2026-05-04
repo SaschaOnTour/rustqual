@@ -24,11 +24,11 @@ use colored::Colorize;
 use crate::adapters::analyzers::iosp::FunctionAnalysis;
 use crate::domain::analysis_data::{FunctionRecord, ModuleCouplingRecord};
 use crate::domain::findings::{
-    ArchitectureFinding, ComplexityFinding, CouplingFinding, DryFinding, IospFinding, SrpFinding,
-    TqFinding,
+    ArchitectureFinding, ComplexityFinding, CouplingFinding, DryFinding, IospFinding,
+    OrphanSuppression, SrpFinding, TqFinding,
 };
 use crate::ports::reporter::{ReporterImpl, Snapshot};
-use crate::report::findings_list::FindingEntry;
+use crate::report::findings_list::{orphan_to_finding_entry, FindingEntry};
 
 use super::Summary;
 
@@ -61,6 +61,7 @@ impl<'a> ReporterImpl for TextReporter<'a> {
     type CouplingView = CouplingView;
     type TestQualityView = TqView;
     type ArchitectureView = ArchitectureView;
+    type OrphanView = Vec<FindingEntry>;
     type IospDataView = ();
     type ComplexityDataView = ();
     type CouplingDataView = CouplingTableView;
@@ -82,6 +83,9 @@ impl<'a> ReporterImpl for TextReporter<'a> {
     fn build_architecture(&self, findings: &[ArchitectureFinding]) -> ArchitectureView {
         build_architecture_view(findings)
     }
+    fn build_orphans(&self, suppressions: &[OrphanSuppression]) -> Vec<FindingEntry> {
+        suppressions.iter().map(orphan_to_finding_entry).collect()
+    }
     fn build_iosp_data(&self, _: &[FunctionRecord]) {}
     fn build_complexity_data(&self, _: &[FunctionRecord]) {}
     fn build_coupling_data(&self, modules: &[ModuleCouplingRecord]) -> CouplingTableView {
@@ -97,12 +101,21 @@ impl<'a> ReporterImpl for TextReporter<'a> {
             coupling,
             test_quality,
             architecture,
+            orphans,
             iosp_data: (),
             complexity_data: (),
             coupling_data,
         } = snapshot;
+        // Compose merged-list (compact) and dedicated-section (verbose)
+        // entries from `findings_entries` (non-orphan flat list) plus
+        // `orphans` (the snapshot view). Orphan rendering flows
+        // exclusively through the snapshot view; `findings_entries`
+        // carries the other dimensions.
+        let mut all_entries: Vec<FindingEntry> = self.findings_entries.to_vec();
+        all_entries.extend(orphans.iter().cloned());
+        all_entries.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
         let mut out = String::new();
-        out.push_str(&format_summary_section(self.summary, self.findings_entries));
+        out.push_str(&format_summary_section(self.summary, &all_entries));
         out.push_str(&format_coupling_section(
             &coupling,
             &coupling_data,
@@ -118,9 +131,9 @@ impl<'a> ReporterImpl for TextReporter<'a> {
                 &coupling.structural_rows,
             ));
             out.push_str(&format_architecture_section(&architecture));
-            out.push_str(&format_orphan_suppressions_section(self.findings_entries));
+            out.push_str(&format_orphan_suppressions_section(&orphans));
         } else {
-            out.push_str(&format_findings_list(self.findings_entries));
+            out.push_str(&format_findings_list(&all_entries));
         }
         if let Some(s) = self.suggestions_text {
             out.push_str(s);

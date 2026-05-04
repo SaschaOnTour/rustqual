@@ -13,8 +13,8 @@
 
 use crate::domain::analysis_data::{FunctionClassification, FunctionRecord, ModuleCouplingRecord};
 use crate::domain::findings::{
-    ArchitectureFinding, ComplexityFinding, CouplingFinding, DryFinding, IospFinding, SrpFinding,
-    TqFinding,
+    ArchitectureFinding, ComplexityFinding, CouplingFinding, DryFinding, IospFinding,
+    OrphanSuppression, SrpFinding, TqFinding,
 };
 use crate::domain::{AnalysisData, AnalysisFindings};
 use crate::ports::reporter::{ReporterImpl, Snapshot};
@@ -50,6 +50,7 @@ impl ReporterImpl for DotReporter {
     type CouplingView = ();
     type TestQualityView = ();
     type ArchitectureView = ();
+    type OrphanView = ();
     type IospDataView = DotIospDataView;
     type ComplexityDataView = ();
     type CouplingDataView = ();
@@ -61,6 +62,7 @@ impl ReporterImpl for DotReporter {
     fn build_coupling(&self, _: &[CouplingFinding]) {}
     fn build_test_quality(&self, _: &[TqFinding]) {}
     fn build_architecture(&self, _: &[ArchitectureFinding]) {}
+    fn build_orphans(&self, _: &[OrphanSuppression]) {}
 
     /// IOSP data view: project function records into nodes + edges.
     fn build_iosp_data(&self, functions: &[FunctionRecord]) -> DotIospDataView {
@@ -96,6 +98,7 @@ impl ReporterImpl for DotReporter {
             coupling: (),
             test_quality: (),
             architecture: (),
+            orphans: (),
             iosp_data,
             complexity_data: (),
             coupling_data: (),

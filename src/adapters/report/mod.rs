@@ -36,37 +36,17 @@ pub struct AnalysisResult {
     /// Summary statistics: dimension scores, finding counts, total
     /// suppressions. Populated by the analysis pipeline.
     pub summary: Summary,
-    /// `// qual:allow(...)` markers that matched no finding in their
-    /// annotation window — stale or misplaced suppressions that should
-    /// be removed or corrected. Coupling-only markers are verified
-    /// against line-anchored Coupling findings (Structural OI/SIT/DEH/IET)
-    /// if present; when the file has only module-global coupling reports,
-    /// the marker is skipped rather than falsely flagged as orphan.
-    pub orphan_suppressions: Vec<OrphanSuppressionWarning>,
     /// Per-dimension typed findings — the unified payload that the
     /// `Reporter` trait (in `ports::reporter`) consumes. Populated by
-    /// projection adapters during analysis.
+    /// projection adapters during analysis. Includes the cross-cutting
+    /// `orphan_suppressions` field carrying `// qual:allow(...)` markers
+    /// that matched no finding in their annotation window.
     pub findings: crate::domain::AnalysisFindings,
     /// Typed state-of-codebase data — counterpart to `findings`, the
     /// payload `AnalysisReporter` consumes. Carries per-function
     /// classifications + raw complexity metrics, per-module coupling
     /// records.
     pub data: crate::domain::AnalysisData,
-}
-
-/// A `// qual:allow(...)` marker that failed to match any finding in
-/// its annotation window. Represents a stale or misplaced suppression.
-#[derive(Debug, Clone)]
-pub struct OrphanSuppressionWarning {
-    pub file: String,
-    /// 1-based line of the marker (already shifted to the last line
-    /// of the contiguous `//`-comment block containing the marker).
-    pub line: usize,
-    /// Which dimensions the marker tried to suppress. Empty = wildcard
-    /// (bare `// qual:allow`).
-    pub dimensions: Vec<crate::domain::Dimension>,
-    /// Optional human-readable rationale attached to the marker.
-    pub reason: Option<String>,
 }
 
 /// Summary statistics for a full analysis run.

@@ -13,8 +13,8 @@ mod complexity_predicates;
 use std::collections::HashMap;
 
 use crate::adapters::analyzers::iosp::Classification;
+use crate::domain::findings::OrphanSuppression;
 use crate::findings::Suppression;
-use crate::report::OrphanSuppressionWarning;
 
 // Window widths come from the shared `app::suppression_windows`
 // module so the orphan detector and the `mark_*_suppressions`
@@ -53,15 +53,15 @@ pub(crate) fn detect_orphan_suppressions(
     suppression_lines: &HashMap<String, Vec<Suppression>>,
     analysis: &crate::report::AnalysisResult,
     config: &crate::config::Config,
-) -> Vec<OrphanSuppressionWarning> {
+) -> Vec<OrphanSuppression> {
     let positions = enumerate_finding_positions(analysis, config);
-    let mut orphans: Vec<OrphanSuppressionWarning> = suppression_lines
+    let mut orphans: Vec<OrphanSuppression> = suppression_lines
         .iter()
         .flat_map(|(file, sups)| {
             sups.iter()
                 .filter(|sup| is_verifiable(sup, file, &positions))
                 .filter(|sup| !has_matching_finding(file, sup, &positions))
-                .map(|sup| OrphanSuppressionWarning {
+                .map(|sup| OrphanSuppression {
                     file: file.clone(),
                     line: sup.line,
                     dimensions: sup.dimensions.clone(),

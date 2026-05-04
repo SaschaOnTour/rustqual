@@ -5,7 +5,9 @@
 //! — typical case: cli has two handlers (`cmd_search`, `cmd_grep`)
 //! both reaching `session.search` while mcp has only `handle_search`.
 
-use super::support::{build_workspace, empty_cfg_test, four_layer, globset, run_check_d};
+use super::support::{
+    build_workspace, empty_cfg_test, four_layer, globset, ports_app_cli_mcp, run_check_d,
+};
 use crate::adapters::analyzers::architecture::compiled::CompiledCallParity;
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use std::collections::HashSet;
@@ -215,4 +217,59 @@ fn check_d_distinct_from_b() {
         extract_d(&findings).is_empty(),
         "Check D should not fire when target missing entirely from an adapter (that's Check B's job), got {findings:?}"
     );
+}
+
+#[test]
+fn check_d_uses_anchor_as_capability_for_multiplicity() {
+    // cli has TWO handlers dispatching `dyn Handler.handle()`.
+    // mcp has ONE handler doing the same. Both adapters reach the
+    // anchor (Check B silent), but multiplicity diverges: cli=2,
+    // mcp=1. Check D must fire on the trait-method anchor as the
+    // capability — not on the concrete impl, which the dispatch
+    // never directly calls. Without anchor iteration this drift
+    // would be silent.
+    let ws = build_workspace(&[
+        (
+            "src/ports/handler.rs",
+            "pub trait Handler { fn handle(&self); }",
+        ),
+        (
+            "src/application/logging.rs",
+            r#"
+            use crate::ports::handler::Handler;
+            pub struct LoggingHandler;
+            impl Handler for LoggingHandler { fn handle(&self) {} }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::ports::handler::Handler;
+            pub fn cmd_dispatch_a(h: &dyn Handler) { h.handle(); }
+            pub fn cmd_dispatch_b(h: &dyn Handler) { h.handle(); }
+            "#,
+        ),
+        (
+            "src/mcp/handlers.rs",
+            r#"
+            use crate::ports::handler::Handler;
+            pub fn mcp_dispatch(h: &dyn Handler) { h.handle(); }
+            "#,
+        ),
+    ]);
+    let cp = make_config(&["cli", "mcp"]);
+    let findings = run_check_d(&ws, &ports_app_cli_mcp(), &cp, &empty_cfg_test());
+    let entries = extract_d(&findings);
+    let anchor = "crate::ports::handler::Handler::handle";
+    let anchor_entry = entries
+        .iter()
+        .find(|(target, _)| target == anchor)
+        .unwrap_or_else(|| panic!("Check D missed anchor multiplicity drift, got {entries:?}"));
+    let counts: std::collections::HashMap<&str, usize> = anchor_entry
+        .1
+        .iter()
+        .map(|(a, c)| (a.as_str(), *c))
+        .collect();
+    assert_eq!(counts.get("cli"), Some(&2));
+    assert_eq!(counts.get("mcp"), Some(&1));
 }

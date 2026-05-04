@@ -15,7 +15,7 @@
 //! count even though both adapters technically cover the capability.
 
 use super::pub_fns::PubFnInfo;
-use super::workspace_graph::canonical_name_for_pub_fn;
+use super::workspace_graph::{anchor_canonical_to_file_path, canonical_name_for_pub_fn, CallGraph};
 use super::HandlerTouchpoints;
 use crate::adapters::analyzers::architecture::compiled::CompiledCallParity;
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
@@ -28,20 +28,67 @@ use std::collections::HashMap;
 /// `HandlerTouchpoints` cache, then probes each target for divergence.
 pub(crate) fn check_multiplicity_mismatch<'ast>(
     pub_fns_by_layer: &HashMap<String, Vec<PubFnInfo<'ast>>>,
+    graph: &CallGraph,
     touchpoints: &HandlerTouchpoints,
     cp: &CompiledCallParity,
 ) -> Vec<MatchLocation> {
-    let Some(targets) = pub_fns_by_layer.get(&cp.target) else {
-        return Vec::new();
-    };
     let counts = build_per_adapter_target_counts(pub_fns_by_layer, touchpoints, cp);
     let mut out = Vec::new();
-    for info in targets {
-        if let Some(hit) = inspect_target(info, &counts, cp) {
+    if let Some(targets) = pub_fns_by_layer.get(&cp.target) {
+        for info in targets {
+            if let Some(hit) = inspect_target(info, &counts, cp) {
+                out.push(hit);
+            }
+        }
+    }
+    for anchor in graph.target_anchor_capabilities(&cp.target) {
+        if let Some(hit) = inspect_anchor(anchor, &counts, cp) {
             out.push(hit);
         }
     }
     out
+}
+
+/// Same multiplicity check as `inspect_target`, but for synthetic
+/// trait-method anchors. Operation: probe per-adapter counts on the
+/// anchor canonical.
+fn inspect_anchor(
+    anchor: &str,
+    counts: &AdapterTargetCounts,
+    cp: &CompiledCallParity,
+) -> Option<MatchLocation> {
+    let per_adapter = collect_counts(anchor, counts, cp);
+    if per_adapter.len() != cp.adapters.len() {
+        return None;
+    }
+    if !counts_diverge(&per_adapter) {
+        return None;
+    }
+    Some(build_anchor_finding(
+        anchor.to_string(),
+        per_adapter,
+        &cp.target,
+    ))
+}
+
+/// Construct a `CallParityMultiplicityMismatch` MatchLocation for an
+/// anchor. File derived heuristically from the anchor canonical (trait
+/// declaration path), line=0. Operation: data construction.
+fn build_anchor_finding(
+    canonical: String,
+    counts_per_adapter: Vec<(String, usize)>,
+    target_layer: &str,
+) -> MatchLocation {
+    MatchLocation {
+        file: anchor_canonical_to_file_path(&canonical),
+        line: 0,
+        column: 0,
+        kind: ViolationKind::CallParityMultiplicityMismatch {
+            target_fn: canonical,
+            target_layer: target_layer.to_string(),
+            counts_per_adapter,
+        },
+    }
 }
 
 /// Per-adapter, per-target handler count: `counts[adapter][target] = N`

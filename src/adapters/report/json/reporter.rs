@@ -15,8 +15,8 @@ use super::srp_coupling::{
 };
 use crate::domain::analysis_data::{FunctionRecord, ModuleCouplingRecord};
 use crate::domain::findings::{
-    ArchitectureFinding, ComplexityFinding, CouplingFinding, DryFinding, IospFinding, SrpFinding,
-    TqFinding,
+    ArchitectureFinding, ComplexityFinding, CouplingFinding, DryFinding, IospFinding,
+    OrphanSuppression, SrpFinding, TqFinding,
 };
 use crate::domain::AnalysisFindings;
 use crate::ports::reporter::{ReporterImpl, Snapshot};
@@ -43,6 +43,7 @@ impl<'a> ReporterImpl for JsonReporter<'a> {
     type CouplingView = JsonChunk;
     type TestQualityView = JsonChunk;
     type ArchitectureView = JsonChunk;
+    type OrphanView = Vec<crate::adapters::report::json_types::JsonOrphanSuppression>;
     type IospDataView = JsonChunk;
     type ComplexityDataView = JsonChunk;
     type CouplingDataView = JsonChunk;
@@ -127,6 +128,13 @@ impl<'a> ReporterImpl for JsonReporter<'a> {
         }
     }
 
+    fn build_orphans(
+        &self,
+        suppressions: &[OrphanSuppression],
+    ) -> Vec<crate::adapters::report::json_types::JsonOrphanSuppression> {
+        crate::adapters::report::json::misc::build_orphans(suppressions)
+    }
+
     fn publish(&self, snapshot: Snapshot<Self>) -> String {
         let Snapshot {
             iosp,
@@ -136,6 +144,7 @@ impl<'a> ReporterImpl for JsonReporter<'a> {
             coupling,
             test_quality,
             architecture,
+            orphans,
             iosp_data,
             complexity_data,
             coupling_data,
@@ -155,6 +164,6 @@ impl<'a> ReporterImpl for JsonReporter<'a> {
         ] {
             merged.extend_from(chunk);
         }
-        self.composer.compose(merged)
+        self.composer.compose(merged, orphans)
     }
 }

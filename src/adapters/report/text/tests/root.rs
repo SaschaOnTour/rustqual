@@ -110,6 +110,48 @@ fn test_print_report_with_complexity_no_panic() {
 }
 
 #[test]
+fn text_reporter_renders_orphans_via_snapshot_view() {
+    // Verify the migration: orphan rendering must come from
+    // `snapshot.orphans` (the trait-driven view), not from the legacy
+    // `findings_entries` struct-field bypass. We construct a TextReporter
+    // with an EMPTY findings_entries field and populate ONLY
+    // `findings.orphan_suppressions`. If the verbose path still emits
+    // the orphan section, it must have come through `build_orphans` →
+    // `Snapshot::orphans` → `publish`. RED before the migration (no-op
+    // build_orphans + verbose path reads findings_entries).
+    use crate::domain::findings::OrphanSuppression;
+    use crate::domain::{AnalysisData, AnalysisFindings, Dimension};
+    use crate::ports::Reporter;
+    let summary = Summary::from_results(&[]);
+    let reporter = TextReporter {
+        summary: &summary,
+        function_analyses: &[],
+        findings_entries: &[],
+        verbose: true,
+        suggestions_text: None,
+    };
+    let findings = AnalysisFindings {
+        orphan_suppressions: vec![OrphanSuppression {
+            file: "src/foo.rs".to_string(),
+            line: 42,
+            dimensions: vec![Dimension::Iosp],
+            reason: Some("legacy".to_string()),
+        }],
+        ..Default::default()
+    };
+    let data = AnalysisData::default();
+    let output = reporter.render(&findings, &data);
+    assert!(
+        output.contains("Orphan Suppression"),
+        "verbose text output must render orphan section from snapshot.orphans (not from findings_entries struct field), got:\n{output}"
+    );
+    assert!(
+        output.contains("src/foo.rs:42"),
+        "orphan entry must appear with file:line, got:\n{output}"
+    );
+}
+
+#[test]
 fn test_print_report_suppressed_verbose_no_panic() {
     let mut func = make_result(
         "suppressed_fn",

@@ -237,7 +237,6 @@ fn test_output_results_text_no_panic() {
     let analysis = AnalysisResult {
         results,
         summary,
-        orphan_suppressions: vec![],
         findings: crate::domain::AnalysisFindings::default(),
         data: crate::domain::AnalysisData::default(),
     };

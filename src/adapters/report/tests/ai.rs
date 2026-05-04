@@ -35,7 +35,6 @@ fn build_ai_value(analysis: &AnalysisResult, config: &Config) -> Value {
     let reporter = AiReporter {
         config,
         data: &analysis.data,
-        orphan_entries: &[],
         format: AiOutputFormat::Json,
     };
     let json_str = reporter.render(&analysis.findings, &analysis.data);
@@ -46,7 +45,6 @@ fn empty_analysis() -> AnalysisResult {
     AnalysisResult {
         results: vec![],
         summary: crate::report::Summary::default(),
-        orphan_suppressions: vec![],
         findings: crate::domain::AnalysisFindings::default(),
         data: crate::domain::AnalysisData::default(),
     }
@@ -153,7 +151,6 @@ fn make_reporter<'a>(config: &'a Config, data: &'a crate::domain::AnalysisData) 
     AiReporter {
         config,
         data,
-        orphan_entries: &[],
         format: AiOutputFormat::Json,
     }
 }
@@ -540,4 +537,34 @@ fn build_ai_value_with_complexity_finding_no_panic() {
     let config = Config::default();
     let value = build_ai_value(&analysis, &config);
     assert_eq!(value["findings"], 1);
+}
+
+#[test]
+fn ai_reporter_includes_orphan_entries_via_snapshot_view() {
+    use crate::domain::findings::OrphanSuppression;
+    let mut analysis = empty_analysis();
+    analysis.findings.orphan_suppressions = vec![OrphanSuppression {
+        file: "src/foo.rs".into(),
+        line: 42,
+        dimensions: vec![crate::findings::Dimension::Srp],
+        reason: Some("legacy".into()),
+    }];
+    let config = Config::default();
+    let value = build_ai_value(&analysis, &config);
+    assert_eq!(
+        value["findings"], 1,
+        "orphan must count as a finding, got value: {value}"
+    );
+    let by_file = value["findings_by_file"]
+        .as_object()
+        .expect("findings_by_file present");
+    let entries = by_file
+        .get("src/foo.rs")
+        .and_then(|v| v.as_array())
+        .expect("entries for src/foo.rs");
+    let orphan = entries
+        .iter()
+        .find(|e| e["category"] == "orphan_suppression")
+        .expect("orphan entry under src/foo.rs");
+    assert_eq!(orphan["line"], 42);
 }

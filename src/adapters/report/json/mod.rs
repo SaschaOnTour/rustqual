@@ -27,15 +27,18 @@ use crate::ports::Reporter;
 use crate::report::Summary;
 
 /// Wraps a merged `JsonChunk` into the public `JsonOutput` envelope.
-/// Holds summary + orphan-suppression slices borrowed from the
-/// `AnalysisResult` so `compose` can finalise without re-deriving them.
+/// Holds the summary slice; orphan suppressions arrive via the
+/// trait-driven `Snapshot::orphans` view (passed to `compose`).
 pub(crate) struct JsonOutputComposer<'a> {
     pub summary: &'a Summary,
-    pub analysis: &'a AnalysisResult,
 }
 
 impl<'a> JsonOutputComposer<'a> {
-    pub(crate) fn compose(&self, merged: JsonChunk) -> String {
+    pub(crate) fn compose(
+        &self,
+        merged: JsonChunk,
+        orphan_suppressions: Vec<crate::adapters::report::json_types::JsonOrphanSuppression>,
+    ) -> String {
         let output = JsonOutput {
             summary: misc::build_summary(self.summary),
             functions: merged.functions,
@@ -68,7 +71,7 @@ impl<'a> JsonOutputComposer<'a> {
                     param_warnings: merged.srp_param,
                 })
             },
-            orphan_suppressions: misc::build_orphans(self.analysis),
+            orphan_suppressions,
             architecture_findings: merged.architecture,
         };
         serde_json::to_string_pretty(&output)
@@ -88,7 +91,6 @@ pub fn print_json(analysis: &AnalysisResult) {
 pub(crate) fn build_json_string(analysis: &AnalysisResult) -> String {
     let composer = JsonOutputComposer {
         summary: &analysis.summary,
-        analysis,
     };
     let reporter = JsonReporter {
         findings: &analysis.findings,

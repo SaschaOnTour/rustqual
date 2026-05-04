@@ -209,19 +209,42 @@ impl WorkspaceTypeIndex {
     }
 
     // qual:api
+    /// Iterate every workspace trait and its declared methods. Used by
+    /// the call-graph builder to mirror trait+method pairs into anchor
+    /// index. Operation.
+    pub fn trait_methods_iter(&self) -> impl Iterator<Item = (&String, &HashSet<String>)> {
+        self.trait_methods.iter()
+    }
+
+    // qual:api
+    /// Set of impl-self-type canonicals that override `method_name` on
+    /// `trait_canonical`. Used by the call-graph builder to populate the
+    /// anchor → impls map (`CallGraph::trait_method_anchors`). Operation.
+    pub fn overriding_impls_for(
+        &self,
+        trait_canonical: &str,
+        method_name: &str,
+    ) -> HashSet<String> {
+        self.impls_of_trait(trait_canonical)
+            .iter()
+            .filter(|impl_type| self.impl_overrides_method(trait_canonical, impl_type, method_name))
+            .cloned()
+            .collect()
+    }
+
+    // qual:api
     /// True iff `impl_type_canonical` overrides `method_name` in its
     /// `impl trait_canonical for impl_type_canonical { … }` block.
     /// Returns false when the impl inherits the trait's default body
     /// for that method. Returns **true** when there's no record at
-    /// all — preserves the original "assume override" behaviour for
+    /// all — preserves the "assume override" behaviour for
     /// hand-built test indices that populate `trait_impls` without
     /// `trait_impl_overrides`. The production builder
-    /// (`traits.rs::record_trait_impl`) always populates both, so a
-    /// real-world `impl Trait for X {}` (no method bodies) records
-    /// an empty set and the dispatch edge is dropped — non-overriding
-    /// impls inherit the trait default body, which is not modeled as
-    /// a graph node, so those calls stay unresolved (no phantom edge).
-    /// Operation.
+    /// (`traits.rs::record_trait_impl`) always populates both. Used by
+    /// `overriding_impls_for` to drive the `<Trait>::<method>` anchor
+    /// → impl-layers map; non-overriding impls don't contribute layers
+    /// to the anchor (so the walker won't recognise the anchor as a
+    /// target boundary purely on default-body impls). Operation.
     pub fn impl_overrides_method(
         &self,
         trait_canonical: &str,

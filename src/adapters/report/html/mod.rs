@@ -24,11 +24,11 @@ use views::{
     HtmlCouplingView, HtmlDryView, HtmlIospDataView, HtmlIospView, HtmlSrpView, HtmlTqView,
 };
 
-use super::{AnalysisResult, OrphanSuppressionWarning, Summary};
+use super::{AnalysisResult, Summary};
 use crate::domain::analysis_data::{FunctionRecord, ModuleCouplingRecord};
 use crate::domain::findings::{
-    ArchitectureFinding, ComplexityFinding, CouplingFinding, DryFinding, IospFinding, SrpFinding,
-    TqFinding,
+    ArchitectureFinding, ComplexityFinding, CouplingFinding, DryFinding, IospFinding,
+    OrphanSuppression, SrpFinding, TqFinding,
 };
 use crate::domain::PERCENTAGE_MULTIPLIER;
 use crate::ports::reporter::{ReporterImpl, Snapshot};
@@ -45,10 +45,11 @@ pub(crate) fn html_escape(s: &str) -> String {
 
 /// HTML reporter — produces a self-contained HTML report. Holds
 /// `&Summary` for the dashboard composition; per-dim views handle
-/// their respective collapsible sections.
+/// their respective collapsible sections, including orphan
+/// suppressions which flow through the trait via `build_orphans` →
+/// `Snapshot::orphans` → `publish`.
 pub struct HtmlReporter<'a> {
     pub(crate) summary: &'a Summary,
-    pub(crate) orphan_suppressions: &'a [OrphanSuppressionWarning],
 }
 
 impl<'a> ReporterImpl for HtmlReporter<'a> {
@@ -61,6 +62,7 @@ impl<'a> ReporterImpl for HtmlReporter<'a> {
     type CouplingView = HtmlCouplingView;
     type TestQualityView = HtmlTqView;
     type ArchitectureView = HtmlArchitectureView;
+    type OrphanView = String;
     type IospDataView = HtmlIospDataView;
     type ComplexityDataView = HtmlComplexityDataView;
     type CouplingDataView = HtmlCouplingDataView;
@@ -95,6 +97,9 @@ impl<'a> ReporterImpl for HtmlReporter<'a> {
     fn build_coupling_data(&self, modules: &[ModuleCouplingRecord]) -> HtmlCouplingDataView {
         build_coupling_data_view(modules)
     }
+    fn build_orphans(&self, suppressions: &[OrphanSuppression]) -> String {
+        format_orphan_suppressions_section(suppressions)
+    }
 
     fn publish(&self, snapshot: Snapshot<Self>) -> String {
         let Snapshot {
@@ -105,6 +110,7 @@ impl<'a> ReporterImpl for HtmlReporter<'a> {
             coupling,
             test_quality,
             architecture,
+            orphans,
             iosp_data,
             complexity_data,
             coupling_data,
@@ -123,9 +129,7 @@ impl<'a> ReporterImpl for HtmlReporter<'a> {
         ));
         html.push_str(&format_coupling_section(&coupling, &coupling_data));
         html.push_str(&format_architecture_section(&architecture));
-        html.push_str(&format_orphan_suppressions_section(
-            self.orphan_suppressions,
-        ));
+        html.push_str(&orphans);
         html.push_str(&html_footer());
         html
     }
@@ -136,7 +140,6 @@ impl<'a> ReporterImpl for HtmlReporter<'a> {
 pub fn print_html(analysis: &AnalysisResult) {
     let reporter = HtmlReporter {
         summary: &analysis.summary,
-        orphan_suppressions: &analysis.orphan_suppressions,
     };
     println!("{}", reporter.render(&analysis.findings, &analysis.data));
 }

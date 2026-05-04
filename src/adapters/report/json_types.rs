@@ -46,8 +46,10 @@ pub(crate) struct JsonArchitectureFinding {
 }
 
 /// `// qual:allow(...)` marker that matched no finding in its window.
+/// `pub` (not `pub(crate)`) because it surfaces as `JsonReporter::OrphanView`
+/// — a per-reporter view type on the public `ReporterImpl` trait.
 #[derive(serde::Serialize)]
-pub(crate) struct JsonOrphanSuppression {
+pub struct JsonOrphanSuppression {
     pub(crate) file: String,
     pub(crate) line: usize,
     pub(crate) dimensions: Vec<String>,

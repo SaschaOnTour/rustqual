@@ -37,7 +37,6 @@ fn make_analysis_for(findings: AnalysisFindings) -> AnalysisResult {
     AnalysisResult {
         results: vec![],
         summary: Summary::default(),
-        orphan_suppressions: vec![],
         findings,
         data: AnalysisData::default(),
     }

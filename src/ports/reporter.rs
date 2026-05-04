@@ -19,8 +19,8 @@
 
 use crate::domain::analysis_data::{FunctionRecord, ModuleCouplingRecord};
 use crate::domain::findings::{
-    ArchitectureFinding, ComplexityFinding, CouplingFinding, DryFinding, IospFinding, SrpFinding,
-    TqFinding,
+    ArchitectureFinding, ComplexityFinding, CouplingFinding, DryFinding, IospFinding,
+    OrphanSuppression, SrpFinding, TqFinding,
 };
 
 mod sealed {
@@ -86,6 +86,7 @@ pub trait ReporterImpl: Sized + sealed::Sealed + Send + Sync {
     type CouplingView;
     type TestQualityView;
     type ArchitectureView;
+    type OrphanView;
     type IospDataView;
     type ComplexityDataView;
     type CouplingDataView;
@@ -97,6 +98,7 @@ pub trait ReporterImpl: Sized + sealed::Sealed + Send + Sync {
     fn build_coupling(&self, findings: &[CouplingFinding]) -> Self::CouplingView;
     fn build_test_quality(&self, findings: &[TqFinding]) -> Self::TestQualityView;
     fn build_architecture(&self, findings: &[ArchitectureFinding]) -> Self::ArchitectureView;
+    fn build_orphans(&self, suppressions: &[OrphanSuppression]) -> Self::OrphanView;
     fn build_iosp_data(&self, fns: &[FunctionRecord]) -> Self::IospDataView;
     fn build_complexity_data(&self, fns: &[FunctionRecord]) -> Self::ComplexityDataView;
     fn build_coupling_data(&self, mods: &[ModuleCouplingRecord]) -> Self::CouplingDataView;
@@ -124,6 +126,7 @@ pub struct Snapshot<R: ReporterImpl> {
     pub(crate) coupling: R::CouplingView,
     pub(crate) test_quality: R::TestQualityView,
     pub(crate) architecture: R::ArchitectureView,
+    pub(crate) orphans: R::OrphanView,
     pub(crate) iosp_data: R::IospDataView,
     pub(crate) complexity_data: R::ComplexityDataView,
     pub(crate) coupling_data: R::CouplingDataView,
@@ -151,6 +154,7 @@ impl<T: ReporterImpl> Reporter for T {
             coupling: self.build_coupling(&findings.coupling),
             test_quality: self.build_test_quality(&findings.test_quality),
             architecture: self.build_architecture(&findings.architecture),
+            orphans: self.build_orphans(&findings.orphan_suppressions),
             iosp_data: self.build_iosp_data(&data.functions),
             complexity_data: self.build_complexity_data(&data.functions),
             coupling_data: self.build_coupling_data(&data.modules),

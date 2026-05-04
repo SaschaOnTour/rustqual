@@ -63,9 +63,10 @@ pub(super) fn build_tq(findings: &[TqFinding]) -> Vec<JsonTqWarning> {
         .collect()
 }
 
-pub(super) fn build_orphans(analysis: &AnalysisResult) -> Vec<JsonOrphanSuppression> {
-    analysis
-        .orphan_suppressions
+pub(super) fn build_orphans(
+    suppressions: &[crate::domain::findings::OrphanSuppression],
+) -> Vec<JsonOrphanSuppression> {
+    suppressions
         .iter()
         .map(|w| JsonOrphanSuppression {
             file: w.file.clone(),

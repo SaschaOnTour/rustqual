@@ -67,11 +67,16 @@ impl TouchpointWalk<'_> {
         };
         let mut state = WalkState::seeded(start, direct);
         while let Some((node, depth)) = state.queue.pop_front() {
-            if self.ctx.graph.layer_of(&node) == Some(self.ctx.target_layer) {
-                touchpoints.insert(node);
+            // Peer-adapter check FIRST — a trait anchor declared in a
+            // peer adapter layer (`crate::mcp::Handler::handle`) would
+            // otherwise be promoted to a target boundary by
+            // `is_target_boundary` and inherit peer-adapter coverage
+            // into this walk's set, masking adapter delegation drift.
+            if self.is_peer_adapter(&node) {
                 continue;
             }
-            if self.is_peer_adapter(&node) {
+            if self.is_target_boundary(&node) {
+                touchpoints.insert(node);
                 continue;
             }
             if depth < self.ctx.call_depth {
@@ -81,6 +86,26 @@ impl TouchpointWalk<'_> {
             }
         }
         touchpoints
+    }
+
+    /// True if `node` represents a target-layer capability the walk must
+    /// stop at and record as a touchpoint. Two cases:
+    ///
+    /// 1. Concrete target-layer node — `layer_of(node) == target_layer`.
+    /// 2. Synthetic trait-method anchor whose trait has at least one
+    ///    overriding impl in the target layer. The anchor itself lives
+    ///    in the trait's declaring layer (commonly `ports`), but it
+    ///    represents the contract reached via `dyn Trait.method()`
+    ///    dispatch — collapsing what would otherwise be N impl-edges
+    ///    into one canonical capability so Check C doesn't fire on a
+    ///    single boundary call.
+    fn is_target_boundary(&self, node: &str) -> bool {
+        if self.ctx.graph.layer_of(node) == Some(self.ctx.target_layer) {
+            return true;
+        }
+        self.ctx
+            .graph
+            .anchor_reaches_target(node, self.ctx.target_layer)
     }
 
     /// True if `node` lives in an adapter layer that is not the origin

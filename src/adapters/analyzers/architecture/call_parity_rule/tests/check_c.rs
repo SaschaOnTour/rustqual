@@ -59,6 +59,44 @@ fn check_c_single_touchpoint_silent() {
     );
 }
 
+// ── Single dispatch on dyn Trait stays silent ─────────────────
+
+#[test]
+fn check_c_silent_for_single_trait_dispatch_with_multiple_impls() {
+    // CLI handler issues exactly ONE call: `h.handle()` on `dyn Handler`.
+    // The trait has THREE overriding impls in the target layer. With
+    // dispatch fanout-to-impls semantics this would expose three
+    // touchpoints to Check C and fire a false-positive multi-touchpoint
+    // warning for what is semantically a single boundary call.
+    // Anchor semantics collapses the dispatch into one capability
+    // (`crate::application::handler::Handler::handle`) so Check C is
+    // silent. Regression guard for review pass 2026-05-04 P2 #3.
+    let ws = build_workspace(&[
+        (
+            "src/application/handler.rs",
+            r#"
+            pub trait Handler { fn handle(&self); }
+            pub struct A; impl Handler for A { fn handle(&self) {} }
+            pub struct B; impl Handler for B { fn handle(&self) {} }
+            pub struct C; impl Handler for C { fn handle(&self) {} }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::handler::Handler;
+            pub fn cmd_dispatch(h: &dyn Handler) { h.handle(); }
+            "#,
+        ),
+    ]);
+    let cp = make_config(SingleTouchpointMode::Warn);
+    let findings = run_check_c(&ws, &three_layer(), &cp, &empty_cfg_test());
+    assert!(
+        extract_c(&findings).is_empty(),
+        "single trait-dispatch call with multiple impls must collapse to one anchor (no Check C fire), got {findings:?}"
+    );
+}
+
 // ── Two touchpoints, default severity warn ────────────────────
 
 #[test]

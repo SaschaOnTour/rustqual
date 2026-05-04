@@ -5,6 +5,84 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - in development
+
+Patch release: **Reporter-Trait sealed two-trait + Snapshot pattern**,
+**Call-parity anchor model + Orphan-suppression in trait contract**.
+
+Late-cycle additions (post 2026-04-30 tag):
+
+### Added
+
+- **Trait-method anchor model for call-parity dispatch**: `dyn
+  Trait.method()` now emits a single synthetic
+  `<Trait>::<method>` anchor instead of one edge per overriding
+  workspace impl. The boundary walker recognises the anchor as a
+  target boundary when at least one overriding impl lives in the
+  target layer (`CallGraph::trait_method_anchors` populated by
+  `populate_anchor_index`). Concrete impl-method canonicals never
+  enter the touchpoint set via dispatch, so Check C doesn't fire on
+  what is semantically a single boundary call.
+- **Anchors as target capabilities for Check B/D**:
+  `CallGraph::target_anchor_capabilities(target)` enumerates
+  trait-method anchors with overriding impls in the target layer.
+  Check B iterates them alongside concrete `pub_fns_by_layer[target]`,
+  so dispatch-only adapter coverage is checked for parity and orphan
+  status; Check D counts handlers per anchor for multiplicity.
+  Anchor findings carry a heuristic file path
+  (`src/<file_module_segs>.rs`) derived from the canonical, line=0
+  until span info is carried through `WorkspaceTypeIndex.trait_methods`.
+- **Walker peer-adapter check before anchor promotion**:
+  `TouchpointWalk::run` now checks `is_peer_adapter` BEFORE
+  `is_target_boundary`. A trait anchor declared in a peer-adapter
+  layer (e.g. `mcp::Handler`) with overriding impls in the target
+  layer no longer leaks peer-adapter coverage into the origin
+  adapter's set.
+- **`OrphanSuppression` Finding type in `domain::findings`** with
+  `AnalysisFindings::orphan_suppressions` field. Cross-cutting
+  Finding (not tied to a single dimension) carrying
+  `// qual:allow(...)` markers that matched no finding in their
+  annotation window.
+- **`ReporterImpl::OrphanView` + `build_orphans` method** plus
+  `Snapshot::orphans` field. Per-reporter discretion: dot stays
+  `OrphanView = ()` (intentional no-op for the data-only graph
+  format), the seven diagnostic reporters (text, html, json, sarif,
+  github, ai, findings_list) declare meaningful view types and
+  consume `snapshot.orphans` exclusively. Future reporters MUST
+  implement `build_orphans` (compile-force) and consciously decide
+  what to do with orphans.
+
+### Fixed
+
+- **cfg-test impl-block leak in graph + pub-fn visitors**:
+  `file_fn_collector::visit_item_impl` and `pub_fns::visit_item_impl`
+  now skip `#[cfg(test)] impl X { … }` blocks entirely. Previously
+  the cfg attribute lived on the impl block while child methods had
+  no attrs of their own, so test-only methods leaked into the
+  production call graph and pub-fn surface.
+- **`record_trait_impl` filters cfg-test / `#[test]` overrides**:
+  `WorkspaceTypeIndex.trait_impl_overrides` no longer records
+  test-only methods, so production dispatch can't route to a phantom
+  `Type::method` for a test-only override.
+- **Strict self-type visibility in pub_fns**: trait-impl method
+  registration was relaxed in an interim fix to register
+  `<Hidden>::<method>` for `impl PubTrait for Hidden` even when
+  `Hidden` is private. With the anchor refactor that relaxation is
+  no longer needed and produced over-coverage; the strict visibility
+  gate is restored. The trait method's anchor carries the public
+  capability instead.
+
+### Removed
+
+- **`AnalysisResult.orphan_suppressions` field** — orphan rendering
+  flows exclusively through `findings.orphan_suppressions`
+  (consumed by `Snapshot::orphans` per reporter). The legacy
+  struct-field bypass and per-reporter `orphan_suppressions: &'a [_]`
+  fields are gone.
+- **`OrphanSuppressionWarning`** alias removed. The canonical type is
+  `domain::findings::OrphanSuppression`; the adapter-layer alias served
+  as a transition step and is no longer needed.
+
 ## [1.2.2] - 2026-04-30
 
 Patch release: **Reporter-Trait sealed two-trait + Snapshot pattern**.
@@ -53,16 +131,23 @@ observing 18 compile errors across all 9 reporter sites.
 
 ### Fixed
 
-- **Trait-dispatch conservative drop for non-overriding impls.**
+- **Trait-dispatch collapses to synthetic anchor.**
   `calls::trait_dispatch_edges` previously emitted `<impl>::<method>`
-  for every workspace impl of a dispatched trait method, including
-  impls that inherit the default body. The default body lives on the
-  trait, not the impl — so the emitted node had no graph entry,
-  no return type, no callees. Check A was falsely satisfied and
-  Check B/D were blind to default-body callees. Non-overriding impls
-  now produce no edge; calls fall through to "unresolved" in line
-  with rustqual's no-phantom-edges guarantee. Documented as
-  Limitation #5 in `book/adapter-parity.md`.
+  for every workspace impl of a dispatched trait method. A single
+  `h.handle()` on `dyn Handler` with N overriding impls produced N
+  edges, expanding into N touchpoints in the boundary walker, which
+  triggered Check C `multi_touchpoint` warnings for what is
+  semantically a single boundary call. Dispatch now emits ONE
+  synthetic anchor `<Trait>::<method>` representing the logical
+  capability. The touchpoint walker recognises the anchor as a
+  target boundary when at least one overriding impl lives in the
+  target layer (`CallGraph::trait_method_anchors`, populated by
+  `populate_anchor_index`). Side benefit: non-overriding impls
+  (which inherit the trait default body) are no longer a special
+  case — they share the same anchor as overriding impls. The
+  earlier Limitation #5 ("Calls on non-overriding impls left
+  unresolved") is replaced by a narrower one: only calls **inside**
+  the default-method body itself stay invisible to Check A/B/D.
 - **`record_trait_impl` filters cfg-test / `#[test]` overrides.**
   `WorkspaceTypeIndex.trait_impl_overrides` used to record every
   `ImplItem::Fn`, including test-only methods. Production dispatch
@@ -70,15 +155,17 @@ observing 18 compile errors across all 9 reporter sites.
   while the workspace call graph + `method_returns` index correctly
   skipped those items. The override set is now filtered with
   `has_cfg_test` + `has_test_attr`, mirroring `methods.rs`.
-- **PubFnCollector relaxes self-type visibility for visible-trait
-  impls.** `impl PubTrait for Hidden { fn handle() {} }` registers
-  `Hidden::handle` as a target pub-fn even when `Hidden` is private,
-  because trait-dispatch can emit `Hidden::handle` as a touchpoint
-  via an intra-crate factory producing `dyn PubTrait`. Without this,
-  Check B/D had a dispatch-emitted touchpoint with no corresponding
-  target pub-fn — silent coverage gap. Regression test
-  `test_collect_pub_fns_records_trait_impl_method_on_private_self_type`
-  added.
+- **PubFnCollector keeps strict self-type visibility.** Earlier
+  v1.2.2 relaxed visibility to register `<Hidden>::<method>` for
+  `impl PubTrait for Hidden` even when `Hidden` is private, so
+  dispatch-emitted impl-edges had matching pub-fn entries. With
+  the anchor refactor dispatch no longer emits per-impl edges, so
+  the relaxation is unnecessary and the visibility gate is
+  restored to its strict form: only impls on visible self-types
+  contribute concrete target pub-fns. Private impls are still
+  reachable through the anchor — the public capability they
+  fulfill — without polluting the per-handler-type pub-fn surface.
+  Regression test `test_collect_pub_fns_skips_trait_impl_method_on_private_self_type`.
 
 ### Documented limitations
 

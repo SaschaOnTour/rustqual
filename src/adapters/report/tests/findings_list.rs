@@ -17,7 +17,6 @@ fn empty_analysis() -> AnalysisResult {
     AnalysisResult {
         results: vec![],
         summary: Summary::default(),
-        orphan_suppressions: vec![],
         findings: crate::domain::AnalysisFindings::default(),
         data: crate::domain::AnalysisData::default(),
     }
@@ -209,10 +208,13 @@ fn test_collect_test_quality_uncovered() {
 }
 
 #[test]
-fn test_orphan_suppression_appended() {
-    use crate::adapters::report::OrphanSuppressionWarning;
+fn findings_list_includes_orphan_suppressions_via_snapshot_view() {
+    use crate::domain::findings::OrphanSuppression;
     let mut analysis = empty_analysis();
-    analysis.orphan_suppressions = vec![OrphanSuppressionWarning {
+    // Orphan suppressions now flow through `findings.orphan_suppressions`
+    // (the trait-driven path) — the legacy `analysis.orphan_suppressions`
+    // field is no longer the source for reporter rendering.
+    analysis.findings.orphan_suppressions = vec![OrphanSuppression {
         file: "src/foo.rs".into(),
         line: 42,
         dimensions: vec![crate::findings::Dimension::Srp],

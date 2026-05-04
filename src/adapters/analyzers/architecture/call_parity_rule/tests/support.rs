@@ -92,6 +92,28 @@ pub(super) fn cli_mcp_config(call_depth: usize) -> CompiledCallParity {
     }
 }
 
+/// Ports-style fixture: ports + application + cli + mcp.
+/// Used to exercise trait-dispatch where the trait declaration lives
+/// in `ports` and impls live in the target `application` layer —
+/// the canonical Hexagonal/Ports&Adapters shape.
+/// Operation: LayerDefinitions construction.
+pub(super) fn ports_app_cli_mcp() -> LayerDefinitions {
+    LayerDefinitions::new(
+        vec![
+            "ports".to_string(),
+            "application".to_string(),
+            "cli".to_string(),
+            "mcp".to_string(),
+        ],
+        vec![
+            ("ports".to_string(), globset(&["src/ports/**"])),
+            ("application".to_string(), globset(&["src/application/**"])),
+            ("cli".to_string(), globset(&["src/cli/**"])),
+            ("mcp".to_string(), globset(&["src/mcp/**"])),
+        ],
+    )
+}
+
 /// Four-layer test fixture: application + cli + mcp + rest.
 /// Operation: LayerDefinitions construction.
 pub(super) fn four_layer() -> LayerDefinitions {
@@ -121,6 +143,26 @@ pub(super) enum Check {
     B,
     C,
     D,
+}
+
+/// Build only the workspace call graph and return it for direct
+/// inspection (node membership, edge presence). Integration: thin
+/// wrapper over `build_call_graph` that consumes the same workspace
+/// shape as the higher-level helpers.
+pub(super) fn build_graph_only(
+    ws: &Workspace,
+    layers: &LayerDefinitions,
+    cfg_test: &HashSet<String>,
+    transparent_wrappers: &HashSet<String>,
+) -> crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::CallGraph {
+    let borrowed = borrowed_files(ws);
+    build_call_graph(
+        &borrowed,
+        &ws.aliases_per_file,
+        cfg_test,
+        layers,
+        transparent_wrappers,
+    )
 }
 
 /// Build the workspace's pub-fns map and call graph. Integration:
@@ -172,7 +214,7 @@ pub(super) fn run_check(
         Check::A => check_no_delegation(&pub_fns, &touchpoints, cp),
         Check::B => check_missing_adapter(&pub_fns, &graph, &touchpoints, cp),
         Check::C => check_multi_touchpoint(&pub_fns, &touchpoints, cp),
-        Check::D => check_multiplicity_mismatch(&pub_fns, &touchpoints, cp),
+        Check::D => check_multiplicity_mismatch(&pub_fns, &graph, &touchpoints, cp),
     }
 }
 

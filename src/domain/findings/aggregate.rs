@@ -12,10 +12,15 @@
 
 use super::{
     architecture::ArchitectureFinding, complexity::ComplexityFinding, coupling::CouplingFinding,
-    dry::DryFinding, iosp::IospFinding, srp::SrpFinding, tq::TqFinding,
+    dry::DryFinding, iosp::IospFinding, orphan::OrphanSuppression, srp::SrpFinding, tq::TqFinding,
 };
 
-/// All findings of an analysis run, grouped by dimension.
+/// All findings of an analysis run, grouped by dimension. The
+/// `orphan_suppressions` field is cross-cutting (not tied to a single
+/// dimension) — it carries `// qual:allow(...)` markers that didn't
+/// match any finding inside their annotation window. Reporters render
+/// it via `ReporterImpl::build_orphans` so a future reporter can't
+/// silently omit it.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct AnalysisFindings {
     pub iosp: Vec<IospFinding>,
@@ -25,4 +30,5 @@ pub struct AnalysisFindings {
     pub coupling: Vec<CouplingFinding>,
     pub test_quality: Vec<TqFinding>,
     pub architecture: Vec<ArchitectureFinding>,
+    pub orphan_suppressions: Vec<OrphanSuppression>,
 }

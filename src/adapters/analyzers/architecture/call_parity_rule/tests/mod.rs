@@ -1,4 +1,5 @@
 mod calls;
+mod cfg_test_impl;
 mod check_a;
 mod check_b;
 mod check_c;
@@ -7,4 +8,5 @@ mod pub_fns;
 mod regressions;
 mod rlm_snapshot;
 mod support;
+mod target_anchors;
 mod touchpoints;

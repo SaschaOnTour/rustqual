@@ -27,8 +27,10 @@ mod bindings;
 pub mod calls;
 pub mod check_a;
 pub mod check_b;
+mod check_b_coverage;
 pub mod check_c;
 pub mod check_d;
+mod file_fn_collector;
 mod file_visibility;
 pub(crate) mod local_symbols;
 pub mod pub_fns;
@@ -108,7 +110,7 @@ pub fn collect_findings(
     for hit in check_c::check_multi_touchpoint(&pub_fns, &touchpoints, cp) {
         out.push(project_call_parity(hit, cp));
     }
-    for hit in check_d::check_multiplicity_mismatch(&pub_fns, &touchpoints, cp) {
+    for hit in check_d::check_multiplicity_mismatch(&pub_fns, &graph, &touchpoints, cp) {
         out.push(project_call_parity(hit, cp));
     }
     out

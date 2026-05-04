@@ -21,13 +21,13 @@ use views::{
 
 use crate::domain::analysis_data::{FunctionRecord, ModuleCouplingRecord};
 use crate::domain::findings::{
-    ArchitectureFinding, ComplexityFinding, CouplingFinding, DryFinding, IospFinding, SrpFinding,
-    TqFinding,
+    ArchitectureFinding, ComplexityFinding, CouplingFinding, DryFinding, IospFinding,
+    OrphanSuppression, SrpFinding, TqFinding,
 };
 use crate::domain::AnalysisData;
 use crate::ports::reporter::{ReporterImpl, Snapshot};
 use crate::ports::Reporter;
-use crate::report::{AnalysisResult, OrphanSuppressionWarning};
+use crate::report::AnalysisResult;
 
 /// One row of the unified findings list — the public Output type.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,10 +59,10 @@ impl FindingEntry {
 
 /// Findings-list reporter. Function-name lookup is via the per-file:line
 /// match against `AnalysisData.functions`. Orphan-suppression entries
-/// are passed in pre-built so `publish` only needs to merge them.
+/// flow through the trait via `build_orphans` → `Snapshot::orphans` →
+/// `publish` — no struct-field bypass.
 pub struct FindingsListReporter<'a> {
     pub(crate) data: &'a AnalysisData,
-    pub(crate) orphan_entries: &'a [FindingEntry],
 }
 
 impl<'a> FindingsListReporter<'a> {
@@ -86,6 +86,7 @@ impl<'a> ReporterImpl for FindingsListReporter<'a> {
     type CouplingView = Vec<ListCouplingRow>;
     type TestQualityView = Vec<ListTqRow>;
     type ArchitectureView = Vec<ListArchRow>;
+    type OrphanView = Vec<FindingEntry>;
     type IospDataView = ();
     type ComplexityDataView = ();
     type CouplingDataView = ();
@@ -179,6 +180,9 @@ impl<'a> ReporterImpl for FindingsListReporter<'a> {
             .collect()
     }
 
+    fn build_orphans(&self, suppressions: &[OrphanSuppression]) -> Vec<FindingEntry> {
+        suppressions.iter().map(orphan_to_finding_entry).collect()
+    }
     fn build_iosp_data(&self, _: &[FunctionRecord]) {}
     fn build_complexity_data(&self, _: &[FunctionRecord]) {}
     fn build_coupling_data(&self, _: &[ModuleCouplingRecord]) {}
@@ -192,6 +196,7 @@ impl<'a> ReporterImpl for FindingsListReporter<'a> {
             coupling,
             test_quality,
             architecture,
+            orphans,
             iosp_data: (),
             complexity_data: (),
             coupling_data: (),
@@ -203,7 +208,7 @@ impl<'a> ReporterImpl for FindingsListReporter<'a> {
             + coupling.len()
             + test_quality.len()
             + architecture.len()
-            + self.orphan_entries.len();
+            + orphans.len();
         let mut entries: Vec<FindingEntry> = Vec::with_capacity(cap);
         entries.extend(iosp.into_iter().map(format_iosp));
         entries.extend(complexity.into_iter().map(format_complexity));
@@ -212,40 +217,37 @@ impl<'a> ReporterImpl for FindingsListReporter<'a> {
         entries.extend(coupling.into_iter().map(format_coupling));
         entries.extend(test_quality.into_iter().map(format_tq));
         entries.extend(architecture.into_iter().map(format_architecture));
-        entries.extend(self.orphan_entries.iter().cloned());
+        entries.extend(orphans);
         entries.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
         entries
     }
 }
 
 /// Collect all findings as a flat Vec<FindingEntry>, sorted by file
-/// then line. Orphan-suppression warnings are appended.
+/// then line. Orphan-suppression warnings flow through the trait via
+/// `Snapshot::orphans` (populated from `AnalysisFindings.orphan_suppressions`).
 pub fn collect_all_findings(analysis: &AnalysisResult) -> Vec<FindingEntry> {
-    let orphan_entries = orphan_suppression_entries(&analysis.orphan_suppressions);
     let reporter = FindingsListReporter {
         data: &analysis.data,
-        orphan_entries: &orphan_entries,
     };
     reporter.render(&analysis.findings, &analysis.data)
 }
 
-fn orphan_suppression_entries(orphans: &[OrphanSuppressionWarning]) -> Vec<FindingEntry> {
-    orphans
-        .iter()
-        .map(|w| {
-            let dims: Vec<String> = w.dimensions.iter().map(|d| d.to_string()).collect();
-            let scope = if dims.is_empty() {
-                "<all>".to_string()
-            } else {
-                dims.join(",")
-            };
-            let detail = match &w.reason {
-                Some(r) => format!("stale qual:allow({scope}) — {r}"),
-                None => format!("stale qual:allow({scope})"),
-            };
-            FindingEntry::new(&w.file, w.line, "ORPHAN_SUPPRESSION", detail, String::new())
-        })
-        .collect()
+/// Convert one `OrphanSuppression` finding into a `FindingEntry`.
+/// Per-reporter view discretion: each reporter that renders orphans
+/// owns its conversion. Operation: pure data shaping, no own calls.
+pub(crate) fn orphan_to_finding_entry(w: &OrphanSuppression) -> FindingEntry {
+    let dims: Vec<String> = w.dimensions.iter().map(|d| d.to_string()).collect();
+    let scope = if dims.is_empty() {
+        "<all>".to_string()
+    } else {
+        dims.join(",")
+    };
+    let detail = match &w.reason {
+        Some(r) => format!("stale qual:allow({scope}) — {r}"),
+        None => format!("stale qual:allow({scope})"),
+    };
+    FindingEntry::new(&w.file, w.line, "ORPHAN_SUPPRESSION", detail, String::new())
 }
 
 /// Print findings in one-line-per-finding format with heading.

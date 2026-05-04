@@ -32,12 +32,15 @@
 //! - `// qual:allow(architecture)` above the target fn — handled by the
 //!   architecture-dimension suppression pipeline.
 
+use super::check_b_coverage::{
+    build_adapter_coverage, build_adapter_reachable_targets, AdapterCoverage,
+};
 use super::pub_fns::PubFnInfo;
-use super::workspace_graph::{canonical_name_for_pub_fn, CallGraph};
+use super::workspace_graph::{anchor_canonical_to_file_path, canonical_name_for_pub_fn, CallGraph};
 use super::HandlerTouchpoints;
 use crate::adapters::analyzers::architecture::compiled::CompiledCallParity;
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
 // qual:api
 /// Emit one `CallParityMissingAdapter` finding per target pub-fn whose
@@ -66,36 +69,70 @@ pub(crate) fn check_missing_adapter<'ast>(
             out.push(hit);
         }
     }
+    for anchor in graph.target_anchor_capabilities(&cp.target) {
+        if let Some(hit) = inspect_anchor(anchor, &ctx) {
+            out.push(hit);
+        }
+    }
     out
 }
 
-/// Per-adapter aggregated touchpoint set: union of every adapter
-/// pub-fn's individual touchpoint set, keyed by adapter layer name.
-type AdapterCoverage = HashMap<String, HashSet<String>>;
-
-/// Build the per-adapter coverage view by unioning the cached
-/// touchpoint sets across each adapter's handlers. Deprecated
-/// handlers are already filtered out of `touchpoints`.
-/// Operation: nested fold over the cache.
-fn build_adapter_coverage(
-    pub_fns_by_layer: &HashMap<String, Vec<PubFnInfo<'_>>>,
-    touchpoints: &HandlerTouchpoints,
-    cp: &CompiledCallParity,
-) -> AdapterCoverage {
-    let mut coverage: AdapterCoverage = HashMap::new();
-    for adapter in &cp.adapters {
-        let mut union: HashSet<String> = HashSet::new();
-        if let Some(handlers) = pub_fns_by_layer.get(adapter) {
-            for info in handlers {
-                let canonical = canonical_name_for_pub_fn(info);
-                if let Some(tps) = touchpoints.get(&canonical) {
-                    union.extend(tps.iter().cloned());
-                }
-            }
-        }
-        coverage.insert(adapter.clone(), union);
+/// Same coverage check as `inspect_target`, but for synthetic
+/// trait-method anchors. The anchor canonical is the capability —
+/// `dyn Trait.method()` dispatch is what the boundary walker registers
+/// as the touchpoint, so anchor coverage is decided purely by anchor
+/// presence in the per-adapter coverage set. Direct calls to concrete
+/// impl-methods (`LoggingHandler::handle()` straight on a struct
+/// receiver) emit a different concrete edge and are inspected by
+/// `inspect_target` against the concrete `pub_fns_by_layer[target]`
+/// entry — they are NOT folded into anchor coverage here. This means
+/// a workspace where `cli` dispatches via `dyn Trait` and `mcp` calls
+/// the concrete impl directly produces two findings (one anchor
+/// mismatch + one concrete-fn mismatch) for the same logical drift.
+/// Cross-form synonym handling is intentionally left out — it would
+/// require a graph-level synonym index and design discussion before
+/// implementation. Operation: probe coverage on the anchor canonical.
+fn inspect_anchor(anchor: &str, ctx: &TargetCtx<'_>) -> Option<MatchLocation> {
+    if is_excluded(anchor, ctx.cp) {
+        return None;
     }
-    coverage
+    let reached = adapters_reaching(anchor, ctx.coverage, &ctx.cp.adapters);
+    let missing = adapters_missing(&reached, &ctx.cp.adapters);
+    if missing.is_empty() {
+        return None;
+    }
+    if reached.is_empty() && ctx.reachable.contains(anchor) {
+        return None;
+    }
+    Some(build_anchor_finding(
+        anchor.to_string(),
+        reached,
+        missing,
+        &ctx.cp.target,
+    ))
+}
+
+/// Construct a `CallParityMissingAdapter` MatchLocation for an anchor.
+/// File/line are derived from the anchor's canonical (trait declaration
+/// path) — column is 0. Operation: data construction.
+fn build_anchor_finding(
+    canonical: String,
+    mut reached: Vec<String>,
+    missing: Vec<String>,
+    target_layer: &str,
+) -> MatchLocation {
+    reached.sort();
+    MatchLocation {
+        file: anchor_canonical_to_file_path(&canonical),
+        line: 0,
+        column: 0,
+        kind: ViolationKind::CallParityMissingAdapter {
+            target_fn: canonical,
+            target_layer: target_layer.to_string(),
+            reached_adapters: reached,
+            missing_adapters: missing,
+        },
+    }
 }
 
 /// Read-only context bundle threaded into `inspect_target`. Operation:
@@ -161,41 +198,6 @@ fn adapters_missing(reached: &[String], adapters: &[String]) -> Vec<String> {
         .filter(|a| !reached.iter().any(|r| r == a.as_str()))
         .cloned()
         .collect()
-}
-
-/// Set of target-layer canonicals transitively reachable from at least
-/// one adapter touchpoint, traversing only target-layer edges.
-///
-/// Used to distinguish post-boundary helpers (wired into adapter
-/// coverage via target-internal callers — silent) from genuine
-/// orphans and dead target-layer islands (flagged). Multi-source
-/// forward BFS seeded from the touchpoint union.
-/// Operation: BFS over `graph.forward`, gated by target layer.
-fn build_adapter_reachable_targets(
-    coverage: &AdapterCoverage,
-    graph: &CallGraph,
-    target_layer: &str,
-) -> HashSet<String> {
-    let mut reachable: HashSet<String> = HashSet::new();
-    let mut queue: VecDeque<String> = VecDeque::new();
-    for tps in coverage.values() {
-        for tp in tps {
-            if reachable.insert(tp.clone()) {
-                queue.push_back(tp.clone());
-            }
-        }
-    }
-    while let Some(node) = queue.pop_front() {
-        let Some(callees) = graph.forward.get(&node) else {
-            continue;
-        };
-        for callee in callees {
-            if graph.layer_of(callee) == Some(target_layer) && reachable.insert(callee.clone()) {
-                queue.push_back(callee.clone());
-            }
-        }
-    }
-    reachable
 }
 
 /// Construct a `CallParityMissingAdapter` MatchLocation. Operation:

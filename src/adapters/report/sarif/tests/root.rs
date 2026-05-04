@@ -36,7 +36,6 @@ fn make_analysis(results: Vec<FunctionAnalysis>) -> AnalysisResult {
     AnalysisResult {
         results,
         summary,
-        orphan_suppressions: vec![],
         findings: crate::domain::AnalysisFindings::default(),
         data: crate::domain::AnalysisData::default(),
     }
@@ -170,10 +169,12 @@ fn test_print_sarif_multiple_violations() {
 // ── Orphan-suppression SARIF coverage ─────────────────────────
 
 #[test]
-fn sarif_emits_orphan_suppression_finding() {
-    use crate::adapters::report::OrphanSuppressionWarning;
+fn sarif_reporter_emits_orphan_results_via_snapshot_view() {
+    use crate::domain::findings::OrphanSuppression;
     let mut analysis = make_analysis(vec![]);
-    analysis.orphan_suppressions = vec![OrphanSuppressionWarning {
+    // Trait-driven path — populate `findings.orphan_suppressions`
+    // (NOT the legacy `analysis.orphan_suppressions` field).
+    analysis.findings.orphan_suppressions = vec![OrphanSuppression {
         file: "src/foo.rs".into(),
         line: 42,
         dimensions: vec![crate::findings::Dimension::Srp],

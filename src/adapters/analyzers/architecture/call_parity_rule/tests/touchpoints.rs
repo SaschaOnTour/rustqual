@@ -7,7 +7,8 @@
 //! `run_check_a/b` style used elsewhere.
 
 use super::support::{
-    build_workspace, cli_mcp_config, compute_touchpoints_for, empty_cfg_test, three_layer,
+    build_workspace, cli_mcp_config, compute_touchpoints_for, empty_cfg_test, ports_app_cli_mcp,
+    three_layer,
 };
 use std::collections::HashSet;
 
@@ -279,6 +280,133 @@ fn touchpoints_call_depth_just_inside() {
         &empty_cfg_test(),
     );
     assert_set(touchpoints, &["crate::application::session::search"]);
+}
+
+// ── Trait-dispatch anchor ────────────────────────────────────────
+
+#[test]
+fn touchpoints_trait_dispatch_collapses_to_anchor() {
+    // CLI handler calls `dyn Handler.handle()` where Handler has THREE
+    // overriding impls in the application layer. Touchpoint set must be
+    // ONE anchor `<Trait>::<method>`, not three impl edges. Otherwise
+    // Check C fires multi-touchpoint for what is semantically a single
+    // boundary call.
+    let ws = build_workspace(&[
+        (
+            "src/application/handler.rs",
+            r#"
+            pub trait Handler { fn handle(&self); }
+            pub struct LoggingHandler;
+            impl Handler for LoggingHandler { fn handle(&self) {} }
+            pub struct MetricsHandler;
+            impl Handler for MetricsHandler { fn handle(&self) {} }
+            pub struct AuditHandler;
+            impl Handler for AuditHandler { fn handle(&self) {} }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::handler::Handler;
+            pub fn cmd_dispatch(h: &dyn Handler) { h.handle(); }
+            "#,
+        ),
+    ]);
+    let touchpoints = compute_touchpoints_for(
+        &ws,
+        &three_layer(),
+        &cli_mcp_config(3),
+        "cmd_dispatch",
+        &empty_cfg_test(),
+    );
+    assert_set(
+        touchpoints,
+        &["crate::application::handler::Handler::handle"],
+    );
+}
+
+#[test]
+fn touchpoints_trait_anchor_recognized_when_trait_lives_in_ports_layer() {
+    // Hexagonal/Ports&Adapters case: trait declared in `ports` layer,
+    // impls in `application` (target) layer. Dispatch emits anchor
+    // `crate::ports::Handler::handle` (anchor lives in ports). Walker
+    // must still register the anchor as a target boundary because
+    // its impls reach the target layer — otherwise Check A would
+    // falsely fire "no delegation" for a CLI command that legitimately
+    // crosses into the target via trait dispatch.
+    let ws = build_workspace(&[
+        (
+            "src/ports/handler.rs",
+            "pub trait Handler { fn handle(&self); }",
+        ),
+        (
+            "src/application/logging.rs",
+            r#"
+            use crate::ports::handler::Handler;
+            pub struct LoggingHandler;
+            impl Handler for LoggingHandler { fn handle(&self) {} }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::ports::handler::Handler;
+            pub fn cmd_dispatch(h: &dyn Handler) { h.handle(); }
+            "#,
+        ),
+    ]);
+    let mut config = cli_mcp_config(3);
+    config.target = "application".to_string();
+    let touchpoints = compute_touchpoints_for(
+        &ws,
+        &ports_app_cli_mcp(),
+        &config,
+        "cmd_dispatch",
+        &empty_cfg_test(),
+    );
+    assert_set(touchpoints, &["crate::ports::handler::Handler::handle"]);
+}
+
+#[test]
+fn touchpoints_skip_anchor_declared_in_peer_adapter_layer() {
+    // Trait declared in peer-adapter layer (`mcp`), with an overriding
+    // impl in the target layer (`application`). CLI handler calls
+    // `dyn mcp::Handler.handle()`. The anchor lives in `mcp` (peer
+    // adapter), so the walker MUST refuse to register it as a target
+    // boundary — otherwise CLI inherits MCP's reachability into
+    // application via the anchor and fakes adapter delegation.
+    // Regression for the v1.2.2 regression that anchor promotion
+    // bypassed the existing peer-adapter filter (review pass
+    // 2026-05-04 P2 #2).
+    let ws = build_workspace(&[
+        (
+            "src/mcp/handler.rs",
+            "pub trait Handler { fn handle(&self); }",
+        ),
+        (
+            "src/application/logging.rs",
+            r#"
+            use crate::mcp::handler::Handler;
+            pub struct LoggingHandler;
+            impl Handler for LoggingHandler { fn handle(&self) {} }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::mcp::handler::Handler;
+            pub fn cmd_via_dyn_peer(h: &dyn Handler) { h.handle(); }
+            "#,
+        ),
+    ]);
+    let touchpoints = compute_touchpoints_for(
+        &ws,
+        &three_layer(),
+        &cli_mcp_config(3),
+        "cmd_via_dyn_peer",
+        &empty_cfg_test(),
+    );
+    assert_set(touchpoints, &[]);
 }
 
 // ── Peer-adapter blocking ────────────────────────────────────────
