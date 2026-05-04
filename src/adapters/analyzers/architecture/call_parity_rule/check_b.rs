@@ -54,11 +54,17 @@ pub(crate) fn check_missing_adapter<'ast>(
     touchpoints: &HandlerTouchpoints,
     cp: &CompiledCallParity,
 ) -> Vec<MatchLocation> {
-    let Some(targets) = pub_fns_by_layer.get(&cp.target) else {
-        return Vec::new();
-    };
+    // Empty slice fallback when the target layer has no concrete
+    // `PubFnInfo` entries (anchor-only target surfaces: target-layer
+    // trait with default body but no other pub fns; or ports trait
+    // impl'd only by a private application type). Without this, the
+    // loop is silently skipped AND `target_anchor_capabilities` is
+    // never enumerated — masking missing-adapter findings on the
+    // anchor-only surface.
+    let empty_targets: Vec<PubFnInfo<'ast>> = Vec::new();
+    let targets = pub_fns_by_layer.get(&cp.target).unwrap_or(&empty_targets);
     let coverage = build_adapter_coverage(pub_fns_by_layer, touchpoints, cp);
-    let reachable = build_adapter_reachable_targets(&coverage, graph, &cp.target);
+    let reachable = build_adapter_reachable_targets(&coverage, graph, &cp.target, &cp.adapters);
     let ctx = TargetCtx {
         cp,
         coverage: &coverage,
@@ -66,14 +72,25 @@ pub(crate) fn check_missing_adapter<'ast>(
     };
     let mut out = Vec::new();
     for info in targets {
-        // Concrete impl-methods of a trait whose anchor is enumerated
-        // as target capability are skipped: the anchor takes
-        // capability responsibility, otherwise an adapter that only
-        // dispatches via `dyn Trait.method()` would silently produce
-        // a false orphan finding for every concrete impl-method that
-        // never appears in the touchpoint set.
+        // Concrete impl-methods of an anchor-backed trait are skipped
+        // ONLY when no adapter has the concrete in its coverage — i.e.
+        // every adapter reaches the capability via `dyn Trait.method()`
+        // dispatch. In that case the anchor pass handles the capability
+        // and skipping the concrete avoids a false orphan finding.
+        //
+        // When at least one adapter calls the concrete directly
+        // (`LoggingHandler::handle()` on a struct receiver), the
+        // concrete touchpoint exists in coverage and the concrete pass
+        // must run — otherwise mixed-form drift (cli direct vs mcp
+        // dispatch) silently disappears, leaving only a false-positive
+        // anchor-orphan finding for the adapter that uses the concrete
+        // form. Cross-form synonym handling is intentionally left out;
+        // mixed-form drift produces both a concrete and an anchor
+        // finding, which the inline doc on `inspect_anchor` documents.
         let canonical = canonical_name_for_pub_fn(info);
-        if graph.is_anchor_backed_concrete(&canonical, &cp.target, &cp.adapters) {
+        if graph.is_anchor_backed_concrete(&canonical, &cp.target, &cp.adapters)
+            && !any_adapter_reaches_concrete(&canonical, &coverage)
+        {
             continue;
         }
         if let Some(hit) = inspect_target(info, &ctx) {
@@ -169,6 +186,15 @@ fn inspect_target(info: &PubFnInfo<'_>, ctx: &TargetCtx<'_>) -> Option<MatchLoca
         missing,
         &ctx.cp.target,
     ))
+}
+
+/// True iff at least one adapter has `concrete` in its boundary
+/// coverage set — i.e. some adapter calls the concrete impl-method
+/// directly (not via `dyn Trait` dispatch). Used to gate the
+/// anchor-backed-concrete skip so the concrete pass still runs in
+/// mixed-form scenarios. Operation: per-adapter probe.
+fn any_adapter_reaches_concrete(concrete: &str, coverage: &AdapterCoverage) -> bool {
+    coverage.values().any(|set| set.contains(concrete))
 }
 
 /// True iff the canonical target matches an `exclude_targets` glob.

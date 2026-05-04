@@ -828,6 +828,72 @@ fn check_b_silent_for_concrete_impl_when_only_anchor_reached() {
 }
 
 #[test]
+fn check_b_does_not_skip_concrete_when_an_adapter_calls_it_directly() {
+    // Codex P1 #2 (2026-05-04 review): when one adapter reaches the
+    // capability via direct concrete call (`LoggingHandler::handle()`)
+    // and another via `dyn Trait` dispatch (anchor), the unconditional
+    // `is_anchor_backed_concrete` skip removes the concrete from
+    // Check B's iteration entirely. The anchor pass then reports the
+    // adapter that called the concrete directly as missing — a false
+    // orphan, because that adapter DOES reach the capability, just via
+    // the concrete form.
+    //
+    // Conservative fix: only skip the concrete when NO adapter has it
+    // in coverage (all adapters reach via dispatch). When at least one
+    // adapter calls the concrete directly, the concrete pass must run
+    // — at minimum, the concrete drift becomes visible (the inline
+    // documentation acknowledges the resulting double-finding for
+    // mixed-form drift; cross-form synonym handling stays out of scope).
+    let ws = build_workspace(&[
+        (
+            "src/ports/handler.rs",
+            "pub trait Handler { fn handle(&self); }",
+        ),
+        (
+            "src/application/logging.rs",
+            r#"
+            use crate::ports::handler::Handler;
+            pub struct LoggingHandler;
+            impl Handler for LoggingHandler { fn handle(&self) {} }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            // Direct concrete call (UFCS) — emits the concrete canonical
+            // unambiguously, regardless of receiver type inference.
+            r#"
+            use crate::application::logging::LoggingHandler;
+            pub fn cmd_log() {
+                LoggingHandler::handle(&LoggingHandler);
+            }
+            "#,
+        ),
+        (
+            "src/mcp/handlers.rs",
+            // dyn-Trait dispatch — touchpoint is the anchor.
+            r#"
+            use crate::ports::handler::Handler;
+            pub fn mcp_dispatch(h: &dyn Handler) { h.handle(); }
+            "#,
+        ),
+    ]);
+    let findings = run_check_b(&ws, &ports_app_cli_mcp(), &ports_cp(), &empty_cfg_test());
+    let pairs = missing_pairs(&findings);
+    let concrete = "crate::application::logging::LoggingHandler::handle";
+    let concrete_finding = pairs.iter().find(|(t, _)| t == concrete);
+    assert!(
+        concrete_finding.is_some(),
+        "concrete impl-method must NOT be silently skipped when at least one adapter (cli) calls it directly — drift between cli (direct) and mcp (dispatch) must surface; got {pairs:?}"
+    );
+    if let Some((_, missing)) = concrete_finding {
+        assert!(
+            missing.iter().any(|a| a == "mcp"),
+            "concrete pass must report mcp as missing (it reaches via dispatch, not direct concrete); got {missing:?}"
+        );
+    }
+}
+
+#[test]
 fn check_b_flags_anchor_orphan_when_no_adapter_reaches_it() {
     // Trait `Orphan` in ports with overriding impl in application.
     // No adapter dispatches through it. The anchor is a target
@@ -905,5 +971,137 @@ fn anchor_finding_carries_trait_method_source_line() {
         hit.line >= 1,
         "anchor finding line must be 1-based (>=1), got {}",
         hit.line
+    );
+}
+
+#[test]
+fn check_b_anchor_only_target_surface_still_inspected() {
+    // Target layer has NO concrete pub fns — only a default-body trait
+    // declared there. The trait method is a target capability via the
+    // unified rule. Even though in practice `pub_fns_by_layer["application"]`
+    // is created (empty vec) by the collector's `or_default()`, the
+    // target-anchor branch must still fire a missing-adapter finding.
+    // Sister test below directly exercises the `None` branch via a
+    // hand-stripped pub_fns_by_layer.
+    let ws = build_workspace(&[
+        (
+            "src/application/cap.rs",
+            "pub trait Cap { fn run(&self) {} }",
+        ),
+        ("src/cli/handlers.rs", "pub fn cmd_other() {}"),
+        ("src/mcp/handlers.rs", "pub fn mcp_other() {}"),
+    ]);
+    let findings = run_check_b(&ws, &ports_app_cli_mcp(), &ports_cp(), &empty_cfg_test());
+    let pairs = missing_pairs(&findings);
+    let anchor = "crate::application::cap::Cap::run";
+    assert!(
+        pairs.iter().any(|(target, _)| target == anchor),
+        "anchor in anchor-only target layer must still fire missing-adapter, got {pairs:?}"
+    );
+}
+
+#[test]
+fn check_b_anchor_reached_transitively_via_target_chain_no_finding() {
+    // Codex P2 (2026-05-04 review): the post-boundary reachable BFS
+    // only follows callees whose canonical resolves directly to the
+    // target layer. A ports-declared trait anchor backed by a target
+    // impl has `layer_of(anchor) == "ports"`, so the BFS skips it —
+    // even though the anchor IS target capability via the unified rule.
+    // Result: an anchor wired up transitively by an adapter (adapter →
+    // target fn → `dyn Trait.method()`) gets reported as an orphan
+    // because `reachable` doesn't contain it.
+    //
+    // Setup: cli pub-fn reaches `dispatch` (target fn) which dispatches
+    // through `dyn Handler`. mcp doesn't reach the anchor at all.
+    // Expected: anchor MUST NOT appear in findings (post-boundary
+    // plumbing wired up via at least one adapter is silent per
+    // v1.2.1+ semantic).
+    let ws = build_workspace(&[
+        (
+            "src/ports/handler.rs",
+            "pub trait Handler { fn handle(&self); }",
+        ),
+        (
+            "src/application/wires.rs",
+            r#"
+            use crate::ports::handler::Handler;
+            pub struct LoggingHandler;
+            impl Handler for LoggingHandler { fn handle(&self) {} }
+            pub fn dispatch(h: &dyn Handler) { h.handle(); }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::wires::{dispatch, LoggingHandler};
+            pub fn cmd_run() { dispatch(&LoggingHandler); }
+            "#,
+        ),
+        ("src/mcp/handlers.rs", "pub fn cmd_other() {}"),
+    ]);
+    let findings = run_check_b(&ws, &ports_app_cli_mcp(), &ports_cp(), &empty_cfg_test());
+    let pairs = missing_pairs(&findings);
+    let anchor = "crate::ports::handler::Handler::handle";
+    assert!(
+        !pairs.iter().any(|(target, _)| target == anchor),
+        "anchor reachable transitively via an adapter-touched target fn must be silent (post-boundary plumbing rule), got {pairs:?}"
+    );
+}
+
+#[test]
+fn check_b_anchor_inspected_even_when_target_layer_absent_from_pub_fns_map() {
+    // Defensive guard for the `None` branch of `pub_fns_by_layer.get(target)`.
+    // Codex P1 (2026-05-04 review): even though `or_default()` in the
+    // pub-fn collector empirically creates an entry for every layer with
+    // ≥1 file, the target-anchor enumeration must NOT depend on that
+    // invariant. We strip the target entry from pub_fns_by_layer before
+    // calling `check_missing_adapter` to simulate any future refactor
+    // (or weird configuration) that could leave the target absent. The
+    // anchor capability must still be enumerated and the missing-adapter
+    // finding emitted.
+    use super::support::borrowed_files;
+    use crate::adapters::analyzers::architecture::call_parity_rule::build_handler_touchpoints;
+    use crate::adapters::analyzers::architecture::call_parity_rule::check_b::check_missing_adapter;
+    use crate::adapters::analyzers::architecture::call_parity_rule::pub_fns::collect_pub_fns_by_layer;
+    use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::build_call_graph;
+
+    let ws = build_workspace(&[
+        (
+            "src/application/cap.rs",
+            "pub trait Cap { fn run(&self) {} }",
+        ),
+        ("src/cli/handlers.rs", "pub fn cmd_other() {}"),
+        ("src/mcp/handlers.rs", "pub fn mcp_other() {}"),
+    ]);
+    let layers = ports_app_cli_mcp();
+    let cp = ports_cp();
+    let cfg_test = empty_cfg_test();
+    let borrowed = borrowed_files(&ws);
+    let mut pub_fns = collect_pub_fns_by_layer(
+        &borrowed,
+        &ws.aliases_per_file,
+        &layers,
+        &cfg_test,
+        &cp.transparent_wrappers,
+    );
+    let graph = build_call_graph(
+        &borrowed,
+        &ws.aliases_per_file,
+        &cfg_test,
+        &layers,
+        &cp.transparent_wrappers,
+    );
+    let touchpoints = build_handler_touchpoints(&pub_fns, &graph, &cp);
+    pub_fns.remove("application");
+    assert!(
+        !pub_fns.contains_key("application"),
+        "test precondition: target layer key must be absent before invoking check_missing_adapter"
+    );
+    let findings = check_missing_adapter(&pub_fns, &graph, &touchpoints, &cp);
+    let pairs = missing_pairs(&findings);
+    let anchor = "crate::application::cap::Cap::run";
+    assert!(
+        pairs.iter().any(|(target, _)| target == anchor),
+        "with target layer absent from pub_fns_by_layer, anchor enumeration must still run; got {pairs:?}"
     );
 }

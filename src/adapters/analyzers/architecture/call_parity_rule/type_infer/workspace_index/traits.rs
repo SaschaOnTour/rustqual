@@ -96,6 +96,9 @@ fn record_trait_methods(
         let syn::TraitItem::Fn(f) = item else {
             continue;
         };
+        if has_cfg_test(&f.attrs) || has_test_attr(&f.attrs) {
+            continue;
+        }
         let method = f.sig.ident.to_string();
         record_trait_method_details(index, ctx, &canonical, &method, f);
         methods.insert(method);

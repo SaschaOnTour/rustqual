@@ -99,11 +99,15 @@ impl CallGraph {
 
     /// True iff `canonical` is the impl-method canonical of a trait
     /// whose anchor is enumerated as target capability under the same
-    /// rules. Used by Check B/D to skip concrete trait-impl-method
-    /// pub-fns that the anchor already covers — without this, an
-    /// adapter that dispatches via `dyn Trait.method()` and reaches
-    /// only the anchor would produce a false orphan finding for every
-    /// concrete impl-method.
+    /// rules. Used by Check B/D as the FIRST gate of a two-part skip
+    /// condition: the concrete is dropped only when this returns `true`
+    /// AND no adapter has the concrete in its boundary coverage. The
+    /// second part — "no adapter calls the concrete directly" — is
+    /// checked separately in each consumer (`any_adapter_reaches_concrete`
+    /// in check_b, `any_adapter_counts_concrete` in check_d). Without
+    /// the second part, mixed-form drift (cli direct concrete vs mcp
+    /// dispatch) gets masked behind a single false-positive anchor
+    /// finding, or — in Check D — silently dropped entirely.
     pub(crate) fn is_anchor_backed_concrete(
         &self,
         canonical: &str,

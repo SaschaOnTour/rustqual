@@ -36,9 +36,20 @@ Late-cycle additions (post 2026-04-30 tag):
 - **Concrete impl-method skip in Check B/D** (P1): when an anchor is
   enumerated as target capability, its overriding impl-method
   canonicals (`<Impl>::<method>`) are skipped in the concrete
-  pub-fn iteration. Adapters that dispatch via `dyn Trait.method()`
-  reach only the anchor — without the skip, every concrete impl
-  would be flagged as orphan.
+  pub-fn iteration **only when no adapter has the concrete in its
+  coverage**. If at least one adapter calls the concrete directly
+  (`LoggingHandler::handle()` UFCS or static-method form) while
+  another adapter dispatches via `dyn Trait`, the concrete pass
+  still runs — the mixed-form drift then surfaces as a concrete
+  finding plus an anchor finding for the adapter that uses the
+  other form. Cross-form synonym handling stays intentionally out
+  of scope; without the gating refinement, mixed-form drift was
+  silently masked behind a single false-positive anchor-orphan.
+  Same conditional skip is mirrored in Check D (`check_d::check_multiplicity_mismatch`)
+  via `any_adapter_counts_concrete` — without it, all-direct-call
+  multiplicity drift (cli=2 vs mcp=1, both calling concrete
+  directly with no dispatch) was silently dropped because Check D's
+  `is_anchor_backed_concrete` skip ran unconditionally.
 - **Anchor findings carry real source line** (P4): `AnchorInfo` now
   stores the trait method's source location captured at
   type-index-build time (`MethodLocation { file, line, column }`).
@@ -47,6 +58,38 @@ Late-cycle additions (post 2026-04-30 tag):
   declaration line instead of `line: 0`. Suppression-window
   matching, the orphan detector's window scan, and SARIF
   `startLine` validity all work for anchor-level findings.
+
+Second-pass review (Codex 2026-05-04 round 2):
+
+- **Anchor-only target surface defensive guard** (P1): Check B's
+  early-return on missing target-layer entry in `pub_fns_by_layer`
+  is replaced with an empty-slice fallback. The target-anchor
+  enumeration runs unconditionally. Empirical workspaces always
+  carry an entry (the pub-fn collector's `or_default()` ensures it),
+  but the fallback locks in the invariant against future refactors —
+  an anchor-only target surface (e.g. ports trait impl'd by a
+  private application type, or default-only trait declared in
+  target) cannot silently lose missing-adapter findings.
+- **Reachable-target BFS recognises trait anchors** (P2):
+  `build_adapter_reachable_targets` now treats a callee as a
+  target-capability node when EITHER its resolved layer matches
+  `target_layer` OR it is a synthetic anchor that passes
+  `is_anchor_target_capability` for `(target_layer, adapter_layers)`.
+  Previously, an anchor reached transitively via an adapter-touched
+  target fn (adapter → target fn → `dyn Trait.method()`) was
+  invisible to the BFS (anchor's `layer_of()` is the trait
+  declaration layer, e.g. `ports`), and Check B fired a false
+  orphan. Post-boundary plumbing wired up via at least one adapter
+  now stays silent for trait anchors too.
+- **cfg-test trait method filter** (P2): per-method `#[cfg(test)]`
+  / `#[test]` attributes inside an otherwise-production trait now
+  exclude the method from `WorkspaceTypeIndex.trait_methods`,
+  `trait_method_locations`, and `trait_methods_with_default_body`.
+  Without this, a `#[cfg(test)] fn helper(&self) {}` with a default
+  body would promote the method to a target anchor capability
+  even though it is invisible in production builds, and
+  `trait_has_method` would accept dispatch calls that should stay
+  unresolved.
 
 ### Added
 

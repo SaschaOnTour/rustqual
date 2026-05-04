@@ -85,6 +85,41 @@ fn record_trait_impl_excludes_cfg_test_overrides_from_overridden_set() {
 }
 
 #[test]
+fn record_trait_methods_excludes_cfg_test_method_default_body() {
+    // Production trait that declares a `#[cfg(test)]` method WITH a
+    // default body. Without filtering at the per-method level, the
+    // default body lands in `trait_methods_with_default_body`, the
+    // method ends up in `trait_methods`, and the unified capability
+    // rule promotes it to a target anchor — even though the method
+    // is invisible in production builds. Filter test-only entries
+    // when walking trait items so anchor capabilities + dispatch
+    // gating only see production methods.
+    let ws = build_workspace(&[(
+        "src/application/h.rs",
+        r#"
+        pub trait Handler {
+            fn handle(&self) {}
+            #[cfg(test)]
+            fn test_helper(&self) {}
+        }
+        "#,
+    )]);
+    let graph = build_graph_only(&ws, &three_layer(), &empty_cfg_test(), &HashSet::new());
+    let caps: std::collections::HashSet<&str> = graph
+        .target_anchor_capabilities("application", &[])
+        .map(|(name, _)| name)
+        .collect();
+    assert!(
+        caps.contains("crate::application::h::Handler::handle"),
+        "production default-body method must remain a target anchor capability, got {caps:?}"
+    );
+    assert!(
+        !caps.contains("crate::application::h::Handler::test_helper"),
+        "cfg-test trait method (even with default body) must NOT be a target anchor capability; got {caps:?}"
+    );
+}
+
+#[test]
 fn pub_fns_skips_cfg_test_impl_block() {
     // Sister-fix to file_fn_collector_skips_cfg_test_impl_block — the
     // pub-fn collector has the same impl-block shape and must apply

@@ -273,3 +273,80 @@ fn check_d_uses_anchor_as_capability_for_multiplicity() {
     assert_eq!(counts.get("cli"), Some(&2));
     assert_eq!(counts.get("mcp"), Some(&1));
 }
+
+#[test]
+fn check_d_surfaces_concrete_multiplicity_when_all_adapters_call_direct() {
+    // Sister-fix of check_b's mixed-form scenario, scoped to Check D's
+    // semantic ("all adapters reach the target, counts differ"). Both
+    // cli and mcp call the concrete `LoggingHandler::handle()` directly
+    // via UFCS — no `dyn Trait` dispatch anywhere. cli has TWO
+    // handlers, mcp has ONE → multiplicity drift on the concrete
+    // canonical.
+    //
+    // Without the conditional skip, `is_anchor_backed_concrete`
+    // unconditionally drops the concrete from Check D's iteration
+    // (the trait Handler has an overriding impl in target → the skip
+    // fires). With both adapters reaching only via concrete, the
+    // anchor pass produces no counts either, so Check D goes silent
+    // — masking a clear-cut multiplicity drift.
+    //
+    // Fix mirrors check_b: skip only when no adapter has the concrete
+    // in coverage. When adapters reach via direct concrete, the
+    // concrete pass runs and the counts diverge (cli=2, mcp=1).
+    let ws = build_workspace(&[
+        (
+            "src/ports/handler.rs",
+            "pub trait Handler { fn handle(&self); }",
+        ),
+        (
+            "src/application/logging.rs",
+            r#"
+            use crate::ports::handler::Handler;
+            pub struct LoggingHandler;
+            impl Handler for LoggingHandler { fn handle(&self) {} }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::logging::LoggingHandler;
+            pub fn cmd_log_a() { LoggingHandler::handle(&LoggingHandler); }
+            pub fn cmd_log_b() { LoggingHandler::handle(&LoggingHandler); }
+            "#,
+        ),
+        (
+            "src/mcp/handlers.rs",
+            r#"
+            use crate::application::logging::LoggingHandler;
+            pub fn mcp_log() { LoggingHandler::handle(&LoggingHandler); }
+            "#,
+        ),
+    ]);
+    let cp = make_config(&["cli", "mcp"]);
+    let findings = run_check_d(&ws, &ports_app_cli_mcp(), &cp, &empty_cfg_test());
+    let entries = extract_d(&findings);
+    let concrete = "crate::application::logging::LoggingHandler::handle";
+    let concrete_entry = entries
+        .iter()
+        .find(|(target, _)| target == concrete)
+        .unwrap_or_else(|| {
+            panic!(
+                "Check D must surface concrete multiplicity drift when all adapters reach via direct concrete; got {entries:?}"
+            )
+        });
+    let counts: std::collections::HashMap<&str, usize> = concrete_entry
+        .1
+        .iter()
+        .map(|(a, c)| (a.as_str(), *c))
+        .collect();
+    assert_eq!(
+        counts.get("cli"),
+        Some(&2),
+        "concrete count for cli (two direct UFCS callers); got {counts:?}"
+    );
+    assert_eq!(
+        counts.get("mcp"),
+        Some(&1),
+        "concrete count for mcp (one direct UFCS caller); got {counts:?}"
+    );
+}

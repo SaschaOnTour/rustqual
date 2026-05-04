@@ -9,6 +9,7 @@
 //! plumbing wired into adapter coverage stays silent (only genuine
 //! orphans / dead islands surface).
 
+use super::anchor_index::is_anchor_target_capability;
 use super::pub_fns::PubFnInfo;
 use super::workspace_graph::{canonical_name_for_pub_fn, CallGraph};
 use super::HandlerTouchpoints;
@@ -45,17 +46,29 @@ pub(super) fn build_adapter_coverage(
 }
 
 /// Set of target-layer canonicals transitively reachable from at least
-/// one adapter touchpoint, traversing only target-layer edges.
+/// one adapter touchpoint, traversing only target-capability edges.
 ///
 /// Used to distinguish post-boundary helpers (wired into adapter
 /// coverage via target-internal callers — silent) from genuine
 /// orphans and dead target-layer islands (flagged). Multi-source
 /// forward BFS seeded from the touchpoint union.
-/// Operation: BFS over `graph.forward`, gated by target layer.
+///
+/// A callee counts as a target-capability node when EITHER (a) its
+/// resolved layer matches `target_layer`, OR (b) it is a synthetic
+/// trait-method anchor that passes the unified
+/// `is_anchor_target_capability` rule for `(target_layer, adapter_layers)`.
+/// Without (b), a `dyn Trait.method()` dispatch reached transitively
+/// from an adapter would be invisible to the BFS (anchor's
+/// `layer_of()` is the trait declaration layer, e.g. `ports`), and
+/// Check B would falsely flag the anchor as orphan even though an
+/// adapter wires it up via a target-internal caller.
+/// Operation: BFS over `graph.forward`, gated by the unified
+/// target-capability predicate.
 pub(super) fn build_adapter_reachable_targets(
     coverage: &AdapterCoverage,
     graph: &CallGraph,
     target_layer: &str,
+    adapter_layers: &[String],
 ) -> HashSet<String> {
     let mut reachable: HashSet<String> = HashSet::new();
     let mut queue: VecDeque<String> = VecDeque::new();
@@ -71,10 +84,30 @@ pub(super) fn build_adapter_reachable_targets(
             continue;
         };
         for callee in callees {
-            if graph.layer_of(callee) == Some(target_layer) && reachable.insert(callee.clone()) {
+            if is_target_capability_node(callee, graph, target_layer, adapter_layers)
+                && reachable.insert(callee.clone())
+            {
                 queue.push_back(callee.clone());
             }
         }
     }
     reachable
+}
+
+/// True when `canonical` is either a direct target-layer node or a
+/// synthetic trait-method anchor that the unified rule promotes to a
+/// target capability. Operation: predicate composition.
+fn is_target_capability_node(
+    canonical: &str,
+    graph: &CallGraph,
+    target_layer: &str,
+    adapter_layers: &[String],
+) -> bool {
+    if graph.layer_of(canonical) == Some(target_layer) {
+        return true;
+    }
+    graph
+        .trait_method_anchors
+        .get(canonical)
+        .is_some_and(|info| is_anchor_target_capability(info, target_layer, adapter_layers))
 }
