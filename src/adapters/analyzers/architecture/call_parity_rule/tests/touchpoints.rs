@@ -452,6 +452,49 @@ fn touchpoints_reject_phantom_inherited_default_concrete_canonical() {
 }
 
 #[test]
+fn touchpoints_route_inherited_default_concrete_to_anchor() {
+    // Target-layer trait with default body + inherited impl in target.
+    // Adapter calls via UFCS on the concrete impl. The concrete
+    // canonical is phantom (rejected by the walker), but the anchor
+    // IS a valid target capability (default body lives in target).
+    // The call-site emission must route this case to the anchor so
+    // the capability surfaces in the adapter's touchpoint set.
+    let ws = build_workspace(&[
+        (
+            "src/application/handler.rs",
+            "pub trait Handler { fn handle(&self) {} }",
+        ),
+        (
+            "src/application/logging.rs",
+            r#"
+            use crate::application::handler::Handler;
+            pub struct AppHandler;
+            impl Handler for AppHandler {}
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::logging::AppHandler;
+            pub fn cmd_log() { AppHandler::handle(&AppHandler); }
+            "#,
+        ),
+    ]);
+    let tps = compute_touchpoints_for(
+        &ws,
+        &ports_app_cli_mcp(),
+        &cli_mcp_config(3),
+        "cmd_log",
+        &empty_cfg_test(),
+    );
+    let anchor = "crate::application::handler::Handler::handle";
+    assert!(
+        tps.contains(anchor),
+        "inherited-default concrete call must route to the trait anchor when the anchor is a target capability; got {tps:?}"
+    );
+}
+
+#[test]
 fn touchpoints_recognise_real_target_fn_node() {
     // Sanity check: a real `pub fn` in target IS a boundary. Gates
     // the round-6 phantom filter to the right side — we must not

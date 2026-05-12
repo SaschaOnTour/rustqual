@@ -265,16 +265,17 @@ pub struct CallParityConfig {
     /// `[architecture.layers]` and not overlap `adapters`.
     pub target: String,
 
-    /// Adapter-internal traversal depth — the maximum number of hops
-    /// the boundary BFS will walk through adapter-layer helpers before
-    /// giving up. Default 3, range 1..=10.
+    /// Adapter-internal traversal depth — the maximum number of CALL
+    /// EDGES the boundary BFS follows from an adapter pub-fn before
+    /// giving up. Default 3, range 1..=10. Direct callees are seeded
+    /// at depth 1, so `call_depth = 3` covers
+    /// `handler → h1 → h2 → target` (three edges, two intermediate
+    /// helpers).
     ///
     /// The semantic is bounded to the adapter→target walk only: once
     /// a target-layer node is reached, the touchpoint set records it
-    /// and the walk stops descending into target callees. So
-    /// `call_depth` controls how deep adapter-internal helper chains
-    /// can go before the BFS abandons the path; it does not influence
-    /// post-boundary application-internal call depth.
+    /// and the walk stops descending into target callees. It does not
+    /// influence post-boundary application-internal call depth.
     #[serde(default = "default_call_depth")]
     pub call_depth: usize,
 

@@ -46,7 +46,7 @@ The walker refuses to promote anchors declared in **peer-adapter layers** (e.g. 
 
 This boundary stop is deliberate: application-internal call chains (`session.search → record_operation → impact_count`) aren't a parity concern. If two adapters both reach `session.search`, the parity question is answered. What `session.search` does internally is `DRY-002`'s job, not `call_parity`'s.
 
-`call_depth` (default 3) bounds the **adapter-internal** traversal — how many helper hops the walk will go through before giving up. It does not constrain post-boundary application chain depth.
+`call_depth` (default 3) bounds the **adapter-internal** traversal — the maximum number of call edges the boundary BFS follows from the adapter pub-fn before giving up. Direct callees sit at depth 1, so `call_depth = 3` covers `handler → h1 → h2 → target` (three edges, two intermediate helpers). It does not constrain post-boundary application chain depth.
 
 ### Deprecated-handler exclusion
 

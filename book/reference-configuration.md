@@ -226,7 +226,7 @@ Single-instance section.
 |---|---|---|
 | `adapters` | (required) | List of adapter layer names |
 | `target` | (required) | Target layer name |
-| `call_depth` | `3` | Adapter-internal traversal depth — max helper hops the boundary BFS walks before giving up. Does not constrain post-boundary application chain depth. |
+| `call_depth` | `3` | Adapter-internal traversal depth — max call edges the boundary BFS follows from the adapter pub-fn (direct callees at depth 1, so `3` reaches `handler → h1 → h2 → target`). Does not constrain post-boundary application chain depth. |
 | `exclude_targets` | `[]` | Globs (module-path form) to skip from Check B |
 | `transparent_wrappers` | `[]` | Wrapper type names to peel during receiver-type inference |
 | `transparent_macros` | (default list) | Attribute macros treated as transparent |

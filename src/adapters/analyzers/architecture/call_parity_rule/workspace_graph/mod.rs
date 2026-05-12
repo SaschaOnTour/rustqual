@@ -19,6 +19,8 @@
 //! file-local helpers — walking only pub fns would under-count delegation
 //! chains and trigger false positives in Check A.
 
+mod edge_rewrite;
+
 use super::anchor_index::{
     build_anchor_info, is_anchor_target_capability, AnchorInfo, TraitAnchorMeta,
 };
@@ -341,6 +343,7 @@ pub(crate) fn build_call_graph<'ast>(
     });
     let mut graph = CallGraph::new();
     walk_files_into_graph(files, &workspace_files, &type_index, &mut graph);
+    edge_rewrite::rewrite_phantom_inherited_default_edges(&mut graph, &type_index);
     let visible_canonicals = super::pub_fns_visibility::collect_visible_type_canonicals_workspace(
         files,
         cfg_test_files,

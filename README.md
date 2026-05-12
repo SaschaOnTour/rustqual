@@ -240,8 +240,7 @@ RUSTFLAGS="-Dwarnings" cargo clippy --all-targets  # lints (0 warnings)
 
 1. **Syntactic analysis only.** Uses `syn` for AST parsing. The receiver-type-inference engine (v1.2+) resolves most method-call receivers; what it can't resolve stays unresolved rather than being fabricated.
 2. **Macros.** Macro invocations are not expanded. `println!` etc. are special-cased; custom macros producing logic or calls may be misclassified. Configurable via `[architecture.call_parity].transparent_macros`.
-3. **External file modules.** `mod foo;` declarations pointing to separate files are not followed. Only inline modules (`mod foo { ... }`) are analysed recursively.
-4. **Sequential analysis pass.** `proc_macro2::Span` (with `span-locations` enabled for line numbers) is not `Sync`. File I/O is parallelised via `rayon`.
+3. **Sequential analysis pass.** `proc_macro2::Span` (with `span-locations` enabled for line numbers) is not `Sync`. File I/O is parallelised via `rayon`.
 
 ## License
 

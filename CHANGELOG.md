@@ -236,6 +236,42 @@ Sixth-pass review (Codex 2026-05-12 round 6):
   Updated to strict "at least one overriding impl lives in target",
   plus an explicit note that inherited-default impls don't promote.
 
+Seventh-pass review (Codex 2026-05-12 round 7):
+
+- **Phantom inherited-default edge rewrite** (P2): the round-6
+  walker-phantom-gate correctly rejected fabricated
+  `<Impl>::<method>` canonicals as touchpoints, but never emitted
+  an alternative — a target-layer trait declared with a default
+  body + empty target impl + adapter UFCS call would silently look
+  non-delegating, even though the trait anchor IS a valid target
+  capability. New post-build pass
+  `workspace_graph::edge_rewrite::rewrite_phantom_inherited_default_edges`
+  scans every emitted edge after `FileFnCollector` completes,
+  identifies phantom callees that match an inherited-default impl
+  (impl is in `trait_impls[T]`, method has default body, impl
+  doesn't override), and rewrites the edge to point at the trait
+  anchor `<Trait>::<method>`. Concrete inherent methods stay
+  untouched (their canonical IS a real graph node), and overriding
+  impls stay untouched (their override registers a real fn body).
+  Regression test
+  `touchpoints_route_inherited_default_concrete_to_anchor`.
+- **`call_depth` describes edge depth, not helper hops** (P3): the
+  Rustdoc on `CallParityConfig::call_depth`, the
+  `book/adapter-parity.md` walk description, the
+  `book/reference-configuration.md` table entry, and the
+  `docs/internals.md` summary all said "max helper hops", which
+  was off-by-one — direct callees are seeded at depth 1, so
+  `call_depth = 3` reaches `handler → h1 → h2 → target`
+  (three edges, two intermediate helpers). All four sources
+  updated with explicit edge-count wording + the example.
+- **README stale `mod foo;` limitation** (P3): the "External file
+  modules" entry in `README.md`'s Known Limitations claimed
+  `mod foo;` declarations weren't followed and only inline modules
+  were analysed recursively. That hasn't been true since the
+  `file_visibility::collect_file_root_visibility` pre-pass
+  shipped with regression tests for crate-root `mod`, private
+  file modules, and ancestor chains. Entry removed.
+
 ### Added
 
 - **Trait-method anchor model for call-parity dispatch**: `dyn
