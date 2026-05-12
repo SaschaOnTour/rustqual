@@ -26,8 +26,8 @@ pub(super) fn build_functions(
                 logic,
                 calls,
                 complexity: f.complexity.as_ref().map(|c| JsonComplexity {
-                    logic_count: 0,
-                    call_count: 0,
+                    logic_count: c.logic_count,
+                    call_count: c.call_count,
                     max_nesting: c.max_nesting,
                     cognitive_complexity: c.cognitive_complexity,
                     cyclomatic_complexity: c.cyclomatic_complexity,

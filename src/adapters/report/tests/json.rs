@@ -95,16 +95,39 @@ fn test_print_json_all_types_no_panic() {
 }
 
 #[test]
-fn test_print_json_with_complexity_no_panic() {
-    let mut func = make_result("f", Classification::Operation);
+fn test_print_json_carries_complexity_counts() {
+    // Build the JSON string, parse it, and assert the analyzer's
+    // non-zero `logic_count` / `call_count` survive the projection +
+    // reporter round-trip. Regression for v1.2.1: the typed-reporter
+    // refactor dropped both fields from the projection, so every
+    // function appeared as `logic_count: 0, call_count: 0` in JSON
+    // until the round-12 fix added them back to
+    // `ComplexityMetricsRecord` and the JSON projection.
+    let mut func = make_result("counted", Classification::Operation);
     func.complexity = Some(ComplexityMetrics {
-        logic_count: 3,
-        call_count: 0,
-        max_nesting: 2,
+        logic_count: 5,
+        call_count: 4,
+        max_nesting: 1,
         ..Default::default()
     });
     let analysis = make_analysis(vec![func]);
-    print_json(&analysis);
+    let json = crate::report::json::build_json_string(&analysis);
+    let v: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
+    let f = v["functions"]
+        .as_array()
+        .and_then(|a| a.iter().find(|x| x["name"] == "counted"))
+        .expect("function `counted` present");
+    let complexity = &f["complexity"];
+    assert_eq!(
+        complexity["logic_count"].as_u64(),
+        Some(5),
+        "logic_count must survive projection + reporter; got {json}"
+    );
+    assert_eq!(
+        complexity["call_count"].as_u64(),
+        Some(4),
+        "call_count must survive projection + reporter; got {json}"
+    );
 }
 
 #[test]

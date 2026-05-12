@@ -70,6 +70,8 @@ fn project_metrics(m: &LegacyMetrics) -> ComplexityMetricsRecord {
         expect_count: m.expect_count,
         panic_count: m.panic_count,
         todo_count: m.todo_count,
+        logic_count: m.logic_count,
+        call_count: m.call_count,
         hotspots: m.hotspots.iter().map(project_hotspot).collect(),
         magic_numbers: m.magic_numbers.iter().map(project_magic).collect(),
         logic_occurrences: m.logic_occurrences.iter().map(project_logic).collect(),

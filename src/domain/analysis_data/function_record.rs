@@ -58,6 +58,11 @@ pub struct ComplexityMetricsRecord {
     pub expect_count: usize,
     pub panic_count: usize,
     pub todo_count: usize,
+    /// IOSP-classifier counts. Carried here so reporters that show
+    /// per-function complexity surface them as part of the same
+    /// record (legacy JSON schema exposes them under `complexity`).
+    pub logic_count: usize,
+    pub call_count: usize,
     pub hotspots: Vec<NestingHotspot>,
     pub magic_numbers: Vec<MagicNumberOccurrence>,
     pub logic_occurrences: Vec<LogicOccurrenceRecord>,

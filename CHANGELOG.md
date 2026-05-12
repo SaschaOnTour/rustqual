@@ -361,6 +361,26 @@ Eleventh-pass review (Codex 2026-05-12 round 11, doc-only):
   classifies each bullet's topic, so readers no longer assume only
   the first two items are in scope.
 
+Twelfth-pass review (Codex 2026-05-12 round 12):
+
+- **JSON reporter dropped `logic_count` + `call_count`** (P2): the
+  v1.2.1 typed-reporter refactor split `FunctionAnalysis.complexity`
+  (legacy IOSP type carrying every metric) into
+  `ComplexityMetricsRecord` (typed dimension state), but
+  `project_metrics` did not carry the IOSP `logic_count` /
+  `call_count` fields across and `json::functions::build_functions`
+  hard-coded `JsonComplexity.logic_count` / `call_count` to `0`.
+  Every JSON consumer therefore saw zeros for every function since
+  v1.2.1, even though the analyzer measured non-zero counts. The
+  existing `test_print_json_with_complexity_no_panic` set non-zero
+  inputs but only asserted "no panic" — the smoke-test masked the
+  data loss for eleven Codex passes. Fix: added the two counts to
+  `ComplexityMetricsRecord`, copied them in `project_metrics`, and
+  pulled them through `build_functions`. Regression test
+  `json_complexity_carries_logic_count_and_call_count` parses the
+  produced JSON and asserts the non-zero values survive the
+  projection + reporter round-trip.
+
 ### Added
 
 - **Trait-method anchor model for call-parity dispatch**: `dyn
