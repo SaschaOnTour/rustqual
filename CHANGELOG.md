@@ -152,19 +152,17 @@ Fourth-pass review (Codex 2026-05-04 round 4):
   redundant `WorkspaceTypeIndex.trait_visibility` map and the
   `TraitCollector.enclosing_mod_visible` tracking — both subsumed
   by the canonical-set lookup.
-- **Inherited-default impls count as target capability** (P2): the
-  round-1 `overriding_impls_for` builder filtered non-overriding
-  impls out of `impl_layers` and `impl_method_canonicals`. With
-  `pub trait Handler { fn handle(&self) {} } impl Handler for
-  AppHandler {}` (no override, inherits default body), the body IS
-  callable via the impl, but the anchor was rejected as
-  non-capability — Check B/D silently skipped the entire ports-trait
-  capability. Fix: new `WorkspaceTypeIndex::callable_impls_for`
-  accessor that returns the union of overriding impls plus
-  non-overriding impls when the trait method has a default body.
-  `build_anchor_info` consumes this superset so inherited-default
-  impls in the target layer make the anchor a target capability
-  (and feed the anchor-orphan suppression branch correctly).
+- **Inherited-default capability gap surfaced** (P2 — superseded
+  in round 5, replaced with edge-rewrite in round 7): round 4
+  noted that `pub trait Handler { fn handle(&self) {} } impl
+  Handler for AppHandler {}` (no override, inherits default body)
+  left adapter coverage with no visible target capability. The
+  round-4 fix (`callable_impls_for` widening of `impl_layers` /
+  `impl_method_canonicals`) was reverted in round 5 because it
+  caused canonical collisions with inherent methods of the same
+  name and promoted non-target default bodies through empty target
+  impls. The final fix lives in the round-7 edge-rewrite pass
+  (see below) — see the seventh-pass review entry.
 - **Stale `add_anchor_to_impl_edges` reference** (P3): the
   `trait_dispatch_edges` doc comment in `calls.rs` claimed
   reachability from anchor to impl bodies was wired by
@@ -271,6 +269,44 @@ Seventh-pass review (Codex 2026-05-12 round 7):
   `file_visibility::collect_file_root_visibility` pre-pass
   shipped with regression tests for crate-root `mod`, private
   file modules, and ancestor chains. Entry removed.
+
+Eighth-pass review (Codex 2026-05-12 round 8):
+
+- **Edge-rewrite ambiguity guard** (P2): the round-7
+  `inherited_default_anchor_for` returned the first HashMap match
+  when a type implemented multiple traits with the same default
+  method name (e.g. `pub trait Greeting { fn handle(&self) {} }`
+  and `pub trait Logging { fn handle(&self) {} }` both implemented
+  by `AppHandler`). Rewrite choice depended on map iteration order
+  — non-deterministic. Rust itself requires UFCS disambiguation
+  in that case, and the canonical alone doesn't tell us which
+  trait was selected. Fix: rewrite only when EXACTLY ONE
+  inherited-default candidate exists; otherwise leave the phantom
+  canonical in place (the walker phantom-gate suppresses it).
+  Regression test
+  `touchpoints_skip_rewrite_when_multiple_traits_share_default_method_name`.
+- **CHANGELOG round-4 anchor semantics superseded** (P3): the
+  "Inherited-default impls count as target capability" entry from
+  round 4 described the `callable_impls_for` widening that was
+  reverted in round 5 and properly fixed via edge-rewrite in
+  round 7. The CHANGELOG now reads as if two contradictory anchor
+  models are active. The round-4 entry is reworded as
+  "superseded" with a pointer to the round-7 entry that delivered
+  the real fix.
+- **CHANGELOG anchor model summary aligned** (P3): the Added-
+  section blurb on the round-1 anchor model still framed target
+  capability around "overriding impls" and treated inherited
+  defaults as sharing the same target semantics. Updated to the
+  current dual-rule (target-declared default body OR overriding
+  impl in target) plus an explicit note that inherited-default
+  UFCS calls are routed via edge-rewrite and that calls inside the
+  default-method body itself stay invisible.
+- **`inspect_anchor` comment refreshed** (P3): the doc on
+  `inspect_anchor` still said "all-direct inherited-default drift
+  stays undetected — the impl-method canonical is phantom". With
+  the round-7 edge-rewrite, those phantom canonicals are folded
+  onto the anchor before coverage/counting, so the limitation no
+  longer applies. Comment updated to reflect the active behaviour.
 
 ### Added
 
@@ -400,14 +436,16 @@ observing 18 compile errors across all 9 reporter sites.
   semantically a single boundary call. Dispatch now emits ONE
   synthetic anchor `<Trait>::<method>` representing the logical
   capability. The touchpoint walker recognises the anchor as a
-  target boundary when at least one overriding impl lives in the
-  target layer (`CallGraph::trait_method_anchors`, populated by
-  `populate_anchor_index`). Side benefit: non-overriding impls
-  (which inherit the trait default body) are no longer a special
-  case — they share the same anchor as overriding impls. The
-  earlier Limitation #5 ("Calls on non-overriding impls left
-  unresolved") is replaced by a narrower one: only calls **inside**
-  the default-method body itself stay invisible to Check A/B/D.
+  target boundary when (a) the trait is declared in the target
+  layer with a callable body (default OR overriding impl), OR
+  (b) at least one overriding impl lives in the target layer —
+  non-target default bodies are NOT promoted through empty target
+  impls (the executable body lives outside target). Concrete UFCS
+  calls into inherited-default impls are routed to the anchor at
+  graph build time via the edge-rewrite post-pass, so dispatch and
+  direct-concrete forms share the same anchor. Calls **inside**
+  the default-method body itself stay invisible to Check A/B/D
+  (the trait method's body isn't a graph node).
 - **`record_trait_impl` filters cfg-test / `#[test]` overrides.**
   `WorkspaceTypeIndex.trait_impl_overrides` used to record every
   `ImplItem::Fn`, including test-only methods. Production dispatch

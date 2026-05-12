@@ -65,31 +65,54 @@ fn apply_edge_rewrite(graph: &mut CallGraph, caller: &str, old: &str, new: Strin
 }
 
 /// True iff `canonical` matches an `<Impl>::<method>` whose `Impl`
-/// inherits the default body of a trait method. Returns the trait
-/// anchor canonical when such a match exists.
+/// inherits the default body of EXACTLY ONE trait method. Returns
+/// the trait anchor canonical when the match is unambiguous;
+/// `None` otherwise (no candidate, or multiple traits with the same
+/// default method name — Rust would require UFCS disambiguation in
+/// that case, and we can't tell from the canonical alone which trait
+/// was selected, so we leave the canonical phantom rather than guess
+/// from HashMap iteration order).
 fn inherited_default_anchor_for(
     canonical: &str,
     type_index: &WorkspaceTypeIndex,
 ) -> Option<String> {
     let (impl_canon, method) = canonical.rsplit_once("::")?;
+    let mut candidate: Option<String> = None;
     for (trait_canon, impls) in &type_index.trait_impls {
-        if !impls.iter().any(|i| i == impl_canon) {
+        if !is_inherited_default_match(type_index, trait_canon, impls, impl_canon, method) {
             continue;
         }
-        if !type_index
-            .trait_methods
-            .get(trait_canon)
-            .is_some_and(|s| s.contains(method))
-        {
-            continue;
+        if candidate.is_some() {
+            return None;
         }
-        if !type_index.trait_method_has_default_body(trait_canon, method) {
-            continue;
-        }
-        if type_index.impl_overrides_method(trait_canon, impl_canon, method) {
-            continue;
-        }
-        return Some(format!("{trait_canon}::{method}"));
+        candidate = Some(format!("{trait_canon}::{method}"));
     }
-    None
+    candidate
+}
+
+/// Predicate: trait declares `method` with a default body, has
+/// `impl_canon` in its impl list, and the impl does NOT override the
+/// method. Extracted so `inherited_default_anchor_for` stays under
+/// the SRP cyclomatic budget after adding the ambiguity guard.
+fn is_inherited_default_match(
+    type_index: &WorkspaceTypeIndex,
+    trait_canon: &str,
+    impls: &[String],
+    impl_canon: &str,
+    method: &str,
+) -> bool {
+    if !impls.iter().any(|i| i == impl_canon) {
+        return false;
+    }
+    if !type_index
+        .trait_methods
+        .get(trait_canon)
+        .is_some_and(|s| s.contains(method))
+    {
+        return false;
+    }
+    if !type_index.trait_method_has_default_body(trait_canon, method) {
+        return false;
+    }
+    !type_index.impl_overrides_method(trait_canon, impl_canon, method)
 }

@@ -495,6 +495,56 @@ fn touchpoints_route_inherited_default_concrete_to_anchor() {
 }
 
 #[test]
+fn touchpoints_skip_rewrite_when_multiple_traits_share_default_method_name() {
+    // Ambiguity guard: if the impl-type implements two traits with the
+    // SAME default method name, Rust requires UFCS disambiguation
+    // (`<X as T1>::handle(&x)`). The phantom canonical alone doesn't
+    // tell us which trait was selected, so the edge-rewrite pass must
+    // NOT pick the first map-iteration match — that would make
+    // touchpoints depend on HashMap iteration order. Conservative
+    // choice: leave the canonical phantom (walker phantom-gate will
+    // suppress it), so neither anchor is incorrectly registered.
+    let ws = build_workspace(&[
+        (
+            "src/application/handler.rs",
+            r#"
+            pub trait Greeting { fn handle(&self) {} }
+            pub trait Logging { fn handle(&self) {} }
+            "#,
+        ),
+        (
+            "src/application/logging.rs",
+            r#"
+            use crate::application::handler::{Greeting, Logging};
+            pub struct AppHandler;
+            impl Greeting for AppHandler {}
+            impl Logging for AppHandler {}
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::logging::AppHandler;
+            pub fn cmd_log() { AppHandler::handle(&AppHandler); }
+            "#,
+        ),
+    ]);
+    let tps = compute_touchpoints_for(
+        &ws,
+        &ports_app_cli_mcp(),
+        &cli_mcp_config(3),
+        "cmd_log",
+        &empty_cfg_test(),
+    );
+    let greeting_anchor = "crate::application::handler::Greeting::handle";
+    let logging_anchor = "crate::application::handler::Logging::handle";
+    assert!(
+        !tps.contains(greeting_anchor) && !tps.contains(logging_anchor),
+        "ambiguous inherited-default rewrite must leave the call unresolved (non-deterministic otherwise); got {tps:?}"
+    );
+}
+
+#[test]
 fn touchpoints_recognise_real_target_fn_node() {
     // Sanity check: a real `pub fn` in target IS a boundary. Gates
     // the round-6 phantom filter to the right side — we must not

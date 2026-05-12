@@ -865,10 +865,10 @@ fn check_b_flags_inherent_method_even_when_same_name_inherited_default_exists() 
 #[test]
 fn check_b_silent_anchor_when_adapters_call_inherited_default_concretely() {
     // Inherited-default impl: every adapter covers the capability via
-    // the concrete form (UFCS or struct-method call). The anchor pass
-    // must be silent because impl_method_canonicals includes the
-    // inherited-default impls when the trait method has a default
-    // body.
+    // the concrete form (UFCS or struct-method call). The edge-rewrite
+    // post-pass folds those phantom edges onto the trait anchor, so
+    // coverage hits the anchor for both adapters and the anchor pass
+    // stays silent.
     let ws = build_workspace(&[
         (
             "src/ports/handler.rs",

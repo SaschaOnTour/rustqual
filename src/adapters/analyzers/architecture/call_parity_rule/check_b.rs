@@ -91,10 +91,10 @@ pub(crate) fn check_missing_adapter<'ast>(
 /// Anchor analogue of `inspect_target`. Mixed-form drift (one
 /// adapter dispatches via `dyn Trait`, another calls an overriding
 /// concrete impl directly) intentionally produces paired anchor +
-/// concrete findings. All-direct drift on inherited-default impls
-/// stays undetected — the inherited body lives on the trait, so the
-/// impl-method canonical is phantom and not iterated; cross-form
-/// synonym handling is out of scope.
+/// concrete findings; cross-form synonym handling is out of scope.
+/// Inherited-default UFCS calls are folded onto the anchor at graph
+/// build time via the edge-rewrite post-pass, so drift on those is
+/// counted against the anchor — not lost under a phantom canonical.
 fn inspect_anchor(anchor: &str, info: &AnchorInfo, ctx: &TargetCtx<'_>) -> Option<MatchLocation> {
     if is_anchor_excluded(anchor, info, ctx.cp) {
         return None;
