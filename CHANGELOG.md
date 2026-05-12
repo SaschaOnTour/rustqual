@@ -349,6 +349,18 @@ Tenth-pass review (Codex 2026-05-12 round 10, doc/comment-only):
   in target" framing. Both updated to the current single-anchor
   semantics + dual-rule capability predicate.
 
+Eleventh-pass review (Codex 2026-05-12 round 11, doc-only):
+
+- **Limitations section heading + intro generalised** (P3): the
+  `book/adapter-parity.md` Limitations subsection was titled
+  "Limitations: type aliases" with an intro saying "two alias
+  patterns currently disagree", but the list had grown to six
+  bullets covering re-exports, function re-exports, trait
+  default-body internals, and ambiguous inherited-default UFCS
+  calls. Renamed to "Known limitations" with an intro that
+  classifies each bullet's topic, so readers no longer assume only
+  the first two items are in scope.
+
 ### Added
 
 - **Trait-method anchor model for call-parity dispatch**: `dyn

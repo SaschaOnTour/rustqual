@@ -60,12 +60,17 @@ phased out shouldn't drag the parity report.
 pub fn cmd_grep(args: ClapArgs) { /* … */ }   // skipped from parity
 ```
 
-### Limitations: type aliases
+### Known limitations
 
-The visibility pass and the receiver-type inference agree on most
-alias shapes (`pub type Public = Box<private::Hidden>`, multi-step
-chains, transparent-wrapper peeling), but two alias patterns currently
-disagree and can produce false-negative Check-B coverage:
+Call-parity handles most type-alias, re-export, and trait-dispatch
+shapes (`pub type Public = Box<private::Hidden>`, multi-step chains,
+transparent-wrapper peeling, `dyn Trait` collapsed to synthetic
+anchors, file-backed module visibility). The patterns below can
+still produce false-negative Check-B coverage or leave a call
+unresolved — bullets 1–2 are type-alias edge cases, 3 is a nested
+re-export, 4 is a public function re-export, 5 is internals of
+trait default bodies, 6 is an ambiguous inherited-default UFCS
+form. Workarounds are listed inline:
 
 1. **Generic-identity aliases at use sites.** A `type Id<T> = T;` and
    then `pub type Public = Id<private::Hidden>;` registers `Id` in
