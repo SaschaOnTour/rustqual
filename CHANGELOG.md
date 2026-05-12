@@ -312,6 +312,43 @@ Eighth-pass review (Codex 2026-05-12 round 8):
   onto the anchor before coverage/counting, so the limitation no
   longer applies. Comment updated to reflect the active behaviour.
 
+Ninth-pass review (Codex 2026-05-12 round 9, doc-only):
+
+- **Round-5 limitation note narrowed** (P3): the round-5 entry
+  describing "mixed-form multiplicity drift on inherited defaults
+  remains undetected" was reworded to reflect the round-7
+  edge-rewrite — only the ambiguous multi-trait default case (the
+  round-8 ambiguity guard) leaves edges phantom now.
+- **Top-level anchor summary aligned** (P3): the primary
+  `### Added` blurb on the anchor model was framing target boundary
+  status around "overriding impl in target" only. Updated to the
+  full dual-rule (target-declared callable body OR overriding impl
+  in target) plus an explicit note on the edge-rewrite folding for
+  unambiguous inherited-default UFCS calls.
+
+Tenth-pass review (Codex 2026-05-12 round 10, doc/comment-only):
+
+- **Ambiguous-multi-trait-default added to known limitations** (P3):
+  `book/adapter-parity.md` Limitations list gained a sixth entry
+  documenting that UFCS calls like `X::handle(&x)` are left
+  unresolved when `X` implements multiple traits with the same
+  default method name (Rust requires UFCS disambiguation; the
+  canonical alone is ambiguous). Workaround: rename, override on
+  the impl, or call through `dyn Trait`.
+- **`docs/internals.md` anchor summary refreshed** (P3): the
+  contributor-facing summary still framed target-boundary status
+  around "at least one overriding impl in target". Rewritten to
+  reference `is_anchor_target_capability` directly, list the dual
+  rule, mention visibility / peer-adapter constraints, and call out
+  the round-7 edge-rewrite for inherited-default UFCS calls.
+- **`calls.rs` Rustdoc comments aligned** (P3): the
+  `resolve_method_targets` doc still said trait-dispatch inference
+  "may return multiple (one per impl of the trait)" — that was
+  round-1 behaviour, before the synthetic-anchor collapse. The
+  `canonical_edges_for_method` doc had the same "overriding impl
+  in target" framing. Both updated to the current single-anchor
+  semantics + dual-rule capability predicate.
+
 ### Added
 
 - **Trait-method anchor model for call-parity dispatch**: `dyn

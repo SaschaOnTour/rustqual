@@ -366,9 +366,11 @@ impl<'a> CanonicalCallCollector<'a> {
 
     /// Resolve a method call's receiver to the canonical call-graph
     /// targets. Fast-path returns a single element; trait-dispatch
-    /// inference may return multiple (one per impl of the trait).
-    /// Empty vec means unresolved — caller records `<method>:name`.
-    /// Integration: fast-path first, inference fallback second.
+    /// inference returns the synthetic anchor `<Trait>::<method>` so
+    /// `dyn Trait` calls collapse to one boundary regardless of how
+    /// many impls exist. Empty vec means unresolved — caller records
+    /// `<method>:name`. Integration: fast-path first, inference
+    /// fallback second.
     fn resolve_method_targets(&self, receiver: &syn::Expr, method_name: &str) -> Vec<String> {
         if let Some(c) = self.try_fast_path_receiver(receiver, method_name) {
             return vec![c];
@@ -654,13 +656,14 @@ fn parse_macro_tokens(tokens: proc_macro2::TokenStream) -> Vec<syn::Expr> {
 /// edge(s) for a method call. `Path` yields one concrete edge.
 /// `TraitBound` (Stage 2) yields one synthetic anchor edge
 /// `<Trait>::<method>` provided the method is declared on the trait —
-/// the touchpoint walker recognises the anchor as a target boundary
-/// when at least one overriding impl lives in the target layer, so
-/// call-parity stays sound for Ports&Adapters architectures without
-/// fanning out N per-impl edges (which would otherwise turn one
-/// boundary call into N false-positive Check C touchpoints).
-/// Wrapper variants (`Result`/`Option`/…) yield no direct edge — the
-/// combinator table already unwrapped them in the method-return lookup.
+/// the touchpoint walker decides target-boundary status via
+/// `is_anchor_target_capability` (target-declared callable body OR
+/// overriding impl in target), so call-parity stays sound for
+/// Ports&Adapters architectures without fanning out N per-impl edges
+/// (which would otherwise turn one boundary call into N
+/// false-positive Check C touchpoints). Wrapper variants
+/// (`Result`/`Option`/…) yield no direct edge — the combinator table
+/// already unwrapped them in the method-return lookup.
 /// Operation: variant dispatch.
 fn canonical_edges_for_method(
     ty: &CanonicalType,

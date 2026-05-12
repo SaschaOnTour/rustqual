@@ -117,6 +117,17 @@ disagree and can produce false-negative Check-B coverage:
    explicitly in each impl, or move the body into a free function
    the trait method delegates to.
 
+6. **Ambiguous inherited-default UFCS calls.** When one impl type
+   implements multiple traits with the same default method name
+   (e.g. `impl Greeting for X {}` + `impl Logging for X {}` where
+   both traits declare `fn handle(&self) {}`), a UFCS call like
+   `X::handle(&x)` would require Rust-side `<X as Greeting>::handle`
+   disambiguation. From the canonical alone we can't tell which
+   trait was selected, so the edge-rewrite pass leaves the call
+   unresolved rather than guessing. Workaround: rename the methods,
+   override on the impl, or call through `dyn Trait` (which
+   resolves the anchor unambiguously).
+
 If you hit any of these patterns in practice, please open an issue
 with the exact alias / re-export / dispatch shape — the fixes
 touch several call sites in the call-parity pipeline and we'd like
