@@ -89,26 +89,14 @@ impl TouchpointWalk<'_> {
         touchpoints
     }
 
-    /// True if `node` represents a target-layer capability the walk must
-    /// stop at and record as a touchpoint. Two cases:
-    ///
-    /// 1. Concrete target-layer node — `layer_of(node) == target_layer`.
-    /// 2. Synthetic trait-method anchor whose trait has at least one
-    ///    overriding impl in the target layer. The anchor itself lives
-    ///    in the trait's declaring layer (commonly `ports`), but it
-    ///    represents the contract reached via `dyn Trait.method()`
-    ///    dispatch — collapsing what would otherwise be N impl-edges
-    ///    into one canonical capability so Check C doesn't fire on a
-    ///    single boundary call.
+    /// True if `node` represents a target-layer capability the walk
+    /// must stop at and record as a touchpoint. Anchor canonicals use
+    /// the unified rule; concrete canonicals must additionally
+    /// correspond to a real graph node — `layer_of` is cached for
+    /// every edge sink, including fabricated `<Impl>::<method>`
+    /// canonicals from inherited-default impls, so a layer-only test
+    /// would accept phantom nodes that no body actually inhabits.
     fn is_target_boundary(&self, node: &str) -> bool {
-        // Anchor check first, with the unified rule. If `node` is an
-        // anchor, the rule applies (peer-adapter rejection,
-        // default-only-target acceptance, target-impl acceptance) —
-        // we MUST NOT fall through to the layer-of-canonical check,
-        // which would otherwise accept peer-adapter-declared anchors
-        // or default-only-target anchors that the unified rule
-        // already handled. Single map lookup; pattern-matches the
-        // result instead of checking-then-getting twice.
         if let Some(info) = self.ctx.graph.trait_method_anchors.get(node) {
             return is_anchor_target_capability(
                 info,
@@ -117,6 +105,7 @@ impl TouchpointWalk<'_> {
             );
         }
         self.ctx.graph.layer_of(node) == Some(self.ctx.target_layer)
+            && self.ctx.graph.forward.contains_key(node)
     }
 
     /// True if `node` lives in an adapter layer that is not the origin

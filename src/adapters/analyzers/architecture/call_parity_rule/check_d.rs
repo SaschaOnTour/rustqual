@@ -37,17 +37,9 @@ pub(crate) fn check_multiplicity_mismatch<'ast>(
     let mut out = Vec::new();
     if let Some(targets) = pub_fns_by_layer.get(&cp.target) {
         for info in targets {
-            // Mirror of check_b's conditional skip: skip concrete
-            // impl-methods backed by an enumerated anchor ONLY when no
-            // adapter has the concrete in coverage — i.e. every
-            // adapter reaches via dispatch and the anchor pass owns
-            // the capability count. When at least one adapter calls
-            // the concrete directly (UFCS / static-method form), the
-            // concrete pass must run so mixed-form multiplicity drift
-            // (cli=2 direct vs mcp=1 dispatch) surfaces against the
-            // concrete canonical. The anchor pass still runs and
-            // produces a paired finding for the dispatch-only adapter,
-            // matching check_b's documented double-finding tradeoff.
+            // Mirrors check_b's conditional skip — keep the concrete
+            // pass alive when any adapter reaches it directly so
+            // multiplicity drift surfaces.
             let canonical = canonical_name_for_pub_fn(info);
             if graph.is_anchor_backed_concrete(&canonical, &cp.target, &cp.adapters)
                 && !any_adapter_counts_concrete(&canonical, &counts)
@@ -100,11 +92,8 @@ fn inspect_anchor(
     })
 }
 
-/// True iff at least one adapter has `concrete` in its per-target
-/// count map — i.e. some adapter calls the concrete impl-method
-/// directly. Mirror of `check_b::any_adapter_reaches_concrete` but
-/// adapted to the count-map shape Check D works with.
-/// Operation: per-adapter probe.
+/// True iff any adapter has `concrete` in its count map. Mirror of
+/// `check_b::any_adapter_reaches_concrete` for Check D's count shape.
 fn any_adapter_counts_concrete(concrete: &str, counts: &AdapterTargetCounts) -> bool {
     counts.values().any(|m| m.contains_key(concrete))
 }

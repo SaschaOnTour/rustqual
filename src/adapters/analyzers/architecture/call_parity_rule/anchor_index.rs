@@ -34,11 +34,8 @@ pub(crate) struct AnchorInfo {
     /// uncallable signatures and do NOT count as a target capability
     /// just because the trait happens to live in the target layer.
     pub(crate) has_default_body: bool,
-    /// True iff the trait declaration carried a `pub` visibility
-    /// modifier (and is thus part of the public architectural surface).
-    /// Private traits (`trait Internal { … }`) are implementation
-    /// detail and must not surface as Check B/D capabilities, even
-    /// when they have a default body or a target-layer impl.
+    /// Whether the trait is workspace-visible per the shared
+    /// `visible_canonicals` set (same set `pub_fns` consumes).
     pub(crate) trait_visible: bool,
     /// Source location of the trait method declaration. `None` when
     /// the trait was registered without a captured span (synthetic
@@ -46,33 +43,14 @@ pub(crate) struct AnchorInfo {
     pub(crate) location: Option<MethodLocation>,
 }
 
-/// **Unified target-capability rule for trait-method anchors.** Both
-/// the boundary walker (`TouchpointWalk::is_target_boundary`), the
-/// Check B/D enumeration (`CallGraph::target_anchor_capabilities`),
-/// and the post-boundary reachable-targets BFS in
-/// `check_b_coverage::build_adapter_reachable_targets` MUST consult
-/// this same predicate, otherwise the three sides drift (parallel-path
-/// inconsistency — see memory pattern A18).
+/// Single source of truth for "is this anchor a target capability?"
+/// — consulted by the boundary walker, Check B/D capability
+/// enumeration, AND the reachable-targets BFS, so the three never
+/// drift apart.
 ///
-/// Returns `true` iff: (0) the trait declaration carries `pub`
-/// visibility (private traits are implementation detail, not
-/// architectural surface), AND (1) the trait's declaring layer is NOT
-/// a peer adapter (a configured adapter that isn't the target), AND
-/// (2) the trait's declaring layer IS the target layer AND the method
-/// has a callable body (default OR overriding impl), OR at least one
-/// overriding impl lives in the target layer.
-///
-/// Rule 0 stops `trait Internal { fn run(&self) {} }` (no `pub`) and
-/// `trait Hidden { fn run(&self); } impl Hidden for X { … }` (private
-/// trait + target impl) from surfacing as Check B/D capabilities —
-/// they aren't part of the public contract, only the implementation.
-/// Rule 1 prevents `cli` from inheriting `mcp::Handler`-backed coverage
-/// when the trait is declared in the `mcp` peer adapter. Rule 2 covers
-/// the Hexagonal layout (trait in `ports`, impls in `application`),
-/// the default-only-target case (trait + default body in target, no
-/// overriding impls anywhere), and rejects pure-signature trait methods
-/// in target (no default, no impl) which are uncallable and not a
-/// capability. Operation: predicate logic.
+/// Passes iff trait is visible, declaring layer is not a peer
+/// adapter, AND (decl_layer == target with a callable body) OR an
+/// overriding impl lives in target_layer.
 pub(crate) fn is_anchor_target_capability(
     info: &AnchorInfo,
     target_layer: &str,
@@ -94,18 +72,37 @@ pub(crate) fn is_anchor_target_capability(
     info.impl_layers.contains(target_layer)
 }
 
+/// Per-trait inputs that don't change across the trait's methods.
+/// Bundles the canonical, declaring layer (resolved once via
+/// `LayerDefinitions::layer_of_crate_path`), and the workspace-
+/// visibility flag (sourced from the same `visible_canonicals` set
+/// pub-fns uses) so `build_anchor_info` stays under the SRP param
+/// budget while the per-method anchor build remains a pure projection
+/// over the type index.
+pub(crate) struct TraitAnchorMeta<'a> {
+    pub canonical: &'a str,
+    pub decl_layer: &'a Option<String>,
+    pub visible: bool,
+}
+
 /// Construct one anchor's `AnchorInfo` from the workspace type index
-/// plus layer definitions: collect overriding impl canonicals, derive
-/// their layers, look up the trait method's source location, and the
-/// default-body flag. Operation: per-method assembly.
+/// plus per-trait metadata. `trait_visible` is sourced from the
+/// workspace-wide `visible_canonicals` set (the same set
+/// `pub_fns::collect_pub_fns_by_layer` uses) so anchor visibility
+/// agrees with the rest of call-parity. Operation: per-method
+/// assembly.
 pub(crate) fn build_anchor_info(
     type_index: &WorkspaceTypeIndex,
     layers: &LayerDefinitions,
-    trait_canonical: &str,
+    trait_meta: &TraitAnchorMeta<'_>,
     method: &str,
-    decl_layer: &Option<String>,
 ) -> AnchorInfo {
-    let overriding = type_index.overriding_impls_for(trait_canonical, method);
+    // Strict: only overriding impls contribute layers and method
+    // canonicals. Inherited defaults aren't included — the default
+    // body lives on the trait (not the impl's layer), and fabricating
+    // `<Impl>::<method>` would collide with unrelated inherent methods
+    // of the same name.
+    let overriding = type_index.overriding_impls_for(trait_meta.canonical, method);
     let impl_layers: HashSet<String> = overriding
         .iter()
         .filter_map(|impl_canon| layers.layer_of_crate_path(impl_canon).map(String::from))
@@ -115,16 +112,15 @@ pub(crate) fn build_anchor_info(
         .map(|impl_canon| format!("{impl_canon}::{method}"))
         .collect();
     let location = type_index
-        .trait_method_location(trait_canonical, method)
+        .trait_method_location(trait_meta.canonical, method)
         .cloned();
-    let has_default_body = type_index.trait_method_has_default_body(trait_canonical, method);
-    let trait_visible = type_index.trait_is_visible(trait_canonical);
+    let has_default_body = type_index.trait_method_has_default_body(trait_meta.canonical, method);
     AnchorInfo {
         impl_layers,
         impl_method_canonicals,
-        decl_layer: decl_layer.clone(),
+        decl_layer: trait_meta.decl_layer.clone(),
         has_default_body,
-        trait_visible,
+        trait_visible: trait_meta.visible,
         location,
     }
 }

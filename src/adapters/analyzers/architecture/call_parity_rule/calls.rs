@@ -682,11 +682,13 @@ fn canonical_edges_for_method(
 /// `dyn Trait.method()` dispatch. The anchor represents the logical
 /// capability; concrete impls are NOT fanned out as separate edges
 /// here — fanout would build N-element touchpoint sets that fire
-/// Check C false-positives for a single boundary call. Reachability
-/// from anchor to impl bodies (overriding impls only) is wired in a
-/// separate graph pass (`workspace_graph::add_anchor_to_impl_edges`).
-/// Filters on `trait_has_method` so `dyn Trait.unrelated_method()`
-/// still falls through to `<method>:name`. Operation: index lookup.
+/// Check C false-positives for a single boundary call. The anchor is
+/// intentionally treated as a leaf in the call graph (no
+/// anchor → impl edges are added) — calls inside default bodies and
+/// overriding impl bodies are out of scope; documented as a known
+/// limitation in `book/adapter-parity.md`. Filters on
+/// `trait_has_method` so `dyn Trait.unrelated_method()` still falls
+/// through to `<method>:name`. Operation: index lookup.
 fn trait_dispatch_edges(
     trait_segs: &[String],
     method: &str,

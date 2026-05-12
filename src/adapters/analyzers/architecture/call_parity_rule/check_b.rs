@@ -54,13 +54,8 @@ pub(crate) fn check_missing_adapter<'ast>(
     touchpoints: &HandlerTouchpoints,
     cp: &CompiledCallParity,
 ) -> Vec<MatchLocation> {
-    // Empty slice fallback when the target layer has no concrete
-    // `PubFnInfo` entries (anchor-only target surfaces: target-layer
-    // trait with default body but no other pub fns; or ports trait
-    // impl'd only by a private application type). Without this, the
-    // loop is silently skipped AND `target_anchor_capabilities` is
-    // never enumerated — masking missing-adapter findings on the
-    // anchor-only surface.
+    // Anchor-only target surfaces have no `PubFnInfo` entries; the
+    // empty-slice fallback keeps the anchor enumeration alive.
     let empty_targets: Vec<PubFnInfo<'ast>> = Vec::new();
     let targets = pub_fns_by_layer.get(&cp.target).unwrap_or(&empty_targets);
     let coverage = build_adapter_coverage(pub_fns_by_layer, touchpoints, cp);
@@ -72,21 +67,9 @@ pub(crate) fn check_missing_adapter<'ast>(
     };
     let mut out = Vec::new();
     for info in targets {
-        // Concrete impl-methods of an anchor-backed trait are skipped
-        // ONLY when no adapter has the concrete in its coverage — i.e.
-        // every adapter reaches the capability via `dyn Trait.method()`
-        // dispatch. In that case the anchor pass handles the capability
-        // and skipping the concrete avoids a false orphan finding.
-        //
-        // When at least one adapter calls the concrete directly
-        // (`LoggingHandler::handle()` on a struct receiver), the
-        // concrete touchpoint exists in coverage and the concrete pass
-        // must run — otherwise mixed-form drift (cli direct vs mcp
-        // dispatch) silently disappears, leaving only a false-positive
-        // anchor-orphan finding for the adapter that uses the concrete
-        // form. Cross-form synonym handling is intentionally left out;
-        // mixed-form drift produces both a concrete and an anchor
-        // finding, which the inline doc on `inspect_anchor` documents.
+        // Skip the concrete only when no adapter reaches it directly;
+        // otherwise mixed-form drift (cli direct vs mcp dispatch) goes
+        // silent.
         let canonical = canonical_name_for_pub_fn(info);
         if graph.is_anchor_backed_concrete(&canonical, &cp.target, &cp.adapters)
             && !any_adapter_reaches_concrete(&canonical, &coverage)
@@ -105,21 +88,13 @@ pub(crate) fn check_missing_adapter<'ast>(
     out
 }
 
-/// Same coverage check as `inspect_target`, but for synthetic
-/// trait-method anchors. The anchor canonical is the capability —
-/// `dyn Trait.method()` dispatch is what the boundary walker registers
-/// as the touchpoint, so anchor coverage is decided purely by anchor
-/// presence in the per-adapter coverage set. Direct calls to concrete
-/// impl-methods (`LoggingHandler::handle()` straight on a struct
-/// receiver) emit a different concrete edge and are inspected by
-/// `inspect_target` against the concrete `pub_fns_by_layer[target]`
-/// entry — they are NOT folded into anchor coverage here. This means
-/// a workspace where `cli` dispatches via `dyn Trait` and `mcp` calls
-/// the concrete impl directly produces two findings (one anchor
-/// mismatch + one concrete-fn mismatch) for the same logical drift.
-/// Cross-form synonym handling is intentionally left out — it would
-/// require a graph-level synonym index and design discussion before
-/// implementation. Operation: probe coverage on the anchor canonical.
+/// Anchor analogue of `inspect_target`. Mixed-form drift (one
+/// adapter dispatches via `dyn Trait`, another calls an overriding
+/// concrete impl directly) intentionally produces paired anchor +
+/// concrete findings. All-direct drift on inherited-default impls
+/// stays undetected — the inherited body lives on the trait, so the
+/// impl-method canonical is phantom and not iterated; cross-form
+/// synonym handling is out of scope.
 fn inspect_anchor(anchor: &str, info: &AnchorInfo, ctx: &TargetCtx<'_>) -> Option<MatchLocation> {
     if is_anchor_excluded(anchor, info, ctx.cp) {
         return None;
@@ -129,29 +104,18 @@ fn inspect_anchor(anchor: &str, info: &AnchorInfo, ctx: &TargetCtx<'_>) -> Optio
     if missing.is_empty() {
         return None;
     }
-    // Suppress orphan-style anchor findings (`reached.is_empty()`) when
-    // the capability is exercised via the concrete form by some
-    // adapter — either directly (impl-method canonical in coverage) or
-    // transitively (impl-method canonical in the reachable set). Without
-    // this, an all-direct-concrete scenario (every adapter calls
-    // `LoggingHandler::handle()` via UFCS, none dispatches via
-    // `dyn Trait`) produces a false-positive "anchor missing from all
-    // adapters" finding even though every adapter covers the
-    // capability. Mixed-form drift still surfaces as the documented
-    // paired findings (the concrete pass + this anchor pass with
-    // `reached` non-empty); only the fully-orphan-looking all-direct
-    // case is silenced here.
+    // Orphan suppression: capability is exercised via the concrete
+    // form (covered or transitively reachable) when no adapter reaches
+    // the anchor directly.
     if reached.is_empty()
         && (ctx.reachable.contains(anchor)
             || any_impl_canonical_covered_or_reachable(info, ctx.coverage, ctx.reachable))
     {
         return None;
     }
-    // Anchor findings need a real source location for suppression-window
-    // matching, the orphan detector, and SARIF `startLine` validity. If
-    // the type index didn't capture a span (synthetic fixtures, edge
-    // cases), suppressing the finding is preferable to emitting one
-    // with line=0 that silently won't match any `qual:allow` window.
+    // Anchor findings without a real span can't participate in
+    // suppression-window matching or SARIF — drop rather than emit
+    // line=0.
     let location = info.location.as_ref()?;
     let mut reached = reached;
     reached.sort();
@@ -203,22 +167,15 @@ fn inspect_target(info: &PubFnInfo<'_>, ctx: &TargetCtx<'_>) -> Option<MatchLoca
     ))
 }
 
-/// True iff at least one adapter has `concrete` in its boundary
-/// coverage set — i.e. some adapter calls the concrete impl-method
-/// directly (not via `dyn Trait` dispatch). Used to gate the
-/// anchor-backed-concrete skip so the concrete pass still runs in
-/// mixed-form scenarios. Operation: per-adapter probe.
+/// True iff any adapter has `concrete` in its coverage. Gates the
+/// anchor-backed-concrete skip so mixed-form drift stays visible.
 fn any_adapter_reaches_concrete(concrete: &str, coverage: &AdapterCoverage) -> bool {
     coverage.values().any(|set| set.contains(concrete))
 }
 
-/// True iff at least one of the anchor's overriding impl-method
-/// canonicals is covered by some adapter (`coverage` contains it) or
-/// transitively reachable (`reachable` contains it). Used by the
-/// anchor-orphan suppression branch so an all-direct-concrete
-/// workspace doesn't produce a false orphan finding for the trait
-/// anchor — the capability IS covered, just via the concrete form.
-/// Operation: set-membership scan over `info.impl_method_canonicals`.
+/// True iff any backed impl-method canonical is covered or
+/// transitively reachable. Drives the anchor-orphan suppression so
+/// all-direct-concrete coverage doesn't fire a false orphan.
 fn any_impl_canonical_covered_or_reachable(
     info: &AnchorInfo,
     coverage: &AdapterCoverage,
@@ -236,14 +193,9 @@ fn is_excluded(canonical: &str, cp: &CompiledCallParity) -> bool {
     cp.exclude_targets.is_match(stripped)
 }
 
-/// True iff an anchor finding should be silenced by `exclude_targets`.
-/// Tests the anchor canonical AND every backed `impl_method_canonical`,
-/// so a glob aimed at the impl path (e.g. `application::admin::*`)
-/// silences both the concrete pass for the impl method and the anchor
-/// pass for the trait method that backs it. Without this, users would
-/// have to maintain two parallel exclude entries — one for the impl
-/// path, one for the trait path — to silence drift on a single feature.
-/// Operation: predicate composition over `is_excluded`.
+/// True iff `exclude_targets` matches the anchor canonical or any of
+/// its backed impl-method canonicals. Lets a single impl-path glob
+/// silence both the concrete and anchor finding for the same feature.
 fn is_anchor_excluded(anchor: &str, info: &AnchorInfo, cp: &CompiledCallParity) -> bool {
     if is_excluded(anchor, cp) {
         return true;

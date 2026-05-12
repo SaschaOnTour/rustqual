@@ -134,6 +134,108 @@ Third-pass review (Codex 2026-05-04 round 3):
   method's source location. Wording updated to reference the
   round-2 P4 entry that delivered real `MethodLocation` capture.
 
+Fourth-pass review (Codex 2026-05-04 round 4):
+
+- **Trait visibility uses the shared workspace-canonical set** (P1):
+  the round-3 trait visibility filter implemented a private
+  `node.vis == Public` check (later patched with `enclosing_mod_visible`
+  tracking), which diverged from the rest of call-parity's
+  visibility model — `pub(crate)`, `pub(super)`, `pub(in <path>)`,
+  file-backed module visibility, and `pub use` re-exports were all
+  missed. `pub(crate) trait Handler` with a target impl was rejected
+  as invisible; conversely a `pub trait` in a private file-backed
+  module could still slip through. Fix: `populate_anchor_index` now
+  reuses the workspace-wide `visible_canonicals` set built by
+  `pub_fns_visibility::collect_visible_type_canonicals_workspace`
+  (the same set `pub_fns::collect_pub_fns_by_layer` consumes), so
+  trait visibility agrees with the rest of call-parity. Removed the
+  redundant `WorkspaceTypeIndex.trait_visibility` map and the
+  `TraitCollector.enclosing_mod_visible` tracking — both subsumed
+  by the canonical-set lookup.
+- **Inherited-default impls count as target capability** (P2): the
+  round-1 `overriding_impls_for` builder filtered non-overriding
+  impls out of `impl_layers` and `impl_method_canonicals`. With
+  `pub trait Handler { fn handle(&self) {} } impl Handler for
+  AppHandler {}` (no override, inherits default body), the body IS
+  callable via the impl, but the anchor was rejected as
+  non-capability — Check B/D silently skipped the entire ports-trait
+  capability. Fix: new `WorkspaceTypeIndex::callable_impls_for`
+  accessor that returns the union of overriding impls plus
+  non-overriding impls when the trait method has a default body.
+  `build_anchor_info` consumes this superset so inherited-default
+  impls in the target layer make the anchor a target capability
+  (and feed the anchor-orphan suppression branch correctly).
+- **Stale `add_anchor_to_impl_edges` reference** (P3): the
+  `trait_dispatch_edges` doc comment in `calls.rs` claimed
+  reachability from anchor to impl bodies was wired by
+  `workspace_graph::add_anchor_to_impl_edges` — function never
+  existed; the design intentionally keeps the anchor as a leaf
+  in the graph. Comment updated to reflect the actual behaviour.
+- **Default-only target anchor in book summary** (P3): the
+  short summary in `book/adapter-parity.md` (the type-inference
+  capability list) still said anchors are recognised "when at least
+  one overriding impl lives in the target layer". The detailed
+  anchor section already documents the default-OR-overriding rule,
+  but the summary contradicted it. Updated.
+
+Fifth-pass review (Codex 2026-05-12 round 5):
+
+- **Revert of round-4 `callable_impls_for` widening** (P1 #1 + #2):
+  the round-4 expansion of `impl_method_canonicals` to absorb
+  non-overriding impls when the trait method has a default body
+  caused two distinct bugs. First, `<Impl>::<method>` canonicals
+  fabricated for inherited-default impls collide with unrelated
+  inherent methods of the same name (`impl X { fn handle … }` +
+  `impl T for X {}`), so Check B silently treats the real inherent
+  method as anchor-backed and skips it. Second, ports-declared
+  default methods with empty target-layer impls falsely promoted
+  the anchor to a target capability — the executable body lives on
+  the ports trait, not target, so Check A/B/D would require parity
+  for code that never crosses into target. Fix: revert to strict
+  overriding-only via the restored `overriding_impls_for` accessor;
+  inherited-default impls no longer contribute to `impl_layers` or
+  `impl_method_canonicals`. Promotion to target capability now
+  requires either (a) the trait is declared in the target layer
+  with a callable body (default body in target OR an overriding
+  impl somewhere), or (b) at least one overriding impl lives in the
+  target layer; default bodies declared OUTSIDE target don't promote
+  through empty target impls. Mixed-form multiplicity drift on
+  inherited defaults remains undetected — documented inline on
+  `inspect_anchor` as a known cross-form synonym limitation.
+- **Book visibility wording aligned with shared canonical set**
+  (P3): the detailed anchor definition in `book/adapter-parity.md`
+  still said workspace-visible means "the trait's own `vis` is
+  `pub` AND every enclosing inline `mod` is `pub`". The code uses
+  the shared `visible_canonicals` set (covering `pub(crate)`,
+  `pub(super)`, `pub(in <path>)`, file-backed module visibility,
+  and `pub use` re-exports). Wording updated to match.
+
+Sixth-pass review (Codex 2026-05-12 round 6):
+
+- **Walker phantom-canonical gate** (P1): `populate_layer_cache`
+  caches `layer_of` for every canonical that appears in the graph,
+  including edge sinks. A fabricated `<Impl>::<method>` from an
+  inherited-default impl (no override, body lives on the trait)
+  therefore got `layer_of == target_layer` and was accepted as a
+  target boundary by `is_target_boundary` even though no real fn
+  node existed with that canonical. Check A would pass on the
+  phantom touchpoint while Check B/D had no way to enumerate the
+  same capability consistently. Fix: `is_target_boundary` (in
+  `touchpoints.rs`) and the sister `is_target_capability_node` (in
+  `check_b_coverage.rs`) now require `graph.forward.contains_key`
+  in addition to the layer match for concrete canonicals. Trait
+  anchors continue through the unified `is_anchor_target_capability`
+  rule untouched. Regression tests
+  `touchpoints_reject_phantom_inherited_default_concrete_canonical`
+  and `touchpoints_recognise_real_target_fn_node`.
+- **Anchor docs round-5 leftover** (P3): the short anchor summary
+  in `book/adapter-parity.md`'s type-inference list still said
+  "at least one impl in the target layer makes the method callable
+  (overriding the signature, or inheriting a default body declared
+  elsewhere)" — that was the round-4 widening, reverted in round 5.
+  Updated to strict "at least one overriding impl lives in target",
+  plus an explicit note that inherited-default impls don't promote.
+
 ### Added
 
 - **Trait-method anchor model for call-parity dispatch**: `dyn

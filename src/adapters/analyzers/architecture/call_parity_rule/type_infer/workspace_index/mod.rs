@@ -126,15 +126,6 @@ pub struct WorkspaceTypeIndex {
     /// trait-dispatch so `dyn Trait.unrelated_method()` stays
     /// unresolved.
     pub trait_methods: HashMap<String, std::collections::HashSet<String>>,
-    /// `trait_canonical → bool` carrying the trait's `pub` visibility
-    /// modifier. A `false` entry means the trait was declared without
-    /// `pub` (`trait Internal { … }`) and isn't part of the public
-    /// architectural surface — the unified target-capability rule
-    /// rejects such anchors so they don't trigger Check B/D findings
-    /// for implementation-detail traits. Missing entries default to
-    /// `false` (defensive — synthetic test fixtures or future
-    /// builders without visibility capture stay invisible).
-    pub trait_visibility: HashMap<String, bool>,
     /// `(trait_canonical, method_name) → source location` (file +
     /// 1-based line + column). Carried alongside `trait_methods` so
     /// synthetic anchor findings can attach a real source location
@@ -260,22 +251,6 @@ impl WorkspaceTypeIndex {
     }
 
     // qual:api
-    /// True iff the trait was declared with a `pub` visibility modifier
-    /// (and thus is part of the public architectural surface). Returns
-    /// `false` for traits without `pub` and for traits not recorded in
-    /// the index — defensive default so synthetic fixtures or future
-    /// build paths without visibility capture treat the trait as
-    /// invisible. The unified target-capability rule consults this so
-    /// private implementation-detail traits don't surface as Check B/D
-    /// targets. Operation.
-    pub fn trait_is_visible(&self, trait_canonical: &str) -> bool {
-        self.trait_visibility
-            .get(trait_canonical)
-            .copied()
-            .unwrap_or(false)
-    }
-
-    // qual:api
     /// Look up the source location of a trait-method declaration.
     /// Returns `None` for traits / methods not recorded in the index
     /// (e.g. test-only items, synthetic test fixtures). Used by the
@@ -291,9 +266,11 @@ impl WorkspaceTypeIndex {
     }
 
     // qual:api
-    /// Set of impl-self-type canonicals that override `method_name` on
-    /// `trait_canonical`. Used by the call-graph builder to populate the
-    /// anchor → impls map (`CallGraph::trait_method_anchors`). Operation.
+    /// Impls that override `method_name` on `trait_canonical`. Strict —
+    /// inherited-default impls aren't included; their canonical
+    /// `<Impl>::<method>` would collide with unrelated inherent methods
+    /// of the same name, and the default body lives on the trait, not
+    /// on the impl's declaring layer.
     pub fn overriding_impls_for(
         &self,
         trait_canonical: &str,
@@ -309,16 +286,8 @@ impl WorkspaceTypeIndex {
     // qual:api
     /// True iff `impl_type_canonical` overrides `method_name` in its
     /// `impl trait_canonical for impl_type_canonical { … }` block.
-    /// Returns false when the impl inherits the trait's default body
-    /// for that method. Returns **true** when there's no record at
-    /// all — preserves the "assume override" behaviour for
-    /// hand-built test indices that populate `trait_impls` without
-    /// `trait_impl_overrides`. The production builder
-    /// (`traits.rs::record_trait_impl`) always populates both. Used by
-    /// `overriding_impls_for` to drive the `<Trait>::<method>` anchor
-    /// → impl-layers map; non-overriding impls don't contribute layers
-    /// to the anchor (so the walker won't recognise the anchor as a
-    /// target boundary purely on default-body impls). Operation.
+    /// Returns `true` when no override record exists — preserves the
+    /// "assume override" behaviour for hand-built test indices.
     pub fn impl_overrides_method(
         &self,
         trait_canonical: &str,

@@ -201,13 +201,8 @@ fn target_anchor_capabilities_includes_default_only_target_layer_trait() {
 
 #[test]
 fn target_anchor_capabilities_excludes_private_target_layer_trait() {
-    // Codex round 3 P1 (2026-05-04): a private (non-`pub`) trait
-    // declared in the target layer is not part of the public
-    // architecture surface. Even with a default body it cannot be
-    // dispatched to from outside its declaring module — so it must
-    // NOT be enumerated as a target capability, otherwise Check B
-    // would falsely demand adapter coverage for an implementation
-    // detail.
+    // A private (non-`pub`) trait isn't workspace-visible and must
+    // never count as architectural surface, even with a default body.
     let ws = build_workspace(&[(
         "src/application/internal.rs",
         // `trait`, not `pub trait` — private.
@@ -231,11 +226,8 @@ fn target_anchor_capabilities_excludes_private_target_layer_trait() {
 
 #[test]
 fn target_anchor_capabilities_excludes_private_ports_trait_with_target_impl() {
-    // Codex round 3 P1 (2026-05-04): a private trait declared in
-    // ports with an impl in the target layer is not architecturally
-    // exposed — the trait isn't usable from outside ports' module.
-    // It must NOT be promoted to a target capability via the
-    // overriding-impl branch of the unified rule.
+    // Private ports trait isn't usable outside its module; even a
+    // target-impl shouldn't promote it to a target capability.
     let ws = build_workspace(&[
         (
             "src/ports/internal.rs",
@@ -264,6 +256,77 @@ fn target_anchor_capabilities_excludes_private_ports_trait_with_target_impl() {
     assert!(
         !caps.contains("crate::ports::internal::Hidden::run"),
         "private ports trait (even with target-layer impl) must NOT be a target capability anchor; got {caps:?}"
+    );
+}
+
+#[test]
+fn target_anchor_capabilities_excludes_inherited_default_when_body_lives_outside_target() {
+    // Empty `impl Handler for AppHandler {}` in target inherits the
+    // default body, but that body lives on the ports trait — the
+    // graph doesn't model it as a target-layer node. The anchor must
+    // NOT count as a target capability; otherwise B/D would require
+    // adapter coverage for a body that never crosses into target.
+    let ws = build_workspace(&[
+        (
+            "src/ports/handler.rs",
+            "pub trait Handler { fn handle(&self) {} }",
+        ),
+        (
+            "src/application/logging.rs",
+            r#"
+            use crate::ports::handler::Handler;
+            pub struct AppHandler;
+            impl Handler for AppHandler {}
+            "#,
+        ),
+    ]);
+    let graph = build_graph_only(
+        &ws,
+        &ports_app_cli_mcp(),
+        &empty_cfg_test(),
+        &HashSet::new(),
+    );
+    let caps: std::collections::HashSet<&str> = graph
+        .target_anchor_capabilities("application", &[])
+        .map(|(name, _)| name)
+        .collect();
+    assert!(
+        !caps.contains("crate::ports::handler::Handler::handle"),
+        "ports default body + empty target impl must NOT promote the anchor to a target capability; got {caps:?}"
+    );
+}
+
+#[test]
+fn target_anchor_capabilities_includes_pub_crate_trait_with_target_impl() {
+    // `pub(crate)` traits are workspace-visible per the shared
+    // `visible_canonicals` set; the anchor must be enumerated.
+    let ws = build_workspace(&[
+        (
+            "src/ports/handler.rs",
+            "pub(crate) trait Handler { fn handle(&self); }",
+        ),
+        (
+            "src/application/logging.rs",
+            r#"
+            use crate::ports::handler::Handler;
+            pub struct LoggingHandler;
+            impl Handler for LoggingHandler { fn handle(&self) {} }
+            "#,
+        ),
+    ]);
+    let graph = build_graph_only(
+        &ws,
+        &ports_app_cli_mcp(),
+        &empty_cfg_test(),
+        &HashSet::new(),
+    );
+    let caps: std::collections::HashSet<&str> = graph
+        .target_anchor_capabilities("application", &[])
+        .map(|(name, _)| name)
+        .collect();
+    assert!(
+        caps.contains("crate::ports::handler::Handler::handle"),
+        "pub(crate) trait with target-layer impl must be a target capability anchor (workspace-visible per `is_visible` model); got {caps:?}"
     );
 }
 

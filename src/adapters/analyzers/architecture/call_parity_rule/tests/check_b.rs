@@ -828,22 +828,90 @@ fn check_b_silent_for_concrete_impl_when_only_anchor_reached() {
 }
 
 #[test]
+fn check_b_flags_inherent_method_even_when_same_name_inherited_default_exists() {
+    // Canonical collision: the inherent method `impl AppHandler { fn
+    // handle… }` and the inherited-default `impl Handler for
+    // AppHandler {}` share the canonical `AppHandler::handle`. The
+    // inherent method has a real body and is a normal target pub-fn
+    // — Check B must surface a missing-adapter finding when no
+    // adapter reaches it. It must NOT be silently treated as
+    // "anchor-backed" via the empty trait impl.
+    let ws = build_workspace(&[
+        (
+            "src/ports/handler.rs",
+            "pub trait Handler { fn handle(&self) {} }",
+        ),
+        (
+            "src/application/logging.rs",
+            r#"
+            use crate::ports::handler::Handler;
+            pub struct AppHandler;
+            impl Handler for AppHandler {}
+            impl AppHandler { pub fn handle(&self) {} }
+            "#,
+        ),
+        ("src/cli/handlers.rs", "pub fn cmd_other() {}"),
+        ("src/mcp/handlers.rs", "pub fn mcp_other() {}"),
+    ]);
+    let findings = run_check_b(&ws, &ports_app_cli_mcp(), &ports_cp(), &empty_cfg_test());
+    let pairs = missing_pairs(&findings);
+    let inherent = "crate::application::logging::AppHandler::handle";
+    assert!(
+        pairs.iter().any(|(target, _)| target == inherent),
+        "inherent method `AppHandler::handle` must produce a missing-adapter finding; it must not be silently absorbed into the trait anchor; got {pairs:?}"
+    );
+}
+
+#[test]
+fn check_b_silent_anchor_when_adapters_call_inherited_default_concretely() {
+    // Inherited-default impl: every adapter covers the capability via
+    // the concrete form (UFCS or struct-method call). The anchor pass
+    // must be silent because impl_method_canonicals includes the
+    // inherited-default impls when the trait method has a default
+    // body.
+    let ws = build_workspace(&[
+        (
+            "src/ports/handler.rs",
+            "pub trait Handler { fn handle(&self) {} }",
+        ),
+        (
+            "src/application/logging.rs",
+            // Empty impl — inherits the trait default body.
+            r#"
+            use crate::ports::handler::Handler;
+            pub struct AppHandler;
+            impl Handler for AppHandler {}
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::logging::AppHandler;
+            pub fn cmd_log() { AppHandler::handle(&AppHandler); }
+            "#,
+        ),
+        (
+            "src/mcp/handlers.rs",
+            r#"
+            use crate::application::logging::AppHandler;
+            pub fn mcp_log() { AppHandler::handle(&AppHandler); }
+            "#,
+        ),
+    ]);
+    let findings = run_check_b(&ws, &ports_app_cli_mcp(), &ports_cp(), &empty_cfg_test());
+    let pairs = missing_pairs(&findings);
+    let anchor = "crate::ports::handler::Handler::handle";
+    assert!(
+        !pairs.iter().any(|(target, _)| target == anchor),
+        "anchor must be silent when every adapter covers the capability via the inherited-default concrete form; got {pairs:?}"
+    );
+}
+
+#[test]
 fn check_b_anchor_finding_excluded_via_impl_path_glob() {
-    // Codex round 3 P2 (2026-05-04): users naturally write
-    // `exclude_targets = ["application::admin::*"]` to silence drift
-    // on a target-layer feature. For concrete target pub-fns this
-    // works because `is_excluded` matches the concrete canonical
-    // (`application::admin::AdminHandler::handle`). But the anchor
-    // pass tests `is_excluded` only against the ANCHOR canonical
-    // (`ports::handler::Handler::handle`) — the impl-path glob
-    // never matches → anchor finding fires anyway.
-    //
-    // Fix: anchor `is_excluded` checks the anchor canonical AND each
-    // backed `impl_method_canonical` — if any matches the glob, the
-    // anchor finding is silenced. Users now have one consistent
-    // exclude form (impl path) that covers both the concrete and the
-    // anchor pass, mirroring how `is_anchor_backed_concrete` ties
-    // the two together.
+    // `exclude_targets = ["application::admin::*"]` matches the impl
+    // path; the anchor finding for `ports::Handler::handle` must be
+    // silenced via the anchor's backed impl_method_canonicals.
     let ws = build_workspace(&[
         (
             "src/ports/handler.rs",
@@ -873,21 +941,9 @@ fn check_b_anchor_finding_excluded_via_impl_path_glob() {
 
 #[test]
 fn check_b_silent_anchor_when_all_adapters_cover_via_direct_concrete() {
-    // Codex round 3 P1 (2026-05-04): with the conditional concrete
-    // skip, all-direct-concrete scenarios already make the concrete
-    // pass silent (every adapter covers the concrete target). But
-    // the anchor pass in `inspect_anchor` still sees `reached = []`
-    // (no adapter has the anchor in coverage) and the reachable BFS
-    // doesn't contain the anchor (concrete impl bodies don't call
-    // the anchor — they ARE the anchor's implementation). Result:
-    // a false-positive anchor orphan finding "missing from all
-    // adapters" even though every adapter exercises the capability
-    // via direct concrete.
-    //
-    // Fix: in `inspect_anchor`, when `reached.is_empty()`, also
-    // suppress when at least one of `info.impl_method_canonicals`
-    // is in some adapter's coverage (or in the reachable set) —
-    // the capability IS exercised, just via the concrete form.
+    // Every adapter calls the concrete impl directly; no dispatch
+    // anywhere. The anchor pass must suppress the orphan finding via
+    // the impl-method-canonical coverage check.
     let ws = build_workspace(&[
         (
             "src/ports/handler.rs",
@@ -927,21 +983,8 @@ fn check_b_silent_anchor_when_all_adapters_cover_via_direct_concrete() {
 
 #[test]
 fn check_b_does_not_skip_concrete_when_an_adapter_calls_it_directly() {
-    // Codex P1 #2 (2026-05-04 review): when one adapter reaches the
-    // capability via direct concrete call (`LoggingHandler::handle()`)
-    // and another via `dyn Trait` dispatch (anchor), the unconditional
-    // `is_anchor_backed_concrete` skip removes the concrete from
-    // Check B's iteration entirely. The anchor pass then reports the
-    // adapter that called the concrete directly as missing — a false
-    // orphan, because that adapter DOES reach the capability, just via
-    // the concrete form.
-    //
-    // Conservative fix: only skip the concrete when NO adapter has it
-    // in coverage (all adapters reach via dispatch). When at least one
-    // adapter calls the concrete directly, the concrete pass must run
-    // — at minimum, the concrete drift becomes visible (the inline
-    // documentation acknowledges the resulting double-finding for
-    // mixed-form drift; cross-form synonym handling stays out of scope).
+    // Mixed-form drift: cli direct concrete, mcp dispatch. The
+    // concrete pass must still run so the form-mismatch surfaces.
     let ws = build_workspace(&[
         (
             "src/ports/handler.rs",
@@ -957,8 +1000,6 @@ fn check_b_does_not_skip_concrete_when_an_adapter_calls_it_directly() {
         ),
         (
             "src/cli/handlers.rs",
-            // Direct concrete call (UFCS) — emits the concrete canonical
-            // unambiguously, regardless of receiver type inference.
             r#"
             use crate::application::logging::LoggingHandler;
             pub fn cmd_log() {
@@ -968,7 +1009,6 @@ fn check_b_does_not_skip_concrete_when_an_adapter_calls_it_directly() {
         ),
         (
             "src/mcp/handlers.rs",
-            // dyn-Trait dispatch — touchpoint is the anchor.
             r#"
             use crate::ports::handler::Handler;
             pub fn mcp_dispatch(h: &dyn Handler) { h.handle(); }
@@ -1100,20 +1140,9 @@ fn check_b_anchor_only_target_surface_still_inspected() {
 
 #[test]
 fn check_b_anchor_reached_transitively_via_target_chain_no_finding() {
-    // Codex P2 (2026-05-04 review): the post-boundary reachable BFS
-    // only follows callees whose canonical resolves directly to the
-    // target layer. A ports-declared trait anchor backed by a target
-    // impl has `layer_of(anchor) == "ports"`, so the BFS skips it —
-    // even though the anchor IS target capability via the unified rule.
-    // Result: an anchor wired up transitively by an adapter (adapter →
-    // target fn → `dyn Trait.method()`) gets reported as an orphan
-    // because `reachable` doesn't contain it.
-    //
-    // Setup: cli pub-fn reaches `dispatch` (target fn) which dispatches
-    // through `dyn Handler`. mcp doesn't reach the anchor at all.
-    // Expected: anchor MUST NOT appear in findings (post-boundary
-    // plumbing wired up via at least one adapter is silent per
-    // v1.2.1+ semantic).
+    // cli reaches a target fn that dispatches via `dyn Handler`; mcp
+    // doesn't reach the anchor at all. The anchor must stay silent
+    // (post-boundary plumbing wired via at least one adapter).
     let ws = build_workspace(&[
         (
             "src/ports/handler.rs",
@@ -1148,15 +1177,9 @@ fn check_b_anchor_reached_transitively_via_target_chain_no_finding() {
 
 #[test]
 fn check_b_anchor_inspected_even_when_target_layer_absent_from_pub_fns_map() {
-    // Defensive guard for the `None` branch of `pub_fns_by_layer.get(target)`.
-    // Codex P1 (2026-05-04 review): even though `or_default()` in the
-    // pub-fn collector empirically creates an entry for every layer with
-    // ≥1 file, the target-anchor enumeration must NOT depend on that
-    // invariant. We strip the target entry from pub_fns_by_layer before
-    // calling `check_missing_adapter` to simulate any future refactor
-    // (or weird configuration) that could leave the target absent. The
-    // anchor capability must still be enumerated and the missing-adapter
-    // finding emitted.
+    // Strips the target entry from pub_fns_by_layer to exercise the
+    // `None` branch of `get(target)`. Anchor enumeration must still
+    // run.
     use super::support::borrowed_files;
     use crate::adapters::analyzers::architecture::call_parity_rule::build_handler_touchpoints;
     use crate::adapters::analyzers::architecture::call_parity_rule::check_b::check_missing_adapter;

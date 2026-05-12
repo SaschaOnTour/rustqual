@@ -45,25 +45,11 @@ pub(super) fn build_adapter_coverage(
     coverage
 }
 
-/// Set of target-layer canonicals transitively reachable from at least
-/// one adapter touchpoint, traversing only target-capability edges.
-///
-/// Used to distinguish post-boundary helpers (wired into adapter
-/// coverage via target-internal callers — silent) from genuine
-/// orphans and dead target-layer islands (flagged). Multi-source
-/// forward BFS seeded from the touchpoint union.
-///
-/// A callee counts as a target-capability node when EITHER (a) its
-/// resolved layer matches `target_layer`, OR (b) it is a synthetic
-/// trait-method anchor that passes the unified
-/// `is_anchor_target_capability` rule for `(target_layer, adapter_layers)`.
-/// Without (b), a `dyn Trait.method()` dispatch reached transitively
-/// from an adapter would be invisible to the BFS (anchor's
-/// `layer_of()` is the trait declaration layer, e.g. `ports`), and
-/// Check B would falsely flag the anchor as orphan even though an
-/// adapter wires it up via a target-internal caller.
-/// Operation: BFS over `graph.forward`, gated by the unified
-/// target-capability predicate.
+/// Target-capability nodes transitively reachable from any adapter
+/// touchpoint. Distinguishes post-boundary plumbing (silent) from
+/// genuine orphans (flagged). Forward BFS over `graph.forward`,
+/// gated by `is_target_capability_node` so trait anchors reached
+/// via target-internal callers stay visible.
 pub(super) fn build_adapter_reachable_targets(
     coverage: &AdapterCoverage,
     graph: &CallGraph,
@@ -94,16 +80,18 @@ pub(super) fn build_adapter_reachable_targets(
     reachable
 }
 
-/// True when `canonical` is either a direct target-layer node or a
-/// synthetic trait-method anchor that the unified rule promotes to a
-/// target capability. Operation: predicate composition.
+/// True when `canonical` is a real target-layer graph node or a
+/// trait-method anchor passing the unified target-capability rule.
+/// Phantom edge sinks (e.g. fabricated `<Impl>::<method>` canonicals
+/// from inherited-default impls) carry a cached `layer_of` but no
+/// `forward` entry; they must not propagate as target capabilities.
 fn is_target_capability_node(
     canonical: &str,
     graph: &CallGraph,
     target_layer: &str,
     adapter_layers: &[String],
 ) -> bool {
-    if graph.layer_of(canonical) == Some(target_layer) {
+    if graph.layer_of(canonical) == Some(target_layer) && graph.forward.contains_key(canonical) {
         return true;
     }
     graph

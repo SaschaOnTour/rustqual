@@ -19,7 +19,9 @@
 //! file-local helpers — walking only pub fns would under-count delegation
 //! chains and trigger false positives in Check A.
 
-use super::anchor_index::{build_anchor_info, is_anchor_target_capability, AnchorInfo};
+use super::anchor_index::{
+    build_anchor_info, is_anchor_target_capability, AnchorInfo, TraitAnchorMeta,
+};
 use super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
 use super::file_fn_collector::FileFnCollector;
 use super::type_infer::{build_workspace_type_index, WorkspaceIndexInputs, WorkspaceTypeIndex};
@@ -338,23 +340,42 @@ pub(crate) fn build_call_graph<'ast>(
         transparent_wrappers,
     });
     let mut graph = CallGraph::new();
+    walk_files_into_graph(files, &workspace_files, &type_index, &mut graph);
+    let visible_canonicals = super::pub_fns_visibility::collect_visible_type_canonicals_workspace(
+        files,
+        cfg_test_files,
+        aliases_per_file,
+        &crate_root_modules,
+        transparent_wrappers,
+    );
+    populate_anchor_index(&mut graph, &type_index, layers, &visible_canonicals);
+    populate_layer_cache(&mut graph, layers);
+    graph
+}
+
+/// Per-file pass that runs `FileFnCollector` over every workspace file,
+/// recording fn definitions and their canonical calls into `graph`.
+/// Operation: per-file delegate to the collector.
+fn walk_files_into_graph<'ast>(
+    files: &[(&'ast str, &'ast syn::File)],
+    workspace_files: &HashMap<String, FileScope<'ast>>,
+    type_index: &WorkspaceTypeIndex,
+    graph: &mut CallGraph,
+) {
     for (path, ast) in files {
         let Some(file) = workspace_files.get(*path) else {
             continue;
         };
         let mut collector = FileFnCollector {
             file,
-            workspace_files: &workspace_files,
-            type_index: &type_index,
+            workspace_files,
+            type_index,
             impl_type_stack: Vec::new(),
             mod_stack: Vec::new(),
-            graph: &mut graph,
+            graph,
         };
         collector.visit_file(ast);
     }
-    populate_anchor_index(&mut graph, &type_index, layers);
-    populate_layer_cache(&mut graph, layers);
-    graph
 }
 
 /// Mirror `WorkspaceTypeIndex.trait_methods` + `trait_impls` into the
@@ -368,14 +389,20 @@ fn populate_anchor_index(
     graph: &mut CallGraph,
     type_index: &WorkspaceTypeIndex,
     layers: &LayerDefinitions,
+    visible_canonicals: &HashSet<String>,
 ) {
     for (trait_canonical, methods) in type_index.trait_methods_iter() {
         let decl_layer = layers
             .layer_of_crate_path(trait_canonical)
             .map(String::from);
+        let trait_meta = TraitAnchorMeta {
+            canonical: trait_canonical,
+            decl_layer: &decl_layer,
+            visible: visible_canonicals.contains(trait_canonical),
+        };
         for method in methods {
             let anchor = format!("{trait_canonical}::{method}");
-            let info = build_anchor_info(type_index, layers, trait_canonical, method, &decl_layer);
+            let info = build_anchor_info(type_index, layers, &trait_meta, method);
             graph.trait_method_anchors.insert(anchor, info);
         }
     }

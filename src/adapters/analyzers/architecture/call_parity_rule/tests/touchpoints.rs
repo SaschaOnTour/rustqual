@@ -375,9 +375,109 @@ fn touchpoints_skip_anchor_declared_in_peer_adapter_layer() {
     // adapter), so the walker MUST refuse to register it as a target
     // boundary — otherwise CLI inherits MCP's reachability into
     // application via the anchor and fakes adapter delegation.
-    // Regression for the v1.2.2 regression that anchor promotion
-    // bypassed the existing peer-adapter filter (review pass
-    // 2026-05-04 P2 #2).
+    let ws = build_workspace(&[
+        (
+            "src/mcp/handler.rs",
+            "pub trait Handler { fn handle(&self); }",
+        ),
+        (
+            "src/application/logging.rs",
+            r#"
+            use crate::mcp::handler::Handler;
+            pub struct LoggingHandler;
+            impl Handler for LoggingHandler { fn handle(&self) {} }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::mcp::handler::Handler;
+            pub fn cmd_via_dyn_peer(h: &dyn Handler) { h.handle(); }
+            "#,
+        ),
+    ]);
+    let touchpoints = compute_touchpoints_for(
+        &ws,
+        &three_layer(),
+        &cli_mcp_config(3),
+        "cmd_via_dyn_peer",
+        &empty_cfg_test(),
+    );
+    assert_set(touchpoints, &[]);
+}
+
+#[test]
+fn touchpoints_reject_phantom_inherited_default_concrete_canonical() {
+    // Adapter calls AppHandler::handle (UFCS) where the impl is
+    // empty `impl Handler for AppHandler {}`. The fabricated
+    // canonical `crate::application::logging::AppHandler::handle`
+    // is added as an edge sink and `layer_of` caches `application`
+    // for it, but no graph node exists with that body (the default
+    // lives on the trait in ports). The walker must NOT treat the
+    // phantom as a target boundary — otherwise Check A passes on a
+    // touchpoint that B/D can't enumerate consistently.
+    let ws = build_workspace(&[
+        (
+            "src/ports/handler.rs",
+            "pub trait Handler { fn handle(&self) {} }",
+        ),
+        (
+            "src/application/logging.rs",
+            r#"
+            use crate::ports::handler::Handler;
+            pub struct AppHandler;
+            impl Handler for AppHandler {}
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::logging::AppHandler;
+            pub fn cmd_log() { AppHandler::handle(&AppHandler); }
+            "#,
+        ),
+    ]);
+    let tps = compute_touchpoints_for(
+        &ws,
+        &ports_app_cli_mcp(),
+        &cli_mcp_config(3),
+        "cmd_log",
+        &empty_cfg_test(),
+    );
+    let phantom = "crate::application::logging::AppHandler::handle";
+    assert!(
+        !tps.contains(phantom),
+        "phantom inherited-default canonical must NOT be registered as touchpoint (no real fn node); got {tps:?}"
+    );
+}
+
+#[test]
+fn touchpoints_recognise_real_target_fn_node() {
+    // Sanity check: a real `pub fn` in target IS a boundary. Gates
+    // the round-6 phantom filter to the right side — we must not
+    // accidentally drop legitimate concrete target fns.
+    let ws = build_workspace(&[
+        ("src/application/stats.rs", "pub fn get_stats() {}"),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::stats::get_stats;
+            pub fn cmd_stats() { get_stats(); }
+            "#,
+        ),
+    ]);
+    let tps = compute_touchpoints_for(
+        &ws,
+        &ports_app_cli_mcp(),
+        &cli_mcp_config(3),
+        "cmd_stats",
+        &empty_cfg_test(),
+    );
+    let real = "crate::application::stats::get_stats";
+    assert!(
+        tps.contains(real),
+        "real target-layer pub fn must be a touchpoint; got {tps:?}"
+    );
     let ws = build_workspace(&[
         (
             "src/mcp/handler.rs",
