@@ -197,9 +197,13 @@ Fifth-pass review (Codex 2026-05-12 round 5):
   with a callable body (default body in target OR an overriding
   impl somewhere), or (b) at least one overriding impl lives in the
   target layer; default bodies declared OUTSIDE target don't promote
-  through empty target impls. Mixed-form multiplicity drift on
-  inherited defaults remains undetected — documented inline on
-  `inspect_anchor` as a known cross-form synonym limitation.
+  through empty target impls. Unambiguous inherited-default concrete
+  calls are folded onto the trait anchor by the round-7 edge-rewrite
+  pass, so drift on them is counted against the anchor. The remaining
+  blind spot is the ambiguous multi-trait default case (a type
+  implementing two traits with the same default method name): the
+  round-8 ambiguity guard leaves those phantoms in place rather than
+  guessing.
 - **Book visibility wording aligned with shared canonical set**
   (P3): the detailed anchor definition in `book/adapter-parity.md`
   still said workspace-visible means "the trait's own `vis` is
@@ -314,20 +318,27 @@ Eighth-pass review (Codex 2026-05-12 round 8):
   Trait.method()` now emits a single synthetic
   `<Trait>::<method>` anchor instead of one edge per overriding
   workspace impl. The boundary walker recognises the anchor as a
-  target boundary when at least one overriding impl lives in the
-  target layer (`CallGraph::trait_method_anchors` populated by
-  `populate_anchor_index`). Concrete impl-method canonicals never
-  enter the touchpoint set via dispatch, so Check C doesn't fire on
-  what is semantically a single boundary call.
+  target boundary when (a) the trait is declared in the target
+  layer with a callable body (default body in target OR an
+  overriding impl), or (b) at least one overriding impl lives in
+  the target layer; non-target default bodies are not promoted
+  through empty target impls (`CallGraph::trait_method_anchors`
+  populated by `populate_anchor_index`). Concrete impl-method
+  canonicals never enter the touchpoint set via dispatch, so
+  Check C doesn't fire on what is semantically a single boundary
+  call. Unambiguous inherited-default UFCS calls are routed to
+  the same anchor by the edge-rewrite post-pass.
 - **Anchors as target capabilities for Check B/D**:
   `CallGraph::target_anchor_capabilities(target)` enumerates
-  trait-method anchors with overriding impls in the target layer.
-  Check B iterates them alongside concrete `pub_fns_by_layer[target]`,
-  so dispatch-only adapter coverage is checked for parity and orphan
-  status; Check D counts handlers per anchor for multiplicity. Anchor
-  findings carry the trait method's actual source location (file +
-  1-based line + column) — see the round-2 P4 entry above for the
-  `MethodLocation` capture path.
+  trait-method anchors that pass the unified target-capability
+  rule (target-declared callable body OR overriding impl in
+  target). Check B iterates them alongside concrete
+  `pub_fns_by_layer[target]`, so dispatch-only adapter coverage
+  is checked for parity and orphan status; Check D counts handlers
+  per anchor for multiplicity. Anchor findings carry the trait
+  method's actual source location (file + 1-based line + column)
+  — see the round-2 P4 entry above for the `MethodLocation`
+  capture path.
 - **Walker peer-adapter check before anchor promotion**:
   `TouchpointWalk::run` now checks `is_peer_adapter` BEFORE
   `is_target_boundary`. A trait anchor declared in a peer-adapter
