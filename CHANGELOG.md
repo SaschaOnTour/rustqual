@@ -361,6 +361,26 @@ Eleventh-pass review (Codex 2026-05-12 round 11, doc-only):
   classifies each bullet's topic, so readers no longer assume only
   the first two items are in scope.
 
+Fifteenth-pass review (Codex 2026-05-13 round 15):
+
+- **Repeated-match dedup leaked into text/HTML via shared
+  projection** (P2): round 13's fix routed the JSON repeated-match
+  builder to a `(enum_name, sorted participant locations)` dedup
+  key, but the shared `split_dry_findings` projection
+  (`src/adapters/report/projections/dry.rs`) — consumed by the
+  text and HTML reporters — still deduped by `enum_name` alone.
+  Two distinct repeated-match patterns over the same enum
+  therefore collapsed into one rendered group outside JSON, so
+  reporter parity regressed in the very next pass. Fix:
+  `build_repeated_match_groups` now goes through the existing
+  `dedup_by_locations` helper (same path that `build_duplicate_groups`
+  and `build_fragment_groups` use), keying on the participant
+  location set. Regression tests
+  `split_dry_findings_keeps_distinct_repeated_match_groups_over_same_enum`
+  + `split_dry_findings_collapses_duplicate_repeated_match_group_emissions`
+  in `src/adapters/report/tests/projections_dry.rs` lock the dedup
+  contract at the projection layer so every reporter benefits.
+
 Fourteenth-pass review (user-driven proactive A21 sweep
 2026-05-12 round 14):
 

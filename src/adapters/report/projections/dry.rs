@@ -156,27 +156,25 @@ fn build_fragment_groups(findings: &[DryFinding]) -> Vec<DryGroupRow> {
 }
 
 fn build_repeated_match_groups(findings: &[DryFinding]) -> Vec<DryGroupRow> {
-    use std::collections::HashSet;
-    let mut seen: HashSet<String> = HashSet::new();
-    let mut out = Vec::new();
-    findings
-        .iter()
-        .filter(|f| !f.common.suppressed)
-        .for_each(|f| {
-            if let DryFindingDetails::RepeatedMatch {
-                enum_name,
-                participants,
-            } = &f.details
-            {
-                if seen.insert(enum_name.clone()) {
-                    out.push(DryGroupRow {
-                        kind_label: enum_name.clone(),
-                        participants: rep_participants(participants),
-                    });
-                }
-            }
-        });
-    out
+    dedup_by_locations(findings, |f| match &f.details {
+        DryFindingDetails::RepeatedMatch {
+            enum_name,
+            participants,
+        } => {
+            let key: Vec<(String, usize)> = participants
+                .iter()
+                .map(|p| (p.file.clone(), p.line))
+                .collect();
+            Some((
+                DryGroupRow {
+                    kind_label: enum_name.clone(),
+                    participants: rep_participants(participants),
+                },
+                key,
+            ))
+        }
+        _ => None,
+    })
 }
 
 fn build_dead_code(findings: &[DryFinding]) -> Vec<DeadCodeRow> {

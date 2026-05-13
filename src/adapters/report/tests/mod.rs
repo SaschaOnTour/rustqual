@@ -4,5 +4,6 @@ mod dot;
 mod findings_list;
 mod github;
 mod json;
+mod projections_dry;
 mod root;
 mod suggestions;
