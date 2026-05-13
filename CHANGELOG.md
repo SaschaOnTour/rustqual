@@ -361,6 +361,29 @@ Eleventh-pass review (Codex 2026-05-12 round 11, doc-only):
   classifies each bullet's topic, so readers no longer assume only
   the first two items are in scope.
 
+Seventeenth-pass review (Codex 2026-05-13 round 17):
+
+- **Marker-trait skip discarded workspace traits with marker-style
+  leaf names** (P2): `resolve_bound_list` skipped each bound via
+  `is_marker_trait`, which checked the raw last segment against a
+  hard-coded `MARKER_TRAITS` list before alias canonicalisation.
+  Workspace traits or aliases like `dyn crate::ports::Send` or
+  `use crate::ports::Handler as Send; dyn Send` therefore got
+  discarded as if they were the std marker, so `h.handle()` never
+  became a trait anchor. Same root cause as round 16 P2 (aliased
+  `Future` bound) — a sister-fix-site that should have been caught
+  in the same pass. Fix: extracted `is_marker_trait` into a new
+  `resolve_marker` module that canonicalises the bound first and
+  skips only when the canonical leaf is in `MARKER_TRAITS` AND the
+  canonical path is stdlib-prefixed (`std`/`core`/`alloc`).
+  Unresolvable paths still skip bare single-segment markers
+  (`dyn Send` via prelude) and explicitly stdlib-rooted forms
+  (`dyn std::marker::Send`) — multi-segment workspace paths that
+  failed to canonicalise are treated as real bounds. Regression
+  tests `test_impl_trait_local_send_named_trait_resolves_not_skipped`
+  + `test_impl_trait_bare_std_send_marker_still_skipped` cover both
+  directions.
+
 Sixteenth-pass review (Codex 2026-05-13 round 16):
 
 - **Aliased `Future` bound on `impl Trait` lost its `Output`**

@@ -22,6 +22,7 @@ use super::super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
 use super::super::local_symbols::FileScope;
 use super::canonical::CanonicalType;
 use super::resolve_alias::{expand_alias, lookup_alias_param};
+use super::resolve_marker::is_marker_trait;
 use super::resolve_wrapper::identify_wrapper_name;
 use std::collections::{HashMap, HashSet};
 
@@ -147,7 +148,7 @@ fn resolve_bound_list(
         let syn::TypeParamBound::Trait(trait_bound) = bound else {
             continue;
         };
-        if is_marker_trait(&trait_bound.path) {
+        if is_marker_trait(&trait_bound.path, ctx) {
             continue;
         }
         // `impl Future<Output = T>` deserves the same `Future(T)` shape
@@ -187,23 +188,6 @@ fn future_bound_args<'a>(
     let raw_name = last.ident.to_string();
     let wrapper = identify_wrapper_name(&trait_bound.path, &raw_name, ctx)?;
     (wrapper == "Future").then_some(&last.arguments)
-}
-
-/// Marker traits (plus common auto-derive names) that are skipped when
-/// picking the dispatch-relevant trait from a `dyn T1 + T2` bound set.
-/// Kept as a const so the list is greppable and easy to extend.
-const MARKER_TRAITS: &[&str] = &[
-    "Send", "Sync", "Unpin", "Copy", "Clone", "Sized", "Debug", "Display",
-];
-
-/// Skip marker traits when picking the dispatch-relevant trait from
-/// `dyn T1 + T2`. Operation: lookup table.
-fn is_marker_trait(path: &syn::Path) -> bool {
-    let Some(last) = path.segments.last() else {
-        return false;
-    };
-    let name = last.ident.to_string();
-    MARKER_TRAITS.contains(&name.as_str())
 }
 
 /// Names of the recognised stdlib wrappers, used both for direct-name

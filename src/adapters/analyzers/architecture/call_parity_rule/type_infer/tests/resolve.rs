@@ -461,6 +461,82 @@ fn test_future_wraps_output() {
 }
 
 #[test]
+fn test_impl_trait_local_send_named_trait_resolves_not_skipped() {
+    // `use crate::ports::Send;` then `impl Send` (or `dyn Send`) refers
+    // to a workspace trait that happens to share its name with the std
+    // marker. The marker-trait skip used to discard it based on the raw
+    // last segment, dropping the bound and leaving downstream method
+    // dispatch (`h.handle()`) unresolved. After alias canonicalisation
+    // the path resolves to `crate::ports::Send`, which is *not*
+    // stdlib-prefixed and therefore not a marker.
+    let mut alias_map = HashMap::new();
+    alias_map.insert(
+        "Send".to_string(),
+        vec!["crate".to_string(), "ports".to_string(), "Send".to_string()],
+    );
+    let local = HashSet::new();
+    let roots = HashSet::new();
+    let ty = parse_type("impl Send");
+    let resolved = resolve_type(
+        &ty,
+        &ctx(&FileScope {
+            path: "src/app/mod.rs",
+            alias_map: &alias_map,
+            aliases_per_scope: &ScopedAliasMap::new(),
+            local_symbols: &local,
+            local_decl_scopes: &HashMap::new(),
+            crate_root_modules: &roots,
+        }),
+    );
+    assert_eq!(
+        resolved,
+        CanonicalType::TraitBound(vec![
+            "crate".to_string(),
+            "ports".to_string(),
+            "Send".to_string(),
+        ]),
+        "workspace `Send`-named trait must resolve to its canonical path, \
+         not be discarded as a std marker; got {resolved:?}",
+    );
+}
+
+#[test]
+fn test_impl_trait_bare_std_send_marker_still_skipped() {
+    // Regression guard: the canonicalisation-first refactor must NOT
+    // start treating bare `Send` / `Sync` / `Debug` as workspace
+    // traits. With no alias for `Send` in scope, the bound stays
+    // unresolvable, and the conservative "single-segment marker"
+    // fallback still skips it. `impl Handler + Send` therefore picks
+    // up `Handler`, not the marker.
+    let alias_map = HashMap::new();
+    let mut local = HashSet::new();
+    local.insert("Handler".to_string());
+    let roots = HashSet::new();
+    let ty = parse_type("impl Handler + Send");
+    let resolved = resolve_type(
+        &ty,
+        &ctx(&FileScope {
+            path: "src/app/mod.rs",
+            alias_map: &alias_map,
+            aliases_per_scope: &ScopedAliasMap::new(),
+            local_symbols: &local,
+            local_decl_scopes: &HashMap::new(),
+            crate_root_modules: &roots,
+        }),
+    );
+    assert_eq!(
+        resolved,
+        CanonicalType::TraitBound(vec![
+            "crate".to_string(),
+            "app".to_string(),
+            "Handler".to_string(),
+        ]),
+        "bare std-marker `Send` must still be skipped so dispatch picks \
+         up the local `Handler`; got {resolved:?}",
+    );
+}
+
+#[test]
 fn test_impl_aliased_future_resolves_to_future_with_output() {
     // `use std::future::Future as Fut;` then `impl Fut<Output = Session>`.
     // The raw bound leaf is `Fut`, but the canonicalised path is
