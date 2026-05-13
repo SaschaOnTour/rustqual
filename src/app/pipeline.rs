@@ -98,13 +98,20 @@ pub(crate) fn run_analysis(
     let architecture_findings =
         collect_architecture_findings(parsed, config, &suppression_lines, &mut summary);
     finalize_summary(&mut summary, config, &suppression_lines, parsed);
-    let mut result = build_result(&mut all_results, summary, secondary, architecture_findings);
-    result.orphan_suppressions = crate::app::orphan_suppressions::detect_orphan_suppressions(
+    let mut result = build_result(
+        &mut all_results,
+        summary,
+        secondary,
+        architecture_findings,
+        config,
+    );
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &suppression_lines,
         &result,
         config,
     );
-    result.summary.orphan_suppressions = result.orphan_suppressions.len();
+    result.summary.orphan_suppressions = orphans.len();
+    result.findings.orphan_suppressions = orphans;
     result
 }
 
@@ -116,22 +123,27 @@ fn build_result(
     summary: Summary,
     secondary: SecondaryResults,
     architecture_findings: Vec<crate::domain::Finding>,
+    config: &crate::config::Config,
 ) -> AnalysisResult {
+    let findings = crate::domain::AnalysisFindings {
+        iosp: super::projection::project_iosp(all_results),
+        complexity: super::projection::project_complexity(all_results, config),
+        architecture: super::projection::project_architecture(&architecture_findings),
+        dry: super::projection::project_dry(&secondary),
+        srp: super::projection::project_srp(secondary.srp.as_ref(), secondary.structural.as_ref()),
+        coupling: super::projection::project_coupling(
+            secondary.coupling.as_ref(),
+            secondary.structural.as_ref(),
+        ),
+        test_quality: super::projection::project_tq(secondary.tq.as_ref()),
+        orphan_suppressions: Vec::new(),
+    };
+    let data = super::projection::project_data(all_results, secondary.coupling.as_ref());
     AnalysisResult {
         results: std::mem::take(all_results),
         summary,
-        coupling: secondary.coupling,
-        duplicates: secondary.duplicates,
-        dead_code: secondary.dead_code,
-        fragments: secondary.fragments,
-        boilerplate: secondary.boilerplate,
-        wildcard_warnings: secondary.wildcard_warnings,
-        repeated_matches: secondary.repeated_matches,
-        srp: secondary.srp,
-        tq: secondary.tq,
-        structural: secondary.structural,
-        architecture_findings,
-        orphan_suppressions: Vec::new(),
+        findings,
+        data,
     }
 }
 
@@ -168,7 +180,14 @@ pub(crate) fn analyze_and_output(
 }
 
 /// Output results in the requested format.
-/// Operation: match on output format.
+/// Integration: dispatches on the output format. Most branches use the
+/// existing `print_*` wrappers (each a thin `<Reporter>.render() +
+/// print` shim). Two branches construct reporters directly:
+/// - AI variants pass the `AiOutputFormat` flag.
+/// - Text constructs a `TextReporter` so it can post-print suggestions
+///   when `--suggestions` is set (a Phase 9.5 cleanup folds that into
+///   the reporter once `print_suggestions` migrates to a `format_*`
+///   helper).
 pub(crate) fn output_results(
     analysis: &AnalysisResult,
     output_format: &crate::cli::OutputFormat,
@@ -177,50 +196,18 @@ pub(crate) fn output_results(
     config: &crate::config::Config,
 ) {
     use crate::report;
+    use crate::report::findings_list::collect_all_findings;
     match output_format {
         crate::cli::OutputFormat::Json => report::print_json(analysis),
-        crate::cli::OutputFormat::Github => {
-            report::print_github(&analysis.results, &analysis.summary);
-            analysis
-                .coupling
-                .iter()
-                .for_each(|ca| report::print_coupling_annotations(ca, &config.coupling));
-            report::print_dry_annotations(analysis);
-            analysis.srp.iter().for_each(report::print_srp_annotations);
-            analysis.tq.iter().for_each(report::print_tq_annotations);
-            analysis
-                .structural
-                .iter()
-                .for_each(report::print_structural_annotations);
-        }
-        crate::cli::OutputFormat::Dot => report::print_dot(&analysis.results),
+        crate::cli::OutputFormat::Github => report::print_github(analysis),
+        crate::cli::OutputFormat::Dot => report::print_dot(&analysis.data),
         crate::cli::OutputFormat::Sarif => report::print_sarif(analysis),
         crate::cli::OutputFormat::Html => report::print_html(analysis),
         crate::cli::OutputFormat::Ai => report::print_ai(analysis, config),
         crate::cli::OutputFormat::AiJson => report::print_ai_json(analysis, config),
         crate::cli::OutputFormat::Text => {
-            let findings = crate::report::findings_list::collect_all_findings(analysis);
-            // Summary first — always shown
-            report::print_summary_only(&analysis.summary, &findings);
-            // Coupling table — always shown (explanation text only with --verbose)
-            analysis
-                .coupling
-                .iter()
-                .for_each(|ca| report::print_coupling_section(ca, &config.coupling, verbose));
-            if verbose {
-                // Verbose: file-grouped output + detail sections (summary already printed above)
-                report::print_files_only(&analysis.results);
-                report::print_dry_section(analysis);
-                analysis.srp.iter().for_each(report::print_srp_section);
-                analysis.tq.iter().for_each(report::print_tq_section);
-                analysis
-                    .structural
-                    .iter()
-                    .for_each(report::print_structural_section);
-            } else {
-                // Default: compact findings list
-                crate::report::findings_list::print_findings(&findings);
-            }
+            let findings_entries = collect_all_findings(analysis);
+            crate::report::text::print_text(analysis, &findings_entries, verbose, None);
             if suggestions {
                 report::print_suggestions(&analysis.results);
             }

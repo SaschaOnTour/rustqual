@@ -2,8 +2,19 @@ use crate::adapters::analyzers::iosp::{
     compute_severity, CallOccurrence, Classification, ComplexityMetrics, FunctionAnalysis,
     LogicOccurrence, MagicNumberOccurrence,
 };
+use crate::ports::Reporter;
 use crate::report::html::*;
 use crate::report::Summary;
+
+/// Test-local helper: instantiate the reporter and render. Replaces
+/// the production `build_html_string` shim (whose only consumer was
+/// these tests).
+fn build_html_string(analysis: &AnalysisResult) -> String {
+    HtmlReporter {
+        summary: &analysis.summary,
+    }
+    .render(&analysis.findings, &analysis.data)
+}
 
 fn make_result(name: &str, classification: Classification) -> FunctionAnalysis {
     let severity = compute_severity(&classification);
@@ -35,21 +46,18 @@ fn make_result(name: &str, classification: Classification) -> FunctionAnalysis {
 fn make_analysis(results: Vec<FunctionAnalysis>) -> AnalysisResult {
     let mut summary = Summary::from_results(&results);
     summary.compute_quality_score(&crate::config::sections::DEFAULT_QUALITY_WEIGHTS);
+    let config = crate::config::Config::default();
+    let data = crate::app::projection::project_data(&results, None);
+    let findings = crate::domain::AnalysisFindings {
+        iosp: crate::app::projection::project_iosp(&results),
+        complexity: crate::app::projection::project_complexity(&results, &config),
+        ..Default::default()
+    };
     AnalysisResult {
         results,
         summary,
-        coupling: None,
-        duplicates: vec![],
-        dead_code: vec![],
-        fragments: vec![],
-        boilerplate: vec![],
-        wildcard_warnings: vec![],
-        repeated_matches: vec![],
-        srp: None,
-        tq: None,
-        structural: None,
-        architecture_findings: vec![],
-        orphan_suppressions: vec![],
+        findings,
+        data,
     }
 }
 
@@ -198,4 +206,60 @@ fn test_html_escapes_special_chars() {
     assert!(escaped.contains("&lt;"));
     assert!(escaped.contains("&gt;"));
     assert!(!escaped.contains("<script>"));
+}
+
+#[test]
+fn test_html_renders_architecture_findings() {
+    let mut analysis = make_analysis(vec![]);
+    analysis.findings.architecture = vec![crate::domain::findings::ArchitectureFinding {
+        common: crate::domain::Finding {
+            file: "src/cli/handlers.rs".into(),
+            line: 17,
+            column: 0,
+            dimension: crate::findings::Dimension::Architecture,
+            rule_id: "architecture/call_parity/no_delegation".into(),
+            message: "cli pub fn delegates to no application function".into(),
+            severity: crate::domain::Severity::Medium,
+            suppressed: false,
+        },
+    }];
+    let html = build_html_string(&analysis);
+    assert!(
+        html.contains("architecture/call_parity/no_delegation"),
+        "HTML must contain the architecture rule_id; got:\n{html}"
+    );
+    assert!(
+        html.contains("src/cli/handlers.rs"),
+        "HTML must contain the architecture finding file path"
+    );
+}
+
+#[test]
+fn html_reporter_renders_orphans_via_snapshot_view() {
+    // Construct the reporter with NO orphan_suppressions struct-field
+    // bypass and populate `findings.orphan_suppressions`. Output must
+    // include the orphan section — proving render flows through
+    // `build_orphans` → `Snapshot::orphans` → `publish`.
+    use crate::domain::findings::OrphanSuppression;
+    let mut analysis = make_analysis(vec![]);
+    analysis.findings.orphan_suppressions = vec![OrphanSuppression {
+        file: "src/foo.rs".into(),
+        line: 42,
+        dimensions: vec![crate::findings::Dimension::Iosp],
+        reason: Some("legacy".into()),
+    }];
+    // Reporter struct WITHOUT the orphan_suppressions field — the
+    // bypass path is gone; only the trait-driven snapshot view is left.
+    let html = HtmlReporter {
+        summary: &analysis.summary,
+    }
+    .render(&analysis.findings, &analysis.data);
+    assert!(
+        html.contains("src/foo.rs"),
+        "HTML must include orphan file path from snapshot.orphans, got:\n{html}"
+    );
+    assert!(
+        html.contains("Orphan") || html.contains("ORPHAN"),
+        "HTML must include orphan section heading from snapshot.orphans, got:\n{html}"
+    );
 }

@@ -967,3 +967,40 @@ fn test_struct_in_one_file_impl_in_another() {
         Some(&CanonicalType::path(["crate", "app", "session", "Id"]))
     );
 }
+
+#[test]
+fn record_trait_methods_captures_method_span() {
+    // The trait method's source location (file + 1-based line) must
+    // be captured at index-build time so anchor findings can carry a
+    // real source line. Without this, anchor findings hard-code
+    // line=0, which breaks suppression-window matching, the orphan
+    // detector, and SARIF location reporting.
+    let fix = fixture(&[(
+        "src/ports/handler.rs",
+        // Lines: 1=blank, 2=trait, 3=method-decl
+        "\npub trait Handler {\n    fn handle(&self);\n}\n",
+    )]);
+    let borrowed_files = borrowed(&fix);
+    let cfg_test = HashSet::new();
+    let roots = HashSet::new();
+    let wraps = HashSet::new();
+    let workspace_files = build_workspace_files_map(WorkspaceFilesInputs {
+        files: &borrowed_files,
+        cfg_test_files: &cfg_test,
+        aliases_per_file: &fix.aliases,
+        aliases_scoped_per_file: &fix.aliases_scoped,
+        local_symbols_per_file: &fix.local_symbols,
+        crate_root_modules: &roots,
+    });
+    let index = build_workspace_type_index(&WorkspaceIndexInputs {
+        files: &borrowed_files,
+        workspace_files: &workspace_files,
+        cfg_test_files: &cfg_test,
+        transparent_wrappers: &wraps,
+    });
+    let loc = index
+        .trait_method_location("crate::ports::handler::Handler", "handle")
+        .expect("trait method location must be captured");
+    assert_eq!(loc.file, "src/ports/handler.rs");
+    assert_eq!(loc.line, 3);
+}

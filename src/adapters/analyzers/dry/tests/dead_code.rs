@@ -1178,3 +1178,114 @@ fn test_helper_marker_does_not_suppress_uncalled() {
         "unmarked uncalled function must still flag, got {uncalled:?}"
     );
 }
+
+// ── Trait-Blanket-Dispatch reachability ─────────────────────────────
+//
+// Reproduces the v1.2.2 setup that triggered the original concern: a
+// helper function only reachable via `<T as Reporter>::render → <T as
+// ReporterImpl>::publish → helper`. The fear was that the analyzer
+// can't trace the blanket-impl indirection and would mark `helper` as
+// Uncalled or TestOnly. The visitor in `call_targets.rs` records
+// method-name calls (`self.publish()` → "publish") and free-function
+// calls (`helper()` → "helper") regardless of where they appear, so
+// both sides of the chain are captured by name and the helper stays
+// production-reachable.
+
+#[test]
+fn helper_reached_via_trait_blanket_dispatch_is_not_dead_code() {
+    // Three-file setup mirroring the original v1.2.2 incident:
+    //   ports/reporter.rs  → trait definitions + blanket impl
+    //   sarif/rules.rs     → the helper that was flagged
+    //   sarif/mod.rs       → the concrete ReporterImpl, plus a #[cfg(test)]
+    //                        module that calls the helper directly via
+    //                        a pub-API wrapper (which is what made it
+    //                        look like the helper was *only* test-reachable)
+    //
+    // The production path is:
+    //   <SarifReporter as Reporter>::render
+    //     → <SarifReporter as ReporterImpl>::publish
+    //       → sarif_rules()
+    //
+    // The test path is:
+    //   #[cfg(test)] tests::it()
+    //     → build_sarif_string()  (which also calls publish() indirectly,
+    //                              but the analyzer only sees its name)
+    //
+    // If the analyzer cannot trace through the trait-blanket-dispatch,
+    // it concludes "sarif_rules has only a test caller" → TestOnly.
+    let ports_reporter = (
+        "src/ports/reporter.rs".to_string(),
+        String::new(),
+        syn::parse_file(
+            r#"
+            pub trait ReporterImpl {
+                type Output;
+                fn publish(&self) -> Self::Output;
+            }
+            pub trait Reporter {
+                type Output;
+                fn render(&self) -> Self::Output;
+            }
+            impl<T: ReporterImpl> Reporter for T {
+                type Output = T::Output;
+                fn render(&self) -> Self::Output { self.publish() }
+            }
+            "#,
+        )
+        .unwrap(),
+    );
+    let sarif_rules = (
+        "src/adapters/report/sarif/rules.rs".to_string(),
+        String::new(),
+        syn::parse_file(
+            r#"
+            pub(super) fn sarif_rules() -> Vec<String> {
+                vec![String::from("rule")]
+            }
+            "#,
+        )
+        .unwrap(),
+    );
+    let sarif_mod = (
+        "src/adapters/report/sarif/mod.rs".to_string(),
+        String::new(),
+        syn::parse_file(
+            r#"
+            use super::rules::sarif_rules;
+            pub struct SarifReporter;
+            impl ReporterImpl for SarifReporter {
+                type Output = String;
+                fn publish(&self) -> Self::Output {
+                    let _r = sarif_rules();
+                    String::new()
+                }
+            }
+            pub fn build_sarif_string() -> String {
+                let r = SarifReporter;
+                r.render()
+            }
+            #[cfg(test)]
+            mod tests {
+                use super::build_sarif_string;
+                #[test]
+                fn it() { let _ = build_sarif_string(); }
+            }
+            "#,
+        )
+        .unwrap(),
+    );
+    let parsed = vec![ports_reporter, sarif_rules, sarif_mod];
+    let config = Config::default();
+    let warnings = detect_dead_code(
+        &parsed,
+        &config,
+        &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
+        &std::collections::HashSet::new(),
+    );
+    assert!(
+        !warnings.iter().any(|w| w.function_name == "sarif_rules"),
+        "sarif_rules is reached via trait-blanket dispatch and must not be flagged dead-code, got: {:?}",
+        warnings.iter().map(|w| (&w.function_name, &w.kind)).collect::<Vec<_>>()
+    );
+}

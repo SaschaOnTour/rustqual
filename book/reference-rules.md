@@ -1,6 +1,24 @@
 # Reference: rule catalog
 
-Every rule rustqual emits, grouped by dimension. Codes are stable — they appear in JSON output, SARIF, GitHub annotations, and `// qual:allow` rationales.
+Every rule rustqual emits, grouped by dimension. Codes are stable
+identifiers — but where they actually surface differs by reporter:
+
+- **SARIF**: every result carries the catalog code as `ruleId` and is
+  registered in `tool.driver.rules` (architecture also registers
+  dynamic sub-IDs like `architecture/call_parity/no_delegation`).
+- **JSON**: findings are grouped by dimension section (`duplicates`,
+  `dead_code`, `tq_warnings`, `architecture_findings`, …) — pivot on
+  the section, not on a `code` field. Only `architecture_findings`
+  rows carry their full `rule_id`.
+- **GitHub** workflow-command annotations: emitted as
+  `::level file=...,line=...::message`. Catalog codes are not
+  written to a structured `title` property today; if you need them
+  in CI for filtering, use the SARIF format with Code Scanning.
+- **Text** / **findings-list**: the category column shows
+  human-readable labels (`COGNITIVE`, `DUPLICATE`, `ARCHITECTURE`,
+  `BOILERPLATE`, …), not the catalog codes.
+- **`// qual:allow`** rationales: cite the catalog code in the
+  `reason:` text — it is the canonical reference users grep for.
 
 For dimension intent and refactor patterns, see the use-case guides linked at the bottom.
 
@@ -63,6 +81,7 @@ For dimension intent and refactor patterns, see the use-case guides linked at th
 |---|---|
 | `CP-001` | Circular module dependency |
 | `CP-002` | Stable Dependencies Principle violation |
+| `CP-003` | Module instability exceeds configured threshold |
 
 ## Structural binary checks
 
@@ -90,15 +109,23 @@ Part of SRP (BTC, SLM, NMS) and Coupling (OI, SIT, DEH, IET).
 
 ## Architecture
 
-Architecture findings carry the originating rule kind and the source rule's name:
+Architecture findings emit hierarchical rule IDs of the form
+`architecture/<rule-family>[/<sub-kind>]`. The `<sub-kind>` is dynamic
+for pattern and trait-contract rules (the user-defined rule's `name` /
+`check` string).
 
-| Code | Meaning |
+| Rule ID | Meaning |
 |---|---|
-| `ARCH-LAYER`        | Layer rule violation — file imports outside its allowed direction |
-| `ARCH-FORBID`       | Forbidden-edge violation — `[[architecture.forbidden]]` rule fired |
-| `ARCH-PATTERN`      | Symbol-pattern violation — `[[architecture.pattern]]` rule fired |
-| `ARCH-TRAIT`        | Trait-contract violation — `[[architecture.trait_contract]]` rule fired |
-| `ARCH-CALL-PARITY`  | Call-parity violation — Check A (no delegation) or Check B (missing adapter) |
+| `architecture/layer` | Layer rule violation — file imports outside its allowed direction |
+| `architecture/layer/unmatched` | File doesn't match any configured layer glob (under `unmatched_behavior = "strict_error"`) |
+| `architecture/forbidden` | Forbidden-edge violation — `[[architecture.forbidden]]` rule fired |
+| `architecture/pattern/<name>` | Symbol-pattern violation — `[[architecture.pattern]]` rule with the given `name` fired (e.g. `architecture/pattern/no_panic_helpers_in_production`) |
+| `architecture/trait_contract` | Trait-contract violation — generic catch-all |
+| `architecture/trait_contract/<check>` | Trait-contract violation with a specific `<check>` kind (e.g. `architecture/trait_contract/object_safety`) |
+| `architecture/call_parity/no_delegation`        | Check A — adapter `pub fn` doesn't reach the target layer at all |
+| `architecture/call_parity/missing_adapter`      | Check B — target `pub fn` is in some adapter's coverage but missing from another (or transitively unreachable from any adapter touchpoint — orphan / dead island) |
+| `architecture/call_parity/multi_touchpoint`     | Check C — adapter `pub fn` has more than one touchpoint in the target layer (configurable severity via `single_touchpoint`, default `warn`) |
+| `architecture/call_parity/multiplicity_mismatch` | Check D — target `pub fn` is reached by every adapter but with divergent handler counts (e.g. cli=2, mcp=1) |
 
 ## Suppression / governance
 
@@ -123,4 +150,4 @@ Warnings (`SUP-001`) don't fail by default — pass `--fail-on-warnings` to flip
 - [code-reuse.md](./code-reuse.md) — DRY-*, BP-*
 - [test-quality.md](./test-quality.md) — TQ-*
 - [architecture-rules.md](./architecture-rules.md) — ARCH-*
-- [adapter-parity.md](./adapter-parity.md) — ARCH-CALL-PARITY
+- [adapter-parity.md](./adapter-parity.md) — `architecture/call_parity/*`

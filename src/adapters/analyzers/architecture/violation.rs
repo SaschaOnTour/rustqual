@@ -118,6 +118,35 @@ pub enum ViolationKind {
         /// makes this a finding.
         missing_adapters: Vec<String>,
     },
+    /// `[architecture.call_parity]` Check D: a `pub fn` in the target
+    /// layer is reached by every adapter, but with different handler
+    /// multiplicities — one adapter has more handlers mapping to it
+    /// than another. Typical cause: an alias that exists in only one
+    /// adapter, e.g. cli has `cmd_search` and `cmd_grep` both reaching
+    /// `session.search` while mcp has only `handle_search`.
+    CallParityMultiplicityMismatch {
+        /// Canonical path of the target fn whose multiplicities diverge.
+        target_fn: String,
+        /// Layer name the fn belongs to (the configured target).
+        target_layer: String,
+        /// Per-adapter handler counts, sorted by adapter name for
+        /// deterministic output.
+        counts_per_adapter: Vec<(String, usize)>,
+    },
+    /// `[architecture.call_parity]` Check C: an adapter pub-fn has more
+    /// than one touchpoint in the target layer — i.e. it orchestrates
+    /// multiple application calls itself instead of wrapping them
+    /// inside a single application method. Configurable severity via
+    /// `single_touchpoint`.
+    CallParityMultiTouchpoint {
+        /// Name of the adapter pub-fn with multiple touchpoints.
+        fn_name: String,
+        /// Layer name the adapter fn belongs to.
+        adapter_layer: String,
+        /// Sorted list of canonical target fns the adapter reaches at
+        /// the boundary.
+        touchpoints: Vec<String>,
+    },
 }
 
 /// One concrete occurrence of a matcher hit.

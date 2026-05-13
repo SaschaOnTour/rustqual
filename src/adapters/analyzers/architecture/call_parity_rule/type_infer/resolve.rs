@@ -22,6 +22,7 @@ use super::super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
 use super::super::local_symbols::FileScope;
 use super::canonical::CanonicalType;
 use super::resolve_alias::{expand_alias, lookup_alias_param};
+use super::resolve_marker::is_marker_trait;
 use super::resolve_wrapper::identify_wrapper_name;
 use std::collections::{HashMap, HashSet};
 
@@ -147,13 +148,16 @@ fn resolve_bound_list(
         let syn::TypeParamBound::Trait(trait_bound) = bound else {
             continue;
         };
-        if is_marker_trait(&trait_bound.path) {
+        if is_marker_trait(&trait_bound.path, ctx) {
             continue;
         }
         // `impl Future<Output = T>` deserves the same `Future(T)` shape
         // the path-form `Future<Output = T>` produces, so `.await` on
-        // the result resolves through the combinator table.
-        if let Some(args) = future_args(&trait_bound.path) {
+        // the result resolves through the combinator table. Goes via
+        // `identify_wrapper_name` so aliased Future imports
+        // (`use std::future::Future as Fut;`) still match, while
+        // keeping the original `Output = T` args from the bound.
+        if let Some(args) = future_bound_args(trait_bound, ctx) {
             return wrap_future_output(args, ctx, depth);
         }
         let segs: Vec<String> = trait_bound
@@ -162,36 +166,37 @@ fn resolve_bound_list(
             .iter()
             .map(|s| s.ident.to_string())
             .collect();
+        // Trait dispatch only knows the workspace, so only crate-rooted
+        // canonicals are valid bounds. External aliases
+        // (`use serde::Serialize;`) expand to `["serde", "Serialize"]`
+        // and must be skipped just like fully-qualified
+        // `serde::Serialize` (which `canonicalise_type_segments_in_scope`
+        // already returns `None` for) — otherwise the external bound
+        // shadows a later workspace bound on the same `+` list.
         if let Some(resolved) = canonicalise_type_segments_in_scope(&segs, &canon_scope(ctx)) {
-            return CanonicalType::TraitBound(resolved);
+            if resolved.first().map(String::as_str) == Some("crate") {
+                return CanonicalType::TraitBound(resolved);
+            }
         }
     }
     CanonicalType::Opaque
 }
 
-/// Return the path arguments of a `Future` trait bound (covers bare
-/// `Future`, `std::future::Future`, and any other path ending in
-/// `Future`); `None` when the last segment isn't `Future`.
-fn future_args(path: &syn::Path) -> Option<&syn::PathArguments> {
-    let last = path.segments.last()?;
-    (last.ident == "Future").then_some(&last.arguments)
-}
-
-/// Marker traits (plus common auto-derive names) that are skipped when
-/// picking the dispatch-relevant trait from a `dyn T1 + T2` bound set.
-/// Kept as a const so the list is greppable and easy to extend.
-const MARKER_TRAITS: &[&str] = &[
-    "Send", "Sync", "Unpin", "Copy", "Clone", "Sized", "Debug", "Display",
-];
-
-/// Skip marker traits when picking the dispatch-relevant trait from
-/// `dyn T1 + T2`. Operation: lookup table.
-fn is_marker_trait(path: &syn::Path) -> bool {
-    let Some(last) = path.segments.last() else {
-        return false;
-    };
-    let name = last.ident.to_string();
-    MARKER_TRAITS.contains(&name.as_str())
+/// Return the path arguments of a `Future` trait bound when the bound
+/// canonically resolves to `std::future::Future` — covers bare
+/// `Future`, fully-qualified `std::future::Future`, and aliased forms
+/// like `use std::future::Future as Fut;` followed by `impl Fut<Output = T>`.
+/// `None` when the bound isn't a Future variant. The returned
+/// `PathArguments` come from the original (aliased) leaf so the
+/// `Output = T` associated type stays accessible.
+fn future_bound_args<'a>(
+    trait_bound: &'a syn::TraitBound,
+    ctx: &ResolveContext<'_>,
+) -> Option<&'a syn::PathArguments> {
+    let last = trait_bound.path.segments.last()?;
+    let raw_name = last.ident.to_string();
+    let wrapper = identify_wrapper_name(&trait_bound.path, &raw_name, ctx)?;
+    (wrapper == "Future").then_some(&last.arguments)
 }
 
 /// Names of the recognised stdlib wrappers, used both for direct-name

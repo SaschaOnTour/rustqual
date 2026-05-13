@@ -1,174 +1,153 @@
+//! Text DRY section: duplicates, fragments, dead code, boilerplate,
+//! wildcards, repeated matches.
+
+use std::fmt::Write;
+
 use colored::Colorize;
 
-use crate::report::AnalysisResult;
+use super::views::DryView;
+use crate::adapters::report::projections::dry::{
+    split_dry_findings, BoilerplateRow, DeadCodeRow, DryGroupRow, ParticipantRow, WildcardRow,
+};
+use crate::domain::findings::DryFinding;
 
-/// Print DRY analysis section: duplicates, fragments, dead code, boilerplate, wildcards, repeated matches.
-/// Integration: orchestrates per-category DRY printers.
-pub fn print_dry_section(analysis: &AnalysisResult) {
-    print_dry_header(analysis);
-    print_duplicate_entries(&analysis.duplicates);
-    print_fragment_entries(&analysis.fragments);
-    print_dead_code_entries(&analysis.dead_code);
-    print_boilerplate_entries(&analysis.boilerplate);
-    print_wildcard_entries(&analysis.wildcard_warnings);
-    print_repeated_match_entries(&analysis.repeated_matches);
-}
-
-/// Print DRY section header if there are any findings.
-/// Operation: conditional formatting, no own calls.
-fn print_dry_header(analysis: &AnalysisResult) {
-    let has_wildcards = analysis.wildcard_warnings.iter().any(|w| !w.suppressed);
-    let has_duplicates = analysis.duplicates.iter().any(|g| !g.suppressed);
-    let has_fragments = analysis.fragments.iter().any(|g| !g.suppressed);
-    let has_boilerplate = analysis.boilerplate.iter().any(|b| !b.suppressed);
-    let has_repeated = analysis.repeated_matches.iter().any(|g| !g.suppressed);
-    if !has_duplicates
-        && analysis.dead_code.is_empty()
-        && !has_fragments
-        && !has_boilerplate
-        && !has_wildcards
-        && !has_repeated
-    {
-        return;
-    }
-    println!("\n{}", "═══ DRY / Dead Code ═══".bold());
-}
-
-/// Print repeated match pattern entries.
-/// Operation: iteration and formatting logic, no own calls.
-fn print_repeated_match_entries(
-    repeated_matches: &[crate::adapters::analyzers::dry::match_patterns::RepeatedMatchGroup],
-) {
-    for (i, group) in repeated_matches
-        .iter()
-        .filter(|g| !g.suppressed)
-        .enumerate()
-    {
-        println!(
-            "  {} Repeated match [{}] Group {}: {} arms, {} instances",
-            "⚠".yellow(),
-            group.enum_name,
-            i + 1,
-            group.entries.first().map(|e| e.arm_count).unwrap_or(0),
-            group.entries.len(),
-        );
-        for entry in &group.entries {
-            println!(
-                "    - {} ({}:{})",
-                entry.function_name, entry.file, entry.line,
-            );
-        }
+/// Project DRY findings into the typed text View via the shared
+/// `split_dry_findings` helper.
+pub(super) fn build_dry_view(findings: &[DryFinding]) -> DryView {
+    let buckets = split_dry_findings(findings);
+    DryView {
+        duplicate_groups: buckets.duplicate_groups,
+        fragment_groups: buckets.fragment_groups,
+        repeated_match_groups: buckets.repeated_match_groups,
+        dead_code: buckets.dead_code,
+        boilerplate: buckets.boilerplate,
+        wildcards: buckets.wildcards,
     }
 }
 
-/// Print duplicate function group entries.
-/// Operation: iteration and formatting logic, no own calls.
-fn print_duplicate_entries(
-    duplicates: &[crate::adapters::analyzers::dry::functions::DuplicateGroup],
-) {
-    for (i, group) in duplicates.iter().filter(|g| !g.suppressed).enumerate() {
-        let kind_label = match &group.kind {
-            crate::adapters::analyzers::dry::functions::DuplicateKind::Exact => {
-                "Exact duplicate".to_string()
-            }
-            crate::adapters::analyzers::dry::functions::DuplicateKind::NearDuplicate {
-                similarity,
-            } => {
-                format!("Near-duplicate ({:.0}% similar)", similarity * 100.0)
-            }
+/// Format the DRY section from the View.
+pub(super) fn format_dry_section(view: &DryView) -> String {
+    if view.duplicate_groups.is_empty()
+        && view.fragment_groups.is_empty()
+        && view.dead_code.is_empty()
+        && view.boilerplate.is_empty()
+        && view.wildcards.is_empty()
+        && view.repeated_match_groups.is_empty()
+    {
+        return String::new();
+    }
+    let mut out = String::new();
+    let _ = writeln!(out, "\n{}", "═══ DRY / Dead Code ═══".bold());
+    push_duplicate_entries(&mut out, &view.duplicate_groups);
+    push_fragment_entries(&mut out, &view.fragment_groups);
+    push_dead_code_entries(&mut out, &view.dead_code);
+    push_boilerplate_entries(&mut out, &view.boilerplate);
+    push_wildcard_entries(&mut out, &view.wildcards);
+    push_repeated_match_entries(&mut out, &view.repeated_match_groups);
+    out
+}
+
+fn push_participant_row(out: &mut String, p: &ParticipantRow) {
+    let _ = writeln!(out, "    - {} ({}:{})", p.function_name, p.file, p.line);
+}
+
+fn push_duplicate_entries(out: &mut String, groups: &[DryGroupRow]) {
+    groups.iter().enumerate().for_each(|(i, g)| {
+        let kind_label = if g.kind_label == "Exact" {
+            "Exact duplicate"
+        } else {
+            "Near-duplicate"
         };
-        println!(
+        let _ = writeln!(
+            out,
             "  {} Group {}: {} ({} functions)",
             "⚠".yellow(),
             i + 1,
             kind_label,
-            group.entries.len(),
+            g.participants.len(),
         );
-        for entry in &group.entries {
-            println!(
-                "    - {} ({}:{})",
-                entry.qualified_name, entry.file, entry.line,
-            );
-        }
-    }
+        g.participants
+            .iter()
+            .for_each(|p| push_participant_row(out, p));
+    });
 }
 
-/// Print duplicate fragment group entries.
-/// Operation: iteration and formatting logic, no own calls.
-fn print_fragment_entries(fragments: &[crate::adapters::analyzers::dry::fragments::FragmentGroup]) {
-    for (i, group) in fragments.iter().filter(|g| !g.suppressed).enumerate() {
-        println!(
+fn push_fragment_entries(out: &mut String, groups: &[DryGroupRow]) {
+    groups.iter().enumerate().for_each(|(i, g)| {
+        let _ = writeln!(
+            out,
             "  {} Fragment {}: {} matching statements",
             "⚠".yellow(),
             i + 1,
-            group.statement_count,
+            g.kind_label,
         );
-        for entry in &group.entries {
-            println!(
-                "    - {} ({}:{}-{})",
-                entry.qualified_name, entry.file, entry.start_line, entry.end_line,
-            );
-        }
-    }
+        g.participants
+            .iter()
+            .for_each(|p| push_participant_row(out, p));
+    });
 }
 
-/// Print dead code warning entries.
-/// Operation: iteration and formatting logic, no own calls.
-fn print_dead_code_entries(
-    dead_code: &[crate::adapters::analyzers::dry::dead_code::DeadCodeWarning],
-) {
-    for w in dead_code {
-        let kind_tag = match w.kind {
-            crate::adapters::analyzers::dry::dead_code::DeadCodeKind::Uncalled => "uncalled",
-            crate::adapters::analyzers::dry::dead_code::DeadCodeKind::TestOnly => "test-only",
-        };
-        println!(
+fn push_dead_code_entries(out: &mut String, rows: &[DeadCodeRow]) {
+    rows.iter().for_each(|r| {
+        let _ = writeln!(
+            out,
             "  {} {} [{}] ({}:{}) — {}",
             "⚠".yellow(),
-            w.qualified_name,
-            kind_tag,
-            w.file,
-            w.line,
-            w.suggestion,
+            r.qualified_name,
+            r.kind_tag,
+            r.file,
+            r.line,
+            r.suggestion,
         );
-    }
+    });
 }
 
-/// Print boilerplate pattern entries.
-/// Operation: iteration and formatting logic, no own calls.
-fn print_boilerplate_entries(
-    boilerplate: &[crate::adapters::analyzers::dry::boilerplate::BoilerplateFind],
-) {
-    for bp in boilerplate.iter().filter(|b| !b.suppressed) {
-        let name = bp.struct_name.as_deref().unwrap_or("(anonymous)");
-        println!(
+fn push_boilerplate_entries(out: &mut String, rows: &[BoilerplateRow]) {
+    rows.iter().for_each(|r| {
+        let name = if r.struct_name.is_empty() {
+            "(anonymous)"
+        } else {
+            r.struct_name.as_str()
+        };
+        let _ = writeln!(
+            out,
             "  {} [{}] {} ({}:{}) — {}",
             "⚠".yellow(),
-            bp.pattern_id,
+            r.pattern_id,
             name,
-            bp.file,
-            bp.line,
-            bp.description,
+            r.file,
+            r.line,
+            r.message,
         );
-        println!("    → {}", bp.suggestion.dimmed());
-    }
+        let _ = writeln!(out, "    → {}", r.suggestion.dimmed());
+    });
 }
 
-/// Print wildcard import warning entries.
-/// Operation: iteration and formatting logic, no own calls.
-fn print_wildcard_entries(
-    wildcard_warnings: &[crate::adapters::analyzers::dry::wildcards::WildcardImportWarning],
-) {
-    for w in wildcard_warnings {
-        if w.suppressed {
-            continue;
-        }
-        println!(
+fn push_wildcard_entries(out: &mut String, rows: &[WildcardRow]) {
+    rows.iter().for_each(|r| {
+        let _ = writeln!(
+            out,
             "  {} Wildcard import: {} ({}:{})",
             "⚠".yellow(),
-            w.module_path,
-            w.file,
-            w.line,
+            r.module_path,
+            r.file,
+            r.line,
         );
-    }
+    });
+}
+
+fn push_repeated_match_entries(out: &mut String, groups: &[DryGroupRow]) {
+    groups.iter().enumerate().for_each(|(i, g)| {
+        let _ = writeln!(
+            out,
+            "  {} Repeated match [{}] Group {}: {} instances",
+            "⚠".yellow(),
+            g.kind_label,
+            i + 1,
+            g.participants.len(),
+        );
+        g.participants
+            .iter()
+            .for_each(|p| push_participant_row(out, p));
+    });
 }

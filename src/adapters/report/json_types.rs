@@ -28,11 +28,28 @@ pub(crate) struct JsonOutput {
     pub(crate) repeated_matches: Vec<JsonRepeatedMatchGroup>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) orphan_suppressions: Vec<JsonOrphanSuppression>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) architecture_findings: Vec<JsonArchitectureFinding>,
+}
+
+/// Architecture-dimension finding (layer / forbidden / pattern /
+/// trait_contract / call_parity). Mirrors `domain::Finding` with the
+/// dimension implicit and severity stringified for JSON consumers.
+#[derive(serde::Serialize)]
+pub(crate) struct JsonArchitectureFinding {
+    pub(crate) file: String,
+    pub(crate) line: usize,
+    pub(crate) rule_id: String,
+    pub(crate) severity: String,
+    pub(crate) message: String,
+    pub(crate) suppressed: bool,
 }
 
 /// `// qual:allow(...)` marker that matched no finding in its window.
+/// `pub` (not `pub(crate)`) because it surfaces as `JsonReporter::OrphanView`
+/// — a per-reporter view type on the public `ReporterImpl` trait.
 #[derive(serde::Serialize)]
-pub(crate) struct JsonOrphanSuppression {
+pub struct JsonOrphanSuppression {
     pub(crate) file: String,
     pub(crate) line: usize,
     pub(crate) dimensions: Vec<String>,
@@ -83,6 +100,9 @@ pub(crate) struct JsonSummary {
     pub(crate) structural_srp_warnings: usize,
     pub(crate) structural_coupling_warnings: usize,
     pub(crate) repeated_match_groups: usize,
+    pub(crate) architecture_warnings: usize,
+    pub(crate) orphan_suppressions: usize,
+    pub(crate) dimension_scores: [f64; 7],
     pub(crate) suppression_ratio_exceeded: bool,
 }
 

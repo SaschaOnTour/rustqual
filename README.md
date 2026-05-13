@@ -76,10 +76,14 @@ adapters = ["cli", "mcp"]
 target   = "application"
 ```
 
-Two checks under one rule:
+Four checks under one rule, all anchored at the boundary (the first call from an adapter into the target layer):
 
 - **Check A** — every adapter must delegate. A CLI command that doesn't reach into the application layer is logic in the wrong place.
-- **Check B** — every application capability must reach every adapter. Add `app::ingest::run`, forget to wire it into CLI, and Check B reports it by name in CI before review.
+- **Check B** — every application capability touched by some adapter must be touched by every adapter (or be a genuine orphan).
+- **Check C** — each adapter handler should reach exactly one target touchpoint; multi-touchpoint handlers risk silent divergence between adapters. Configurable severity (`single_touchpoint = "off" | "warn" | "error"`, default `warn`).
+- **Check D** — when two adapters both reach a target, they must reach it with the same handler count. cli accumulating an alias `cmd_grep` for `cmd_search` while mcp has only `handle_search` is API-surface drift Check D catches.
+
+`#[deprecated]` adapter handlers are excluded from all four checks automatically.
 
 The hard part is making the call graph honest across method chains, field access, trait dispatch, type aliases, framework extractors, and `Self` substitution. rustqual ships a shallow type-inference engine that resolves these cases without fabricating edges. Full write-up: [book/adapter-parity.md](./book/adapter-parity.md).
 
@@ -194,7 +198,7 @@ pub fn build_test_session() -> Session { /* … */ }
 
 ## Output formats
 
-`--format <FMT>` — `text` (default), `json`, `github`, `sarif`, `dot`, `html`, `ai`, `ai-json`. Same analysis, different serialisation. Full reference: [book/reference-output-formats.md](./book/reference-output-formats.md).
+`--format <FMT>` — `text` (default), `json`, `github`, `sarif`, `html`, `ai`, `ai-json` all serialise the same findings + summary. `dot` is data-only: it renders the per-function call graph and skips findings / orphan suppressions, so pair it with another format if the run might have diagnostics. Full reference: [book/reference-output-formats.md](./book/reference-output-formats.md).
 
 ## Self-compliance
 
@@ -236,8 +240,7 @@ RUSTFLAGS="-Dwarnings" cargo clippy --all-targets  # lints (0 warnings)
 
 1. **Syntactic analysis only.** Uses `syn` for AST parsing. The receiver-type-inference engine (v1.2+) resolves most method-call receivers; what it can't resolve stays unresolved rather than being fabricated.
 2. **Macros.** Macro invocations are not expanded. `println!` etc. are special-cased; custom macros producing logic or calls may be misclassified. Configurable via `[architecture.call_parity].transparent_macros`.
-3. **External file modules.** `mod foo;` declarations pointing to separate files are not followed. Only inline modules (`mod foo { ... }`) are analysed recursively.
-4. **Sequential analysis pass.** `proc_macro2::Span` (with `span-locations` enabled for line numbers) is not `Sync`. File I/O is parallelised via `rayon`.
+3. **Sequential analysis pass.** `proc_macro2::Span` (with `span-locations` enabled for line numbers) is not `Sync`. File I/O is parallelised via `rayon`.
 
 ## License
 

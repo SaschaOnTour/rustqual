@@ -57,7 +57,7 @@ fn test_sample_file_expected_results() {
 }
 
 #[test]
-fn test_json_output_parseable() {
+fn test_json_output_schema_and_complexity_values() {
     let output = cargo_bin()
         .args(["examples/sample.rs", "--json", "--no-fail"])
         .output()
@@ -72,6 +72,21 @@ fn test_json_output_parseable() {
 
     let summary = &json["summary"];
     assert!(summary["total"].as_u64().unwrap() > 0);
+
+    // Value-level guard against A21 (smoke-tests mask projection drops).
+    // sample.rs has at least one Operation with non-zero logic_count;
+    // assert the field survives the projection + reporter round-trip.
+    let funcs = json["functions"].as_array().expect("functions array");
+    let with_logic = funcs
+        .iter()
+        .filter_map(|f| f.get("complexity"))
+        .filter_map(|c| c.get("logic_count").and_then(|v| v.as_u64()))
+        .max()
+        .unwrap_or(0);
+    assert!(
+        with_logic > 0,
+        "at least one function's complexity.logic_count must be non-zero on sample.rs"
+    );
 }
 
 #[test]

@@ -1,32 +1,32 @@
 //! Check A — Adapter-must-delegate.
 //!
-//! Every `pub fn` in a configured adapter layer must reach (directly or
-//! transitively, up to `call_depth` hops) at least one fn in the
-//! configured target layer. A fn that satisfies this delegates to the
-//! shared Application layer; a fn that fails has almost certainly
-//! inlined business logic.
+//! Every `pub fn` in a configured adapter layer must reach at least one
+//! fn in the configured target layer (within `call_depth` adapter-
+//! internal hops). A fn that satisfies this delegates to the shared
+//! Application layer; a fn that fails has almost certainly inlined
+//! business logic.
 //!
-//! The check walks the pre-built `CallGraph` forward from each adapter
-//! pub-fn, breadth-first with a depth cap and visited-set. `<method>:…`
-//! and `<bare>:…` canonicals are layer-unknown by construction — they
-//! can't count as a delegation target, which is the right conservative
-//! stance (we can't prove the method resolves into the target layer).
+//! Reads from the shared `HandlerTouchpoints` cache built by
+//! `mod::build_handler_touchpoints` — the cache already encodes the
+//! same forward-BFS-with-boundary-stop semantic Check A needs, so we
+//! only need to test whether a handler's touchpoint set is empty.
+//! Deprecated handlers are filtered upstream (absent from the cache)
+//! and silently skipped here.
 
 use super::pub_fns::PubFnInfo;
-use super::workspace_graph::{canonical_name_for_pub_fn, CallGraph, WalkState};
+use super::workspace_graph::canonical_name_for_pub_fn;
+use super::HandlerTouchpoints;
 use crate::adapters::analyzers::architecture::compiled::CompiledCallParity;
-use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use std::collections::HashMap;
 
 // qual:api
-/// Emit one `CallParityNoDelegation` finding per adapter pub-fn that
-/// fails to reach the target layer within `call_depth` hops.
-/// Integration: per-fn BFS + per-finding construction.
+/// Emit one `CallParityNoDelegation` finding per adapter pub-fn whose
+/// touchpoint set is empty.
+/// Integration: per-adapter scan + per-fn cache lookup via `inspect_handler`.
 pub(crate) fn check_no_delegation<'ast>(
     pub_fns_by_layer: &HashMap<String, Vec<PubFnInfo<'ast>>>,
-    graph: &CallGraph,
-    layers: &LayerDefinitions,
+    touchpoints: &HandlerTouchpoints,
     cp: &CompiledCallParity,
 ) -> Vec<MatchLocation> {
     let mut out = Vec::new();
@@ -35,72 +35,39 @@ pub(crate) fn check_no_delegation<'ast>(
             continue;
         };
         for info in fns {
-            if fn_reaches_target(info, graph, layers, &cp.target, cp.call_depth) {
-                continue;
+            if let Some(hit) = inspect_handler(info, adapter_layer, touchpoints, cp) {
+                out.push(hit);
             }
-            out.push(MatchLocation {
-                file: info.file.clone(),
-                line: info.line,
-                column: 0,
-                kind: ViolationKind::CallParityNoDelegation {
-                    fn_name: info.fn_name.clone(),
-                    adapter_layer: adapter_layer.clone(),
-                    target_layer: cp.target.clone(),
-                    call_depth: cp.call_depth,
-                },
-            });
         }
     }
     out
 }
 
-/// True iff a BFS forward from `info`'s canonical name reaches any fn
-/// living in the target layer within `call_depth` hops.
-/// Integration: seeds + delegates to `TargetReachWalk::run`.
-fn fn_reaches_target(
+/// Decide whether one adapter pub-fn produces a Check A finding.
+/// Returns `Some(hit)` only when the cache has an entry for the
+/// handler with an empty touchpoint set; deprecated handlers are
+/// absent from the cache entirely and silently skipped.
+/// Operation: per-handler probe.
+fn inspect_handler(
     info: &PubFnInfo<'_>,
-    graph: &CallGraph,
-    layers: &LayerDefinitions,
-    target_layer: &str,
-    call_depth: usize,
-) -> bool {
-    let start = canonical_name_for_pub_fn(info);
-    TargetReachWalk {
-        graph,
-        layers,
-        target_layer,
-        call_depth,
+    adapter_layer: &str,
+    touchpoints: &HandlerTouchpoints,
+    cp: &CompiledCallParity,
+) -> Option<MatchLocation> {
+    let canonical = canonical_name_for_pub_fn(info);
+    let tps = touchpoints.get(&canonical)?;
+    if !tps.is_empty() {
+        return None;
     }
-    .run(&start)
-}
-
-/// Read-only BFS driver: bundles the static inputs so the step logic
-/// stays off `fn_reaches_target`'s IOSP budget.
-struct TargetReachWalk<'a> {
-    graph: &'a CallGraph,
-    layers: &'a LayerDefinitions,
-    target_layer: &'a str,
-    call_depth: usize,
-}
-
-impl TargetReachWalk<'_> {
-    /// BFS forward from `start`. Returns true on the first node that
-    /// resolves to the target layer.
-    fn run(&self, start: &str) -> bool {
-        let Some(direct) = self.graph.forward.get(start) else {
-            return false;
-        };
-        let mut state = WalkState::seeded(start, direct);
-        while let Some((node, depth)) = state.queue.pop_front() {
-            if self.graph.layer_of(&node) == Some(self.target_layer) {
-                return true;
-            }
-            if depth < self.call_depth {
-                if let Some(callees) = self.graph.forward.get(&node) {
-                    state.enqueue_unvisited(callees, depth + 1);
-                }
-            }
-        }
-        false
-    }
+    Some(MatchLocation {
+        file: info.file.clone(),
+        line: info.line,
+        column: 0,
+        kind: ViolationKind::CallParityNoDelegation {
+            fn_name: info.fn_name.clone(),
+            adapter_layer: adapter_layer.to_string(),
+            target_layer: cp.target.clone(),
+            call_depth: cp.call_depth,
+        },
+    })
 }

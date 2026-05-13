@@ -8,4 +8,5 @@ mod explain;
 mod forbidden_rule;
 mod golden_examples;
 mod layer_rule;
+mod rendering;
 mod trait_contract;

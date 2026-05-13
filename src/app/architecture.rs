@@ -6,7 +6,9 @@
 //!   1. Project the parsed workspace into `ParsedFile`s.
 //!   2. Build an `AnalysisContext` and hand it to `app::analyze_codebase`
 //!      with the Architecture adapter in the analyzer list.
-//!   3. Apply file-level `qual:allow(architecture)` suppressions.
+//!   3. Apply window-scoped `qual:allow(architecture)` suppressions —
+//!      a marker at line N covers findings in `N..=N+ANNOTATION_WINDOW`,
+//!      not the whole file.
 //!   4. Sort the findings stably and update the `Summary` counter.
 
 use crate::adapters::analyzers::architecture::ArchitectureAnalyzer;
@@ -62,8 +64,14 @@ fn run_architecture_dimension(
     findings
 }
 
-/// Mark findings whose file carries a `// qual:allow(architecture)` suppression.
-/// Operation: per-finding lookup over the suppression map.
+/// Mark findings whose annotation window contains a
+/// `// qual:allow(architecture)` suppression.
+///
+/// Window-scoped (not file-scoped): a suppression at line N covers
+/// findings at lines `N..=N+ANNOTATION_WINDOW`. Otherwise a single
+/// `qual:allow(architecture)` for one helper would silence unrelated
+/// call-parity, layer, or forbidden-edge findings elsewhere in the
+/// same file. Operation: per-finding lookup over the suppression map.
 fn mark_architecture_suppressions(
     findings: &mut [Finding],
     suppression_lines: &HashMap<String, Vec<Suppression>>,
@@ -71,7 +79,12 @@ fn mark_architecture_suppressions(
     findings.iter_mut().for_each(|f| {
         let suppressed = suppression_lines
             .get(&f.file)
-            .map(|sups| sups.iter().any(|s| s.covers(Dimension::Architecture)))
+            .map(|sups| {
+                sups.iter().any(|s| {
+                    s.covers(Dimension::Architecture)
+                        && crate::findings::is_within_window(s.line, f.line)
+                })
+            })
             .unwrap_or(false);
         if suppressed {
             f.suppressed = true;

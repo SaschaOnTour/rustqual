@@ -5,6 +5,878 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - in development
+
+Patch release: **Reporter-Trait sealed two-trait + Snapshot pattern**,
+**Call-parity anchor model + Orphan-suppression in trait contract**.
+
+Late-cycle additions (post 2026-04-30 tag):
+
+### Anchor model — unified target-capability rule (Codex 2026-05-04 P1-P4)
+
+- **Single rule for walker + Check B/D**: `is_anchor_target_capability`
+  in `anchor_index` is the only source of truth for "is this anchor
+  a target capability". Walker (`is_target_boundary`) and Check B/D
+  (`target_anchor_capabilities`) share it; previously each side
+  re-implemented the rule and drifted (parallel-path inconsistency).
+  Rule: anchor passes iff (a) declaring layer is NOT a peer adapter,
+  AND (b) declaring layer IS the target with a callable body
+  (default OR overriding impl), OR at least one overriding impl
+  lives in the target layer.
+- **Peer-adapter anchor rejection** (P2): anchors whose declaring
+  trait lives in a configured peer-adapter layer are excluded from
+  target capabilities. Prevents `cli` from inheriting `mcp::Handler`
+  coverage via the anchor side-channel.
+- **Default-only target-layer anchors** (P3): trait declared in
+  target with a default body and no overriding impls is now
+  enumerated as a capability — Check A used to accept the touchpoint
+  (anchor in target layer) while Check B/D refused to enumerate
+  ("no overriding impl"). Pure-signature trait methods (no default,
+  no impl) stay rejected (uncallable).
+- **Concrete impl-method skip in Check B/D** (P1): when an anchor is
+  enumerated as target capability, its overriding impl-method
+  canonicals (`<Impl>::<method>`) are skipped in the concrete
+  pub-fn iteration **only when no adapter has the concrete in its
+  coverage**. If at least one adapter calls the concrete directly
+  (`LoggingHandler::handle()` UFCS or static-method form) while
+  another adapter dispatches via `dyn Trait`, the concrete pass
+  still runs — the mixed-form drift then surfaces as a concrete
+  finding plus an anchor finding for the adapter that uses the
+  other form. Cross-form synonym handling stays intentionally out
+  of scope; without the gating refinement, mixed-form drift was
+  silently masked behind a single false-positive anchor-orphan.
+  Same conditional skip is mirrored in Check D (`check_d::check_multiplicity_mismatch`)
+  via `any_adapter_counts_concrete` — without it, all-direct-call
+  multiplicity drift (cli=2 vs mcp=1, both calling concrete
+  directly with no dispatch) was silently dropped because Check D's
+  `is_anchor_backed_concrete` skip ran unconditionally.
+- **Anchor findings carry real source line** (P4): `AnchorInfo` now
+  stores the trait method's source location captured at
+  type-index-build time (`MethodLocation { file, line, column }`).
+  Anchor findings (Check B `CallParityMissingAdapter`, Check D
+  `CallParityMultiplicityMismatch`) report the trait method's
+  declaration line instead of `line: 0`. Suppression-window
+  matching, the orphan detector's window scan, and SARIF
+  `startLine` validity all work for anchor-level findings.
+
+Second-pass review (Codex 2026-05-04 round 2):
+
+- **Anchor-only target surface defensive guard** (P1): Check B's
+  early-return on missing target-layer entry in `pub_fns_by_layer`
+  is replaced with an empty-slice fallback. The target-anchor
+  enumeration runs unconditionally. Empirical workspaces always
+  carry an entry (the pub-fn collector's `or_default()` ensures it),
+  but the fallback locks in the invariant against future refactors —
+  an anchor-only target surface (e.g. ports trait impl'd by a
+  private application type, or default-only trait declared in
+  target) cannot silently lose missing-adapter findings.
+- **Reachable-target BFS recognises trait anchors** (P2):
+  `build_adapter_reachable_targets` now treats a callee as a
+  target-capability node when EITHER its resolved layer matches
+  `target_layer` OR it is a synthetic anchor that passes
+  `is_anchor_target_capability` for `(target_layer, adapter_layers)`.
+  Previously, an anchor reached transitively via an adapter-touched
+  target fn (adapter → target fn → `dyn Trait.method()`) was
+  invisible to the BFS (anchor's `layer_of()` is the trait
+  declaration layer, e.g. `ports`), and Check B fired a false
+  orphan. Post-boundary plumbing wired up via at least one adapter
+  now stays silent for trait anchors too.
+- **cfg-test trait method filter** (P2): per-method `#[cfg(test)]`
+  / `#[test]` attributes inside an otherwise-production trait now
+  exclude the method from `WorkspaceTypeIndex.trait_methods`,
+  `trait_method_locations`, and `trait_methods_with_default_body`.
+  Without this, a `#[cfg(test)] fn helper(&self) {}` with a default
+  body would promote the method to a target anchor capability
+  even though it is invisible in production builds, and
+  `trait_has_method` would accept dispatch calls that should stay
+  unresolved.
+
+Third-pass review (Codex 2026-05-04 round 3):
+
+- **Private trait anchor exclusion** (P1): `WorkspaceTypeIndex` now
+  captures the trait declaration's effective workspace visibility in
+  `trait_visibility: HashMap<String, bool>`, threaded into
+  `AnchorInfo.trait_visible`, and consulted as a precondition by
+  `is_anchor_target_capability`. Without this, `trait Internal { fn
+  run(&self) {} }` (no `pub`) and `trait Hidden { fn run(&self); }
+  impl Hidden for X` (private trait + target impl) surfaced as
+  Check B/D capabilities and produced orphan findings for what is
+  architecturally implementation detail. Effective visibility is the
+  trait's own `vis == Public` ANDed with the trait collector's
+  `enclosing_mod_visible` (mirroring `pub_fns::PubFnCollector`'s mod
+  visibility tracking) — so a `pub trait T { … }` declared inside a
+  private `mod inner { … }` is also rejected, since it isn't
+  reachable from outside its own module and thus isn't part of the
+  architectural surface.
+- **Anchor orphan suppression for direct-concrete coverage** (P1):
+  `check_b::inspect_anchor` adds a second arm to the
+  `reached.is_empty()` suppression: when at least one of
+  `info.impl_method_canonicals` is in some adapter's coverage or in
+  the reachable set, the anchor finding is silenced. Closes the
+  all-direct-concrete false-positive — every adapter calls
+  `LoggingHandler::handle()` via UFCS, none dispatches via
+  `dyn Trait`, the concrete pass is silent (all reach concrete),
+  and the anchor pass no longer fires "missing all adapters" since
+  the concrete coverage IS the capability coverage.
+- **`exclude_targets` matches impl path on anchor findings** (P2):
+  new `is_anchor_excluded` helper tests the configured globs against
+  the anchor canonical AND every `impl_method_canonical` it backs.
+  A user-friendly `exclude_targets = ["application::admin::*"]`
+  glob now silences the matching anchor finding (e.g.
+  `ports::handler::Handler::handle`) when the impl lives in
+  `application::admin::*`, instead of requiring a parallel
+  ports-path entry. Concrete-pass exclusion is unchanged (already
+  matched against the concrete canonical).
+- **Stale `line=0` anchor wording** (P3): the v1.2.2 "Added —
+  Anchors as target capabilities for Check B/D" entry promised a
+  heuristic file path with `line=0` until span info was added —
+  contradicting the round-2 P4 fix that already captures the trait
+  method's source location. Wording updated to reference the
+  round-2 P4 entry that delivered real `MethodLocation` capture.
+
+Fourth-pass review (Codex 2026-05-04 round 4):
+
+- **Trait visibility uses the shared workspace-canonical set** (P1):
+  the round-3 trait visibility filter implemented a private
+  `node.vis == Public` check (later patched with `enclosing_mod_visible`
+  tracking), which diverged from the rest of call-parity's
+  visibility model — `pub(crate)`, `pub(super)`, `pub(in <path>)`,
+  file-backed module visibility, and `pub use` re-exports were all
+  missed. `pub(crate) trait Handler` with a target impl was rejected
+  as invisible; conversely a `pub trait` in a private file-backed
+  module could still slip through. Fix: `populate_anchor_index` now
+  reuses the workspace-wide `visible_canonicals` set built by
+  `pub_fns_visibility::collect_visible_type_canonicals_workspace`
+  (the same set `pub_fns::collect_pub_fns_by_layer` consumes), so
+  trait visibility agrees with the rest of call-parity. Removed the
+  redundant `WorkspaceTypeIndex.trait_visibility` map and the
+  `TraitCollector.enclosing_mod_visible` tracking — both subsumed
+  by the canonical-set lookup.
+- **Inherited-default capability gap surfaced** (P2 — superseded
+  in round 5, replaced with edge-rewrite in round 7): round 4
+  noted that `pub trait Handler { fn handle(&self) {} } impl
+  Handler for AppHandler {}` (no override, inherits default body)
+  left adapter coverage with no visible target capability. The
+  round-4 fix (`callable_impls_for` widening of `impl_layers` /
+  `impl_method_canonicals`) was reverted in round 5 because it
+  caused canonical collisions with inherent methods of the same
+  name and promoted non-target default bodies through empty target
+  impls. The final fix lives in the round-7 edge-rewrite pass
+  (see below) — see the seventh-pass review entry.
+- **Stale `add_anchor_to_impl_edges` reference** (P3): the
+  `trait_dispatch_edges` doc comment in `calls.rs` claimed
+  reachability from anchor to impl bodies was wired by
+  `workspace_graph::add_anchor_to_impl_edges` — function never
+  existed; the design intentionally keeps the anchor as a leaf
+  in the graph. Comment updated to reflect the actual behaviour.
+- **Default-only target anchor in book summary** (P3): the
+  short summary in `book/adapter-parity.md` (the type-inference
+  capability list) still said anchors are recognised "when at least
+  one overriding impl lives in the target layer". The detailed
+  anchor section already documents the default-OR-overriding rule,
+  but the summary contradicted it. Updated.
+
+Fifth-pass review (Codex 2026-05-12 round 5):
+
+- **Revert of round-4 `callable_impls_for` widening** (P1 #1 + #2):
+  the round-4 expansion of `impl_method_canonicals` to absorb
+  non-overriding impls when the trait method has a default body
+  caused two distinct bugs. First, `<Impl>::<method>` canonicals
+  fabricated for inherited-default impls collide with unrelated
+  inherent methods of the same name (`impl X { fn handle … }` +
+  `impl T for X {}`), so Check B silently treats the real inherent
+  method as anchor-backed and skips it. Second, ports-declared
+  default methods with empty target-layer impls falsely promoted
+  the anchor to a target capability — the executable body lives on
+  the ports trait, not target, so Check A/B/D would require parity
+  for code that never crosses into target. Fix: revert to strict
+  overriding-only via the restored `overriding_impls_for` accessor;
+  inherited-default impls no longer contribute to `impl_layers` or
+  `impl_method_canonicals`. Promotion to target capability now
+  requires either (a) the trait is declared in the target layer
+  with a callable body (default body in target OR an overriding
+  impl somewhere), or (b) at least one overriding impl lives in the
+  target layer; default bodies declared OUTSIDE target don't promote
+  through empty target impls. Unambiguous inherited-default concrete
+  calls are folded onto the trait anchor by the round-7 edge-rewrite
+  pass, so drift on them is counted against the anchor. The remaining
+  blind spot is the ambiguous multi-trait default case (a type
+  implementing two traits with the same default method name): the
+  round-8 ambiguity guard leaves those phantoms in place rather than
+  guessing.
+- **Book visibility wording aligned with shared canonical set**
+  (P3): the detailed anchor definition in `book/adapter-parity.md`
+  still said workspace-visible means "the trait's own `vis` is
+  `pub` AND every enclosing inline `mod` is `pub`". The code uses
+  the shared `visible_canonicals` set (covering `pub(crate)`,
+  `pub(super)`, `pub(in <path>)`, file-backed module visibility,
+  and `pub use` re-exports). Wording updated to match.
+
+Sixth-pass review (Codex 2026-05-12 round 6):
+
+- **Walker phantom-canonical gate** (P1): `populate_layer_cache`
+  caches `layer_of` for every canonical that appears in the graph,
+  including edge sinks. A fabricated `<Impl>::<method>` from an
+  inherited-default impl (no override, body lives on the trait)
+  therefore got `layer_of == target_layer` and was accepted as a
+  target boundary by `is_target_boundary` even though no real fn
+  node existed with that canonical. Check A would pass on the
+  phantom touchpoint while Check B/D had no way to enumerate the
+  same capability consistently. Fix: `is_target_boundary` (in
+  `touchpoints.rs`) and the sister `is_target_capability_node` (in
+  `check_b_coverage.rs`) now require `graph.forward.contains_key`
+  in addition to the layer match for concrete canonicals. Trait
+  anchors continue through the unified `is_anchor_target_capability`
+  rule untouched. Regression tests
+  `touchpoints_reject_phantom_inherited_default_concrete_canonical`
+  and `touchpoints_recognise_real_target_fn_node`.
+- **Anchor docs round-5 leftover** (P3): the short anchor summary
+  in `book/adapter-parity.md`'s type-inference list still said
+  "at least one impl in the target layer makes the method callable
+  (overriding the signature, or inheriting a default body declared
+  elsewhere)" — that was the round-4 widening, reverted in round 5.
+  Updated to strict "at least one overriding impl lives in target",
+  plus an explicit note that inherited-default impls don't promote.
+
+Seventh-pass review (Codex 2026-05-12 round 7):
+
+- **Phantom inherited-default edge rewrite** (P2): the round-6
+  walker-phantom-gate correctly rejected fabricated
+  `<Impl>::<method>` canonicals as touchpoints, but never emitted
+  an alternative — a target-layer trait declared with a default
+  body + empty target impl + adapter UFCS call would silently look
+  non-delegating, even though the trait anchor IS a valid target
+  capability. New post-build pass
+  `workspace_graph::edge_rewrite::rewrite_phantom_inherited_default_edges`
+  scans every emitted edge after `FileFnCollector` completes,
+  identifies phantom callees that match an inherited-default impl
+  (impl is in `trait_impls[T]`, method has default body, impl
+  doesn't override), and rewrites the edge to point at the trait
+  anchor `<Trait>::<method>`. Concrete inherent methods stay
+  untouched (their canonical IS a real graph node), and overriding
+  impls stay untouched (their override registers a real fn body).
+  Regression test
+  `touchpoints_route_inherited_default_concrete_to_anchor`.
+- **`call_depth` describes edge depth, not helper hops** (P3): the
+  Rustdoc on `CallParityConfig::call_depth`, the
+  `book/adapter-parity.md` walk description, the
+  `book/reference-configuration.md` table entry, and the
+  `docs/internals.md` summary all said "max helper hops", which
+  was off-by-one — direct callees are seeded at depth 1, so
+  `call_depth = 3` reaches `handler → h1 → h2 → target`
+  (three edges, two intermediate helpers). All four sources
+  updated with explicit edge-count wording + the example.
+- **README stale `mod foo;` limitation** (P3): the "External file
+  modules" entry in `README.md`'s Known Limitations claimed
+  `mod foo;` declarations weren't followed and only inline modules
+  were analysed recursively. That hasn't been true since the
+  `file_visibility::collect_file_root_visibility` pre-pass
+  shipped with regression tests for crate-root `mod`, private
+  file modules, and ancestor chains. Entry removed.
+
+Eighth-pass review (Codex 2026-05-12 round 8):
+
+- **Edge-rewrite ambiguity guard** (P2): the round-7
+  `inherited_default_anchor_for` returned the first HashMap match
+  when a type implemented multiple traits with the same default
+  method name (e.g. `pub trait Greeting { fn handle(&self) {} }`
+  and `pub trait Logging { fn handle(&self) {} }` both implemented
+  by `AppHandler`). Rewrite choice depended on map iteration order
+  — non-deterministic. Rust itself requires UFCS disambiguation
+  in that case, and the canonical alone doesn't tell us which
+  trait was selected. Fix: rewrite only when EXACTLY ONE
+  inherited-default candidate exists; otherwise leave the phantom
+  canonical in place (the walker phantom-gate suppresses it).
+  Regression test
+  `touchpoints_skip_rewrite_when_multiple_traits_share_default_method_name`.
+- **CHANGELOG round-4 anchor semantics superseded** (P3): the
+  "Inherited-default impls count as target capability" entry from
+  round 4 described the `callable_impls_for` widening that was
+  reverted in round 5 and properly fixed via edge-rewrite in
+  round 7. The CHANGELOG now reads as if two contradictory anchor
+  models are active. The round-4 entry is reworded as
+  "superseded" with a pointer to the round-7 entry that delivered
+  the real fix.
+- **CHANGELOG anchor model summary aligned** (P3): the Added-
+  section blurb on the round-1 anchor model still framed target
+  capability around "overriding impls" and treated inherited
+  defaults as sharing the same target semantics. Updated to the
+  current dual-rule (target-declared default body OR overriding
+  impl in target) plus an explicit note that inherited-default
+  UFCS calls are routed via edge-rewrite and that calls inside the
+  default-method body itself stay invisible.
+- **`inspect_anchor` comment refreshed** (P3): the doc on
+  `inspect_anchor` still said "all-direct inherited-default drift
+  stays undetected — the impl-method canonical is phantom". With
+  the round-7 edge-rewrite, those phantom canonicals are folded
+  onto the anchor before coverage/counting, so the limitation no
+  longer applies. Comment updated to reflect the active behaviour.
+
+Ninth-pass review (Codex 2026-05-12 round 9, doc-only):
+
+- **Round-5 limitation note narrowed** (P3): the round-5 entry
+  describing "mixed-form multiplicity drift on inherited defaults
+  remains undetected" was reworded to reflect the round-7
+  edge-rewrite — only the ambiguous multi-trait default case (the
+  round-8 ambiguity guard) leaves edges phantom now.
+- **Top-level anchor summary aligned** (P3): the primary
+  `### Added` blurb on the anchor model was framing target boundary
+  status around "overriding impl in target" only. Updated to the
+  full dual-rule (target-declared callable body OR overriding impl
+  in target) plus an explicit note on the edge-rewrite folding for
+  unambiguous inherited-default UFCS calls.
+
+Tenth-pass review (Codex 2026-05-12 round 10, doc/comment-only):
+
+- **Ambiguous-multi-trait-default added to known limitations** (P3):
+  `book/adapter-parity.md` Limitations list gained a sixth entry
+  documenting that UFCS calls like `X::handle(&x)` are left
+  unresolved when `X` implements multiple traits with the same
+  default method name (Rust requires UFCS disambiguation; the
+  canonical alone is ambiguous). Workaround: rename, override on
+  the impl, or call through `dyn Trait`.
+- **`docs/internals.md` anchor summary refreshed** (P3): the
+  contributor-facing summary still framed target-boundary status
+  around "at least one overriding impl in target". Rewritten to
+  reference `is_anchor_target_capability` directly, list the dual
+  rule, mention visibility / peer-adapter constraints, and call out
+  the round-7 edge-rewrite for inherited-default UFCS calls.
+- **`calls.rs` Rustdoc comments aligned** (P3): the
+  `resolve_method_targets` doc still said trait-dispatch inference
+  "may return multiple (one per impl of the trait)" — that was
+  round-1 behaviour, before the synthetic-anchor collapse. The
+  `canonical_edges_for_method` doc had the same "overriding impl
+  in target" framing. Both updated to the current single-anchor
+  semantics + dual-rule capability predicate.
+
+Eleventh-pass review (Codex 2026-05-12 round 11, doc-only):
+
+- **Limitations section heading + intro generalised** (P3): the
+  `book/adapter-parity.md` Limitations subsection was titled
+  "Limitations: type aliases" with an intro saying "two alias
+  patterns currently disagree", but the list had grown to six
+  bullets covering re-exports, function re-exports, trait
+  default-body internals, and ambiguous inherited-default UFCS
+  calls. Renamed to "Known limitations" with an intro that
+  classifies each bullet's topic, so readers no longer assume only
+  the first two items are in scope.
+
+Eighteenth-pass review (Codex 2026-05-13 round 18):
+
+- **External aliased trait bounds shadowed later workspace
+  bounds** (P2): after the round-17 marker fix, the bound resolver
+  in `resolve_bound_list` still accepted any successfully-canonicalised
+  path as a `TraitBound`. With `use serde::Serialize;` and
+  `fn make() -> impl Serialize + Handler`, the first bound expanded
+  to `["serde", "Serialize"]` and returned, so the later workspace
+  `Handler` bound was never visited — `make().handle()` stayed
+  unresolved. Fully-qualified `serde::Serialize` without the `use`
+  alias already returned `None` from canonicalisation and was
+  correctly skipped; the alias-expanded form took a different path
+  and slipped through. Fix: gate the `TraitBound` return on
+  `canonical.first() == Some("crate")` so only workspace-rooted
+  bounds win — external aliases now skip exactly like the
+  fully-qualified external form. The std-marker special case
+  (`resolve_marker::is_marker_trait`) and the Future special case
+  (`future_bound_args`) still run first, so `Send` / `Sync` /
+  `Future<Output = T>` keep their existing handling. Regression
+  test `test_impl_trait_external_aliased_bound_skipped_workspace_bound_wins`.
+
+Seventeenth-pass review (Codex 2026-05-13 round 17):
+
+- **Marker-trait skip discarded workspace traits with marker-style
+  leaf names** (P2): `resolve_bound_list` skipped each bound via
+  `is_marker_trait`, which checked the raw last segment against a
+  hard-coded `MARKER_TRAITS` list before alias canonicalisation.
+  Workspace traits or aliases like `dyn crate::ports::Send` or
+  `use crate::ports::Handler as Send; dyn Send` therefore got
+  discarded as if they were the std marker, so `h.handle()` never
+  became a trait anchor. Same root cause as round 16 P2 (aliased
+  `Future` bound) — a sister-fix-site that should have been caught
+  in the same pass. Fix: extracted `is_marker_trait` into a new
+  `resolve_marker` module that canonicalises the bound first and
+  skips only when the canonical leaf is in `MARKER_TRAITS` AND the
+  canonical path is stdlib-prefixed (`std`/`core`/`alloc`).
+  Unresolvable paths still skip bare single-segment markers
+  (`dyn Send` via prelude) and explicitly stdlib-rooted forms
+  (`dyn std::marker::Send`) — multi-segment workspace paths that
+  failed to canonicalise are treated as real bounds. Regression
+  tests `test_impl_trait_local_send_named_trait_resolves_not_skipped`
+  + `test_impl_trait_bare_std_send_marker_still_skipped` cover both
+  directions.
+
+Sixteenth-pass review (Codex 2026-05-13 round 16):
+
+- **Aliased `Future` bound on `impl Trait` lost its `Output`**
+  (P2): `resolve_bound_list` in
+  `src/adapters/analyzers/architecture/call_parity_rule/type_infer/resolve.rs`
+  checked the raw bound leaf with `last.ident == "Future"` before
+  alias canonicalisation. With
+  `use std::future::Future as Fut; fn make() -> impl Fut<Output = Session>`,
+  the leaf was `Fut` so the Future-detection branch missed, the
+  bound got recorded as `TraitBound(std::future::Future)` instead,
+  and `make().await.diff()` stayed unresolved because the canonical
+  type no longer exposed the `Output = Session` shape. Fix: routed
+  the bound through `identify_wrapper_name` (the same alias-aware
+  probe `resolve_path` uses for path-form `Future<Output = T>`),
+  keeping the original `Output = T` args from the trait bound so
+  `wrap_future_output` can resolve them. Regression test
+  `test_impl_aliased_future_resolves_to_future_with_output`
+  asserts `Future(Session)` for the aliased form.
+- **Check-A diagnostic still said "hops"** (P3): round 11 renamed
+  `call_depth` to call-edge depth in the config doc + book to
+  remove the off-by-one ambiguity (`3` = three call edges, two
+  intermediate helpers — not three nodes). The emitted Check-A
+  message in `rendering.rs` still said
+  "within {call_depth} hops", keeping the ambiguity alive in real
+  user-facing diagnostics. Reworded to
+  "within {call_depth} adapter-internal call edges". The example
+  in `book/adapter-parity.md:194` was synced. Regression test
+  `no_delegation_message_uses_call_edge_wording_not_hops` locks
+  the new wording.
+
+Fifteenth-pass review (Codex 2026-05-13 round 15):
+
+- **Repeated-match dedup leaked into text/HTML via shared
+  projection** (P2): round 13's fix routed the JSON repeated-match
+  builder to a `(enum_name, sorted participant locations)` dedup
+  key, but the shared `split_dry_findings` projection
+  (`src/adapters/report/projections/dry.rs`) — consumed by the
+  text and HTML reporters — still deduped by `enum_name` alone.
+  Two distinct repeated-match patterns over the same enum
+  therefore collapsed into one rendered group outside JSON, so
+  reporter parity regressed in the very next pass. Fix:
+  `build_repeated_match_groups` now goes through the existing
+  `dedup_by_locations` helper (same path that `build_duplicate_groups`
+  and `build_fragment_groups` use), keying on the participant
+  location set. Regression tests
+  `split_dry_findings_keeps_distinct_repeated_match_groups_over_same_enum`
+  + `split_dry_findings_collapses_duplicate_repeated_match_group_emissions`
+  in `src/adapters/report/tests/projections_dry.rs` lock the dedup
+  contract at the projection layer so every reporter benefits.
+
+Fourteenth-pass review (user-driven proactive A21 sweep
+2026-05-12 round 14):
+
+- **All 24 reporter `_no_panic` smoke tests converted to
+  value-asserting tests** (proactive A21-class elimination): rounds
+  12-13 surfaced three v1.2.1 typed-reporter refactor drops that
+  smoke tests had masked (JSON `logic_count`/`call_count`,
+  NearDuplicate `similarity`, RepeatedMatch `arm_count`, SRP
+  `composite_score`/`clusters`/`length_score`). Rather than wait
+  for Codex to discover the remaining smoke tests one round at a
+  time, the user directed a full sweep. All 24 `_no_panic` tests
+  across eight reporters (sarif=3, ai=3, dot=3, findings_list=2,
+  github=2, json=4 remaining, text=6, pipeline=1) were replaced
+  with tests that assert actual output values and renamed to
+  describe the asserted behavior (e.g.
+  `test_print_json_carries_violation_logic_and_call_locations`,
+  `test_print_sarif_emits_violation_with_location`,
+  `ai_value_includes_complexity_finding_metric_and_location`). New
+  helper `format_findings(&[FindingEntry]) -> String` in
+  `findings_list/mod.rs` (string-returning variant of
+  `print_findings`) makes the findings-list reporter testable
+  without stdout capture. Reporter test fixtures now populate
+  `findings.iosp` via `project_iosp` so the projection path is
+  actually exercised. Test count unchanged (1611 → 1611, 1-for-1
+  replacement). No production code changes — the conversion is
+  purely a test-suite hardening to prevent future projection
+  drops from staying silent. `grep -rn "fn .*_no_panic\|fn
+  .*_no_crash" src/ tests/` returns nothing after this sweep, so
+  the smoke-test category is effectively eliminated from the
+  reporter suite.
+
+Thirteenth-pass review (Codex 2026-05-12 round 13):
+
+- **NearDuplicate similarity dropped from `DryFindingDetails::Duplicate`**
+  (P2): the v1.2.1 typed-reporter refactor projected
+  `DuplicateKind::NearDuplicate { similarity }` to
+  `DryFindingDetails::Duplicate { participants }` and dropped the
+  similarity score. JSON output hardcoded `similarity: None` for
+  every group, so machine consumers couldn't distinguish a 0.91
+  near-duplicate from an unscored exact group. Fix: added
+  `similarity: Option<f64>` to the details variant, copied it in
+  `project_duplicate_group`, and read it in the JSON builder. `Eq`
+  derives dropped on `DryFinding` / `DryFindingDetails`. Regression
+  test `test_print_json_carries_near_duplicate_similarity`.
+- **RepeatedMatch `arm_count` dropped and groups collapsed by
+  enum name** (P2): the typed `RepeatedMatchParticipant` carried
+  no `arm_count`, so JSON `entries[].arm_count` was hardcoded to
+  `0`; the JSON builder additionally de-duplicated groups by
+  `enum_name` alone, collapsing two distinct repeated patterns over
+  the same enum into one group. Fix: added `arm_count: usize` to
+  `RepeatedMatchParticipant`, copied it in projection, and read it
+  in the JSON builder. JSON de-dup keyed by
+  `(enum_name, sorted participant locations)`. Regression test
+  `test_print_json_carries_repeated_match_arm_count_and_distinct_groups`.
+- **SRP `composite_score`, responsibility clusters, and
+  `length_score` dropped** (P2): `SrpFindingDetails::StructCohesion`
+  was missing the analyzer's `composite_score` + `clusters`
+  (responsibility groups), and `ModuleLength` was missing
+  `length_score`; JSON consumers filled placeholder zeros / empty
+  arrays / wrapped-one-element-arrays. Fix: added the missing
+  fields plus a new `ResponsibilityCluster` domain type
+  (re-exported from `domain::findings`), copied them in
+  `project_struct` / `project_module`, and pulled them through the
+  JSON builder. The intermediate `SrpModuleRow` (text/html-friendly)
+  still flattens each cluster's member list with `", "`; JSON
+  preserves the per-cluster grouping. `Eq` derives dropped on
+  `SrpFinding` / `SrpFindingDetails` (the new `f64` fields are not
+  `Eq`). Regression test
+  `test_print_json_carries_srp_composite_score_clusters_length_score`.
+- **Integration test renamed and reinforced** (proactive A21
+  sweep): `test_json_output_parseable` was a schema-only smoke
+  test. Renamed to `test_json_output_schema_and_complexity_values`
+  and extended with a value assertion that at least one
+  `functions[].complexity.logic_count` is non-zero on
+  `examples/sample.rs`. Catches future projection drops in the
+  JSON path because `sample.rs` deterministically has Operations
+  with non-zero logic counts.
+
+Twelfth-pass review (Codex 2026-05-12 round 12):
+
+- **JSON reporter dropped `logic_count` + `call_count`** (P2): the
+  v1.2.1 typed-reporter refactor split `FunctionAnalysis.complexity`
+  (legacy IOSP type carrying every metric) into
+  `ComplexityMetricsRecord` (typed dimension state), but
+  `project_metrics` did not carry the IOSP `logic_count` /
+  `call_count` fields across and `json::functions::build_functions`
+  hard-coded `JsonComplexity.logic_count` / `call_count` to `0`.
+  Every JSON consumer therefore saw zeros for every function since
+  v1.2.1, even though the analyzer measured non-zero counts. The
+  existing `test_print_json_with_complexity_no_panic` set non-zero
+  inputs but only asserted "no panic" — the smoke-test masked the
+  data loss for eleven Codex passes. Fix: added the two counts to
+  `ComplexityMetricsRecord`, copied them in `project_metrics`, and
+  pulled them through `build_functions`. Regression test
+  `json_complexity_carries_logic_count_and_call_count` parses the
+  produced JSON and asserts the non-zero values survive the
+  projection + reporter round-trip.
+
+### Added
+
+- **Trait-method anchor model for call-parity dispatch**: `dyn
+  Trait.method()` now emits a single synthetic
+  `<Trait>::<method>` anchor instead of one edge per overriding
+  workspace impl. The boundary walker recognises the anchor as a
+  target boundary when (a) the trait is declared in the target
+  layer with a callable body (default body in target OR an
+  overriding impl), or (b) at least one overriding impl lives in
+  the target layer; non-target default bodies are not promoted
+  through empty target impls (`CallGraph::trait_method_anchors`
+  populated by `populate_anchor_index`). Concrete impl-method
+  canonicals never enter the touchpoint set via dispatch, so
+  Check C doesn't fire on what is semantically a single boundary
+  call. Unambiguous inherited-default UFCS calls are routed to
+  the same anchor by the edge-rewrite post-pass.
+- **Anchors as target capabilities for Check B/D**:
+  `CallGraph::target_anchor_capabilities(target)` enumerates
+  trait-method anchors that pass the unified target-capability
+  rule (target-declared callable body OR overriding impl in
+  target). Check B iterates them alongside concrete
+  `pub_fns_by_layer[target]`, so dispatch-only adapter coverage
+  is checked for parity and orphan status; Check D counts handlers
+  per anchor for multiplicity. Anchor findings carry the trait
+  method's actual source location (file + 1-based line + column)
+  — see the round-2 P4 entry above for the `MethodLocation`
+  capture path.
+- **Walker peer-adapter check before anchor promotion**:
+  `TouchpointWalk::run` now checks `is_peer_adapter` BEFORE
+  `is_target_boundary`. A trait anchor declared in a peer-adapter
+  layer (e.g. `mcp::Handler`) with overriding impls in the target
+  layer no longer leaks peer-adapter coverage into the origin
+  adapter's set.
+- **`OrphanSuppression` Finding type in `domain::findings`** with
+  `AnalysisFindings::orphan_suppressions` field. Cross-cutting
+  Finding (not tied to a single dimension) carrying
+  `// qual:allow(...)` markers that matched no finding in their
+  annotation window.
+- **`ReporterImpl::OrphanView` + `build_orphans` method** plus
+  `Snapshot::orphans` field. Per-reporter discretion: dot stays
+  `OrphanView = ()` (intentional no-op for the data-only graph
+  format), the seven diagnostic reporters (text, html, json, sarif,
+  github, ai, findings_list) declare meaningful view types and
+  consume `snapshot.orphans` exclusively. Future reporters MUST
+  implement `build_orphans` (compile-force) and consciously decide
+  what to do with orphans.
+
+### Fixed
+
+- **cfg-test impl-block leak in graph + pub-fn visitors**:
+  `file_fn_collector::visit_item_impl` and `pub_fns::visit_item_impl`
+  now skip `#[cfg(test)] impl X { … }` blocks entirely. Previously
+  the cfg attribute lived on the impl block while child methods had
+  no attrs of their own, so test-only methods leaked into the
+  production call graph and pub-fn surface.
+- **`record_trait_impl` filters cfg-test / `#[test]` overrides**:
+  `WorkspaceTypeIndex.trait_impl_overrides` no longer records
+  test-only methods, so production dispatch can't route to a phantom
+  `Type::method` for a test-only override.
+- **Strict self-type visibility in pub_fns**: trait-impl method
+  registration was relaxed in an interim fix to register
+  `<Hidden>::<method>` for `impl PubTrait for Hidden` even when
+  `Hidden` is private. With the anchor refactor that relaxation is
+  no longer needed and produced over-coverage; the strict visibility
+  gate is restored. The trait method's anchor carries the public
+  capability instead.
+
+### Removed
+
+- **`AnalysisResult.orphan_suppressions` field** — orphan rendering
+  flows exclusively through `findings.orphan_suppressions`
+  (consumed by `Snapshot::orphans` per reporter). The legacy
+  struct-field bypass and per-reporter `orphan_suppressions: &'a [_]`
+  fields are gone.
+- **`OrphanSuppressionWarning`** alias removed. The canonical type is
+  `domain::findings::OrphanSuppression`; the adapter-layer alias served
+  as a transition step and is no longer needed.
+
+## [1.2.2] - 2026-04-30
+
+Patch release: **Reporter-Trait sealed two-trait + Snapshot pattern**.
+
+Internal refactor — no user-visible behaviour change. Every output
+format (text, html, json, sarif, github, ai, dot, findings_list) now
+goes through a single `Reporter::render()` entry point backed by a
+sealed `ReporterImpl` trait. The compile-time Reporter-Parity guarantee
+(adding a new dimension forces every reporter to address it) is now
+proven by three orthogonal failure modes simultaneously: trait method
+set, snapshot constructor, and exhaustive `publish` destructuring —
+verified in Phase 11 by introducing a synthetic 8th dimension and
+observing 18 compile errors across all 9 reporter sites.
+
+### Changed
+
+- **Sealed two-trait design** in `src/ports/reporter.rs`: public
+  `Reporter` trait with single `render()` method (only entry point
+  external code can invoke), crate-internal `ReporterImpl` with
+  per-dim `build_*` projections and `publish()` composition. The
+  `sealed::Sealed` supertrait lives in a private module so no external
+  crate can implement `Reporter` directly. `Snapshot<R>` aggregates
+  all 10 per-dim views with `pub(crate)` fields, locking
+  `ReporterImpl::publish` to crate-internal callers.
+- **Per-reporter pure-data Views**: every reporter projects findings
+  into typed row structs (`HtmlIospView`, `SarifResultRow`,
+  `AiIospRow`, etc.); `publish()` formats them into the final string.
+  No reporter pre-renders markup in `build_*` anymore — composition
+  decisions (card-then-table-then-cross-section in HTML, summary-then-
+  details in text, etc.) live in `publish()`.
+- **Cross-reporter shared projections** in
+  `src/adapters/report/projections/{srp, coupling, dry, tq}.rs`:
+  text/html/sarif/json/ai/findings_list reporters all consume the
+  same dimension-bucket projections (`SrpBuckets`, `CouplingBuckets`,
+  `DryBuckets`, etc.). Removed twelve transitional cross-reporter
+  duplicate findings via these helpers.
+- **Pipeline.rs** (`src/app/pipeline.rs`): every output-format branch
+  follows the unified `<Reporter>.render(&findings, &data)` shape.
+  Print wrappers stay as the boundary entry points.
+
+### Removed
+
+- Legacy `DeprecatedReporter` + `DeprecatedAnalysisReporter` traits
+  and the `deprecated_render_findings` / `deprecated_render_analysis_data`
+  helpers — fully replaced by the sealed design.
+
+### Fixed
+
+- **Trait-dispatch collapses to synthetic anchor.**
+  `calls::trait_dispatch_edges` previously emitted `<impl>::<method>`
+  for every workspace impl of a dispatched trait method. A single
+  `h.handle()` on `dyn Handler` with N overriding impls produced N
+  edges, expanding into N touchpoints in the boundary walker, which
+  triggered Check C `multi_touchpoint` warnings for what is
+  semantically a single boundary call. Dispatch now emits ONE
+  synthetic anchor `<Trait>::<method>` representing the logical
+  capability. The touchpoint walker recognises the anchor as a
+  target boundary when (a) the trait is declared in the target
+  layer with a callable body (default OR overriding impl), OR
+  (b) at least one overriding impl lives in the target layer —
+  non-target default bodies are NOT promoted through empty target
+  impls (the executable body lives outside target). Concrete UFCS
+  calls into inherited-default impls are routed to the anchor at
+  graph build time via the edge-rewrite post-pass, so dispatch and
+  direct-concrete forms share the same anchor. Calls **inside**
+  the default-method body itself stay invisible to Check A/B/D
+  (the trait method's body isn't a graph node).
+- **`record_trait_impl` filters cfg-test / `#[test]` overrides.**
+  `WorkspaceTypeIndex.trait_impl_overrides` used to record every
+  `ImplItem::Fn`, including test-only methods. Production dispatch
+  then routed to a phantom `Type::method` for a test-only override
+  while the workspace call graph + `method_returns` index correctly
+  skipped those items. The override set is now filtered with
+  `has_cfg_test` + `has_test_attr`, mirroring `methods.rs`.
+- **PubFnCollector keeps strict self-type visibility.** Earlier
+  v1.2.2 relaxed visibility to register `<Hidden>::<method>` for
+  `impl PubTrait for Hidden` even when `Hidden` is private, so
+  dispatch-emitted impl-edges had matching pub-fn entries. With
+  the anchor refactor dispatch no longer emits per-impl edges, so
+  the relaxation is unnecessary and the visibility gate is
+  restored to its strict form: only impls on visible self-types
+  contribute concrete target pub-fns. Private impls are still
+  reachable through the anchor — the public capability they
+  fulfill — without polluting the per-handler-type pub-fn surface.
+  Regression test `test_collect_pub_fns_skips_trait_impl_method_on_private_self_type`.
+
+### Documented limitations
+
+- Function re-exports (`pub use private::op` for `pub fn op()`) are
+  intentionally filtered from the visible-types set so private
+  same-named types don't leak. The trade-off — pub-use-only
+  functions are blind to Check B/D — is documented as Limitation #4
+  in `book/adapter-parity.md`. Workaround: declare the function at
+  a publicly-reachable path directly.
+
+### Internal
+
+- 1565 tests, 100% quality across all seven dimensions, 0 findings,
+  0 clippy warnings.
+- All `qual:allow(dry)` and `qual:allow(srp)` markers added during
+  the migration phases removed: github helpers refactored to a
+  generic `GithubDetailRow<D>` + `build_detail_view` /
+  `format_detail_view`, html dry tables share a generic
+  `render_table<T>`, sarif `SarifResultRow` holds the whole `Finding`
+  (single clone) instead of destructured fields, html coupling
+  introduces a private `format_subsections` helper to merge the three
+  sub-formatters into one cluster, and ai is split into
+  `ai/{mod, rows, format, details, output}.rs`.
+- New regression test `helper_reached_via_trait_blanket_dispatch_is_not_dead_code`
+  in `src/adapters/analyzers/dry/tests/dead_code.rs` documents that
+  the `call_targets` visitor handles the trait-blanket-dispatch case
+  via flat method-name capture; the v1.2.2 `sarif_rules` workaround
+  was unnecessary and has been reverted.
+
+## [1.2.1] - 2026-04-27
+
+Patch release: **`call_parity` boundary semantic + new Checks C/D**.
+
+The v1.2.0 `call_parity` rule walked transitive reachability across
+the entire target layer up to `call_depth` hops. On a clean codebase
+with zero genuine adapter asymmetries, this still produced findings
+for every application-internal helper that wasn't directly touched
+by every adapter (e.g. `record_operation`, `impact_count`). The
+findings pointed *inward* at application plumbing rather than at
+real adapter drift.
+
+v1.2.1 reframes Check B's semantic to **boundary-only**: walk forward
+from each adapter pub-fn until the target layer is hit, record that
+node as the adapter's touchpoint, then stop. Compare touchpoint sets
+across adapters. Application-internal helpers are no longer inspected
+for parity — that's `DRY-002`'s concern, not `call_parity`'s.
+
+### Added
+
+- **Check C — multi-touchpoint** (`architecture/call_parity/multi_touchpoint`):
+  flags adapter pub-fns that orchestrate across multiple application
+  calls themselves. Configurable severity via
+  `[architecture.call_parity] single_touchpoint = "off" | "warn" | "error"`,
+  default `"warn"` (emits as `Severity::Low`).
+- **Check D — multiplicity mismatch**
+  (`architecture/call_parity/multiplicity_mismatch`): flags target
+  pub-fns reached by every adapter but with divergent per-adapter
+  handler counts (e.g. cli has 2 handlers → `session.search`, mcp
+  has 1).
+- **Deprecated-handler exclusion**: adapter pub-fns marked
+  `#[deprecated]` (in any form) are excluded from Checks A/B/C/D.
+  Aliases that are explicitly being phased out shouldn't drag the
+  parity report.
+- Regression tests pinning correct turbofish + inferred-generic call
+  resolution behavior in the canonical-call collector.
+
+### Changed
+
+- **Check B — boundary semantic**. A target pub-fn is flagged when:
+  - it appears in some adapter's coverage but is missing from another
+    (mismatch case — adapter feature drift), OR
+  - it isn't transitively reachable from any adapter touchpoint
+    through target-internal callers (orphan case — application
+    capability not wired to any adapter, including dead target-layer
+    islands where only other unreachable target fns call it).
+  Internal application chains wired up via at least one adapter
+  (`session.search → record_operation → impact_count` when an adapter
+  reaches `session.search`) are silent.
+- `call_depth` semantic narrowed: now bounds **adapter-internal**
+  traversal depth only. Once the target layer is reached, the walk
+  stops descending into target callees. Default unchanged (3); no
+  config breakage.
+
+### Migration notes
+
+If you saw v1.2.0 fire findings on application-internal helpers
+(`record_operation`, `impact_count`, etc.) that ARE wired up through
+some adapter, those silently disappear under v1.2.1. The legitimate
+adapter-asymmetry findings remain. Genuinely orphaned target pub-fns
+— including those only callable via other dead target-layer code —
+still produce findings under Check B's orphan branch.
+
+If you want to detect "internal application helpers reached
+asymmetrically through other application code", that semantic is no
+longer covered by `call_parity`; use `DRY-002` (dead code) plus the
+existing per-target visibility audit in code review.
+
+### Architecture refactor: typed per-dimension Findings
+
+Alongside the call_parity bugfix, v1.2.1 introduces a **typed
+per-dimension Finding architecture** that fixes a long-standing
+"shotgun surgery" pattern: when a new dimension was added, every
+reporter had to be touched manually and gaps went unnoticed (e.g.
+`architecture_findings` only appeared in JSON/SARIF/findings_list,
+silently missing from HTML/AI/text/github).
+
+#### Added
+
+- `domain::findings::*` — seven typed Finding structs (`IospFinding`,
+  `ComplexityFinding`, `DryFinding`, `SrpFinding`, `CouplingFinding`,
+  `TqFinding`, `ArchitectureFinding`) plus `AnalysisFindings`
+  aggregate. Each typed Finding embeds `domain::Finding` as `common`
+  for shared metadata (file/line/column/dimension/rule_id/message/
+  severity/suppressed) and adds dimension-specific detail.
+- `domain::analysis_data::*` — typed state structures (`FunctionRecord`,
+  `ModuleCouplingRecord`) that carry per-function classification +
+  complexity metrics and per-module coupling metrics for reporters.
+- `ports::reporter::Reporter` trait with one method per dimension
+  (no default implementations). The compile-time guarantee: when a new
+  dimension is added, every reporter that hasn't been migrated fails
+  to compile. `render_report` helper visits all dimensions in
+  canonical order.
+- `app::projection` module with per-dimension projection adapters that
+  build typed Findings + AnalysisData from the analyzer outputs.
+  Pipeline populates `AnalysisResult.findings` and
+  `AnalysisResult.data` directly.
+- Architecture findings now visible in **all reporters** (HTML, AI,
+  JSON, SARIF, findings_list, text-verbose, github). Previously
+  rendered only by JSON/SARIF/findings_list.
+- AI reporter: `map_category("ARCHITECTURE") → "architecture"`
+  (previously fell through unmapped).
+- Per-kind metadata helpers consolidate label lookups: `DryFindingKind::meta()`,
+  `TqFindingKind::meta()`, `ComplexityFindingKind::meta()`,
+  `Severity::levels()` — replaces the kind→string match statements
+  that used to be duplicated across reporters.
+
+#### Changed
+
+- `AnalysisResult` reduced to 5 fields: `results` (FunctionAnalysis
+  records), `summary`, `orphan_suppressions`, `findings` (typed
+  per-dimension), `data` (typed per-dimension state). The legacy
+  per-dimension fields (`coupling`, `duplicates`, `dead_code`,
+  `fragments`, `boilerplate`, `wildcard_warnings`, `repeated_matches`,
+  `srp`, `tq`, `structural`, `architecture_findings`) are removed —
+  every reporter now consumes the typed findings/data exclusively.
+
+#### Migration notes
+
+For consumers of the JSON output: no breaking changes — JSON shape is
+unchanged. The typed `findings` and `data` aggregates are the internal
+input the pipeline projects from; the JSON envelope is built from
+them with the same shape as before.
+
+For maintainers: when adding a new dimension, the migration path is
+now (1) define the typed `*Finding` struct in `domain::findings`,
+(2) add the projection adapter in `app::projection`, (3) extend the
+`Reporter` trait with `report_<new_dim>`, (4) every reporter
+implementing the trait fails to compile until updated. This replaces
+the old practice of grepping for "where do reporters consume this
+dimension?" and hoping nothing was missed.
+
 ## [1.2.0] - 2026-04-24
 
 Minor release: **shallow type-inference** for `call_parity` receiver
@@ -199,18 +1071,6 @@ fallback markers rather than fabricate edges:
   Workaround: write the impl at the file-level qualified path
   (`impl outer::Hidden { … }`) so impl-canonical and caller-canonical
   agree, or `qual:allow(architecture)` at the call-site.
-- `mod private { pub type Public = Hidden; … } pub use private::Public;`
-  — re-exported type aliases declared inside private modules are
-  *not* followed into their target. The visibility pass skips private
-  modules wholesale, so `Public`'s target type never enters the
-  visible-canonicals set. Workaround: lift the type alias to the
-  parent module (`pub use private::Hidden; pub type Public = Hidden;`).
-- `pub use internal::helper as Hidden;` where `helper` is a function —
-  the visibility pass treats every `pub use` leaf as a type export,
-  so a same-named private `struct Hidden` collides with the function
-  re-export and its impl methods get recorded as adapter surface.
-  Workaround: rename to avoid the collision, or
-  `qual:allow(architecture)` on the affected impl.
 - `pub type Public = private::Hidden; impl Public { pub fn op() }` —
   the impl method is indexed under `crate::…::Public::op` (impl
   self-type via path canonicaliser), but a caller `fn h(x: Public)

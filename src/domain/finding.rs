@@ -19,6 +19,12 @@ use crate::domain::{Dimension, Severity};
 /// `Finding { file, line, dimension, rule_id, message, ..Default::default() }`
 /// where column is unknown, severity is `Medium`, and the finding is not
 /// suppressed.
+///
+/// Future: when a reporter needs rich finding-specific data beyond the
+/// message (logic locations, similarity scores, per-adapter counts), add
+/// `extra: FindingExtra` as a typed `pub enum` in domain — keeps the
+/// domain layer free of serde_json/IO types. Today no reporter has this
+/// need; the message string covers all cases.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Finding {
     /// Path of the file the finding points at, normalised to forward slashes.
@@ -32,8 +38,9 @@ pub struct Finding {
     /// The dimension that produced this finding.
     pub dimension: Dimension,
     /// Stable identifier for the specific rule, used in suppression strings
-    /// and SARIF output. Convention: `"<dimension>/<RULE>"`, e.g.
-    /// `"iosp/VIOLATION"`, `"dry/DUPLICATE"`, `"architecture/LayerViolation"`.
+    /// and SARIF output. Convention: `"<dimension>/<rule>"` (snake_case),
+    /// e.g. `"iosp/violation"`, `"dry/duplicate"`,
+    /// `"architecture/call_parity/no_delegation"`.
     pub rule_id: String,
     /// Human-readable description. Short enough for a single report line.
     pub message: String,

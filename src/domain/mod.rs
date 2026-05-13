@@ -8,15 +8,19 @@
 //! New Domain types land here as the Clean-Architecture refactor progresses.
 //! Phase 1 introduces `Dimension`, `Severity`, `Suppression`.
 
+pub mod analysis_data;
 pub mod dimension;
 pub mod finding;
+pub mod findings;
 pub mod score;
 pub mod severity;
 pub mod source_unit;
 pub mod suppression;
 
+pub use analysis_data::AnalysisData;
 pub use dimension::Dimension;
 pub use finding::Finding;
+pub use findings::AnalysisFindings;
 pub use score::PERCENTAGE_MULTIPLIER;
 pub use severity::Severity;
 pub use source_unit::SourceUnit;
