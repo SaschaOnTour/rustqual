@@ -537,6 +537,48 @@ fn test_impl_trait_bare_std_send_marker_still_skipped() {
 }
 
 #[test]
+fn test_impl_trait_external_aliased_bound_skipped_workspace_bound_wins() {
+    // `use serde::Serialize;` then `impl Serialize + Handler`. The
+    // first bound canonicalises to the external path
+    // `["serde", "Serialize"]`. Trait dispatch only knows the
+    // workspace, so accepting an external bound would shadow the
+    // later workspace `Handler` and leave `make().handle()`
+    // unresolved. External aliased bounds must be skipped just like
+    // fully-qualified `serde::Serialize` already is (canonicalisation
+    // returns `None` for the un-aliased external form).
+    let mut alias_map = HashMap::new();
+    alias_map.insert(
+        "Serialize".to_string(),
+        vec!["serde".to_string(), "Serialize".to_string()],
+    );
+    let mut local = HashSet::new();
+    local.insert("Handler".to_string());
+    let roots = HashSet::new();
+    let ty = parse_type("impl Serialize + Handler");
+    let resolved = resolve_type(
+        &ty,
+        &ctx(&FileScope {
+            path: "src/app/mod.rs",
+            alias_map: &alias_map,
+            aliases_per_scope: &ScopedAliasMap::new(),
+            local_symbols: &local,
+            local_decl_scopes: &HashMap::new(),
+            crate_root_modules: &roots,
+        }),
+    );
+    assert_eq!(
+        resolved,
+        CanonicalType::TraitBound(vec![
+            "crate".to_string(),
+            "app".to_string(),
+            "Handler".to_string(),
+        ]),
+        "external aliased bound `serde::Serialize` must be skipped so \
+         workspace `Handler` is picked; got {resolved:?}",
+    );
+}
+
+#[test]
 fn test_impl_aliased_future_resolves_to_future_with_output() {
     // `use std::future::Future as Fut;` then `impl Fut<Output = Session>`.
     // The raw bound leaf is `Fut`, but the canonicalised path is

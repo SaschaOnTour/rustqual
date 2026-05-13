@@ -166,8 +166,17 @@ fn resolve_bound_list(
             .iter()
             .map(|s| s.ident.to_string())
             .collect();
+        // Trait dispatch only knows the workspace, so only crate-rooted
+        // canonicals are valid bounds. External aliases
+        // (`use serde::Serialize;`) expand to `["serde", "Serialize"]`
+        // and must be skipped just like fully-qualified
+        // `serde::Serialize` (which `canonicalise_type_segments_in_scope`
+        // already returns `None` for) — otherwise the external bound
+        // shadows a later workspace bound on the same `+` list.
         if let Some(resolved) = canonicalise_type_segments_in_scope(&segs, &canon_scope(ctx)) {
-            return CanonicalType::TraitBound(resolved);
+            if resolved.first().map(String::as_str) == Some("crate") {
+                return CanonicalType::TraitBound(resolved);
+            }
         }
     }
     CanonicalType::Opaque

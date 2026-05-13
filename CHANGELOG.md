@@ -361,6 +361,27 @@ Eleventh-pass review (Codex 2026-05-12 round 11, doc-only):
   classifies each bullet's topic, so readers no longer assume only
   the first two items are in scope.
 
+Eighteenth-pass review (Codex 2026-05-13 round 18):
+
+- **External aliased trait bounds shadowed later workspace
+  bounds** (P2): after the round-17 marker fix, the bound resolver
+  in `resolve_bound_list` still accepted any successfully-canonicalised
+  path as a `TraitBound`. With `use serde::Serialize;` and
+  `fn make() -> impl Serialize + Handler`, the first bound expanded
+  to `["serde", "Serialize"]` and returned, so the later workspace
+  `Handler` bound was never visited — `make().handle()` stayed
+  unresolved. Fully-qualified `serde::Serialize` without the `use`
+  alias already returned `None` from canonicalisation and was
+  correctly skipped; the alias-expanded form took a different path
+  and slipped through. Fix: gate the `TraitBound` return on
+  `canonical.first() == Some("crate")` so only workspace-rooted
+  bounds win — external aliases now skip exactly like the
+  fully-qualified external form. The std-marker special case
+  (`resolve_marker::is_marker_trait`) and the Future special case
+  (`future_bound_args`) still run first, so `Send` / `Sync` /
+  `Future<Output = T>` keep their existing handling. Regression
+  test `test_impl_trait_external_aliased_bound_skipped_workspace_bound_wins`.
+
 Seventeenth-pass review (Codex 2026-05-13 round 17):
 
 - **Marker-trait skip discarded workspace traits with marker-style
