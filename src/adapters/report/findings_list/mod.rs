@@ -250,14 +250,19 @@ pub(crate) fn orphan_to_finding_entry(w: &OrphanSuppression) -> FindingEntry {
     FindingEntry::new(&w.file, w.line, "ORPHAN_SUPPRESSION", detail, String::new())
 }
 
-/// Print findings in one-line-per-finding format with heading.
-pub fn print_findings(entries: &[FindingEntry]) {
+/// Format findings as a one-line-per-finding string with heading.
+/// Empty input yields an empty string. Separated from `print_findings`
+/// so tests can assert on the produced text without redirecting stdout.
+pub(crate) fn format_findings(entries: &[FindingEntry]) -> String {
     if entries.is_empty() {
-        return;
+        return String::new();
     }
     let n = entries.len();
     let heading = format!("═══ {} Finding{} ═══", n, if n == 1 { "" } else { "s" });
-    println!("\n{}", colored::Colorize::bold(heading.as_str()));
+    let mut out = String::new();
+    out.push('\n');
+    out.push_str(&colored::Colorize::bold(heading.as_str()).to_string());
+    out.push('\n');
     entries.iter().for_each(|e| {
         let detail = if e.function_name.is_empty() {
             e.detail.clone()
@@ -267,9 +272,21 @@ pub fn print_findings(entries: &[FindingEntry]) {
             format!("{}  in {}", e.detail, e.function_name)
         };
         if e.file.is_empty() {
-            println!("  {}  {}", e.category, detail);
+            out.push_str(&format!("  {}  {}\n", e.category, detail));
         } else {
-            println!("  {}:{}  {}  {}", e.file, e.line, e.category, detail);
+            out.push_str(&format!(
+                "  {}:{}  {}  {}\n",
+                e.file, e.line, e.category, detail
+            ));
         }
     });
+    out
+}
+
+/// Print findings in one-line-per-finding format with heading.
+pub fn print_findings(entries: &[FindingEntry]) {
+    let s = format_findings(entries);
+    if !s.is_empty() {
+        print!("{s}");
+    }
 }

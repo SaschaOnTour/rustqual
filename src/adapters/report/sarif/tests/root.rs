@@ -33,22 +33,34 @@ fn make_result(name: &str, classification: Classification) -> FunctionAnalysis {
 
 fn make_analysis(results: Vec<FunctionAnalysis>) -> AnalysisResult {
     let summary = Summary::from_results(&results);
+    let data = crate::app::projection::project_data(&results, None);
+    let findings = crate::domain::AnalysisFindings {
+        iosp: crate::app::projection::project_iosp(&results),
+        ..Default::default()
+    };
     AnalysisResult {
         results,
         summary,
-        findings: crate::domain::AnalysisFindings::default(),
-        data: crate::domain::AnalysisData::default(),
+        findings,
+        data,
     }
 }
 
 #[test]
-fn test_print_sarif_no_violations_no_panic() {
+fn test_print_sarif_emits_no_results_when_clean() {
     let analysis = make_analysis(vec![make_result("good_fn", Classification::Integration)]);
-    print_sarif(&analysis);
+    let s = build_sarif_string(&analysis);
+    let v: serde_json::Value = serde_json::from_str(&s).expect("valid SARIF JSON");
+    let results = &v["runs"][0]["results"];
+    assert_eq!(
+        results.as_array().map(Vec::len),
+        Some(0),
+        "Integration function should produce no SARIF results; got {s}"
+    );
 }
 
 #[test]
-fn test_print_sarif_with_violation_no_panic() {
+fn test_print_sarif_emits_violation_with_location() {
     let analysis = make_analysis(vec![make_result(
         "bad_fn",
         Classification::Violation {
@@ -64,11 +76,23 @@ fn test_print_sarif_with_violation_no_panic() {
             }],
         },
     )]);
-    print_sarif(&analysis);
+    let s = build_sarif_string(&analysis);
+    let v: serde_json::Value = serde_json::from_str(&s).expect("valid SARIF JSON");
+    let results = v["runs"][0]["results"].as_array().expect("results array");
+    assert!(
+        !results.is_empty(),
+        "violation must produce SARIF result; got {s}"
+    );
+    let r = &results[0];
+    let physical = &r["locations"][0]["physicalLocation"];
+    assert_eq!(physical["artifactLocation"]["uri"], "test.rs");
+    assert_eq!(physical["region"]["startLine"], 1);
+    let rule_id = r["ruleId"].as_str().unwrap_or("");
+    assert!(!rule_id.is_empty(), "rule_id must be set; got {s}");
 }
 
 #[test]
-fn test_print_sarif_high_severity_no_panic() {
+fn test_print_sarif_severity_for_many_violations_is_error_or_warning() {
     let analysis = make_analysis(vec![make_result(
         "complex_fn",
         Classification::Violation {
@@ -104,7 +128,13 @@ fn test_print_sarif_high_severity_no_panic() {
             ],
         },
     )]);
-    print_sarif(&analysis);
+    let s = build_sarif_string(&analysis);
+    let v: serde_json::Value = serde_json::from_str(&s).expect("valid SARIF JSON");
+    let level = v["runs"][0]["results"][0]["level"].as_str().unwrap_or("");
+    assert!(
+        matches!(level, "warning" | "error"),
+        "3+3 violation must map to warning or error level; got `{level}` in {s}"
+    );
 }
 
 #[test]

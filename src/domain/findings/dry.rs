@@ -80,13 +80,18 @@ pub struct RepeatedMatchParticipant {
     pub function_name: String,
     pub file: String,
     pub line: usize,
+    /// Number of arms in this occurrence's match expression.
+    pub arm_count: usize,
 }
 
 /// Per-variant detail for a DRY finding.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum DryFindingDetails {
     Duplicate {
         participants: Vec<DuplicateParticipant>,
+        /// Similarity score for near-duplicate groups (0.0..=1.0).
+        /// `None` for exact duplicates — they don't need a score.
+        similarity: Option<f64>,
     },
     Fragment {
         participants: Vec<FragmentParticipant>,
@@ -111,7 +116,7 @@ pub enum DryFindingDetails {
 }
 
 /// DRY finding — duplicate code, dead code, wildcard import, etc.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DryFinding {
     /// Common metadata. `common.dimension == Dimension::Dry`.
     pub common: Finding,

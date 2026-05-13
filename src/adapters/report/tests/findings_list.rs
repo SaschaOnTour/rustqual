@@ -142,6 +142,7 @@ fn test_total_findings_dry_duplicate_per_participant() {
             kind: DryFindingKind::DuplicateExact,
             details: DryFindingDetails::Duplicate {
                 participants: participants.clone(),
+                similarity: None,
             },
         },
         DryFinding {
@@ -149,6 +150,7 @@ fn test_total_findings_dry_duplicate_per_participant() {
             kind: DryFindingKind::DuplicateExact,
             details: DryFindingDetails::Duplicate {
                 participants: participants.clone(),
+                similarity: None,
             },
         },
     ];
@@ -228,12 +230,16 @@ fn findings_list_includes_orphan_suppressions_via_snapshot_view() {
 }
 
 #[test]
-fn test_print_findings_empty_no_panic() {
-    print_findings(&[]);
+fn test_format_findings_empty_yields_empty_string() {
+    let s = crate::report::findings_list::format_findings(&[]);
+    assert!(
+        s.is_empty(),
+        "empty input must produce empty output; got `{s}`"
+    );
 }
 
 #[test]
-fn test_print_findings_with_entries_no_panic() {
+fn test_format_findings_emits_file_line_category_and_function_name() {
     let entries = vec![FindingEntry::new(
         "src/foo.rs",
         10,
@@ -241,5 +247,13 @@ fn test_print_findings_with_entries_no_panic() {
         "logic + calls".into(),
         "fn_x".into(),
     )];
-    print_findings(&entries);
+    let s = crate::report::findings_list::format_findings(&entries);
+    assert!(
+        s.contains("src/foo.rs:10"),
+        "file:line preserved; got `{s}`"
+    );
+    assert!(s.contains("VIOLATION"), "category preserved; got `{s}`");
+    assert!(s.contains("logic + calls"), "detail preserved; got `{s}`");
+    assert!(s.contains("fn_x"), "function_name preserved; got `{s}`");
+    assert!(s.contains("1 Finding"), "heading shows count; got `{s}`");
 }

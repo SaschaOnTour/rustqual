@@ -361,6 +361,84 @@ Eleventh-pass review (Codex 2026-05-12 round 11, doc-only):
   classifies each bullet's topic, so readers no longer assume only
   the first two items are in scope.
 
+Fourteenth-pass review (user-driven proactive A21 sweep
+2026-05-12 round 14):
+
+- **All 24 reporter `_no_panic` smoke tests converted to
+  value-asserting tests** (proactive A21-class elimination): rounds
+  12-13 surfaced three v1.2.1 typed-reporter refactor drops that
+  smoke tests had masked (JSON `logic_count`/`call_count`,
+  NearDuplicate `similarity`, RepeatedMatch `arm_count`, SRP
+  `composite_score`/`clusters`/`length_score`). Rather than wait
+  for Codex to discover the remaining smoke tests one round at a
+  time, the user directed a full sweep. All 24 `_no_panic` tests
+  across eight reporters (sarif=3, ai=3, dot=3, findings_list=2,
+  github=2, json=4 remaining, text=6, pipeline=1) were replaced
+  with tests that assert actual output values and renamed to
+  describe the asserted behavior (e.g.
+  `test_print_json_carries_violation_logic_and_call_locations`,
+  `test_print_sarif_emits_violation_with_location`,
+  `ai_value_includes_complexity_finding_metric_and_location`). New
+  helper `format_findings(&[FindingEntry]) -> String` in
+  `findings_list/mod.rs` (string-returning variant of
+  `print_findings`) makes the findings-list reporter testable
+  without stdout capture. Reporter test fixtures now populate
+  `findings.iosp` via `project_iosp` so the projection path is
+  actually exercised. Test count unchanged (1611 → 1611, 1-for-1
+  replacement). No production code changes — the conversion is
+  purely a test-suite hardening to prevent future projection
+  drops from staying silent. `grep -rn "fn .*_no_panic\|fn
+  .*_no_crash" src/ tests/` returns nothing after this sweep, so
+  the smoke-test category is effectively eliminated from the
+  reporter suite.
+
+Thirteenth-pass review (Codex 2026-05-12 round 13):
+
+- **NearDuplicate similarity dropped from `DryFindingDetails::Duplicate`**
+  (P2): the v1.2.1 typed-reporter refactor projected
+  `DuplicateKind::NearDuplicate { similarity }` to
+  `DryFindingDetails::Duplicate { participants }` and dropped the
+  similarity score. JSON output hardcoded `similarity: None` for
+  every group, so machine consumers couldn't distinguish a 0.91
+  near-duplicate from an unscored exact group. Fix: added
+  `similarity: Option<f64>` to the details variant, copied it in
+  `project_duplicate_group`, and read it in the JSON builder. `Eq`
+  derives dropped on `DryFinding` / `DryFindingDetails`. Regression
+  test `test_print_json_carries_near_duplicate_similarity`.
+- **RepeatedMatch `arm_count` dropped and groups collapsed by
+  enum name** (P2): the typed `RepeatedMatchParticipant` carried
+  no `arm_count`, so JSON `entries[].arm_count` was hardcoded to
+  `0`; the JSON builder additionally de-duplicated groups by
+  `enum_name` alone, collapsing two distinct repeated patterns over
+  the same enum into one group. Fix: added `arm_count: usize` to
+  `RepeatedMatchParticipant`, copied it in projection, and read it
+  in the JSON builder. JSON de-dup keyed by
+  `(enum_name, sorted participant locations)`. Regression test
+  `test_print_json_carries_repeated_match_arm_count_and_distinct_groups`.
+- **SRP `composite_score`, responsibility clusters, and
+  `length_score` dropped** (P2): `SrpFindingDetails::StructCohesion`
+  was missing the analyzer's `composite_score` + `clusters`
+  (responsibility groups), and `ModuleLength` was missing
+  `length_score`; JSON consumers filled placeholder zeros / empty
+  arrays / wrapped-one-element-arrays. Fix: added the missing
+  fields plus a new `ResponsibilityCluster` domain type
+  (re-exported from `domain::findings`), copied them in
+  `project_struct` / `project_module`, and pulled them through the
+  JSON builder. The intermediate `SrpModuleRow` (text/html-friendly)
+  still flattens each cluster's member list with `", "`; JSON
+  preserves the per-cluster grouping. `Eq` derives dropped on
+  `SrpFinding` / `SrpFindingDetails` (the new `f64` fields are not
+  `Eq`). Regression test
+  `test_print_json_carries_srp_composite_score_clusters_length_score`.
+- **Integration test renamed and reinforced** (proactive A21
+  sweep): `test_json_output_parseable` was a schema-only smoke
+  test. Renamed to `test_json_output_schema_and_complexity_values`
+  and extended with a value assertion that at least one
+  `functions[].complexity.logic_count` is non-zero on
+  `examples/sample.rs`. Catches future projection drops in the
+  JSON path because `sample.rs` deterministically has Operations
+  with non-zero logic counts.
+
 Twelfth-pass review (Codex 2026-05-12 round 12):
 
 - **JSON reporter dropped `logic_count` + `call_count`** (P2): the

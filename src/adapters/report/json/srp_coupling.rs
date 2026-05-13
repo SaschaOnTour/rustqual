@@ -4,7 +4,7 @@
 
 use super::super::json_types::{
     JsonCouplingModule, JsonModuleSrpWarning, JsonParamSrpWarning, JsonSdpViolation,
-    JsonSrpWarning, JsonStructuralWarning,
+    JsonSrpCluster, JsonSrpWarning, JsonStructuralWarning,
 };
 use crate::domain::analysis_data::ModuleCouplingRecord;
 use crate::domain::findings::{
@@ -94,6 +94,8 @@ fn collect_srp_into(
                 field_count,
                 method_count,
                 fan_out,
+                composite_score,
+                clusters,
             },
         ) => structs.push(JsonSrpWarning {
             struct_name: struct_name.clone(),
@@ -103,8 +105,14 @@ fn collect_srp_into(
             field_count: *field_count,
             method_count: *method_count,
             fan_out: *fan_out,
-            composite_score: 0.0,
-            clusters: vec![],
+            composite_score: *composite_score,
+            clusters: clusters
+                .iter()
+                .map(|c| JsonSrpCluster {
+                    methods: c.methods.clone(),
+                    fields: c.fields.clone(),
+                })
+                .collect(),
         }),
         (
             SrpFindingKind::ModuleLength,
@@ -113,14 +121,15 @@ fn collect_srp_into(
                 production_lines,
                 independent_clusters,
                 cluster_names,
+                length_score,
             },
         ) => modules.push(JsonModuleSrpWarning {
             module: module.clone(),
             file: f.common.file.clone(),
             production_lines: *production_lines,
-            length_score: 0.0,
+            length_score: *length_score,
             independent_clusters: *independent_clusters,
-            cluster_names: cluster_names.iter().map(|s| vec![s.clone()]).collect(),
+            cluster_names: cluster_names.clone(),
         }),
         (
             SrpFindingKind::ParameterCount,

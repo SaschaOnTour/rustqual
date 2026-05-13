@@ -115,7 +115,7 @@ fn build_duplicate_groups(findings: &[DryFinding]) -> Vec<DryGroupRow> {
     dedup_by_locations(findings, |f| match (&f.kind, &f.details) {
         (
             DryFindingKind::DuplicateExact | DryFindingKind::DuplicateSimilar,
-            DryFindingDetails::Duplicate { participants },
+            DryFindingDetails::Duplicate { participants, .. },
         ) => {
             let key: Vec<(String, usize)> = participants
                 .iter()

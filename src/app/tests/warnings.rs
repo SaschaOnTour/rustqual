@@ -389,6 +389,8 @@ fn make_srp_struct_finding(file: &str, line: usize) -> crate::domain::findings::
             field_count: 5,
             method_count: 5,
             fan_out: 2,
+            composite_score: 0.0,
+            clusters: vec![],
         },
     }
 }
@@ -407,6 +409,7 @@ fn make_srp_module_finding(file: &str) -> crate::domain::findings::SrpFinding {
             production_lines: 900,
             independent_clusters: 1,
             cluster_names: vec![],
+            length_score: 0.0,
         },
     }
 }

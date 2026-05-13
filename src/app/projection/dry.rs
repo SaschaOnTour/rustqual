@@ -45,11 +45,13 @@ pub(crate) fn project_dry(secondary: &SecondaryResults) -> Vec<DryFinding> {
 }
 
 fn project_duplicate_group(group: &DuplicateGroup) -> Vec<DryFinding> {
-    let (rule_id, kind) = match &group.kind {
-        DuplicateKind::Exact => ("dry/duplicate/exact", DryFindingKind::DuplicateExact),
-        DuplicateKind::NearDuplicate { .. } => {
-            ("dry/duplicate/similar", DryFindingKind::DuplicateSimilar)
-        }
+    let (rule_id, kind, similarity) = match &group.kind {
+        DuplicateKind::Exact => ("dry/duplicate/exact", DryFindingKind::DuplicateExact, None),
+        DuplicateKind::NearDuplicate { similarity } => (
+            "dry/duplicate/similar",
+            DryFindingKind::DuplicateSimilar,
+            Some(*similarity),
+        ),
     };
     let participants: Vec<DuplicateParticipant> = group
         .entries
@@ -77,6 +79,7 @@ fn project_duplicate_group(group: &DuplicateGroup) -> Vec<DryFinding> {
             kind,
             details: DryFindingDetails::Duplicate {
                 participants: participants.clone(),
+                similarity,
             },
         })
         .collect()
@@ -192,6 +195,7 @@ fn project_repeated_match_group(group: &RepeatedMatchGroup) -> Vec<DryFinding> {
             function_name: e.function_name.clone(),
             file: e.file.clone(),
             line: e.line,
+            arm_count: e.arm_count,
         })
         .collect();
     group

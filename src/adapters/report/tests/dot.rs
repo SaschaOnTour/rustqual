@@ -33,27 +33,40 @@ fn data_with(functions: Vec<FunctionRecord>) -> AnalysisData {
 }
 
 #[test]
-fn test_print_dot_empty_no_panic() {
+fn test_print_dot_empty_yields_digraph_envelope() {
     let data = data_with(vec![]);
-    print_dot(&data);
+    let findings = AnalysisFindings::default();
+    let out = DotReporter.render(&findings, &data);
+    assert!(out.starts_with("digraph rustqual {"), "got {out}");
+    assert!(out.ends_with("}\n"), "got {out}");
 }
 
 #[test]
-fn test_print_dot_integration_no_panic() {
+fn test_print_dot_integration_node_present() {
     let data = data_with(vec![make_record(
         "orchestrator",
         FunctionClassification::Integration,
     )]);
-    print_dot(&data);
+    let findings = AnalysisFindings::default();
+    let out = DotReporter.render(&findings, &data);
+    assert!(
+        out.contains("\"orchestrator\""),
+        "Integration function node must be emitted; got {out}"
+    );
 }
 
 #[test]
-fn test_print_dot_violation_no_panic() {
+fn test_print_dot_violation_node_present() {
     let data = data_with(vec![make_record(
         "bad_fn",
         FunctionClassification::Violation,
     )]);
-    print_dot(&data);
+    let findings = AnalysisFindings::default();
+    let out = DotReporter.render(&findings, &data);
+    assert!(
+        out.contains("\"bad_fn\""),
+        "Violation function node must be emitted; got {out}"
+    );
 }
 
 #[test]

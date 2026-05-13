@@ -32,70 +32,106 @@ fn make_result(name: &str, classification: Classification) -> FunctionAnalysis {
     }
 }
 
-#[test]
-fn test_print_report_empty_no_panic() {
-    let results: Vec<FunctionAnalysis> = vec![];
-    let summary = Summary::from_results(&results);
-    print_summary_only(&summary, &[]);
+fn render_text(results: &[FunctionAnalysis], verbose: bool) -> String {
+    use crate::domain::{AnalysisData, AnalysisFindings};
+    use crate::ports::Reporter;
+    let summary = Summary::from_results(results);
+    let reporter = TextReporter {
+        summary: &summary,
+        function_analyses: results,
+        findings_entries: &[],
+        verbose,
+        suggestions_text: None,
+    };
+    let findings = AnalysisFindings::default();
+    let data = AnalysisData::default();
+    reporter.render(&findings, &data)
 }
 
 #[test]
-fn test_print_report_no_violations_no_panic() {
-    let results = vec![make_result("good_fn", Classification::Integration)];
-    let summary = Summary::from_results(&results);
-    print_summary_only(&summary, &[]);
+fn test_print_report_empty_emits_quality_score_header() {
+    let out = render_text(&[], false);
+    assert!(
+        out.to_lowercase().contains("quality") || out.contains("Score"),
+        "empty report must still emit a quality summary section; got {out}"
+    );
 }
 
 #[test]
-fn test_print_report_with_violation_no_panic() {
-    let results = vec![make_result(
-        "bad_fn",
-        Classification::Violation {
-            has_logic: true,
-            has_own_calls: true,
-            logic_locations: vec![LogicOccurrence {
-                kind: "if".into(),
-                line: 5,
-            }],
-            call_locations: vec![CallOccurrence {
-                name: "helper".into(),
-                line: 6,
-            }],
-        },
-    )];
-    let summary = Summary::from_results(&results);
-    print_summary_only(&summary, &[]);
+fn test_print_report_no_violations_marks_clean() {
+    let out = render_text(
+        &[make_result("good_fn", Classification::Integration)],
+        false,
+    );
+    // Clean analysis: summary section produced, no Violation row
+    assert!(
+        !out.to_uppercase().contains("VIOLATION"),
+        "Integration-only analysis must not surface VIOLATION rows; got {out}"
+    );
 }
 
 #[test]
-fn test_print_report_verbose_no_panic() {
-    let results = vec![
-        make_result("integrate_fn", Classification::Integration),
-        make_result("operate_fn", Classification::Operation),
-        make_result("trivial_fn", Classification::Trivial),
-        make_result(
-            "violate_fn",
+fn test_print_report_with_violation_surfaces_bad_fn() {
+    let out = render_text(
+        &[make_result(
+            "bad_fn",
             Classification::Violation {
                 has_logic: true,
                 has_own_calls: true,
                 logic_locations: vec![LogicOccurrence {
-                    kind: "for".into(),
-                    line: 1,
+                    kind: "if".into(),
+                    line: 5,
                 }],
                 call_locations: vec![CallOccurrence {
-                    name: "foo".into(),
-                    line: 2,
+                    name: "helper".into(),
+                    line: 6,
                 }],
             },
-        ),
-    ];
-    let summary = Summary::from_results(&results);
-    print_summary_only(&summary, &[]);
-    print_files_only(&results);
+        )],
+        true,
+    );
+    assert!(
+        out.contains("bad_fn"),
+        "verbose text report must mention the violating function name; got {out}"
+    );
 }
 
 #[test]
-fn test_print_report_with_complexity_no_panic() {
+fn test_print_report_verbose_lists_all_classifications() {
+    let out = render_text(
+        &[
+            make_result("integrate_fn", Classification::Integration),
+            make_result("operate_fn", Classification::Operation),
+            make_result("trivial_fn", Classification::Trivial),
+            make_result(
+                "violate_fn",
+                Classification::Violation {
+                    has_logic: true,
+                    has_own_calls: true,
+                    logic_locations: vec![LogicOccurrence {
+                        kind: "for".into(),
+                        line: 1,
+                    }],
+                    call_locations: vec![CallOccurrence {
+                        name: "foo".into(),
+                        line: 2,
+                    }],
+                },
+            ),
+        ],
+        true,
+    );
+    // Verbose mode lists every function — assert each name appears.
+    for name in &["integrate_fn", "operate_fn", "trivial_fn", "violate_fn"] {
+        assert!(
+            out.contains(name),
+            "verbose output missing `{name}`; got {out}"
+        );
+    }
+}
+
+#[test]
+fn test_print_report_with_complexity_surfaces_complexity_metrics() {
     let mut func = make_result("complex_fn", Classification::Operation);
     func.complexity = Some(ComplexityMetrics {
         logic_count: 5,
@@ -103,10 +139,15 @@ fn test_print_report_with_complexity_no_panic() {
         max_nesting: 3,
         ..Default::default()
     });
-    let results = vec![func];
-    let summary = Summary::from_results(&results);
-    print_summary_only(&summary, &[]);
-    print_files_only(&results);
+    let out = render_text(&[func], true);
+    assert!(
+        out.contains("complex_fn"),
+        "verbose output must list the function; got {out}"
+    );
+    assert!(
+        out.contains("nesting=3") || out.contains("logic=5"),
+        "verbose output must surface complexity metrics; got {out}"
+    );
 }
 
 #[test]
@@ -152,7 +193,7 @@ fn text_reporter_renders_orphans_via_snapshot_view() {
 }
 
 #[test]
-fn test_print_report_suppressed_verbose_no_panic() {
+fn test_print_report_suppressed_verbose_marks_function() {
     let mut func = make_result(
         "suppressed_fn",
         Classification::Violation {
@@ -169,8 +210,9 @@ fn test_print_report_suppressed_verbose_no_panic() {
         },
     );
     func.suppressed = true;
-    let results = vec![func];
-    let summary = Summary::from_results(&results);
-    print_summary_only(&summary, &[]);
-    print_files_only(&results);
+    let out = render_text(&[func], true);
+    assert!(
+        out.contains("suppressed_fn"),
+        "verbose mode must list the function even when suppressed; got {out}"
+    );
 }

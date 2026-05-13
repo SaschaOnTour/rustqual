@@ -8,6 +8,7 @@ use crate::adapters::report::github::format::{
     format_architecture, format_complexity, format_coupling, format_dry, format_iosp, format_srp,
     format_tq,
 };
+use crate::ports::Reporter;
 
 // Wrappers that preserve the test API: take a finding slice, return
 // the formatted annotation block. They go through the new build →
@@ -67,24 +68,40 @@ fn make_result(name: &str, classification: Classification) -> FunctionAnalysis {
 
 fn make_analysis(results: Vec<FunctionAnalysis>) -> AnalysisResult {
     let summary = Summary::from_results(&results);
+    let data = crate::app::projection::project_data(&results, None);
+    let findings = crate::domain::AnalysisFindings {
+        iosp: crate::app::projection::project_iosp(&results),
+        ..Default::default()
+    };
     AnalysisResult {
         results,
         summary,
-        findings: crate::domain::AnalysisFindings::default(),
-        data: crate::domain::AnalysisData::default(),
+        findings,
+        data,
     }
 }
 
 // ── Smoke tests via the public entry point ─────────────────────────
 
 #[test]
-fn test_print_github_no_violations_no_panic() {
+fn test_print_github_emits_quality_notice_when_clean() {
     let analysis = make_analysis(vec![make_result("good_fn", Classification::Integration)]);
-    print_github(&analysis);
+    let reporter = crate::adapters::report::github::GithubReporter {
+        summary: &analysis.summary,
+    };
+    let out = reporter.render(&analysis.findings, &analysis.data);
+    assert!(
+        out.contains("::notice::") || out.contains("::error::"),
+        "github output must include a quality-score annotation prefix; got {out}"
+    );
+    assert!(
+        !out.contains("::warning::"),
+        "clean analysis must not emit warning annotations; got {out}"
+    );
 }
 
 #[test]
-fn test_print_github_with_violation_no_panic() {
+fn test_print_github_emits_warning_for_violation_with_location() {
     let analysis = make_analysis(vec![make_result(
         "bad_fn",
         Classification::Violation {
@@ -100,7 +117,18 @@ fn test_print_github_with_violation_no_panic() {
             }],
         },
     )]);
-    print_github(&analysis);
+    let reporter = crate::adapters::report::github::GithubReporter {
+        summary: &analysis.summary,
+    };
+    let out = reporter.render(&analysis.findings, &analysis.data);
+    assert!(
+        out.contains("::warning") || out.contains("::error"),
+        "violation must emit warning/error annotation; got {out}"
+    );
+    assert!(
+        out.contains("file=test.rs"),
+        "annotation must include file location; got {out}"
+    );
 }
 
 // ── Content tests against the GithubReporter trait directly ────────

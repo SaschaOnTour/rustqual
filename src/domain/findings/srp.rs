@@ -19,8 +19,16 @@ pub enum SrpFindingKind {
     Structural,
 }
 
-/// Per-variant detail for an SRP finding.
+/// One responsibility cluster identified by LCOM4 — a connected
+/// component of methods sharing field accesses.
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResponsibilityCluster {
+    pub methods: Vec<String>,
+    pub fields: Vec<String>,
+}
+
+/// Per-variant detail for an SRP finding.
+#[derive(Debug, Clone, PartialEq)]
 pub enum SrpFindingDetails {
     StructCohesion {
         struct_name: String,
@@ -28,12 +36,16 @@ pub enum SrpFindingDetails {
         field_count: usize,
         method_count: usize,
         fan_out: usize,
+        composite_score: f64,
+        clusters: Vec<ResponsibilityCluster>,
     },
     ModuleLength {
         module: String,
         production_lines: usize,
         independent_clusters: usize,
-        cluster_names: Vec<String>,
+        /// Each inner vec is one cluster (list of function names).
+        cluster_names: Vec<Vec<String>>,
+        length_score: f64,
     },
     ParameterCount {
         function_name: String,
@@ -50,7 +62,7 @@ pub enum SrpFindingDetails {
 }
 
 /// SRP finding — struct cohesion, module length, or parameter-count smell.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SrpFinding {
     /// Common metadata. `common.dimension == Dimension::Srp`.
     pub common: Finding,

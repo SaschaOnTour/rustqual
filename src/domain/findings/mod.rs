@@ -34,5 +34,5 @@ pub use dry::{
 };
 pub use iosp::{CallLocation, IospFinding, LogicLocation};
 pub use orphan::OrphanSuppression;
-pub use srp::{SrpFinding, SrpFindingDetails, SrpFindingKind};
+pub use srp::{ResponsibilityCluster, SrpFinding, SrpFindingDetails, SrpFindingKind};
 pub use tq::{TqFinding, TqFindingKind};

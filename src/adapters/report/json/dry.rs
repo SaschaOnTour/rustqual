@@ -18,7 +18,11 @@ pub(super) fn build_duplicates(findings: &[DryFinding]) -> Vec<JsonDuplicateGrou
         .iter()
         .filter(|f| !f.common.suppressed)
         .for_each(|f| {
-            if let DryFindingDetails::Duplicate { participants } = &f.details {
+            if let DryFindingDetails::Duplicate {
+                participants,
+                similarity,
+            } = &f.details
+            {
                 let key: Vec<(String, usize)> = participants
                     .iter()
                     .map(|p| (p.file.clone(), p.line))
@@ -28,7 +32,7 @@ pub(super) fn build_duplicates(findings: &[DryFinding]) -> Vec<JsonDuplicateGrou
                 }
                 groups.push(JsonDuplicateGroup {
                     kind: f.kind.meta().json_label.to_string(),
-                    similarity: None,
+                    similarity: *similarity,
                     entries: participants
                         .iter()
                         .map(|p| JsonDuplicateEntry {
@@ -143,7 +147,10 @@ pub(super) fn build_boilerplate(findings: &[DryFinding]) -> Vec<JsonBoilerplateF
 }
 
 pub(super) fn build_repeated_matches(findings: &[DryFinding]) -> Vec<JsonRepeatedMatchGroup> {
-    let mut seen: HashSet<String> = HashSet::new();
+    // Dedup key: enum_name + sorted participant locations. Keying on
+    // enum_name alone collapses two distinct repeated patterns over
+    // the same enum into one group.
+    let mut seen: HashSet<(String, Vec<(String, usize)>)> = HashSet::new();
     let mut groups = Vec::new();
     findings
         .iter()
@@ -154,7 +161,12 @@ pub(super) fn build_repeated_matches(findings: &[DryFinding]) -> Vec<JsonRepeate
                 participants,
             } = &f.details
             {
-                if !seen.insert(enum_name.clone()) {
+                let mut locs: Vec<(String, usize)> = participants
+                    .iter()
+                    .map(|p| (p.file.clone(), p.line))
+                    .collect();
+                locs.sort();
+                if !seen.insert((enum_name.clone(), locs)) {
                     return;
                 }
                 groups.push(JsonRepeatedMatchGroup {
@@ -165,7 +177,7 @@ pub(super) fn build_repeated_matches(findings: &[DryFinding]) -> Vec<JsonRepeate
                             file: p.file.clone(),
                             line: p.line,
                             function_name: p.function_name.clone(),
-                            arm_count: 0,
+                            arm_count: p.arm_count,
                         })
                         .collect(),
                 });

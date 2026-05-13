@@ -78,6 +78,7 @@ fn split_one(f: &SrpFinding, buckets: &mut SrpBuckets) {
                 field_count,
                 method_count,
                 fan_out,
+                ..
             },
         ) => buckets.struct_warnings.push(SrpStructRow {
             struct_name: struct_name.clone(),
@@ -95,13 +96,21 @@ fn split_one(f: &SrpFinding, buckets: &mut SrpBuckets) {
                 production_lines,
                 independent_clusters,
                 cluster_names,
+                ..
             },
         ) => buckets.module_warnings.push(SrpModuleRow {
             module: module.clone(),
             file: f.common.file.clone(),
             production_lines: *production_lines,
             independent_clusters: *independent_clusters,
-            cluster_names: cluster_names.clone(),
+            // Display-friendly: join each cluster's members for the
+            // human reporters. JSON path reads `cluster_names` directly
+            // from `SrpFindingDetails` to preserve the per-cluster
+            // grouping.
+            cluster_names: cluster_names
+                .iter()
+                .map(|cluster| cluster.join(", "))
+                .collect(),
         }),
         (
             SrpFindingKind::ParameterCount,

@@ -231,7 +231,15 @@ fn test_read_and_parse_files_missing_file() {
 }
 
 #[test]
-fn test_output_results_text_no_panic() {
+fn test_output_results_dispatches_text_format_on_empty_analysis() {
+    // Pipeline dispatch test: `output_results` is a thin dispatcher
+    // over OutputFormat. The data-transformation paths (per-reporter)
+    // have their own value-asserting tests; here we only verify the
+    // dispatch wires up without panicking and that the Text branch is
+    // reachable for an empty analysis. (Output capture would require
+    // redirecting stdout, which adds complexity without catching any
+    // additional class of regression — every reporter has its own
+    // value-asserting tests now.)
     let results = vec![];
     let summary = crate::report::Summary::from_results(&results);
     let analysis = AnalysisResult {

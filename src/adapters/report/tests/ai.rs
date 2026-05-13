@@ -296,6 +296,7 @@ fn report_dry_duplicate_includes_partner_locations() {
                     line: 20,
                 },
             ],
+            similarity: None,
         },
     };
     let config = Config::default();
@@ -361,6 +362,8 @@ fn build_srp_emit_dimension_specific_categories() {
             field_count: 6,
             method_count: 8,
             fan_out: 3,
+            composite_score: 0.0,
+            clusters: vec![],
         },
     };
     let config = Config::default();
@@ -462,21 +465,38 @@ fn empty_findings_produce_empty_chunks() {
 // ── Smoke tests ────────────────────────────────────────────────────
 
 #[test]
-fn print_ai_no_findings_no_panic() {
+fn ai_toon_render_on_empty_analysis_emits_zero_findings() {
     let analysis = empty_analysis();
     let config = Config::default();
-    crate::report::ai::print_ai(&analysis, &config);
+    let reporter = AiReporter {
+        config: &config,
+        data: &analysis.data,
+        format: AiOutputFormat::Toon,
+    };
+    let output = reporter.render(&analysis.findings, &analysis.data);
+    assert!(
+        output.contains("findings"),
+        "TOON output must include the findings key; got {output}"
+    );
+    assert!(
+        !output.contains("findings_by_file:"),
+        "no findings_by_file when zero findings; got {output}"
+    );
 }
 
 #[test]
-fn print_ai_json_no_findings_no_panic() {
+fn ai_json_render_on_empty_analysis_emits_zero_findings() {
     let analysis = empty_analysis();
     let config = Config::default();
-    crate::report::ai::print_ai_json(&analysis, &config);
+    let value = build_ai_value(&analysis, &config);
+    assert_eq!(
+        value["findings"], 0,
+        "empty analysis must produce zero findings; got {value}"
+    );
 }
 
 #[test]
-fn build_ai_value_with_complexity_finding_no_panic() {
+fn ai_value_includes_complexity_finding_metric_and_location() {
     let mut analysis = empty_analysis();
     let _func = FunctionAnalysis {
         name: "f".into(),
@@ -536,7 +556,27 @@ fn build_ai_value_with_complexity_finding_no_panic() {
     }];
     let config = Config::default();
     let value = build_ai_value(&analysis, &config);
-    assert_eq!(value["findings"], 1);
+    assert_eq!(value["findings"], 1, "one complexity finding: got {value}");
+    let by_file = value["findings_by_file"]
+        .as_object()
+        .expect("findings_by_file present");
+    let entries = by_file
+        .get("test.rs")
+        .and_then(|v| v.as_array())
+        .expect("entries for test.rs");
+    let magic_entries: Vec<_> = entries
+        .iter()
+        .filter(|e| e["category"].as_str() == Some("magic_number"))
+        .collect();
+    assert_eq!(
+        magic_entries.len(),
+        1,
+        "magic_number category preserved; got {value}"
+    );
+    assert_eq!(
+        magic_entries[0]["line"], 4,
+        "line number preserved; got {value}"
+    );
 }
 
 #[test]

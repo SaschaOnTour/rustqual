@@ -9,7 +9,7 @@ use crate::domain::findings::{
 
 pub(super) fn dry_category_detail(f: &DryFinding) -> (&'static str, String) {
     match &f.details {
-        DryFindingDetails::Duplicate { participants } => {
+        DryFindingDetails::Duplicate { participants, .. } => {
             let partners: Vec<String> = participants
                 .iter()
                 .filter(|p| !(p.file == f.common.file && p.line == f.common.line))

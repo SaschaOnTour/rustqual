@@ -55,16 +55,20 @@ fn project_struct(w: &SrpWarning) -> SrpFinding {
             field_count: w.field_count,
             method_count: w.method_count,
             fan_out: w.fan_out,
+            composite_score: w.composite_score,
+            clusters: w
+                .clusters
+                .iter()
+                .map(|c| crate::domain::findings::ResponsibilityCluster {
+                    methods: c.methods.clone(),
+                    fields: c.fields.clone(),
+                })
+                .collect(),
         },
     }
 }
 
 fn project_module(w: &ModuleSrpWarning) -> SrpFinding {
-    let cluster_names: Vec<String> = w
-        .cluster_names
-        .iter()
-        .map(|cluster| cluster.join(", "))
-        .collect();
     SrpFinding {
         common: Finding {
             file: w.file.clone(),
@@ -84,7 +88,8 @@ fn project_module(w: &ModuleSrpWarning) -> SrpFinding {
             module: w.module.clone(),
             production_lines: w.production_lines,
             independent_clusters: w.independent_clusters,
-            cluster_names,
+            cluster_names: w.cluster_names.clone(),
+            length_score: w.length_score,
         },
     }
 }

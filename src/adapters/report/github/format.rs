@@ -76,7 +76,7 @@ fn format_detail_view<D>(
 
 fn format_dry_message(r: &GithubDetailRow<DryFindingDetails>) -> String {
     match &r.details {
-        DryFindingDetails::Duplicate { participants } => {
+        DryFindingDetails::Duplicate { participants, .. } => {
             let names: Vec<&str> = participants
                 .iter()
                 .map(|p| p.function_name.as_str())

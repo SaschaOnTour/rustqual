@@ -221,16 +221,5 @@ pub fn print_text(
     print!("{}", reporter.render(&analysis.findings, &analysis.data));
 }
 
-/// Print summary section. Test-helper: backward-compat for the test
-/// module which still calls the per-section entries.
-pub fn print_summary_only(summary: &Summary, findings: &[FindingEntry]) {
-    print!("{}", format_summary_section(summary, findings));
-}
-
-/// Print only the file-grouped function listings (verbose mode).
-pub fn print_files_only(results: &[FunctionAnalysis]) {
-    print!("{}", format_files_section(results, true));
-}
-
 #[cfg(test)]
 mod tests;
