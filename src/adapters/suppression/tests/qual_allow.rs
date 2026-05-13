@@ -1,11 +1,18 @@
 use crate::adapters::suppression::qual_allow::*;
 
 #[test]
-fn test_parse_qual_allow_all() {
-    let s = parse_suppression(5, "// qual:allow").unwrap();
-    assert_eq!(s.line, 5);
-    assert!(s.dimensions.is_empty());
-    assert!(s.reason.is_none());
+fn test_parse_qual_allow_bare_is_ignored() {
+    // Bare `// qual:allow` (no dimension specified) must be ignored
+    // — global suppress doesn't exist as a feature. Authors must
+    // spell out the targeted dimension(s) explicitly so typos like
+    // `// qual:allow(srp_params)` can't silently hide every finding.
+    assert!(parse_suppression(5, "// qual:allow").is_none());
+    assert!(parse_suppression(5, "// qual:allow()").is_none());
+    assert!(parse_suppression(5, "// qual:allow(srp_params)").is_none());
+    assert!(
+        parse_suppression(5, "// qual:allow(srp_params) reason: \"typo\"").is_none(),
+        "unknown dim + reason still maps to no recognized dim"
+    );
 }
 
 #[test]

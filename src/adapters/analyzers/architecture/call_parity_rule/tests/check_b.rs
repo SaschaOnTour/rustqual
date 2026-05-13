@@ -23,6 +23,7 @@ fn make_config(
         exclude_targets: globset(exclude_targets),
         transparent_wrappers: HashSet::new(),
         transparent_macros: HashSet::new(),
+        promoted_attributes: HashSet::new(),
         single_touchpoint: crate::config::architecture::SingleTouchpointMode::default(),
     }
 }
@@ -732,6 +733,7 @@ fn ports_cp() -> CompiledCallParity {
         exclude_targets: globset(&[]),
         transparent_wrappers: HashSet::new(),
         transparent_macros: HashSet::new(),
+        promoted_attributes: HashSet::new(),
         single_touchpoint: crate::config::architecture::SingleTouchpointMode::default(),
     }
 }
@@ -1183,7 +1185,9 @@ fn check_b_anchor_inspected_even_when_target_layer_absent_from_pub_fns_map() {
     use super::support::borrowed_files;
     use crate::adapters::analyzers::architecture::call_parity_rule::build_handler_touchpoints;
     use crate::adapters::analyzers::architecture::call_parity_rule::check_b::check_missing_adapter;
-    use crate::adapters::analyzers::architecture::call_parity_rule::pub_fns::collect_pub_fns_by_layer;
+    use crate::adapters::analyzers::architecture::call_parity_rule::pub_fns::{
+        collect_pub_fns_by_layer, PubFnInputs,
+    };
     use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::build_call_graph;
 
     let ws = build_workspace(&[
@@ -1198,13 +1202,14 @@ fn check_b_anchor_inspected_even_when_target_layer_absent_from_pub_fns_map() {
     let cp = ports_cp();
     let cfg_test = empty_cfg_test();
     let borrowed = borrowed_files(&ws);
-    let mut pub_fns = collect_pub_fns_by_layer(
-        &borrowed,
-        &ws.aliases_per_file,
-        &layers,
-        &cfg_test,
-        &cp.transparent_wrappers,
-    );
+    let mut pub_fns = collect_pub_fns_by_layer(PubFnInputs {
+        files: &borrowed,
+        aliases_per_file: &ws.aliases_per_file,
+        layers: &layers,
+        cfg_test_files: &cfg_test,
+        transparent_wrappers: &cp.transparent_wrappers,
+        promoted_attributes: &cp.promoted_attributes,
+    });
     let graph = build_call_graph(
         &borrowed,
         &ws.aliases_per_file,

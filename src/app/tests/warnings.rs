@@ -612,9 +612,14 @@ fn suppression_with_wrong_dimension_is_orphan() {
 }
 
 #[test]
-fn bare_qual_allow_is_wildcard_and_matches_any_dim() {
-    // Suppression has empty dimensions (bare `// qual:allow`) → matches
-    // any dimension. A finding in window must clear the orphan.
+fn empty_dim_suppression_acts_as_wildcard_defensive() {
+    // Defensive: bare `// qual:allow` no longer parses to a
+    // Suppression (the parser drops it), so this code path is
+    // unreachable in production. If a Suppression with empty
+    // dimensions somehow appears (test fixture, internal API
+    // misuse), the orphan detector still treats it as a wildcard
+    // — keeping the behaviour stable rather than producing a
+    // confusing false-orphan report.
     use crate::findings::Suppression;
     let mut sups = HashMap::new();
     sups.insert(
@@ -636,7 +641,7 @@ fn bare_qual_allow_is_wildcard_and_matches_any_dim() {
         &Config::default(),
     )
     .len();
-    assert_eq!(orphans, 0, "bare qual:allow is wildcard");
+    assert_eq!(orphans, 0, "empty-dim Suppression still matches any dim");
 }
 
 // ── Regression tests: no false-positive orphans when the marker ──

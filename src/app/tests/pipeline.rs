@@ -103,15 +103,19 @@ fn test_collect_filtered_files_with_exclude() {
 // ── Suppression tests (new syntax) ──────────────────────────────
 
 #[test]
-fn test_collect_suppression_qual_allow_all() {
+fn test_collect_suppression_bare_qual_allow_is_ignored() {
+    // Bare `// qual:allow` (no dimension) is silently dropped by the
+    // parser — there's no global-suppress feature, every suppression
+    // must target a named dimension.
     let source = "// qual:allow\nfn foo() {}";
     let syntax = syn::parse_file(source).unwrap();
     let parsed = vec![("test.rs".to_string(), source.to_string(), syntax)];
     let result = collect_suppression_lines(&parsed);
-    assert!(result.contains_key("test.rs"));
-    let sups = &result["test.rs"];
-    assert_eq!(sups.len(), 1);
-    assert!(sups[0].dimensions.is_empty()); // all dimensions
+    let sups = result.get("test.rs").cloned().unwrap_or_default();
+    assert!(
+        sups.is_empty(),
+        "bare qual:allow must not produce a Suppression, got {sups:?}"
+    );
 }
 
 #[test]
@@ -167,7 +171,7 @@ fn test_collect_suppression_no_match() {
 
 #[test]
 fn test_collect_suppression_multiple() {
-    let source = "// qual:allow\nfn foo() {}\n// qual:allow(iosp)\nfn bar() {}";
+    let source = "// qual:allow(srp)\nfn foo() {}\n// qual:allow(iosp)\nfn bar() {}";
     let syntax = syn::parse_file(source).unwrap();
     let parsed = vec![("test.rs".to_string(), source.to_string(), syntax)];
     let result = collect_suppression_lines(&parsed);
@@ -503,7 +507,7 @@ fn test_count_all_suppressions_rust_allow_only() {
 
 #[test]
 fn test_count_all_suppressions_both_types() {
-    let source = "#[allow(dead_code)]\nfn unused() {}\n// qual:allow\nfn foo() {}";
+    let source = "#[allow(dead_code)]\nfn unused() {}\n// qual:allow(iosp)\nfn foo() {}";
     let syntax = syn::parse_file(source).unwrap();
     let parsed = vec![("test.rs".to_string(), source.to_string(), syntax)];
     let mut supp = std::collections::HashMap::new();
@@ -511,7 +515,7 @@ fn test_count_all_suppressions_both_types() {
         "test.rs".to_string(),
         vec![crate::findings::Suppression {
             line: 3,
-            dimensions: vec![],
+            dimensions: vec![crate::findings::Dimension::Iosp],
             reason: None,
         }],
     );

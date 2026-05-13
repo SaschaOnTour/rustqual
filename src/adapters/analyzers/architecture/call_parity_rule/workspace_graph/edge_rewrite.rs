@@ -48,8 +48,11 @@ fn collect_phantom_rewrites(
     rewrites
 }
 
-/// Apply one edge rewrite to both forward and reverse maps.
-fn apply_edge_rewrite(graph: &mut CallGraph, caller: &str, old: &str, new: String) {
+/// Apply one edge rewrite to both forward and reverse maps. Shared
+/// primitive — the per-rewrite probes (`collect_phantom_rewrites`,
+/// `collect_reexport_rewrites`) differ in policy but the actual map
+/// mutation is identical, so it lives here as a single chokepoint.
+pub(crate) fn apply_edge_rewrite(graph: &mut CallGraph, caller: &str, old: &str, new: String) {
     if let Some(set) = graph.forward.get_mut(caller) {
         set.remove(old);
         set.insert(new.clone());

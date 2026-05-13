@@ -72,7 +72,7 @@ pub fn parse_suppression(line_number: usize, trimmed: &str) -> Option<Suppressio
     }
     trimmed
         .strip_prefix("// qual:allow")
-        .map(|rest| parse_qual_allow(line_number, rest))
+        .and_then(|rest| parse_qual_allow(line_number, rest))
         .or_else(|| parse_iosp_legacy(line_number, trimmed))
 }
 
@@ -94,9 +94,16 @@ fn parse_iosp_legacy(line_number: usize, trimmed: &str) -> Option<Suppression> {
 }
 
 /// Parse the part after "// qual:allow".
+/// Returns `None` for any form that produces an empty dimensions list:
+/// bare `// qual:allow`, empty parens `// qual:allow()`, or all-args
+/// unrecognized like `// qual:allow(srp_params)`. Such forms are
+/// silently treated as not-an-annotation so typos can't accidentally
+/// suppress every dimension. Authors must spell out the targeted
+/// dimension(s) explicitly; the orphan-suppression detector continues
+/// to surface annotations that match no real finding.
 /// Operation: string parsing for dimensions and reason (no own calls;
 /// extract_reason is called via closures for IOSP compliance).
-fn parse_qual_allow(line_number: usize, rest: &str) -> Suppression {
+fn parse_qual_allow(line_number: usize, rest: &str) -> Option<Suppression> {
     let rest = rest.trim();
 
     let (dimensions, reason_text) = if rest.is_empty() || !rest.starts_with('(') {
@@ -112,15 +119,19 @@ fn parse_qual_allow(line_number: usize, rest: &str) -> Suppression {
         (dimensions, after_parens)
     };
 
+    if dimensions.is_empty() {
+        return None;
+    }
+
     let reason = (!reason_text.is_empty())
         .then(|| extract_reason(reason_text))
         .flatten();
 
-    Suppression {
+    Some(Suppression {
         line: line_number,
         dimensions,
         reason,
-    }
+    })
 }
 
 /// Extract a reason from text like `reason: "some text"` or bare text.

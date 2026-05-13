@@ -10,7 +10,7 @@
 use super::bindings::CanonScope;
 use super::calls::{collect_canonical_calls, FnContext};
 use super::local_symbols::FileScope;
-use super::signature_params::extract_signature_params;
+use super::signature_params::{extract_generic_params, extract_signature_params};
 use super::type_infer::WorkspaceTypeIndex;
 use super::workspace_graph::{canonical_fn_name, resolve_impl_self_type, CallGraph};
 use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
@@ -57,6 +57,7 @@ impl<'a> FileFnCollector<'a> {
             mod_stack: &self.mod_stack,
             body,
             signature_params: extract_signature_params(sig),
+            generic_params: extract_generic_params(sig),
             self_type,
             workspace_index: Some(self.type_index),
             workspace_files: Some(self.workspace_files),

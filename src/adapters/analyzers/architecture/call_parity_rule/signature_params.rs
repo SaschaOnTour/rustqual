@@ -23,6 +23,51 @@ pub(crate) fn extract_signature_params(sig: &syn::Signature) -> Vec<(String, &sy
         .collect()
 }
 
+// qual:api
+/// Extract `(name, [trait_bound_path_segs, ...])` for every type
+/// parameter declared in a fn signature. Lifetime / const generics
+/// are skipped. Each trait bound is returned as its raw path segments
+/// (un-canonicalised); the call collector resolves them against the
+/// file scope before storing — same pattern `extract_signature_params`
+/// uses for value-param types.
+///
+/// Used so a body call like `Q::execute(&q)` (where `Q: SymbolQuery`)
+/// can route through the workspace's trait-method anchor instead of
+/// collapsing to `<bare>:Q::execute`.
+pub(crate) fn extract_generic_params(sig: &syn::Signature) -> Vec<(String, Vec<Vec<String>>)> {
+    sig.generics
+        .params
+        .iter()
+        .filter_map(|p| match p {
+            syn::GenericParam::Type(tp) => {
+                Some((tp.ident.to_string(), trait_bound_paths(&tp.bounds)))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Flatten each trait bound into its segment idents. Lifetime bounds
+/// and `?Sized`-style negative bounds are dropped. Operation:
+/// per-bound projection.
+fn trait_bound_paths(
+    bounds: &syn::punctuated::Punctuated<syn::TypeParamBound, syn::Token![+]>,
+) -> Vec<Vec<String>> {
+    bounds
+        .iter()
+        .filter_map(|b| match b {
+            syn::TypeParamBound::Trait(tb) => Some(
+                tb.path
+                    .segments
+                    .iter()
+                    .map(|s| s.ident.to_string())
+                    .collect(),
+            ),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Pull the bound identifier out of a fn-parameter pattern. Supports
 /// `Pat::Ident` (the 99% case) and single-ident `Pat::TupleStruct`
 /// destructuring (framework extractors: `State(db)`, `Extension(ext)`,

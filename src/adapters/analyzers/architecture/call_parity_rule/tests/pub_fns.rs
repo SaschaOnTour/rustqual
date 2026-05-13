@@ -3,7 +3,7 @@
 
 use super::support::three_layer;
 use crate::adapters::analyzers::architecture::call_parity_rule::pub_fns::{
-    collect_pub_fns_by_layer, PubFnInfo,
+    collect_pub_fns_by_layer, PubFnInfo, PubFnInputs,
 };
 use crate::adapters::shared::use_tree::gather_alias_map;
 use std::collections::{HashMap, HashSet};
@@ -43,13 +43,14 @@ fn test_collect_pub_fns_in_layer_free_fn() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(cli.contains("cmd_stats"), "cli = {cli:?}");
@@ -66,13 +67,14 @@ fn test_collect_pub_fns_skips_private_fns() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(cli.contains("cmd_stats"));
@@ -92,13 +94,14 @@ fn test_pub_crate_is_treated_as_public_for_intra_crate_layers() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(cli.contains("cmd_stats"), "pub(crate) must be collected");
@@ -115,13 +118,14 @@ fn test_pub_super_and_pub_in_path_treated_as_public() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(cli.contains("cmd_a"));
@@ -142,13 +146,14 @@ fn test_collect_pub_fns_collects_pub_impl_methods_for_pub_type() {
     let files = vec![("src/application/session.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let app = names_for_layer(&by_layer, "application");
     assert!(app.contains("search"), "pub impl method must be collected");
@@ -180,13 +185,14 @@ fn test_collect_pub_fns_recognises_impl_across_files() {
     ];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let app = names_for_layer(&by_layer, "application");
     assert!(
@@ -211,13 +217,14 @@ fn test_collect_pub_fns_skips_impl_methods_on_private_type() {
     let files = vec![("src/application/session.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let app = names_for_layer(&by_layer, "application");
     assert!(
@@ -238,13 +245,14 @@ fn test_collect_pub_fns_groups_by_layer() {
     ];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     assert_eq!(
         names_for_layer(&by_layer, "cli"),
@@ -267,8 +275,14 @@ fn test_collect_pub_fns_skips_cfg_test_files() {
     let mut cfg_test = HashSet::new();
     cfg_test.insert("src/cli/handlers.rs".to_string());
     let aliases = aliases_from_files(&files);
-    let by_layer =
-        collect_pub_fns_by_layer(&files, &aliases, &three_layer(), &cfg_test, &HashSet::new());
+    let by_layer = collect_pub_fns_by_layer(PubFnInputs {
+        files: &files,
+        aliases_per_file: &aliases,
+        layers: &three_layer(),
+        cfg_test_files: &cfg_test,
+        transparent_wrappers: &HashSet::new(),
+        promoted_attributes: &HashSet::new(),
+    });
     assert!(
         names_for_layer(&by_layer, "cli").is_empty(),
         "cfg-test file must be skipped wholesale"
@@ -287,13 +301,14 @@ fn test_collect_pub_fns_skips_test_attr_fns() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(cli.contains("cmd_stats"));
@@ -308,13 +323,14 @@ fn test_collect_pub_fns_skips_unmatched_files() {
     let files = vec![("src/utils/misc.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     for layer in ["application", "cli", "mcp"] {
         assert!(
@@ -341,13 +357,14 @@ fn test_collect_pub_fns_skips_pub_fn_inside_private_inline_mod() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
@@ -373,13 +390,14 @@ fn test_collect_pub_fns_treats_pub_self_as_private() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
@@ -411,13 +429,14 @@ fn test_collect_pub_fns_skips_impl_method_on_type_in_private_inline_mod() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
@@ -447,13 +466,14 @@ fn test_collect_pub_fns_records_impl_in_private_mod_for_public_type() {
     let files = vec![("src/application/session.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let app = names_for_layer(&by_layer, "application");
     assert!(
@@ -485,13 +505,14 @@ fn test_collect_pub_fns_records_impl_via_nested_pub_use_export_path() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
@@ -521,13 +542,14 @@ fn test_collect_pub_fns_records_impl_via_chained_type_alias() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
@@ -557,13 +579,14 @@ fn test_collect_pub_fns_does_not_promote_bare_local_arc() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
@@ -594,7 +617,14 @@ fn test_collect_pub_fns_peels_qualified_user_wrapper() {
     wrappers.insert("State".to_string());
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(&files, &aliases, &three_layer(), &HashSet::new(), &wrappers)
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &wrappers,
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
@@ -624,13 +654,14 @@ fn test_collect_pub_fns_does_not_promote_qualified_local_arc() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
@@ -662,13 +693,14 @@ fn test_collect_pub_fns_does_not_promote_local_wrapper_alias() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
@@ -698,13 +730,14 @@ fn test_collect_pub_fns_records_impl_via_renamed_stdlib_wrapper() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
@@ -735,7 +768,14 @@ fn test_collect_pub_fns_records_impl_via_pub_type_alias_through_user_wrapper() {
     wrappers.insert("State".to_string());
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(&files, &aliases, &three_layer(), &HashSet::new(), &wrappers)
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &wrappers,
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
@@ -765,13 +805,14 @@ fn test_collect_pub_fns_records_impl_via_pub_type_alias_through_wrapper() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
@@ -801,13 +842,14 @@ fn test_collect_pub_fns_records_impl_via_pub_type_alias() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
@@ -838,13 +880,14 @@ fn test_collect_pub_fns_records_renamed_reexport_impl_methods() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
@@ -876,13 +919,14 @@ fn test_collect_pub_fns_chases_reexported_type_alias_to_target() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
@@ -915,13 +959,14 @@ fn test_collect_pub_fns_records_pub_use_reexport_with_qualified_impl() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
@@ -953,13 +998,14 @@ fn test_collect_pub_fns_skips_trait_impl_method_on_private_self_type() {
     );
     let files = vec![("src/application/mod.rs", &file)];
     let aliases = aliases_from_files(&files);
-    let by_layer = collect_pub_fns_by_layer(
-        &files,
-        &aliases,
-        &three_layer(),
-        &HashSet::new(),
-        &HashSet::new(),
-    );
+    let by_layer = collect_pub_fns_by_layer(PubFnInputs {
+        files: &files,
+        aliases_per_file: &aliases,
+        layers: &three_layer(),
+        cfg_test_files: &HashSet::new(),
+        transparent_wrappers: &HashSet::new(),
+        promoted_attributes: &HashSet::new(),
+    });
     let app = names_for_layer(&by_layer, "application");
     assert!(
         !app.contains("handle"),
@@ -988,13 +1034,14 @@ fn test_collect_pub_fns_records_inherited_trait_impl_methods() {
     );
     let files = vec![("src/application/mod.rs", &file)];
     let aliases = aliases_from_files(&files);
-    let by_layer = collect_pub_fns_by_layer(
-        &files,
-        &aliases,
-        &three_layer(),
-        &HashSet::new(),
-        &HashSet::new(),
-    );
+    let by_layer = collect_pub_fns_by_layer(PubFnInputs {
+        files: &files,
+        aliases_per_file: &aliases,
+        layers: &three_layer(),
+        cfg_test_files: &HashSet::new(),
+        transparent_wrappers: &HashSet::new(),
+        promoted_attributes: &HashSet::new(),
+    });
     let app = names_for_layer(&by_layer, "application");
     assert!(
         app.contains("handle"),
@@ -1017,13 +1064,14 @@ fn test_collect_pub_fns_excludes_orphan_file_not_declared_in_crate_root() {
         ("src/application/mod.rs", &app),
     ];
     let aliases = aliases_from_files(&files);
-    let by_layer = collect_pub_fns_by_layer(
-        &files,
-        &aliases,
-        &three_layer(),
-        &HashSet::new(),
-        &HashSet::new(),
-    );
+    let by_layer = collect_pub_fns_by_layer(PubFnInputs {
+        files: &files,
+        aliases_per_file: &aliases,
+        layers: &three_layer(),
+        cfg_test_files: &HashSet::new(),
+        transparent_wrappers: &HashSet::new(),
+        promoted_attributes: &HashSet::new(),
+    });
     let app_fns = names_for_layer(&by_layer, "application");
     assert!(
         !app_fns.contains("helper"),
@@ -1049,13 +1097,14 @@ fn test_collect_pub_fns_unions_lib_and_main_root_trees() {
         ("src/cli/mod.rs", &cli),
     ];
     let aliases = aliases_from_files(&files);
-    let by_layer = collect_pub_fns_by_layer(
-        &files,
-        &aliases,
-        &three_layer(),
-        &HashSet::new(),
-        &HashSet::new(),
-    );
+    let by_layer = collect_pub_fns_by_layer(PubFnInputs {
+        files: &files,
+        aliases_per_file: &aliases,
+        layers: &three_layer(),
+        cfg_test_files: &HashSet::new(),
+        transparent_wrappers: &HashSet::new(),
+        promoted_attributes: &HashSet::new(),
+    });
     let app_fns = names_for_layer(&by_layer, "application");
     let cli_fns = names_for_layer(&by_layer, "cli");
     assert!(
@@ -1085,13 +1134,14 @@ fn test_collect_pub_fns_includes_crate_root_mod_decl_without_pub() {
         ("src/application/mod.rs", &app_mod),
     ];
     let aliases = aliases_from_files(&files);
-    let by_layer = collect_pub_fns_by_layer(
-        &files,
-        &aliases,
-        &three_layer(),
-        &HashSet::new(),
-        &HashSet::new(),
-    );
+    let by_layer = collect_pub_fns_by_layer(PubFnInputs {
+        files: &files,
+        aliases_per_file: &aliases,
+        layers: &three_layer(),
+        cfg_test_files: &HashSet::new(),
+        transparent_wrappers: &HashSet::new(),
+        promoted_attributes: &HashSet::new(),
+    });
     let cli = names_for_layer(&by_layer, "cli");
     let app = names_for_layer(&by_layer, "application");
     assert!(
@@ -1118,13 +1168,14 @@ fn test_collect_pub_fns_excludes_pub_fn_under_private_ancestor_chain() {
         ("src/application/internal/deep.rs", &deep),
     ];
     let aliases = aliases_from_files(&files);
-    let by_layer = collect_pub_fns_by_layer(
-        &files,
-        &aliases,
-        &three_layer(),
-        &HashSet::new(),
-        &HashSet::new(),
-    );
+    let by_layer = collect_pub_fns_by_layer(PubFnInputs {
+        files: &files,
+        aliases_per_file: &aliases,
+        layers: &three_layer(),
+        cfg_test_files: &HashSet::new(),
+        transparent_wrappers: &HashSet::new(),
+        promoted_attributes: &HashSet::new(),
+    });
     let app_fns = names_for_layer(&by_layer, "application");
     assert!(
         !app_fns.contains("helper"),
@@ -1145,13 +1196,14 @@ fn test_collect_pub_fns_excludes_pub_fn_in_file_backed_private_module() {
         ("src/application/internal.rs", &child),
     ];
     let aliases = aliases_from_files(&files);
-    let by_layer = collect_pub_fns_by_layer(
-        &files,
-        &aliases,
-        &three_layer(),
-        &HashSet::new(),
-        &HashSet::new(),
-    );
+    let by_layer = collect_pub_fns_by_layer(PubFnInputs {
+        files: &files,
+        aliases_per_file: &aliases,
+        layers: &three_layer(),
+        cfg_test_files: &HashSet::new(),
+        transparent_wrappers: &HashSet::new(),
+        promoted_attributes: &HashSet::new(),
+    });
     let app = names_for_layer(&by_layer, "application");
     assert!(
         !app.contains("helper"),
@@ -1170,13 +1222,14 @@ fn test_collect_pub_fns_includes_pub_fn_in_file_backed_public_module() {
         ("src/application/internal.rs", &child),
     ];
     let aliases = aliases_from_files(&files);
-    let by_layer = collect_pub_fns_by_layer(
-        &files,
-        &aliases,
-        &three_layer(),
-        &HashSet::new(),
-        &HashSet::new(),
-    );
+    let by_layer = collect_pub_fns_by_layer(PubFnInputs {
+        files: &files,
+        aliases_per_file: &aliases,
+        layers: &three_layer(),
+        cfg_test_files: &HashSet::new(),
+        transparent_wrappers: &HashSet::new(),
+        promoted_attributes: &HashSet::new(),
+    });
     let app = names_for_layer(&by_layer, "application");
     assert!(
         app.contains("helper"),
@@ -1212,13 +1265,14 @@ fn test_collect_pub_fns_skips_impl_methods_under_short_name_collision() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
@@ -1258,13 +1312,14 @@ fn pub_fn_records_deprecated_attribute_bare() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     let dep = deprecated_for_layer(&by_layer, "cli");
     assert_eq!(dep.get("cmd_old"), Some(&true));
@@ -1281,13 +1336,14 @@ fn pub_fn_records_deprecated_with_message() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     assert_eq!(
         deprecated_for_layer(&by_layer, "cli").get("cmd_old"),
@@ -1306,13 +1362,14 @@ fn pub_fn_records_deprecated_with_args() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     assert_eq!(
         deprecated_for_layer(&by_layer, "cli").get("cmd_old"),
@@ -1330,13 +1387,14 @@ fn pub_fn_no_attribute_not_deprecated() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     assert_eq!(
         deprecated_for_layer(&by_layer, "cli").get("cmd_active"),
@@ -1356,13 +1414,14 @@ fn pub_fn_other_attribute_not_deprecated() {
     let files = vec![("src/cli/handlers.rs", &file)];
     let by_layer = {
         let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(
-            &files,
-            &aliases,
-            &three_layer(),
-            &HashSet::new(),
-            &HashSet::new(),
-        )
+        collect_pub_fns_by_layer(PubFnInputs {
+            files: &files,
+            aliases_per_file: &aliases,
+            layers: &three_layer(),
+            cfg_test_files: &HashSet::new(),
+            transparent_wrappers: &HashSet::new(),
+            promoted_attributes: &HashSet::new(),
+        })
     };
     assert_eq!(
         deprecated_for_layer(&by_layer, "cli").get("cmd_active"),

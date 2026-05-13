@@ -19,6 +19,7 @@ fn make_config(mode: SingleTouchpointMode) -> CompiledCallParity {
         exclude_targets: globset(&[]),
         transparent_wrappers: HashSet::new(),
         transparent_macros: HashSet::new(),
+        promoted_attributes: HashSet::new(),
         single_touchpoint: mode,
     }
 }

@@ -7,7 +7,9 @@
 //! satisfy adapter-coverage or trigger spurious orphan findings.
 
 use super::support::{build_graph_only, build_workspace, empty_cfg_test, three_layer};
-use crate::adapters::analyzers::architecture::call_parity_rule::pub_fns::collect_pub_fns_by_layer;
+use crate::adapters::analyzers::architecture::call_parity_rule::pub_fns::{
+    collect_pub_fns_by_layer, PubFnInputs,
+};
 use std::collections::HashSet;
 
 #[test]
@@ -137,13 +139,14 @@ fn pub_fns_skips_cfg_test_impl_block() {
     )]);
     let borrowed: Vec<(&str, &syn::File)> =
         ws.files.iter().map(|(p, _, f)| (p.as_str(), f)).collect();
-    let by_layer = collect_pub_fns_by_layer(
-        &borrowed,
-        &ws.aliases_per_file,
-        &three_layer(),
-        &empty_cfg_test(),
-        &HashSet::new(),
-    );
+    let by_layer = collect_pub_fns_by_layer(PubFnInputs {
+        files: &borrowed,
+        aliases_per_file: &ws.aliases_per_file,
+        layers: &three_layer(),
+        cfg_test_files: &empty_cfg_test(),
+        transparent_wrappers: &HashSet::new(),
+        promoted_attributes: &HashSet::new(),
+    });
     let app_fn_names: Vec<&str> = by_layer
         .get("application")
         .map(|infos| infos.iter().map(|i| i.fn_name.as_str()).collect())

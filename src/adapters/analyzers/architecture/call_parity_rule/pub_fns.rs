@@ -52,34 +52,45 @@ pub(crate) struct PubFnInfo<'ast> {
     pub deprecated: bool,
 }
 
-// qual:api
+/// Inputs bundle for `collect_pub_fns_by_layer`. Keeps the public
+/// entry point under the SRP-parameter budget while making each
+/// per-file lookup table explicit at the call site.
+pub(crate) struct PubFnInputs<'a, 'ast> {
+    pub files: &'a [(&'ast str, &'ast syn::File)],
+    pub aliases_per_file: &'a HashMap<String, HashMap<String, Vec<String>>>,
+    pub layers: &'a LayerDefinitions,
+    pub cfg_test_files: &'a HashSet<String>,
+    pub transparent_wrappers: &'a HashSet<String>,
+    pub promoted_attributes: &'a HashSet<String>,
+}
+
 /// Group every `pub` / `pub(crate)` / `pub(super)` / `pub(in path)` fn
 /// by the layer of its source file. Test-attribute fns, files in
 /// `cfg_test_files`, and impl methods on private types are skipped.
+/// `promoted_attributes` lifts otherwise-private fns onto the
+/// adapter-handler surface when they carry a matching attribute —
+/// closes the gap for proc-macro-generated dispatch (rmcp `#[tool]`,
+/// axum/poem `#[handler]`, etc.).
 /// Integration: delegates per-file layer lookup + per-file collection.
 pub(crate) fn collect_pub_fns_by_layer<'ast>(
-    files: &[(&'ast str, &'ast syn::File)],
-    aliases_per_file: &HashMap<String, HashMap<String, Vec<String>>>,
-    layers: &LayerDefinitions,
-    cfg_test_files: &HashSet<String>,
-    transparent_wrappers: &HashSet<String>,
+    inputs: PubFnInputs<'_, 'ast>,
 ) -> HashMap<String, Vec<PubFnInfo<'ast>>> {
-    let crate_root_modules = collect_crate_root_modules(files);
-    let file_root_visibility = collect_file_root_visibility(files);
+    let crate_root_modules = collect_crate_root_modules(inputs.files);
+    let file_root_visibility = collect_file_root_visibility(inputs.files);
     let visible_canonicals = collect_visible_type_canonicals_workspace(
-        files,
-        cfg_test_files,
-        aliases_per_file,
+        inputs.files,
+        inputs.cfg_test_files,
+        inputs.aliases_per_file,
         &crate_root_modules,
-        transparent_wrappers,
+        inputs.transparent_wrappers,
     );
     let empty_aliases = HashMap::new();
     let mut out: HashMap<String, Vec<PubFnInfo<'ast>>> = HashMap::new();
-    for (path, ast) in files {
-        if cfg_test_files.contains(*path) {
+    for (path, ast) in inputs.files {
+        if inputs.cfg_test_files.contains(*path) {
             continue;
         }
-        let Some(layer) = layers.layer_for_file(path) else {
+        let Some(layer) = inputs.layers.layer_for_file(path) else {
             continue;
         };
         let layer = layer.to_string();
@@ -89,7 +100,7 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
         // in the pre-computed set — those files won't have resolvable
         // impl self-types via `use` anyway, and the local-symbol /
         // crate-root fallbacks still work.
-        let alias_map = aliases_per_file.get(*path).unwrap_or(&empty_aliases);
+        let alias_map = inputs.aliases_per_file.get(*path).unwrap_or(&empty_aliases);
         let LocalSymbols { flat, by_name } = collect_local_symbols_scoped(ast);
         let aliases_per_scope = gather_alias_map_scoped(ast);
         let file = FileScope {
@@ -106,6 +117,7 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
             file: &file,
             found: Vec::new(),
             visible_canonicals: &visible_canonicals,
+            promoted_attributes: inputs.promoted_attributes,
             impl_stack: Vec::new(),
             mod_stack: Vec::new(),
             enclosing_mod_visible: file_visible,
@@ -131,6 +143,11 @@ struct PubFnCollector<'ast, 'vis> {
     /// string, comparable directly against `resolve_impl_self_type`'s
     /// output. Shared across files.
     visible_canonicals: &'vis HashSet<String>,
+    /// Bare attribute names that lift a private fn onto the handler
+    /// surface — for proc-macro-generated dispatch where the user
+    /// writes `#[tool] async fn search(&self, ...)` (no `pub`) and
+    /// the macro generates the public wrapper at expansion time.
+    promoted_attributes: &'vis HashSet<String>,
     /// Stack of enclosing `impl` blocks: `(self-type segments, is-visible)`.
     /// Each entry: `(self_type_segments, self_type_visible,
     /// is_visible_trait_impl)`. The third flag is `true` iff this
@@ -197,9 +214,27 @@ fn has_deprecated_attribute(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|a| a.path().is_ident("deprecated"))
 }
 
+/// True iff any attribute's last path segment matches an entry in
+/// `promoted`. Used to lift macro-attributed private fns onto the
+/// adapter-handler surface (`#[tool]` / `#[handler]` / framework
+/// equivalents). Operation: per-attribute leaf-ident probe.
+fn has_promoted_attribute(attrs: &[syn::Attribute], promoted: &HashSet<String>) -> bool {
+    if promoted.is_empty() {
+        return false;
+    }
+    attrs.iter().any(|a| {
+        a.path()
+            .segments
+            .last()
+            .is_some_and(|s| promoted.contains(&s.ident.to_string()))
+    })
+}
+
 impl<'ast, 'vis> Visit<'ast> for PubFnCollector<'ast, 'vis> {
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
-        if self.enclosing_mod_visible && is_visible(&node.vis) && !is_test_fn(&node.attrs) {
+        let surface =
+            is_visible(&node.vis) || has_promoted_attribute(&node.attrs, self.promoted_attributes);
+        if self.enclosing_mod_visible && surface && !is_test_fn(&node.attrs) {
             let line = syn::spanned::Spanned::span(&node.sig.ident).start().line;
             let name = node.sig.ident.to_string();
             self.record_fn(name, line, &node.block, &node.sig, &node.attrs);
@@ -251,7 +286,13 @@ impl<'ast, 'vis> Visit<'ast> for PubFnCollector<'ast, 'vis> {
         // is never registered, since dispatch into private impls is
         // collapsed to the trait-method anchor (`<PubTrait>::<m>`) and
         // the impl-method canonical never appears as a touchpoint.
-        let method_visible = is_visible(&node.vis) || self.current_impl_is_visible_trait();
+        // Promoted attributes (rmcp `#[tool]`, axum `#[handler]`, …)
+        // also lift a private impl method onto the handler surface so
+        // proc-macro-generated dispatch surfaces are picked up
+        // pre-expansion.
+        let method_visible = is_visible(&node.vis)
+            || self.current_impl_is_visible_trait()
+            || has_promoted_attribute(&node.attrs, self.promoted_attributes);
         if self.current_impl_visible() && method_visible && !is_test_fn(&node.attrs) {
             let line = syn::spanned::Spanned::span(&node.sig.ident).start().line;
             let name = node.sig.ident.to_string();
