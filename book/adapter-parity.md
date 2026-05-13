@@ -191,7 +191,7 @@ The default `transparent_macros` list already covers the common cases; entries h
 In `--findings` (one-line) output, real findings look like:
 
 ```
-src/cli/commands/sync.rs:12  ARCHITECTURE  adapter cli::cmd_sync does not delegate to 'application' within 3 hops: call parity
+src/cli/commands/sync.rs:12  ARCHITECTURE  adapter cli::cmd_sync does not delegate to 'application' within 3 adapter-internal call edges: call parity
 src/application/export.rs:8  ARCHITECTURE  'crate::application::export::run_export' is not reached from adapter layer(s): cli: call parity
 ```
 

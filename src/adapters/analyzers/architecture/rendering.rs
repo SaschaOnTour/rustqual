@@ -128,7 +128,7 @@ fn render_no_delegation_head(
     call_depth: usize,
 ) -> String {
     format!(
-        "adapter {adapter_layer}::{fn_name} does not delegate to '{target_layer}' within {call_depth} hops"
+        "adapter {adapter_layer}::{fn_name} does not delegate to '{target_layer}' within {call_depth} adapter-internal call edges"
     )
 }
 

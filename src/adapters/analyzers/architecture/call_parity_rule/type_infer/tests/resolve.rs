@@ -460,6 +460,46 @@ fn test_future_wraps_output() {
     assert!(matches!(resolved, CanonicalType::Future(_)));
 }
 
+#[test]
+fn test_impl_aliased_future_resolves_to_future_with_output() {
+    // `use std::future::Future as Fut;` then `impl Fut<Output = Session>`.
+    // The raw bound leaf is `Fut`, but the canonicalised path is
+    // `std::future::Future`, so the bound must still shape the
+    // result as `Future(Session)` — otherwise `.await` on the
+    // return type doesn't unwrap and downstream method dispatch
+    // (e.g. `make().await.diff()`) stays unresolved.
+    let mut alias_map = HashMap::new();
+    alias_map.insert(
+        "Fut".to_string(),
+        vec![
+            "std".to_string(),
+            "future".to_string(),
+            "Future".to_string(),
+        ],
+    );
+    let mut local = HashSet::new();
+    local.insert("Session".to_string());
+    let roots = HashSet::new();
+    let ty = parse_type("impl Fut<Output = Session>");
+    let resolved = resolve_type(
+        &ty,
+        &ctx(&FileScope {
+            path: "src/app/mod.rs",
+            alias_map: &alias_map,
+            aliases_per_scope: &ScopedAliasMap::new(),
+            local_symbols: &local,
+            local_decl_scopes: &HashMap::new(),
+            crate_root_modules: &roots,
+        }),
+    );
+    let expected_output = CanonicalType::path(["crate", "app", "Session"]);
+    assert_eq!(
+        resolved,
+        CanonicalType::Future(Box::new(expected_output)),
+        "aliased Future bound must canonicalise to Future(Session); got {resolved:?}",
+    );
+}
+
 /// Per-file scope inputs the cross-module alias test owns. `FileScope`
 /// holds borrows, so the owning storage stays here and `as_scope`
 /// produces a fresh borrow at call sites.

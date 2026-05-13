@@ -152,8 +152,11 @@ fn resolve_bound_list(
         }
         // `impl Future<Output = T>` deserves the same `Future(T)` shape
         // the path-form `Future<Output = T>` produces, so `.await` on
-        // the result resolves through the combinator table.
-        if let Some(args) = future_args(&trait_bound.path) {
+        // the result resolves through the combinator table. Goes via
+        // `identify_wrapper_name` so aliased Future imports
+        // (`use std::future::Future as Fut;`) still match, while
+        // keeping the original `Output = T` args from the bound.
+        if let Some(args) = future_bound_args(trait_bound, ctx) {
             return wrap_future_output(args, ctx, depth);
         }
         let segs: Vec<String> = trait_bound
@@ -169,12 +172,21 @@ fn resolve_bound_list(
     CanonicalType::Opaque
 }
 
-/// Return the path arguments of a `Future` trait bound (covers bare
-/// `Future`, `std::future::Future`, and any other path ending in
-/// `Future`); `None` when the last segment isn't `Future`.
-fn future_args(path: &syn::Path) -> Option<&syn::PathArguments> {
-    let last = path.segments.last()?;
-    (last.ident == "Future").then_some(&last.arguments)
+/// Return the path arguments of a `Future` trait bound when the bound
+/// canonically resolves to `std::future::Future` — covers bare
+/// `Future`, fully-qualified `std::future::Future`, and aliased forms
+/// like `use std::future::Future as Fut;` followed by `impl Fut<Output = T>`.
+/// `None` when the bound isn't a Future variant. The returned
+/// `PathArguments` come from the original (aliased) leaf so the
+/// `Output = T` associated type stays accessible.
+fn future_bound_args<'a>(
+    trait_bound: &'a syn::TraitBound,
+    ctx: &ResolveContext<'_>,
+) -> Option<&'a syn::PathArguments> {
+    let last = trait_bound.path.segments.last()?;
+    let raw_name = last.ident.to_string();
+    let wrapper = identify_wrapper_name(&trait_bound.path, &raw_name, ctx)?;
+    (wrapper == "Future").then_some(&last.arguments)
 }
 
 /// Marker traits (plus common auto-derive names) that are skipped when

@@ -361,6 +361,36 @@ Eleventh-pass review (Codex 2026-05-12 round 11, doc-only):
   classifies each bullet's topic, so readers no longer assume only
   the first two items are in scope.
 
+Sixteenth-pass review (Codex 2026-05-13 round 16):
+
+- **Aliased `Future` bound on `impl Trait` lost its `Output`**
+  (P2): `resolve_bound_list` in
+  `src/adapters/analyzers/architecture/call_parity_rule/type_infer/resolve.rs`
+  checked the raw bound leaf with `last.ident == "Future"` before
+  alias canonicalisation. With
+  `use std::future::Future as Fut; fn make() -> impl Fut<Output = Session>`,
+  the leaf was `Fut` so the Future-detection branch missed, the
+  bound got recorded as `TraitBound(std::future::Future)` instead,
+  and `make().await.diff()` stayed unresolved because the canonical
+  type no longer exposed the `Output = Session` shape. Fix: routed
+  the bound through `identify_wrapper_name` (the same alias-aware
+  probe `resolve_path` uses for path-form `Future<Output = T>`),
+  keeping the original `Output = T` args from the trait bound so
+  `wrap_future_output` can resolve them. Regression test
+  `test_impl_aliased_future_resolves_to_future_with_output`
+  asserts `Future(Session)` for the aliased form.
+- **Check-A diagnostic still said "hops"** (P3): round 11 renamed
+  `call_depth` to call-edge depth in the config doc + book to
+  remove the off-by-one ambiguity (`3` = three call edges, two
+  intermediate helpers — not three nodes). The emitted Check-A
+  message in `rendering.rs` still said
+  "within {call_depth} hops", keeping the ambiguity alive in real
+  user-facing diagnostics. Reworded to
+  "within {call_depth} adapter-internal call edges". The example
+  in `book/adapter-parity.md:194` was synced. Regression test
+  `no_delegation_message_uses_call_edge_wording_not_hops` locks
+  the new wording.
+
 Fifteenth-pass review (Codex 2026-05-13 round 15):
 
 - **Repeated-match dedup leaked into text/HTML via shared
