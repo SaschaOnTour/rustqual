@@ -139,9 +139,9 @@ pub fn detect_invalid_qual_allow(trimmed: &str) -> Option<String> {
 }
 
 /// Parse the part after "// qual:allow".
-/// Returns `None` for any form that produces an empty dimensions list
-/// (bare allow, empty parens, all-args unrecognized, malformed parens
-/// missing the close-`)`) — those forms can't act as suppressions.
+/// Returns `None` for any form that produces an empty dimensions list:
+/// bare allow, empty parens, all-args unrecognized, or unclosed parens
+/// (missing the closing `)`) — none of those can act as suppressions.
 /// Typos like `// qual:allow(srp_params)` and unclosed forms like
 /// `// qual:allow(srp_params` are also surfaced as invalid markers
 /// via `detect_invalid_qual_allow` so the author still sees a

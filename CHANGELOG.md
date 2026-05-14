@@ -52,13 +52,17 @@ analysis stay 100% green after the fixes land.
   callees. Resolves automatically once Bug 4 emits the anchor edge.
 - **Bug 4 (call-parity / generic trait dispatch)** — `Q::method(...)`
   where `Q: Trait` produced `<bare>:Q::method` instead of an edge to
-  the trait anchor `<Trait>::method`. New `extract_generic_params`
-  helper threads trait-bound info from the fn signature into the
-  call collector; a new branch in `canonicalise_path` emits one edge
-  per bound, riding on the existing anchor machinery. Both inline
-  bounds (`fn f<Q: Trait>`) and `where`-clause bounds
-  (`fn f<Q>(...) where Q: Trait`) are recognised — `extract_generic_params`
-  merges both spellings via the shared `single_ident_of` helper.
+  the trait anchor `<Trait>::method`. New
+  `extract_method_generic_params` helper threads trait-bound info
+  from the fn signature into the call collector; a new branch in
+  `canonicalise_path` emits one edge per bound, riding on the
+  existing anchor machinery. All three bound spellings are
+  recognised: inline (`fn f<Q: Trait>`), method-level where
+  (`fn f<Q>(...) where Q: Trait`), and method-level where on an
+  impl-level generic
+  (`impl<Q> Foo<Q> { fn f(&self) where Q: Trait }`) — the last
+  case is handled by extending the method's where-bounds against
+  the impl-level generic names so the predicate isn't dropped.
 - **Bug 5 (suppression / typo silencing)** — `// qual:allow(srp_params)`
   (or any unknown-dimension form, including bare `// qual:allow`
   without parens) silently parsed to a zero-dim `Suppression` and

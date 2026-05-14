@@ -498,6 +498,45 @@ fn bug4_generic_param_method_call_emits_trait_anchor_edge() {
          run callees: {:?}",
         callees_of(&graph, runner),
     );
+
+    // Method-level where clause on impl-level generic:
+    // `impl<Q> Runner<Q> { fn run(&self) where Q: SymbolQuery { Q::execute(&q) } }`.
+    // The Q is on the impl WITHOUT an inline bound; the bound only
+    // appears in the method's where clause. Without merging the
+    // method-where against impl-level names, the predicate is dropped
+    // and `Q::execute()` fails to emit a trait-anchor edge.
+    let ws_method_where = build_workspace(&[
+        (
+            "src/application/symbol.rs",
+            r#"
+            pub trait SymbolQuery { fn execute(&self); }
+            pub struct DepsQuery;
+            impl SymbolQuery for DepsQuery { fn execute(&self) {} }
+            "#,
+        ),
+        (
+            "src/application/runner.rs",
+            r#"
+            use crate::application::symbol::SymbolQuery;
+            pub struct Runner<Q>(pub Q);
+            impl<Q> Runner<Q> {
+                pub fn run(&self, q: &Q) where Q: SymbolQuery { Q::execute(q); }
+            }
+            "#,
+        ),
+    ]);
+    let graph_method_where = build_graph_only(
+        &ws_method_where,
+        &rlm_layers_for_eval(),
+        &empty_cfg_test(),
+        &HashSet::new(),
+    );
+    assert!(
+        graph_contains_edge(&graph_method_where, runner_impl, anchor),
+        "method-level where clause on impl-level generic must emit \
+         trait-anchor edge. Runner::run callees: {:?}",
+        callees_of(&graph_method_where, runner_impl),
+    );
 }
 
 // ═══════════════════════════════════════════════════════════════════
