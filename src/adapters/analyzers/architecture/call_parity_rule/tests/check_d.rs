@@ -20,6 +20,7 @@ fn make_config(adapters: &[&str]) -> CompiledCallParity {
         exclude_targets: globset(&[]),
         transparent_wrappers: HashSet::new(),
         transparent_macros: HashSet::new(),
+        promoted_attributes: HashSet::new(),
         single_touchpoint: crate::config::architecture::SingleTouchpointMode::default(),
     }
 }

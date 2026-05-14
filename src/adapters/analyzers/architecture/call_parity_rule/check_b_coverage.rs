@@ -65,19 +65,78 @@ pub(super) fn build_adapter_reachable_targets(
             }
         }
     }
+    let probe = ReachProbe {
+        graph,
+        target_layer,
+        adapter_layers,
+    };
     while let Some(node) = queue.pop_front() {
-        let Some(callees) = graph.forward.get(&node) else {
-            continue;
-        };
-        for callee in callees {
-            if is_target_capability_node(callee, graph, target_layer, adapter_layers)
-                && reachable.insert(callee.clone())
-            {
-                queue.push_back(callee.clone());
-            }
-        }
+        propagate_anchor_impls(&probe, &node, &mut reachable, &mut queue);
+        propagate_callees(&probe, &node, &mut reachable, &mut queue);
     }
     reachable
+}
+
+/// Read-only inputs bundled to keep BFS-step helpers under the
+/// SRP-parameter budget. Operation: data container.
+struct ReachProbe<'a> {
+    graph: &'a CallGraph,
+    target_layer: &'a str,
+    adapter_layers: &'a [String],
+}
+
+/// Trait-method anchors are synthetic — no fn body to walk, but
+/// `AnchorInfo` lists every impl method that satisfies the anchor.
+/// A reaching adapter dispatches into those impls at runtime via the
+/// trait, so they (and their own target-internal callees) must
+/// propagate too. Without this step, generic-fn dispatch chains like
+/// `record_query::<Q> → Q::execute → impl_method → helper` would
+/// surface `helper` as a false orphan even though the adapter reaches
+/// it via the impl. Operation: per-impl enqueue.
+fn propagate_anchor_impls(
+    probe: &ReachProbe<'_>,
+    node: &str,
+    reachable: &mut HashSet<String>,
+    queue: &mut VecDeque<String>,
+) {
+    let Some(info) = probe.graph.trait_method_anchors.get(node) else {
+        return;
+    };
+    for impl_canonical in &info.impl_method_canonicals {
+        if is_target_capability_node(
+            impl_canonical,
+            probe.graph,
+            probe.target_layer,
+            probe.adapter_layers,
+        ) && reachable.insert(impl_canonical.clone())
+        {
+            queue.push_back(impl_canonical.clone());
+        }
+    }
+}
+
+/// Forward-edge fan-out: enqueue every target-capability callee not
+/// already in the reachable set. Operation: per-callee enqueue.
+fn propagate_callees(
+    probe: &ReachProbe<'_>,
+    node: &str,
+    reachable: &mut HashSet<String>,
+    queue: &mut VecDeque<String>,
+) {
+    let Some(callees) = probe.graph.forward.get(node) else {
+        return;
+    };
+    for callee in callees {
+        if is_target_capability_node(
+            callee,
+            probe.graph,
+            probe.target_layer,
+            probe.adapter_layers,
+        ) && reachable.insert(callee.clone())
+        {
+            queue.push_back(callee.clone());
+        }
+    }
 }
 
 /// True when `canonical` is a real target-layer graph node or a

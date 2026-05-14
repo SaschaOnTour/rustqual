@@ -128,6 +128,7 @@ fn inspect_anchor(anchor: &str, info: &AnchorInfo, ctx: &TargetCtx<'_>) -> Optio
             target_layer: ctx.cp.target.clone(),
             reached_adapters: reached,
             missing_adapters: missing,
+            hint: None,
         },
     })
 }
@@ -247,6 +248,7 @@ fn build_finding(
             target_layer: target_layer.to_string(),
             reached_adapters: reached,
             missing_adapters: missing,
+            hint: None,
         },
     }
 }

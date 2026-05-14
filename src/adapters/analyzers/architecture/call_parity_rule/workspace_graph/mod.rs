@@ -21,6 +21,8 @@
 
 mod edge_rewrite;
 
+pub(crate) use edge_rewrite::apply_edge_rewrite;
+
 use super::anchor_index::{
     build_anchor_info, is_anchor_target_capability, AnchorInfo, TraitAnchorMeta,
 };
@@ -162,7 +164,7 @@ pub(crate) fn canonical_name_for_pub_fn(info: &super::pub_fns::PubFnInfo<'_>) ->
 /// header, we must not prepend the file's module segments or we'd
 /// produce `crate::<file_mod>::crate::foo::Bar::method`, which never
 /// matches receiver-tracked method targets.
-pub(super) fn canonical_fn_name(
+pub(crate) fn canonical_fn_name(
     file: &str,
     self_type: Option<&[String]>,
     mod_stack: &[String],
@@ -343,6 +345,8 @@ pub(crate) fn build_call_graph<'ast>(
     });
     let mut graph = CallGraph::new();
     walk_files_into_graph(files, &workspace_files, &type_index, &mut graph);
+    let reexports = super::reexports::collect_reexport_map(files, &workspace_files);
+    super::reexports::rewrite_reexport_edges(&mut graph, &reexports);
     edge_rewrite::rewrite_phantom_inherited_default_edges(&mut graph, &type_index);
     let visible_canonicals = super::pub_fns_visibility::collect_visible_type_canonicals_workspace(
         files,

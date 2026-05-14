@@ -65,12 +65,19 @@ pub fn cmd_grep(args: ClapArgs) { /* … */ }   // skipped from parity
 Call-parity handles most type-alias, re-export, and trait-dispatch
 shapes (`pub type Public = Box<private::Hidden>`, multi-step chains,
 transparent-wrapper peeling, `dyn Trait` collapsed to synthetic
-anchors, file-backed module visibility). The patterns below can
-still produce false-negative Check-B coverage or leave a call
-unresolved — bullets 1–2 are type-alias edge cases, 3 is a nested
-re-export, 4 is a public function re-export, 5 is internals of
-trait default bodies, 6 is an ambiguous inherited-default UFCS
-form. Workarounds are listed inline:
+anchors, file-backed module visibility, `pub use` re-export
+rewriting at call sites (since 1.2.3), generic-param trait dispatch
+`Q::method()` where `Q: Trait` (since 1.2.3), and private fns
+promoted to the handler surface via
+`[architecture.call_parity] promoted_attributes` for proc-macro
+frameworks like rmcp `#[tool]` / axum `#[handler]` (since 1.2.3)).
+The patterns below can still produce false-negative Check-B coverage
+or leave a call unresolved — bullets 1–2 are type-alias edge cases,
+3 is a nested re-export in receiver position (call-site `pub use`
+rewriting is handled since 1.2.3, but receiver-type re-exports are
+not), 4 is a public function re-export visible only via `pub use`,
+5 is internals of trait default bodies, 6 is an ambiguous
+inherited-default UFCS form. Workarounds are listed inline:
 
 1. **Generic-identity aliases at use sites.** A `type Id<T> = T;` and
    then `pub type Public = Id<private::Hidden>;` registers `Id` in

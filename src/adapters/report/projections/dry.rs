@@ -3,7 +3,7 @@
 //! code, boilerplate, wildcards). Group-style buckets are deduped by
 //! participant-location set.
 
-use crate::adapters::report::dry_dedup::dedup_by_locations;
+use crate::adapters::report::dry_dedup::dedup_by_key;
 use crate::domain::findings::{
     DryFinding, DryFindingDetails, DryFindingKind, DuplicateParticipant, FragmentParticipant,
     RepeatedMatchParticipant,
@@ -112,7 +112,7 @@ fn rep_participants(p: &[RepeatedMatchParticipant]) -> Vec<ParticipantRow> {
 }
 
 fn build_duplicate_groups(findings: &[DryFinding]) -> Vec<DryGroupRow> {
-    dedup_by_locations(findings, |f| match (&f.kind, &f.details) {
+    dedup_by_key(findings, |f| match (&f.kind, &f.details) {
         (
             DryFindingKind::DuplicateExact | DryFindingKind::DuplicateSimilar,
             DryFindingDetails::Duplicate { participants, .. },
@@ -134,7 +134,7 @@ fn build_duplicate_groups(findings: &[DryFinding]) -> Vec<DryGroupRow> {
 }
 
 fn build_fragment_groups(findings: &[DryFinding]) -> Vec<DryGroupRow> {
-    dedup_by_locations(findings, |f| match &f.details {
+    dedup_by_key(findings, |f| match &f.details {
         DryFindingDetails::Fragment {
             participants,
             statement_count,
@@ -156,21 +156,27 @@ fn build_fragment_groups(findings: &[DryFinding]) -> Vec<DryGroupRow> {
 }
 
 fn build_repeated_match_groups(findings: &[DryFinding]) -> Vec<DryGroupRow> {
-    dedup_by_locations(findings, |f| match &f.details {
+    dedup_by_key(findings, |f| match &f.details {
         DryFindingDetails::RepeatedMatch {
             enum_name,
             participants,
         } => {
-            let key: Vec<(String, usize)> = participants
+            // Mirror JSON's grouping: `(enum_name, sorted locations)`.
+            // Without `enum_name` two distinct repeated patterns over
+            // the same participant set collapse into one group; without
+            // sorting, the same group emitted with participants in
+            // different order would dedupe as separate groups.
+            let mut locations: Vec<(String, usize)> = participants
                 .iter()
                 .map(|p| (p.file.clone(), p.line))
                 .collect();
+            locations.sort();
             Some((
                 DryGroupRow {
                     kind_label: enum_name.clone(),
                     participants: rep_participants(participants),
                 },
-                key,
+                (enum_name.clone(), locations),
             ))
         }
         _ => None,

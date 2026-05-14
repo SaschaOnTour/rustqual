@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use walkdir::WalkDir;
 
+use crate::adapters::suppression::qual_allow::{detect_invalid_qual_allow, InvalidQualAllow};
 use crate::config::Config;
 use crate::findings::{parse_suppression, Suppression};
 
@@ -213,15 +214,39 @@ pub(crate) fn compute_comment_block_ends(source: &str) -> std::collections::Hash
 pub(crate) fn collect_suppression_lines(
     parsed: &[(String, String, syn::File)],
 ) -> std::collections::HashMap<String, Vec<Suppression>> {
-    let mut raw = collect_per_file(parsed, |line_num, trimmed| {
-        parse_suppression(line_num, trimmed)
-    });
+    let mut raw = collect_per_file(parsed, parse_suppression);
     parsed.iter().for_each(|(path, source, _)| {
         if let Some(items) = raw.get_mut(path) {
             let ends = compute_comment_block_ends(source);
             items.iter_mut().for_each(|s| {
                 if let Some(&end) = ends.get(&s.line) {
                     s.line = end;
+                }
+            });
+        }
+    });
+    raw
+}
+
+/// Side-channel collector for `// qual:allow(<unknown>)` typo markers.
+/// Returns `(line, bad_spec)` pairs per file; line is shifted to the
+/// end of its `//`-comment block, mirroring `collect_suppression_lines`.
+/// Kept separate from real `Suppression` entries so these markers
+/// never enter the suppression-application passes (where empty
+/// dimensions would silently suppress every category in the window).
+/// Orphan-suppression detection consumes this map directly.
+pub(crate) fn collect_invalid_qual_allow_lines(
+    parsed: &[(String, String, syn::File)],
+) -> std::collections::HashMap<String, Vec<(usize, InvalidQualAllow)>> {
+    let mut raw = collect_per_file(parsed, |line_num, trimmed| {
+        detect_invalid_qual_allow(trimmed).map(|kind| (line_num, kind))
+    });
+    parsed.iter().for_each(|(path, source, _)| {
+        if let Some(items) = raw.get_mut(path) {
+            let ends = compute_comment_block_ends(source);
+            items.iter_mut().for_each(|(line, _)| {
+                if let Some(&end) = ends.get(line) {
+                    *line = end;
                 }
             });
         }

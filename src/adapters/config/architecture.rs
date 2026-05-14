@@ -321,6 +321,26 @@ pub struct CallParityConfig {
     #[serde(default)]
     pub transparent_macros: Vec<String>,
 
+    /// Attribute names that promote a private impl method to the
+    /// adapter-handler surface. Default: empty (pure opt-in).
+    ///
+    /// Motivation: framework macros like rmcp's `#[tool_router]` /
+    /// `#[tool]`, axum's `#[handler]`, poem's `#[handler]` etc.
+    /// generate a public dispatch wrapper at expansion time around a
+    /// user-written `async fn` that's syntactically private. rustqual
+    /// reads pre-expansion source, so without promotion every method
+    /// inside such an impl block disappears from the adapter-handler
+    /// enumeration and any application call it makes appears as
+    /// "not reached from adapter X".
+    ///
+    /// Configure this with the bare attribute name (`"tool"`,
+    /// `"handler"`, etc.) — path prefixes and arguments are not
+    /// considered. When a private impl method (or free fn) carries
+    /// any attribute whose path-leaf matches an entry here, it's
+    /// treated as part of the adapter's surface for Checks A/B/C/D.
+    #[serde(default)]
+    pub promoted_attributes: Vec<String>,
+
     /// Severity for Check C (multi-touchpoint):
     /// - `"off"` — skip the check entirely; no findings emitted.
     /// - `"warn"` (default) — emit findings as `Severity::Low`.

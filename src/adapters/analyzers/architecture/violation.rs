@@ -117,6 +117,9 @@ pub enum ViolationKind {
         /// Adapter layers that are missing — the non-empty set that
         /// makes this a finding.
         missing_adapters: Vec<String>,
+        /// Optional discoverability text rendered after the message;
+        /// see `call_parity_rule::hint::enrich_with_hints`.
+        hint: Option<String>,
     },
     /// `[architecture.call_parity]` Check D: a `pub fn` in the target
     /// layer is reached by every adapter, but with different handler

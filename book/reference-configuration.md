@@ -230,6 +230,7 @@ Single-instance section.
 | `exclude_targets` | `[]` | Globs (module-path form) to skip from Check B |
 | `transparent_wrappers` | `[]` | Wrapper type names to peel during receiver-type inference |
 | `transparent_macros` | (default list) | Attribute macros treated as transparent |
+| `promoted_attributes` | `[]` | Bare attribute names that lift a private fn onto the adapter-handler surface (rmcp `#[tool]`, axum/poem `#[handler]`, etc.) |
 | `single_touchpoint` | `"warn"` | Check C severity: `"off"` skips, `"warn"` emits as `Severity::Low`, `"error"` as `Severity::Medium` |
 
 ```toml
@@ -239,8 +240,44 @@ target   = "application"
 call_depth = 3
 exclude_targets = ["application::admin::*"]
 transparent_wrappers = ["State", "Extension", "Json", "Data"]
+promoted_attributes = ["tool"]   # rmcp #[tool] private async fns count as handlers
 single_touchpoint = "warn"
 ```
+
+### `promoted_attributes` — proc-macro-generated handlers
+
+rustqual reads pre-expansion source. Frameworks that generate the
+public dispatch surface at macro-expansion time (rmcp's
+`#[tool_router]` / `#[tool]`, axum's `#[handler]`, poem's
+`#[handler]`, …) leave only a syntactically *private* user-written
+fn behind. Without this knob, every application call those methods
+make appears as "not reached from adapter X" because they don't
+qualify as adapter handlers.
+
+Configure with the bare attribute name (`"tool"` not
+`"rmcp::tool"`). When a private impl method or free fn carries any
+attribute whose path-leaf matches an entry, it's treated as part of
+the adapter surface for Checks A/B/C/D.
+
+When a finding fires *and* a private fn in the missing adapter
+carries a non-stdlib attribute that transitively reaches the
+unreached target, the finding's message includes a hint pointing
+at the candidate so the author knows immediately which attribute to
+add:
+
+```
+src/application/session.rs:5  ARCHITECTURE  '...session::open' is not reached from adapter layer(s): mcp: call parity
+hint: 1 private fn in mcp transitively reaches this target:
+  - src/mcp/server.rs:8 search has #[tool] attribute(s)
+Add the attribute name to `[architecture.call_parity] promoted_attributes` if it marks a macro-generated handler entry point.
+```
+
+The hint reuses the production `compute_touchpoints` walker to
+verify reachability — `call_depth`, peer-adapter, and
+boundary-stop rules are applied identically to the actual Check B
+walk. A candidate appears in the hint iff promoting it would
+actually put the target into the adapter's coverage. No parallel
+reachability logic to maintain, no false leads.
 
 **Deprecated handlers** (`#[deprecated]` on adapter `pub fn`s) are
 excluded from Checks A/B/C/D automatically — no config knob.

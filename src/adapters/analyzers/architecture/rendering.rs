@@ -61,10 +61,28 @@ pub(super) fn match_to_finding(
 }
 
 /// Render a concise message from a `ViolationKind` plus the rule reason.
-/// Integration: match-dispatch delegation to per-variant formatters.
+/// Variants that carry an optional hint (currently only
+/// `CallParityMissingAdapter`) append it on a fresh line so every
+/// downstream renderer (text, JSON, SARIF, GitHub annotation, AI
+/// rows, findings_list) shows the discoverability text without
+/// per-format plumbing.
+/// Integration: head + reason + optional hint suffix.
 pub(super) fn format_match_message(kind: &ViolationKind, reason: &str) -> String {
     let head = render_violation_head(kind);
-    format!("{head}: {reason}")
+    let base = format!("{head}: {reason}");
+    match extract_hint(kind) {
+        Some(hint) => format!("{base}\nhint: {hint}"),
+        None => base,
+    }
+}
+
+/// Pull the optional hint out of a `ViolationKind`. Returns `None`
+/// for variants that don't carry one. Operation: per-variant probe.
+fn extract_hint(kind: &ViolationKind) -> Option<&str> {
+    match kind {
+        ViolationKind::CallParityMissingAdapter { hint, .. } => hint.as_deref(),
+        _ => None,
+    }
 }
 
 /// Variant-specific head text for a `ViolationKind`.

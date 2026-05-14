@@ -63,6 +63,17 @@ pub(super) fn lookup_alias_param(
     ctx: &ResolveContext<'_>,
 ) -> Option<CanonicalType> {
     let subs = ctx.alias_param_subs?;
+    let name = single_ident_of(tp)?;
+    subs.get(&name).cloned()
+}
+
+// qual:api
+/// Project a `TypePath` to its single bare ident (e.g. `T`, `Output`)
+/// or `None` for multi-segment paths, qualified-self paths, or paths
+/// with generic arguments. Shared by alias-param lookup and generic
+/// where-clause bound extraction so both spell the same predicate.
+/// Operation: structural projection.
+pub(crate) fn single_ident_of(tp: &syn::TypePath) -> Option<String> {
     if tp.qself.is_some() || tp.path.segments.len() != 1 {
         return None;
     }
@@ -70,7 +81,7 @@ pub(super) fn lookup_alias_param(
     if !matches!(seg.arguments, syn::PathArguments::None) {
         return None;
     }
-    subs.get(&seg.ident.to_string()).cloned()
+    Some(seg.ident.to_string())
 }
 
 /// Pre-resolve each use-site generic argument to a canonical type in

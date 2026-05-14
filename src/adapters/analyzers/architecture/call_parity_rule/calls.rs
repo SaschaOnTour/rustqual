@@ -16,7 +16,10 @@
 //! See `D-3` and `D-4` in the v1.1.0 plan for the resolution order and
 //! the binding scan patterns.
 
-use super::bindings::{canonical_from_type, extract_let_binding, normalize_alias_expansion};
+use super::bindings::{
+    canonical_from_type, canonicalise_type_segments_in_scope, extract_let_binding,
+    normalize_alias_expansion, CanonScope,
+};
 use super::local_symbols::{scope_for_local, FileScope};
 use super::type_infer::resolve::{resolve_type, ResolveContext};
 use super::type_infer::self_subst::substitute_bare_self;
@@ -49,6 +52,10 @@ pub struct FnContext<'a> {
     pub body: &'a syn::Block,
     /// Named signature parameters with their declared types.
     pub signature_params: Vec<(String, &'a syn::Type)>,
+    /// Generic type parameters with their raw trait-bound segment lists.
+    /// Resolved into canonicals on collector construction; see
+    /// `resolve_generic_param_bounds`.
+    pub generic_params: Vec<(String, Vec<Vec<String>>)>,
     /// Type-path of the enclosing `impl` block, if any.
     pub self_type: Option<Vec<String>>,
     /// Workspace type-index for shallow inference fallback. `None` for
@@ -82,6 +89,10 @@ struct CanonicalCallCollector<'a> {
     /// `crate` prefix), if any — used to resolve `Self::method`.
     self_type_canonical: Option<Vec<String>>,
     signature_params: Vec<(String, &'a syn::Type)>,
+    /// Generic type-param name → canonicalised trait-bound paths.
+    /// Empty bounds keep the param-name reservation so an unbound
+    /// `Q::method(...)` doesn't fall through to `crate_root_modules`.
+    generic_params: HashMap<String, Vec<Vec<String>>>,
     /// Scope stack of variable-name → canonical-type-path bindings.
     /// Always non-empty while a collection is in flight.
     bindings: Vec<HashMap<String, Vec<String>>>,
@@ -110,11 +121,14 @@ impl<'a> CanonicalCallCollector<'a> {
             full.extend_from_slice(segs);
             full
         });
+        let generic_params =
+            resolve_generic_param_bounds(&ctx.generic_params, ctx.file, ctx.mod_stack);
         Self {
             file: ctx.file,
             mod_stack: ctx.mod_stack,
             self_type_canonical,
             signature_params: ctx.signature_params.clone(),
+            generic_params,
             bindings: vec![HashMap::new()],
             non_path_bindings: vec![HashMap::new()],
             calls: HashSet::new(),
@@ -260,6 +274,32 @@ impl<'a> CanonicalCallCollector<'a> {
         for name in idents {
             self.install_non_path_binding(name, CanonicalType::Opaque);
         }
+    }
+
+    /// Resolve `Q::method(...)` where `Q` is a generic type param with
+    /// trait bound(s) to the trait-method anchor canonicals. Returns
+    /// `None` when the first segment isn't a known generic param, or
+    /// when the param has bounds we couldn't canonicalise. Multiple
+    /// bounds ⇒ multiple anchors (over-approximation; matches what
+    /// `populate_anchor_index` mints). Empty result for a generic
+    /// without resolvable bounds — the caller short-circuits the call
+    /// rather than falling into local-symbol / crate-root lookup,
+    /// which would mis-route `Q` as a type. Operation.
+    fn canonicalise_generic_param_path(&self, segments: &[String]) -> Option<Vec<String>> {
+        if segments.len() < 2 {
+            return None;
+        }
+        let bounds = self.generic_params.get(&segments[0])?;
+        let method_tail = &segments[1..];
+        let canonicals: Vec<String> = bounds
+            .iter()
+            .map(|bound| {
+                let mut full = bound.clone();
+                full.extend_from_slice(method_tail);
+                full.join("::")
+            })
+            .collect();
+        Some(canonicals)
     }
 
     /// Turn a path-segment list into the canonical String used for all
@@ -921,8 +961,14 @@ impl<'a, 'ast> Visit<'ast> for CanonicalCallCollector<'a> {
                 .iter()
                 .map(|s| s.ident.to_string())
                 .collect();
-            let canonical = self.canonicalise_path(&segments);
-            self.record_call(canonical);
+            if let Some(targets) = self.canonicalise_generic_param_path(&segments) {
+                for t in targets {
+                    self.record_call(t);
+                }
+            } else {
+                let canonical = self.canonicalise_path(&segments);
+                self.record_call(canonical);
+            }
         }
     }
 
@@ -955,4 +1001,28 @@ impl<'a, 'ast> Visit<'ast> for CanonicalCallCollector<'a> {
         self.visit_expr(&c.body);
         self.exit_scope();
     }
+}
+
+/// Canonicalise each raw trait-bound segment list against `file`'s
+/// scope. Bounds that resolve become anchor prefixes; unresolvable
+/// bounds (external trait, typo) are dropped — the param entry stays
+/// in the map (so the canonicalise step still recognises `Q` as a
+/// generic) but with an empty bound list, producing zero anchor
+/// edges. Operation: per-bound canonicalisation.
+fn resolve_generic_param_bounds(
+    raw: &[(String, Vec<Vec<String>>)],
+    file: &FileScope<'_>,
+    mod_stack: &[String],
+) -> HashMap<String, Vec<Vec<String>>> {
+    let mut out = HashMap::new();
+    let scope = CanonScope { file, mod_stack };
+    for (name, bounds) in raw {
+        let resolved: Vec<Vec<String>> = bounds
+            .iter()
+            .filter_map(|b| canonicalise_type_segments_in_scope(b, &scope))
+            .filter(|c| c.first().map(String::as_str) == Some("crate"))
+            .collect();
+        out.insert(name.clone(), resolved);
+    }
+    out
 }

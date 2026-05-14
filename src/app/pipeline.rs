@@ -105,8 +105,11 @@ pub(crate) fn run_analysis(
         architecture_findings,
         config,
     );
+    let invalid_qual_allow_lines =
+        crate::adapters::source::filesystem::collect_invalid_qual_allow_lines(parsed);
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &suppression_lines,
+        &invalid_qual_allow_lines,
         &result,
         config,
     );

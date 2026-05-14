@@ -51,6 +51,9 @@ pub struct CompiledCallParity {
     /// enhancements have the list available without a config-schema
     /// break.
     pub transparent_macros: HashSet<String>,
+    /// Bare attribute names that lift a private fn onto the adapter-handler
+    /// surface. Compiled from `[architecture.call_parity] promoted_attributes`.
+    pub promoted_attributes: HashSet<String>,
     /// Severity mode for Check C (multi-touchpoint).
     pub single_touchpoint: SingleTouchpointMode,
 }
@@ -80,7 +83,7 @@ pub fn compile_architecture(cfg: &ArchitectureConfig) -> Result<CompiledArchitec
 const CALL_DEPTH_MAX: usize = 10;
 
 /// Compile `[architecture.call_parity]` into a runtime struct.
-/// Operation: field validation + glob compilation.
+/// Integration: validation + per-field compilation in fixed order.
 fn compile_call_parity(
     raw: Option<&CallParityConfig>,
     layers: &LayerDefinitions,
@@ -88,6 +91,25 @@ fn compile_call_parity(
     let Some(cp) = raw else {
         return Ok(None);
     };
+    validate_call_parity(cp, layers)?;
+    let exclude_targets = build_globset(&cp.exclude_targets)
+        .map_err(|e| format!("call_parity.exclude_targets: {e}"))?;
+    Ok(Some(CompiledCallParity {
+        adapters: cp.adapters.clone(),
+        target: cp.target.clone(),
+        call_depth: cp.call_depth,
+        exclude_targets,
+        transparent_wrappers: project_path_leaves(&cp.transparent_wrappers),
+        transparent_macros: build_transparent_macros(&cp.transparent_macros),
+        promoted_attributes: project_path_leaves(&cp.promoted_attributes),
+        single_touchpoint: cp.single_touchpoint,
+    }))
+}
+
+/// Validate the call-parity config: non-empty adapters, in-range call
+/// depth, disjoint adapter list, every adapter + target listed in
+/// `[architecture.layers]`. Operation: error early on schema misuse.
+fn validate_call_parity(cp: &CallParityConfig, layers: &LayerDefinitions) -> Result<(), String> {
     if cp.adapters.is_empty() {
         return Err("call_parity.adapters must be non-empty".to_string());
     }
@@ -122,24 +144,19 @@ fn compile_call_parity(
             cp.target
         ));
     }
-    let exclude_targets = build_globset(&cp.exclude_targets)
-        .map_err(|e| format!("call_parity.exclude_targets: {e}"))?;
-    let transparent_wrappers: HashSet<String> = cp
-        .transparent_wrappers
+    Ok(())
+}
+
+/// Strip path prefix + generic args from each entry and collect the
+/// bare leaf idents into a HashSet. Shared by `transparent_wrappers`
+/// and `promoted_attributes` — both need identifier-leaf lookup keyed
+/// off the user-typed list. Operation: per-entry projection.
+fn project_path_leaves(entries: &[String]) -> HashSet<String> {
+    entries
         .iter()
         .map(|w| last_path_segment(w.trim()).to_string())
         .filter(|s| !s.is_empty())
-        .collect();
-    let transparent_macros = build_transparent_macros(&cp.transparent_macros);
-    Ok(Some(CompiledCallParity {
-        adapters: cp.adapters.clone(),
-        target: cp.target.clone(),
-        call_depth: cp.call_depth,
-        exclude_targets,
-        transparent_wrappers,
-        transparent_macros,
-        single_touchpoint: cp.single_touchpoint,
-    }))
+        .collect()
 }
 
 /// Return the bare ident from a path-like wrapper entry: strip any

@@ -88,6 +88,7 @@ pub(super) fn cli_mcp_config(call_depth: usize) -> CompiledCallParity {
         exclude_targets: GlobSet::empty(),
         transparent_wrappers: HashSet::new(),
         transparent_macros: HashSet::new(),
+        promoted_attributes: HashSet::new(),
         single_touchpoint: crate::config::architecture::SingleTouchpointMode::default(),
     }
 }
@@ -180,13 +181,15 @@ fn build_pub_fns_and_graph<'ws>(
     crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::CallGraph,
 ) {
     let borrowed = borrowed_files(ws);
-    let pub_fns = collect_pub_fns_by_layer(
-        &borrowed,
-        &ws.aliases_per_file,
+    use crate::adapters::analyzers::architecture::call_parity_rule::pub_fns::PubFnInputs;
+    let pub_fns = collect_pub_fns_by_layer(PubFnInputs {
+        files: &borrowed,
+        aliases_per_file: &ws.aliases_per_file,
         layers,
-        cfg_test,
-        &cp.transparent_wrappers,
-    );
+        cfg_test_files: cfg_test,
+        transparent_wrappers: &cp.transparent_wrappers,
+        promoted_attributes: &cp.promoted_attributes,
+    });
     let graph = build_call_graph(
         &borrowed,
         &ws.aliases_per_file,
@@ -199,8 +202,6 @@ fn build_pub_fns_and_graph<'ws>(
 
 /// Run a call-parity check end-to-end against a workspace. Integration:
 /// builds pub-fns + graph, then dispatches on `which`.
-// qual:allow(dry) — match-dispatch over Check kinds; each arm targets a
-// distinct check fn with a different signature.
 pub(super) fn run_check(
     which: Check,
     ws: &Workspace,
@@ -212,7 +213,20 @@ pub(super) fn run_check(
     let touchpoints = build_handler_touchpoints(&pub_fns, &graph, cp);
     match which {
         Check::A => check_no_delegation(&pub_fns, &touchpoints, cp),
-        Check::B => check_missing_adapter(&pub_fns, &graph, &touchpoints, cp),
+        Check::B => {
+            let borrowed = borrowed_files(ws);
+            let candidates = crate::adapters::analyzers::architecture::call_parity_rule::hint::collect_private_candidates(
+                &borrowed, cfg_test, &ws.aliases_per_file, layers, &cp.transparent_wrappers,
+            );
+            let mut hits = check_missing_adapter(&pub_fns, &graph, &touchpoints, cp);
+            crate::adapters::analyzers::architecture::call_parity_rule::hint::enrich_with_hints(
+                &mut hits,
+                &graph,
+                cp,
+                &candidates,
+            );
+            hits
+        }
         Check::C => check_multi_touchpoint(&pub_fns, &touchpoints, cp),
         Check::D => check_multiplicity_mismatch(&pub_fns, &graph, &touchpoints, cp),
     }

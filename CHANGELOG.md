@@ -5,14 +5,102 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.2] - in development
+## [1.2.3] - in development
+
+Patch release: **rlm v1.2.2 audit fixes** — closes five gaps surfaced
+by an external rmcp-based project's call-parity audit. Each fix is
+reproduced by a failing-first regression test in
+`call_parity_rule/tests/rlm_v122_eval.rs`; all 1637 tests + self-
+analysis stay 100% green after the fixes land.
+
+- **Bug 1 (call-parity / rmcp `#[tool_router]`)** — proc-macros
+  generate the public dispatch surface at expansion time around a
+  user-written `async fn` that's syntactically private. rustqual
+  reads pre-expansion source, so it filtered such methods out of
+  the adapter-handler enumeration and any application call they
+  reached appeared as "not reached from adapter X". New config
+  `[architecture.call_parity] promoted_attributes` (default empty,
+  pure opt-in) lifts a private fn onto the handler surface when it
+  carries a matching attribute. Implementation in `pub_fns.rs`.
+- **Bug 1 / discoverable hint** — every `CallParityMissingAdapter`
+  finding now carries an optional hint that points at private
+  attributed fn(s) in the missing adapter that would resolve the
+  finding if their attribute were promoted. Candidates are
+  filtered on missing-adapter membership, syntactic privacy,
+  non-stdlib attribute, visible enclosing-mod chain, and visible
+  impl self-type; reachability is verified by reusing the
+  production `compute_touchpoints` walker (treating the candidate
+  as if it were a handler) so `call_depth`, peer-adapter, and
+  boundary-stop semantics are applied identically — a hint
+  appears iff promoting the attribute would actually put the
+  target into the adapter's coverage. Embedded in the
+  `Finding.message` text so all output formats (text / JSON /
+  SARIF / GitHub / AI / findings_list) surface it without
+  per-format plumbing. New module `hint/`.
+- **Bug 2 (call-parity / `pub use` re-exports)** — caller writing
+  `middleware::record_operation()` against a `pub use
+  savings_recorder::record_operation` re-export saw the edge dropped
+  because the canonical mapped to a path with no fn definition. New
+  workspace-wide reexport map rewrites callee canonicals to their
+  real definitions in a post-pass. New module `reexports.rs`; shared
+  `apply_edge_rewrite` helper in `workspace_graph/edge_rewrite.rs`.
+- **Bug 3 (call-parity / cascade orphans)** — fns reachable only
+  through the trait-anchor chain (e.g. `record_query::<Q> →
+  Q::execute → impl_method → helper`) appeared as orphan targets.
+  `build_adapter_reachable_targets` now propagates anchor → impl
+  methods so the BFS reaches the impl body and its target-internal
+  callees. Resolves automatically once Bug 4 emits the anchor edge.
+- **Bug 4 (call-parity / generic trait dispatch)** — `Q::method(...)`
+  where `Q: Trait` produced `<bare>:Q::method` instead of an edge to
+  the trait anchor `<Trait>::method`. New
+  `extract_method_generic_params` helper threads trait-bound info
+  from the fn signature into the call collector; a new branch in
+  `canonicalise_path` emits one edge per bound, riding on the
+  existing anchor machinery. All three bound spellings are
+  recognised: inline (`fn f<Q: Trait>`), method-level where
+  (`fn f<Q>(...) where Q: Trait`), and method-level where on an
+  impl-level generic
+  (`impl<Q> Foo<Q> { fn f(&self) where Q: Trait }`) — the last
+  case is handled by extending the method's where-bounds against
+  the impl-level generic names so the predicate isn't dropped.
+- **Bug 5 (suppression / typo silencing)** — `// qual:allow(srp_params)`
+  (or any unknown-dimension form, including bare `// qual:allow`
+  without parens) silently parsed to a zero-dim `Suppression` and
+  was treated as global suppress. Typos hid every finding category
+  on the annotated function. The parser now returns `None` for
+  empty / unrecognized dimension lists. To keep typos auditable
+  rather than silently dropping them, `detect_invalid_qual_allow`
+  flags `// qual:allow(<unknown>)` forms (parens with content but
+  no recognised dimension) and any unclosed-paren form
+  (`// qual:allow(iosp`, `// qual:allow(srp_params`, …) regardless
+  of whether the tail spells a valid dimension — structural
+  malformation always surfaces. A separate side-channel
+  (`collect_invalid_qual_allow_lines`) projects them directly to
+  `ORPHAN_SUPPRESSION` findings, bypassing the suppression-application
+  pipeline so the marker can never accidentally suppress real
+  findings via the empty-dimensions wildcard semantic. Bare
+  `// qual:allow` and `// qual:allow()` carry no intent and are
+  silently ignored.
+- **Hint precision (post-Codex review)** — three precision
+  refinements to `hint`: (a) `CandidateCollector` requires
+  `Visibility::Inherited` explicitly so `pub` fns excluded from
+  `pub_fns_by_layer` for other reasons (private mod chain) aren't
+  flagged as promotion candidates; (b) impl-self-type
+  canonicalisation goes through `resolve_impl_self_type` (matching
+  `pub_fns` / `file_fn_collector`) so candidates in `impl
+  super::Server` / `use ...; impl Server` shapes intersect the
+  workspace graph correctly; (c) `cfg_test_files` filter applied at
+  the per-file iteration level so test-only fns can't surface as
+  hint candidates.
+
+## [1.2.2] - 2026-05-13
 
 Patch release: **Reporter-Trait sealed two-trait + Snapshot pattern**,
 **Call-parity anchor model + Orphan-suppression in trait contract**.
 
 Late-cycle additions (post 2026-04-30 tag):
 
-### Anchor model — unified target-capability rule (Codex 2026-05-04 P1-P4)
+Round 1 — Anchor model, unified target-capability rule (Codex 2026-05-04, P1-P4):
 
 - **Single rule for walker + Check B/D**: `is_anchor_target_capability`
   in `anchor_index` is the only source of truth for "is this anchor
@@ -59,7 +147,7 @@ Late-cycle additions (post 2026-04-30 tag):
   matching, the orphan detector's window scan, and SARIF
   `startLine` validity all work for anchor-level findings.
 
-Second-pass review (Codex 2026-05-04 round 2):
+Round 2 review (Codex 2026-05-04):
 
 - **Anchor-only target surface defensive guard** (P1): Check B's
   early-return on missing target-layer entry in `pub_fns_by_layer`
@@ -91,7 +179,7 @@ Second-pass review (Codex 2026-05-04 round 2):
   `trait_has_method` would accept dispatch calls that should stay
   unresolved.
 
-Third-pass review (Codex 2026-05-04 round 3):
+Round 3 review (Codex 2026-05-04):
 
 - **Private trait anchor exclusion** (P1): `WorkspaceTypeIndex` now
   captures the trait declaration's effective workspace visibility in
@@ -134,7 +222,7 @@ Third-pass review (Codex 2026-05-04 round 3):
   method's source location. Wording updated to reference the
   round-2 P4 entry that delivered real `MethodLocation` capture.
 
-Fourth-pass review (Codex 2026-05-04 round 4):
+Round 4 review (Codex 2026-05-04):
 
 - **Trait visibility uses the shared workspace-canonical set** (P1):
   the round-3 trait visibility filter implemented a private
@@ -162,7 +250,7 @@ Fourth-pass review (Codex 2026-05-04 round 4):
   caused canonical collisions with inherent methods of the same
   name and promoted non-target default bodies through empty target
   impls. The final fix lives in the round-7 edge-rewrite pass
-  (see below) — see the seventh-pass review entry.
+  (see below) — see the round 7 review entry.
 - **Stale `add_anchor_to_impl_edges` reference** (P3): the
   `trait_dispatch_edges` doc comment in `calls.rs` claimed
   reachability from anchor to impl bodies was wired by
@@ -176,7 +264,7 @@ Fourth-pass review (Codex 2026-05-04 round 4):
   anchor section already documents the default-OR-overriding rule,
   but the summary contradicted it. Updated.
 
-Fifth-pass review (Codex 2026-05-12 round 5):
+Round 5 review (Codex 2026-05-12):
 
 - **Revert of round-4 `callable_impls_for` widening** (P1 #1 + #2):
   the round-4 expansion of `impl_method_canonicals` to absorb
@@ -212,7 +300,7 @@ Fifth-pass review (Codex 2026-05-12 round 5):
   `pub(super)`, `pub(in <path>)`, file-backed module visibility,
   and `pub use` re-exports). Wording updated to match.
 
-Sixth-pass review (Codex 2026-05-12 round 6):
+Round 6 review (Codex 2026-05-12):
 
 - **Walker phantom-canonical gate** (P1): `populate_layer_cache`
   caches `layer_of` for every canonical that appears in the graph,
@@ -238,7 +326,7 @@ Sixth-pass review (Codex 2026-05-12 round 6):
   Updated to strict "at least one overriding impl lives in target",
   plus an explicit note that inherited-default impls don't promote.
 
-Seventh-pass review (Codex 2026-05-12 round 7):
+Round 7 review (Codex 2026-05-12):
 
 - **Phantom inherited-default edge rewrite** (P2): the round-6
   walker-phantom-gate correctly rejected fabricated
@@ -274,7 +362,7 @@ Seventh-pass review (Codex 2026-05-12 round 7):
   shipped with regression tests for crate-root `mod`, private
   file modules, and ancestor chains. Entry removed.
 
-Eighth-pass review (Codex 2026-05-12 round 8):
+Round 8 review (Codex 2026-05-12):
 
 - **Edge-rewrite ambiguity guard** (P2): the round-7
   `inherited_default_anchor_for` returned the first HashMap match
@@ -312,7 +400,7 @@ Eighth-pass review (Codex 2026-05-12 round 8):
   onto the anchor before coverage/counting, so the limitation no
   longer applies. Comment updated to reflect the active behaviour.
 
-Ninth-pass review (Codex 2026-05-12 round 9, doc-only):
+Round 9 review (Codex 2026-05-12, doc-only):
 
 - **Round-5 limitation note narrowed** (P3): the round-5 entry
   describing "mixed-form multiplicity drift on inherited defaults
@@ -326,7 +414,7 @@ Ninth-pass review (Codex 2026-05-12 round 9, doc-only):
   in target) plus an explicit note on the edge-rewrite folding for
   unambiguous inherited-default UFCS calls.
 
-Tenth-pass review (Codex 2026-05-12 round 10, doc/comment-only):
+Round 10 review (Codex 2026-05-12, doc/comment-only):
 
 - **Ambiguous-multi-trait-default added to known limitations** (P3):
   `book/adapter-parity.md` Limitations list gained a sixth entry
@@ -349,7 +437,7 @@ Tenth-pass review (Codex 2026-05-12 round 10, doc/comment-only):
   in target" framing. Both updated to the current single-anchor
   semantics + dual-rule capability predicate.
 
-Eleventh-pass review (Codex 2026-05-12 round 11, doc-only):
+Round 11 review (Codex 2026-05-12, doc-only):
 
 - **Limitations section heading + intro generalised** (P3): the
   `book/adapter-parity.md` Limitations subsection was titled
@@ -361,132 +449,27 @@ Eleventh-pass review (Codex 2026-05-12 round 11, doc-only):
   classifies each bullet's topic, so readers no longer assume only
   the first two items are in scope.
 
-Eighteenth-pass review (Codex 2026-05-13 round 18):
+Round 12 review (Codex 2026-05-12):
 
-- **External aliased trait bounds shadowed later workspace
-  bounds** (P2): after the round-17 marker fix, the bound resolver
-  in `resolve_bound_list` still accepted any successfully-canonicalised
-  path as a `TraitBound`. With `use serde::Serialize;` and
-  `fn make() -> impl Serialize + Handler`, the first bound expanded
-  to `["serde", "Serialize"]` and returned, so the later workspace
-  `Handler` bound was never visited — `make().handle()` stayed
-  unresolved. Fully-qualified `serde::Serialize` without the `use`
-  alias already returned `None` from canonicalisation and was
-  correctly skipped; the alias-expanded form took a different path
-  and slipped through. Fix: gate the `TraitBound` return on
-  `canonical.first() == Some("crate")` so only workspace-rooted
-  bounds win — external aliases now skip exactly like the
-  fully-qualified external form. The std-marker special case
-  (`resolve_marker::is_marker_trait`) and the Future special case
-  (`future_bound_args`) still run first, so `Send` / `Sync` /
-  `Future<Output = T>` keep their existing handling. Regression
-  test `test_impl_trait_external_aliased_bound_skipped_workspace_bound_wins`.
+- **JSON reporter dropped `logic_count` + `call_count`** (P2): the
+  v1.2.1 typed-reporter refactor split `FunctionAnalysis.complexity`
+  (legacy IOSP type carrying every metric) into
+  `ComplexityMetricsRecord` (typed dimension state), but
+  `project_metrics` did not carry the IOSP `logic_count` /
+  `call_count` fields across and `json::functions::build_functions`
+  hard-coded `JsonComplexity.logic_count` / `call_count` to `0`.
+  Every JSON consumer therefore saw zeros for every function since
+  v1.2.1, even though the analyzer measured non-zero counts. The
+  existing `test_print_json_with_complexity_no_panic` set non-zero
+  inputs but only asserted "no panic" — the smoke-test masked the
+  data loss for eleven Codex passes. Fix: added the two counts to
+  `ComplexityMetricsRecord`, copied them in `project_metrics`, and
+  pulled them through `build_functions`. Regression test
+  `json_complexity_carries_logic_count_and_call_count` parses the
+  produced JSON and asserts the non-zero values survive the
+  projection + reporter round-trip.
 
-Seventeenth-pass review (Codex 2026-05-13 round 17):
-
-- **Marker-trait skip discarded workspace traits with marker-style
-  leaf names** (P2): `resolve_bound_list` skipped each bound via
-  `is_marker_trait`, which checked the raw last segment against a
-  hard-coded `MARKER_TRAITS` list before alias canonicalisation.
-  Workspace traits or aliases like `dyn crate::ports::Send` or
-  `use crate::ports::Handler as Send; dyn Send` therefore got
-  discarded as if they were the std marker, so `h.handle()` never
-  became a trait anchor. Same root cause as round 16 P2 (aliased
-  `Future` bound) — a sister-fix-site that should have been caught
-  in the same pass. Fix: extracted `is_marker_trait` into a new
-  `resolve_marker` module that canonicalises the bound first and
-  skips only when the canonical leaf is in `MARKER_TRAITS` AND the
-  canonical path is stdlib-prefixed (`std`/`core`/`alloc`).
-  Unresolvable paths still skip bare single-segment markers
-  (`dyn Send` via prelude) and explicitly stdlib-rooted forms
-  (`dyn std::marker::Send`) — multi-segment workspace paths that
-  failed to canonicalise are treated as real bounds. Regression
-  tests `test_impl_trait_local_send_named_trait_resolves_not_skipped`
-  + `test_impl_trait_bare_std_send_marker_still_skipped` cover both
-  directions.
-
-Sixteenth-pass review (Codex 2026-05-13 round 16):
-
-- **Aliased `Future` bound on `impl Trait` lost its `Output`**
-  (P2): `resolve_bound_list` in
-  `src/adapters/analyzers/architecture/call_parity_rule/type_infer/resolve.rs`
-  checked the raw bound leaf with `last.ident == "Future"` before
-  alias canonicalisation. With
-  `use std::future::Future as Fut; fn make() -> impl Fut<Output = Session>`,
-  the leaf was `Fut` so the Future-detection branch missed, the
-  bound got recorded as `TraitBound(std::future::Future)` instead,
-  and `make().await.diff()` stayed unresolved because the canonical
-  type no longer exposed the `Output = Session` shape. Fix: routed
-  the bound through `identify_wrapper_name` (the same alias-aware
-  probe `resolve_path` uses for path-form `Future<Output = T>`),
-  keeping the original `Output = T` args from the trait bound so
-  `wrap_future_output` can resolve them. Regression test
-  `test_impl_aliased_future_resolves_to_future_with_output`
-  asserts `Future(Session)` for the aliased form.
-- **Check-A diagnostic still said "hops"** (P3): round 11 renamed
-  `call_depth` to call-edge depth in the config doc + book to
-  remove the off-by-one ambiguity (`3` = three call edges, two
-  intermediate helpers — not three nodes). The emitted Check-A
-  message in `rendering.rs` still said
-  "within {call_depth} hops", keeping the ambiguity alive in real
-  user-facing diagnostics. Reworded to
-  "within {call_depth} adapter-internal call edges". The example
-  in `book/adapter-parity.md:194` was synced. Regression test
-  `no_delegation_message_uses_call_edge_wording_not_hops` locks
-  the new wording.
-
-Fifteenth-pass review (Codex 2026-05-13 round 15):
-
-- **Repeated-match dedup leaked into text/HTML via shared
-  projection** (P2): round 13's fix routed the JSON repeated-match
-  builder to a `(enum_name, sorted participant locations)` dedup
-  key, but the shared `split_dry_findings` projection
-  (`src/adapters/report/projections/dry.rs`) — consumed by the
-  text and HTML reporters — still deduped by `enum_name` alone.
-  Two distinct repeated-match patterns over the same enum
-  therefore collapsed into one rendered group outside JSON, so
-  reporter parity regressed in the very next pass. Fix:
-  `build_repeated_match_groups` now goes through the existing
-  `dedup_by_locations` helper (same path that `build_duplicate_groups`
-  and `build_fragment_groups` use), keying on the participant
-  location set. Regression tests
-  `split_dry_findings_keeps_distinct_repeated_match_groups_over_same_enum`
-  + `split_dry_findings_collapses_duplicate_repeated_match_group_emissions`
-  in `src/adapters/report/tests/projections_dry.rs` lock the dedup
-  contract at the projection layer so every reporter benefits.
-
-Fourteenth-pass review (user-driven proactive A21 sweep
-2026-05-12 round 14):
-
-- **All 24 reporter `_no_panic` smoke tests converted to
-  value-asserting tests** (proactive A21-class elimination): rounds
-  12-13 surfaced three v1.2.1 typed-reporter refactor drops that
-  smoke tests had masked (JSON `logic_count`/`call_count`,
-  NearDuplicate `similarity`, RepeatedMatch `arm_count`, SRP
-  `composite_score`/`clusters`/`length_score`). Rather than wait
-  for Codex to discover the remaining smoke tests one round at a
-  time, the user directed a full sweep. All 24 `_no_panic` tests
-  across eight reporters (sarif=3, ai=3, dot=3, findings_list=2,
-  github=2, json=4 remaining, text=6, pipeline=1) were replaced
-  with tests that assert actual output values and renamed to
-  describe the asserted behavior (e.g.
-  `test_print_json_carries_violation_logic_and_call_locations`,
-  `test_print_sarif_emits_violation_with_location`,
-  `ai_value_includes_complexity_finding_metric_and_location`). New
-  helper `format_findings(&[FindingEntry]) -> String` in
-  `findings_list/mod.rs` (string-returning variant of
-  `print_findings`) makes the findings-list reporter testable
-  without stdout capture. Reporter test fixtures now populate
-  `findings.iosp` via `project_iosp` so the projection path is
-  actually exercised. Test count unchanged (1611 → 1611, 1-for-1
-  replacement). No production code changes — the conversion is
-  purely a test-suite hardening to prevent future projection
-  drops from staying silent. `grep -rn "fn .*_no_panic\|fn
-  .*_no_crash" src/ tests/` returns nothing after this sweep, so
-  the smoke-test category is effectively eliminated from the
-  reporter suite.
-
-Thirteenth-pass review (Codex 2026-05-12 round 13):
+Round 13 review (Codex 2026-05-12):
 
 - **NearDuplicate similarity dropped from `DryFindingDetails::Duplicate`**
   (P2): the v1.2.1 typed-reporter refactor projected
@@ -533,25 +516,129 @@ Thirteenth-pass review (Codex 2026-05-12 round 13):
   JSON path because `sample.rs` deterministically has Operations
   with non-zero logic counts.
 
-Twelfth-pass review (Codex 2026-05-12 round 12):
+Round 14 review (user-driven proactive A21 sweep, 2026-05-12):
 
-- **JSON reporter dropped `logic_count` + `call_count`** (P2): the
-  v1.2.1 typed-reporter refactor split `FunctionAnalysis.complexity`
-  (legacy IOSP type carrying every metric) into
-  `ComplexityMetricsRecord` (typed dimension state), but
-  `project_metrics` did not carry the IOSP `logic_count` /
-  `call_count` fields across and `json::functions::build_functions`
-  hard-coded `JsonComplexity.logic_count` / `call_count` to `0`.
-  Every JSON consumer therefore saw zeros for every function since
-  v1.2.1, even though the analyzer measured non-zero counts. The
-  existing `test_print_json_with_complexity_no_panic` set non-zero
-  inputs but only asserted "no panic" — the smoke-test masked the
-  data loss for eleven Codex passes. Fix: added the two counts to
-  `ComplexityMetricsRecord`, copied them in `project_metrics`, and
-  pulled them through `build_functions`. Regression test
-  `json_complexity_carries_logic_count_and_call_count` parses the
-  produced JSON and asserts the non-zero values survive the
-  projection + reporter round-trip.
+- **All 24 reporter `_no_panic` smoke tests converted to
+  value-asserting tests** (proactive A21-class elimination): rounds
+  12-13 surfaced three v1.2.1 typed-reporter refactor drops that
+  smoke tests had masked (JSON `logic_count`/`call_count`,
+  NearDuplicate `similarity`, RepeatedMatch `arm_count`, SRP
+  `composite_score`/`clusters`/`length_score`). Rather than wait
+  for Codex to discover the remaining smoke tests one round at a
+  time, the user directed a full sweep. All 24 `_no_panic` tests
+  across eight reporters (sarif=3, ai=3, dot=3, findings_list=2,
+  github=2, json=4 remaining, text=6, pipeline=1) were replaced
+  with tests that assert actual output values and renamed to
+  describe the asserted behavior (e.g.
+  `test_print_json_carries_violation_logic_and_call_locations`,
+  `test_print_sarif_emits_violation_with_location`,
+  `ai_value_includes_complexity_finding_metric_and_location`). New
+  helper `format_findings(&[FindingEntry]) -> String` in
+  `findings_list/mod.rs` (string-returning variant of
+  `print_findings`) makes the findings-list reporter testable
+  without stdout capture. Reporter test fixtures now populate
+  `findings.iosp` via `project_iosp` so the projection path is
+  actually exercised. Test count unchanged (1611 → 1611, 1-for-1
+  replacement). No production code changes — the conversion is
+  purely a test-suite hardening to prevent future projection
+  drops from staying silent. `grep -rn "fn .*_no_panic\|fn
+  .*_no_crash" src/ tests/` returns nothing after this sweep, so
+  the smoke-test category is effectively eliminated from the
+  reporter suite.
+
+Round 15 review (Codex 2026-05-13):
+
+- **Repeated-match dedup leaked into text/HTML via shared
+  projection** (P2): round 13's fix routed the JSON repeated-match
+  builder to a `(enum_name, sorted participant locations)` dedup
+  key, but the shared `split_dry_findings` projection
+  (`src/adapters/report/projections/dry.rs`) — consumed by the
+  text and HTML reporters — still deduped by `enum_name` alone.
+  Two distinct repeated-match patterns over the same enum
+  therefore collapsed into one rendered group outside JSON, so
+  reporter parity regressed in the very next pass. Fix:
+  `build_repeated_match_groups` now goes through the existing
+  `dedup_by_locations` helper (same path that `build_duplicate_groups`
+  and `build_fragment_groups` use), keying on the participant
+  location set. Regression tests
+  `split_dry_findings_keeps_distinct_repeated_match_groups_over_same_enum`
+  + `split_dry_findings_collapses_duplicate_repeated_match_group_emissions`
+  in `src/adapters/report/tests/projections_dry.rs` lock the dedup
+  contract at the projection layer so every reporter benefits.
+
+Round 16 review (Codex 2026-05-13):
+
+- **Aliased `Future` bound on `impl Trait` lost its `Output`**
+  (P2): `resolve_bound_list` in
+  `src/adapters/analyzers/architecture/call_parity_rule/type_infer/resolve.rs`
+  checked the raw bound leaf with `last.ident == "Future"` before
+  alias canonicalisation. With
+  `use std::future::Future as Fut; fn make() -> impl Fut<Output = Session>`,
+  the leaf was `Fut` so the Future-detection branch missed, the
+  bound got recorded as `TraitBound(std::future::Future)` instead,
+  and `make().await.diff()` stayed unresolved because the canonical
+  type no longer exposed the `Output = Session` shape. Fix: routed
+  the bound through `identify_wrapper_name` (the same alias-aware
+  probe `resolve_path` uses for path-form `Future<Output = T>`),
+  keeping the original `Output = T` args from the trait bound so
+  `wrap_future_output` can resolve them. Regression test
+  `test_impl_aliased_future_resolves_to_future_with_output`
+  asserts `Future(Session)` for the aliased form.
+- **Check-A diagnostic still said "hops"** (P3): round 11 renamed
+  `call_depth` to call-edge depth in the config doc + book to
+  remove the off-by-one ambiguity (`3` = three call edges, two
+  intermediate helpers — not three nodes). The emitted Check-A
+  message in `rendering.rs` still said
+  "within {call_depth} hops", keeping the ambiguity alive in real
+  user-facing diagnostics. Reworded to
+  "within {call_depth} adapter-internal call edges". The example
+  in `book/adapter-parity.md:194` was synced. Regression test
+  `no_delegation_message_uses_call_edge_wording_not_hops` locks
+  the new wording.
+
+Round 17 review (Codex 2026-05-13):
+
+- **Marker-trait skip discarded workspace traits with marker-style
+  leaf names** (P2): `resolve_bound_list` skipped each bound via
+  `is_marker_trait`, which checked the raw last segment against a
+  hard-coded `MARKER_TRAITS` list before alias canonicalisation.
+  Workspace traits or aliases like `dyn crate::ports::Send` or
+  `use crate::ports::Handler as Send; dyn Send` therefore got
+  discarded as if they were the std marker, so `h.handle()` never
+  became a trait anchor. Same root cause as round 16 P2 (aliased
+  `Future` bound) — a sister-fix-site that should have been caught
+  in the same pass. Fix: extracted `is_marker_trait` into a new
+  `resolve_marker` module that canonicalises the bound first and
+  skips only when the canonical leaf is in `MARKER_TRAITS` AND the
+  canonical path is stdlib-prefixed (`std`/`core`/`alloc`).
+  Unresolvable paths still skip bare single-segment markers
+  (`dyn Send` via prelude) and explicitly stdlib-rooted forms
+  (`dyn std::marker::Send`) — multi-segment workspace paths that
+  failed to canonicalise are treated as real bounds. Regression
+  tests `test_impl_trait_local_send_named_trait_resolves_not_skipped`
+  + `test_impl_trait_bare_std_send_marker_still_skipped` cover both
+  directions.
+
+Round 18 review (Codex 2026-05-13):
+
+- **External aliased trait bounds shadowed later workspace
+  bounds** (P2): after the round-17 marker fix, the bound resolver
+  in `resolve_bound_list` still accepted any successfully-canonicalised
+  path as a `TraitBound`. With `use serde::Serialize;` and
+  `fn make() -> impl Serialize + Handler`, the first bound expanded
+  to `["serde", "Serialize"]` and returned, so the later workspace
+  `Handler` bound was never visited — `make().handle()` stayed
+  unresolved. Fully-qualified `serde::Serialize` without the `use`
+  alias already returned `None` from canonicalisation and was
+  correctly skipped; the alias-expanded form took a different path
+  and slipped through. Fix: gate the `TraitBound` return on
+  `canonical.first() == Some("crate")` so only workspace-rooted
+  bounds win — external aliases now skip exactly like the
+  fully-qualified external form. The std-marker special case
+  (`resolve_marker::is_marker_trait`) and the Future special case
+  (`future_bound_args`) still run first, so `Send` / `Sync` /
+  `Future<Output = T>` keep their existing handling. Regression
+  test `test_impl_trait_external_aliased_bound_skipped_workspace_bound_wins`.
 
 ### Added
 

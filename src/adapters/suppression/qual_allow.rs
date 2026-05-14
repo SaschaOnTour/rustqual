@@ -72,7 +72,7 @@ pub fn parse_suppression(line_number: usize, trimmed: &str) -> Option<Suppressio
     }
     trimmed
         .strip_prefix("// qual:allow")
-        .map(|rest| parse_qual_allow(line_number, rest))
+        .and_then(|rest| parse_qual_allow(line_number, rest))
         .or_else(|| parse_iosp_legacy(line_number, trimmed))
 }
 
@@ -93,16 +93,102 @@ fn parse_iosp_legacy(line_number: usize, trimmed: &str) -> Option<Suppression> {
     }
 }
 
+// qual:api
+/// Why a `// qual:allow(...)` marker was flagged as invalid. Carried
+/// through the side-channel into the orphan-finding's reason text so
+/// the author sees the actual failure mode (unknown dim vs unclosed
+/// parens), not a generic "did not parse" message that lies for the
+/// unclosed-with-valid-dim case (`// qual:allow(iosp`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InvalidQualAllow {
+    /// Parens closed, but no comma-separated entry resolves to a
+    /// known dimension (`srp_params`, removed dim, stray text).
+    UnknownDimensions(String),
+    /// Opening `(` present but no closing `)`. Surfaced regardless
+    /// of whether the tail spells a valid dim — the marker's shape
+    /// is broken and the parser rejects it, so it must surface.
+    UnclosedParens(String),
+}
+
+impl InvalidQualAllow {
+    /// Renderable reason for the orphan-finding's `reason` field.
+    pub fn reason(&self) -> String {
+        match self {
+            Self::UnknownDimensions(spec) => format!(
+                "invalid qual:allow — '{spec}' did not parse to any known dimension"
+            ),
+            Self::UnclosedParens(spec) => format!(
+                "invalid qual:allow — marker has unclosed parens (missing `)`); content was '{spec}'"
+            ),
+        }
+    }
+}
+
+/// Detect a `// qual:allow(...)` marker whose parens are malformed
+/// (missing close-paren, e.g. `// qual:allow(iosp`) OR contain text
+/// but no recognized dimension name (typo: `srp_params`, removed
+/// dim, stray text). Returns the typed failure kind for orphan-
+/// finding text. Bare `// qual:allow`, `// qual:allow()`, and the
+/// special-purpose `// qual:allow(unsafe)` form are NOT flagged —
+/// the first two carry no intent, the third is its own annotation
+/// handled by `is_unsafe_allow_marker`. Must agree with
+/// `parse_qual_allow`'s reject path so every malformed marker
+/// either suppresses or surfaces as orphan, never both, never
+/// silently dropped.
+pub fn detect_invalid_qual_allow(trimmed: &str) -> Option<InvalidQualAllow> {
+    if is_unsafe_allow_marker(trimmed) {
+        return None;
+    }
+    let rest = trimmed.strip_prefix("// qual:allow")?.trim_start();
+    if !rest.starts_with('(') {
+        return None;
+    }
+    let (dims_str, malformed_parens) = match rest.find(')') {
+        Some(close_paren) => (rest[1..close_paren].trim().to_string(), false),
+        // Missing close paren: treat the whole tail (after `(`) as
+        // the bad spec so the orphan finding is visible.
+        None => (rest[1..].trim().to_string(), true),
+    };
+    if dims_str.is_empty() {
+        return None;
+    }
+    if malformed_parens {
+        // Structural malformation — surface even if the tail happens
+        // to spell a valid dim. Mirrors the parser's reject path so a
+        // user typing `// qual:allow(iosp` (no `)`) doesn't get
+        // silently zero suppression and zero orphan.
+        return Some(InvalidQualAllow::UnclosedParens(dims_str));
+    }
+    let any_recognized = dims_str
+        .split(',')
+        .any(|s| Dimension::from_str_opt(s.trim()).is_some());
+    if any_recognized {
+        return None;
+    }
+    Some(InvalidQualAllow::UnknownDimensions(dims_str))
+}
+
 /// Parse the part after "// qual:allow".
+/// Returns `None` for any form that produces an empty dimensions list:
+/// bare allow, empty parens, all-args unrecognized, or unclosed parens
+/// (missing the closing `)`) — none of those can act as suppressions.
+/// Typos like `// qual:allow(srp_params)` and unclosed forms like
+/// `// qual:allow(srp_params` are also surfaced as invalid markers
+/// via `detect_invalid_qual_allow` so the author still sees a
+/// stale-suppression finding.
 /// Operation: string parsing for dimensions and reason (no own calls;
 /// extract_reason is called via closures for IOSP compliance).
-fn parse_qual_allow(line_number: usize, rest: &str) -> Suppression {
+fn parse_qual_allow(line_number: usize, rest: &str) -> Option<Suppression> {
     let rest = rest.trim();
 
     let (dimensions, reason_text) = if rest.is_empty() || !rest.starts_with('(') {
         (vec![], rest)
     } else {
-        let close_paren = rest.find(')').unwrap_or(rest.len());
+        // Require a closing paren — `qual:allow(iosp` (no close) is
+        // malformed; falling back to `rest.len()` would treat the
+        // tail as a valid dim list. Such markers route through
+        // `detect_invalid_qual_allow` instead.
+        let close_paren = rest.find(')')?;
         let dims_str = &rest[1..close_paren];
         let dimensions: Vec<Dimension> = dims_str
             .split(',')
@@ -112,15 +198,19 @@ fn parse_qual_allow(line_number: usize, rest: &str) -> Suppression {
         (dimensions, after_parens)
     };
 
+    if dimensions.is_empty() {
+        return None;
+    }
+
     let reason = (!reason_text.is_empty())
         .then(|| extract_reason(reason_text))
         .flatten();
 
-    Suppression {
+    Some(Suppression {
         line: line_number,
         dimensions,
         reason,
-    }
+    })
 }
 
 /// Extract a reason from text like `reason: "some text"` or bare text.

@@ -17,6 +17,8 @@ pub mod patterns;
 pub mod resolve;
 mod resolve_alias;
 mod resolve_marker;
+
+pub(crate) use resolve_alias::single_ident_of;
 mod resolve_wrapper;
 pub(crate) mod self_subst;
 pub mod workspace_index;
