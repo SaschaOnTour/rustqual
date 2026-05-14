@@ -13,6 +13,7 @@ mod complexity_predicates;
 use std::collections::HashMap;
 
 use crate::adapters::analyzers::iosp::Classification;
+use crate::adapters::suppression::qual_allow::InvalidQualAllow;
 use crate::domain::findings::OrphanSuppression;
 use crate::findings::Suppression;
 
@@ -57,7 +58,7 @@ enum MatchMode {
 /// Integration: collects finding positions, then filters unmatched markers.
 pub(crate) fn detect_orphan_suppressions(
     suppression_lines: &HashMap<String, Vec<Suppression>>,
-    invalid_qual_allow_lines: &HashMap<String, Vec<(usize, String)>>,
+    invalid_qual_allow_lines: &HashMap<String, Vec<(usize, InvalidQualAllow)>>,
     analysis: &crate::report::AnalysisResult,
     config: &crate::config::Config,
 ) -> Vec<OrphanSuppression> {
@@ -88,18 +89,16 @@ pub(crate) fn detect_orphan_suppressions(
 /// author should still see a stale-marker finding so the typo is
 /// visible. Operation: per-marker projection.
 fn invalid_marker_orphans(
-    invalid_qual_allow_lines: &HashMap<String, Vec<(usize, String)>>,
+    invalid_qual_allow_lines: &HashMap<String, Vec<(usize, InvalidQualAllow)>>,
 ) -> Vec<OrphanSuppression> {
     invalid_qual_allow_lines
         .iter()
         .flat_map(|(file, markers)| {
-            markers.iter().map(move |(line, spec)| OrphanSuppression {
+            markers.iter().map(move |(line, kind)| OrphanSuppression {
                 file: file.clone(),
                 line: *line,
                 dimensions: Vec::new(),
-                reason: Some(format!(
-                    "invalid qual:allow — '{spec}' did not parse to any known dimension"
-                )),
+                reason: Some(kind.reason()),
             })
         })
         .collect()

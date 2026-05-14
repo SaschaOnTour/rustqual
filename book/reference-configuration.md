@@ -267,7 +267,7 @@ add:
 
 ```
 src/application/session.rs:5  ARCHITECTURE  '...session::open' is not reached from adapter layer(s): mcp: call parity
-hint: 1 private method in mcp transitively reaches this target:
+hint: 1 private fn in mcp transitively reaches this target:
   - src/mcp/server.rs:8 search has #[tool] attribute(s)
 Add the attribute name to `[architecture.call_parity] promoted_attributes` if it marks a macro-generated handler entry point.
 ```

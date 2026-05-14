@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use walkdir::WalkDir;
 
-use crate::adapters::suppression::qual_allow::detect_invalid_qual_allow;
+use crate::adapters::suppression::qual_allow::{detect_invalid_qual_allow, InvalidQualAllow};
 use crate::config::Config;
 use crate::findings::{parse_suppression, Suppression};
 
@@ -237,9 +237,9 @@ pub(crate) fn collect_suppression_lines(
 /// Orphan-suppression detection consumes this map directly.
 pub(crate) fn collect_invalid_qual_allow_lines(
     parsed: &[(String, String, syn::File)],
-) -> std::collections::HashMap<String, Vec<(usize, String)>> {
+) -> std::collections::HashMap<String, Vec<(usize, InvalidQualAllow)>> {
     let mut raw = collect_per_file(parsed, |line_num, trimmed| {
-        detect_invalid_qual_allow(trimmed).map(|spec| (line_num, spec))
+        detect_invalid_qual_allow(trimmed).map(|kind| (line_num, kind))
     });
     parsed.iter().for_each(|(path, source, _)| {
         if let Some(items) = raw.get_mut(path) {
