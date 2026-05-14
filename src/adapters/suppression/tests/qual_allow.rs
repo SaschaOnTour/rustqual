@@ -23,7 +23,9 @@ fn test_detect_invalid_qual_allow_flags_typo_dimensions() {
     // emit a stale-marker finding.
     assert_eq!(
         detect_invalid_qual_allow("// qual:allow(srp_params)"),
-        Some(InvalidQualAllow::UnknownDimensions("srp_params".to_string()))
+        Some(InvalidQualAllow::UnknownDimensions(
+            "srp_params".to_string()
+        ))
     );
     assert_eq!(
         detect_invalid_qual_allow("// qual:allow(srp_params, foo) reason: \"typo\""),
