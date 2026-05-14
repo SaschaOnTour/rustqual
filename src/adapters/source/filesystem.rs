@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use walkdir::WalkDir;
 
+use crate::adapters::suppression::qual_allow::detect_invalid_qual_allow;
 use crate::config::Config;
 use crate::findings::{parse_suppression, Suppression};
 
@@ -207,7 +208,10 @@ pub(crate) fn compute_comment_block_ends(source: &str) -> std::collections::Hash
 /// effective line of each suppression is shifted to the end of the
 /// contiguous `//`-comment block containing the marker, so multi-line
 /// rationales still match items within `ANNOTATION_WINDOW` of the
-/// block's last comment (Bug 3).
+/// block's last comment (Bug 3). Invalid `qual:allow(<unknown>)`
+/// markers are folded in as zero-dim Suppressions whose reason
+/// records the bad spec — the orphan-suppression detector then
+/// surfaces them as stale markers.
 /// Operation: collects raw markers, then rewrites `.line` per file
 /// via the block-ends map.
 pub(crate) fn collect_suppression_lines(
@@ -215,6 +219,7 @@ pub(crate) fn collect_suppression_lines(
 ) -> std::collections::HashMap<String, Vec<Suppression>> {
     let mut raw = collect_per_file(parsed, |line_num, trimmed| {
         parse_suppression(line_num, trimmed)
+            .or_else(|| invalid_marker_as_suppression(line_num, trimmed))
     });
     parsed.iter().for_each(|(path, source, _)| {
         if let Some(items) = raw.get_mut(path) {
@@ -227,6 +232,23 @@ pub(crate) fn collect_suppression_lines(
         }
     });
     raw
+}
+
+/// Reason-prefix marking a Suppression entry as a typo-detected
+/// invalid `qual:allow` marker. Orphan-suppression treats these as
+/// always-orphan so the author sees a stale-marker finding instead
+/// of silent ignoring.
+pub(crate) const INVALID_QUAL_ALLOW_REASON_PREFIX: &str = "invalid qual:allow — ";
+
+fn invalid_marker_as_suppression(line_num: usize, trimmed: &str) -> Option<Suppression> {
+    let bad_spec = detect_invalid_qual_allow(trimmed)?;
+    Some(Suppression {
+        line: line_num,
+        dimensions: Vec::new(),
+        reason: Some(format!(
+            "{INVALID_QUAL_ALLOW_REASON_PREFIX}'{bad_spec}' did not parse to any known dimension"
+        )),
+    })
 }
 
 /// Collect `// qual:api` marker line numbers per file. Each recorded

@@ -25,17 +25,15 @@ pub(crate) fn extract_signature_params(sig: &syn::Signature) -> Vec<(String, &sy
 
 // qual:api
 /// Extract `(name, [trait_bound_path_segs, ...])` for every type
-/// parameter declared in a fn signature. Lifetime / const generics
-/// are skipped. Each trait bound is returned as its raw path segments
-/// (un-canonicalised); the call collector resolves them against the
-/// file scope before storing — same pattern `extract_signature_params`
-/// uses for value-param types.
-///
-/// Used so a body call like `Q::execute(&q)` (where `Q: SymbolQuery`)
-/// can route through the workspace's trait-method anchor instead of
-/// collapsing to `<bare>:Q::execute`.
+/// parameter declared in a fn signature. Merges inline bounds
+/// (`fn f<Q: Trait>`) with `where`-clause bounds (`fn f<Q>(...) where
+/// Q: Trait`) so both spellings produce the same anchor edge for a
+/// body call like `Q::execute(&q)`. Lifetime / const generics are
+/// skipped; each trait bound is returned as its raw path segments —
+/// the call collector resolves them against the file scope.
 pub(crate) fn extract_generic_params(sig: &syn::Signature) -> Vec<(String, Vec<Vec<String>>)> {
-    sig.generics
+    let mut bounds_by_name: Vec<(String, Vec<Vec<String>>)> = sig
+        .generics
         .params
         .iter()
         .filter_map(|p| match p {
@@ -44,7 +42,42 @@ pub(crate) fn extract_generic_params(sig: &syn::Signature) -> Vec<(String, Vec<V
             }
             _ => None,
         })
-        .collect()
+        .collect();
+    if let Some(where_clause) = sig.generics.where_clause.as_ref() {
+        merge_where_bounds(&mut bounds_by_name, where_clause);
+    }
+    bounds_by_name
+}
+
+/// For each `T: Trait` predicate where `T` is a single-ident type,
+/// append the trait bounds to the matching entry in `bounds_by_name`.
+/// Predicates with non-trivial bounded types (`Vec<T>: ...`,
+/// `T::Assoc: ...`) are dropped — they don't affect bare `T::method()`
+/// dispatch resolution.
+fn merge_where_bounds(
+    bounds_by_name: &mut [(String, Vec<Vec<String>>)],
+    where_clause: &syn::WhereClause,
+) {
+    for predicate in &where_clause.predicates {
+        let syn::WherePredicate::Type(pt) = predicate else {
+            continue;
+        };
+        let Some(name) = single_ident_type(&pt.bounded_ty) else {
+            continue;
+        };
+        let Some(entry) = bounds_by_name.iter_mut().find(|(n, _)| n == &name) else {
+            continue;
+        };
+        entry.1.extend(trait_bound_paths(&pt.bounds));
+    }
+}
+
+/// `T` (single-segment, no generics) → Some("T"); anything else None.
+fn single_ident_type(ty: &syn::Type) -> Option<String> {
+    let syn::Type::Path(p) = ty else {
+        return None;
+    };
+    super::type_infer::resolve_alias::single_ident_of(p)
 }
 
 /// Flatten each trait bound into its segment idents. Lifetime bounds

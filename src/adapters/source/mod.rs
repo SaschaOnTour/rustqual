@@ -10,5 +10,7 @@
 pub mod filesystem;
 pub mod watch;
 
+pub(crate) use filesystem::INVALID_QUAL_ALLOW_REASON_PREFIX;
+
 #[cfg(test)]
 mod tests;

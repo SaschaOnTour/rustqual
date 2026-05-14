@@ -216,7 +216,7 @@ pub(super) fn run_check(
         Check::B => {
             let borrowed = borrowed_files(ws);
             let candidates = crate::adapters::analyzers::architecture::call_parity_rule::hint::collect_private_candidates(
-                &borrowed, &pub_fns, layers,
+                &borrowed, cfg_test, layers,
             );
             let mut hits = check_missing_adapter(&pub_fns, &graph, &touchpoints, cp);
             crate::adapters::analyzers::architecture::call_parity_rule::hint::enrich_with_hints(

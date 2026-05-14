@@ -59,8 +59,11 @@ pub(crate) fn detect_orphan_suppressions(
         .iter()
         .flat_map(|(file, sups)| {
             sups.iter()
-                .filter(|sup| is_verifiable(sup, file, &positions))
-                .filter(|sup| !has_matching_finding(file, sup, &positions))
+                .filter(|sup| {
+                    is_invalid_marker(sup)
+                        || (is_verifiable(sup, file, &positions)
+                            && !has_matching_finding(file, sup, &positions))
+                })
                 .map(|sup| OrphanSuppression {
                     file: file.clone(),
                     line: sup.line,
@@ -72,6 +75,17 @@ pub(crate) fn detect_orphan_suppressions(
         .collect();
     orphans.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
     orphans
+}
+
+/// True if `sup` is the synthetic carrier emitted by
+/// `filesystem::collect_suppression_lines` for a typo-detected
+/// `qual:allow(<unknown>)` marker. Such markers must always surface
+/// as orphans regardless of nearby findings — they don't actually
+/// suppress anything, and silent ignoring is the bug we just fixed.
+fn is_invalid_marker(sup: &Suppression) -> bool {
+    sup.reason
+        .as_deref()
+        .is_some_and(|r| r.starts_with(crate::adapters::source::INVALID_QUAL_ALLOW_REASON_PREFIX))
 }
 
 /// True if the suppression can be verified against line-anchored

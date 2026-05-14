@@ -49,15 +49,33 @@ analysis stay 100% green after the fixes land.
   the trait anchor `<Trait>::method`. New `extract_generic_params`
   helper threads trait-bound info from the fn signature into the
   call collector; a new branch in `canonicalise_path` emits one edge
-  per bound, riding on the existing anchor machinery.
+  per bound, riding on the existing anchor machinery. Both inline
+  bounds (`fn f<Q: Trait>`) and `where`-clause bounds
+  (`fn f<Q>(...) where Q: Trait`) are recognised — `extract_generic_params`
+  merges both spellings via the shared `single_ident_of` helper.
 - **Bug 5 (suppression / typo silencing)** — `// qual:allow(srp_params)`
   (or any unknown-dimension form, including bare `// qual:allow`
   without parens) silently parsed to a zero-dim `Suppression` and
   was treated as global suppress. Typos hid every finding category
   on the annotated function. The parser now returns `None` for
-  empty / unrecognized dimension lists; the orphan-suppression
-  detector continues to surface annotations that match no real
-  finding so author intent stays auditable.
+  empty / unrecognized dimension lists. To keep typos auditable
+  rather than silently dropping them, `detect_invalid_qual_allow`
+  flags `// qual:allow(<unknown>)` forms (parens with content but
+  no recognised dimension); these surface as `ORPHAN_SUPPRESSION`
+  findings via a synthetic Suppression carrier with the
+  `INVALID_QUAL_ALLOW_REASON_PREFIX` reason. Bare `// qual:allow`
+  and `// qual:allow()` carry no intent and are silently ignored.
+- **Hint precision (post-Codex review)** — three precision
+  refinements to `hint`: (a) `CandidateCollector` requires
+  `Visibility::Inherited` explicitly so `pub` fns excluded from
+  `pub_fns_by_layer` for other reasons (private mod chain) aren't
+  flagged as promotion candidates; (b) impl-self-type
+  canonicalisation goes through `resolve_impl_self_type` (matching
+  `pub_fns` / `file_fn_collector`) so candidates in `impl
+  super::Server` / `use ...; impl Server` shapes intersect the
+  workspace graph correctly; (c) `cfg_test_files` filter applied at
+  the per-file iteration level so test-only fns can't surface as
+  hint candidates.
 
 ## [1.2.2] - in development
 

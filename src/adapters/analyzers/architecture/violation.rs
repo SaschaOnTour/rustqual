@@ -118,7 +118,7 @@ pub enum ViolationKind {
         /// makes this a finding.
         missing_adapters: Vec<String>,
         /// Optional discoverability text rendered after the message;
-        /// see `hint::compute_hint_for_target`.
+        /// see `call_parity_rule::hint::enrich_with_hints`.
         hint: Option<String>,
     },
     /// `[architecture.call_parity]` Check D: a `pub fn` in the target

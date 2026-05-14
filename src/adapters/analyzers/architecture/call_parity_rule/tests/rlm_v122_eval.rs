@@ -422,6 +422,39 @@ fn bug4_generic_param_method_call_emits_trait_anchor_edge() {
     let has_anchor = graph_contains_edge(&graph, runner, anchor);
     let has_impl = graph_contains_edge(&graph, runner, impl_method);
 
+    // Sanity check: same shape with `where`-clause spelling must
+    // produce the same edge — both forms are semantically identical
+    // and Q::method() dispatch shouldn't depend on bound placement.
+    let ws_where = build_workspace(&[
+        (
+            "src/application/symbol.rs",
+            r#"
+            pub trait SymbolQuery { fn execute(&self); }
+            pub struct DepsQuery;
+            impl SymbolQuery for DepsQuery { fn execute(&self) {} }
+            "#,
+        ),
+        (
+            "src/application/runner.rs",
+            r#"
+            use crate::application::symbol::SymbolQuery;
+            pub fn run<Q>(q: Q) where Q: SymbolQuery { Q::execute(&q); }
+            "#,
+        ),
+    ]);
+    let graph_where = build_graph_only(
+        &ws_where,
+        &rlm_layers_for_eval(),
+        &empty_cfg_test(),
+        &HashSet::new(),
+    );
+    assert!(
+        graph_contains_edge(&graph_where, runner, anchor),
+        "where-clause variant must emit the same trait-anchor edge as inline-bound. \
+         run callees: {:?}",
+        callees_of(&graph_where, runner),
+    );
+
     assert!(
         has_anchor || has_impl,
         "bug4 — `Q::execute(&q)` emits no edge to either the trait \

@@ -15,7 +15,7 @@ pub mod combinators;
 pub mod infer;
 pub mod patterns;
 pub mod resolve;
-mod resolve_alias;
+pub(crate) mod resolve_alias;
 mod resolve_marker;
 mod resolve_wrapper;
 pub(crate) mod self_subst;

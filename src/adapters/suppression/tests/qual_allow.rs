@@ -16,6 +16,39 @@ fn test_parse_qual_allow_bare_is_ignored() {
 }
 
 #[test]
+fn test_detect_invalid_qual_allow_flags_typo_dimensions() {
+    // Typos like `srp_params` (when the actual dim is `srp`) parse to
+    // an empty dimensions list, which would silently do nothing. The
+    // detector surfaces them so the orphan-suppression pipeline can
+    // emit a stale-marker finding.
+    assert_eq!(
+        detect_invalid_qual_allow("// qual:allow(srp_params)"),
+        Some("srp_params".to_string())
+    );
+    assert_eq!(
+        detect_invalid_qual_allow("// qual:allow(srp_params, foo) reason: \"typo\""),
+        Some("srp_params, foo".to_string())
+    );
+}
+
+#[test]
+fn test_detect_invalid_qual_allow_does_not_flag_bare_or_empty() {
+    // Bare `// qual:allow` and `// qual:allow()` carry no dim intent
+    // — author wrote nothing actionable. Treat as no annotation; the
+    // orphan detector should not surface them.
+    assert!(detect_invalid_qual_allow("// qual:allow").is_none());
+    assert!(detect_invalid_qual_allow("// qual:allow()").is_none());
+}
+
+#[test]
+fn test_detect_invalid_qual_allow_passes_partial_recognized_dims() {
+    // At least one recognized dim → partially valid → not flagged
+    // here (the parser keeps the recognized parts as a real
+    // Suppression).
+    assert!(detect_invalid_qual_allow("// qual:allow(srp, srp_params)").is_none());
+}
+
+#[test]
 fn test_parse_qual_allow_iosp() {
     let s = parse_suppression(3, "// qual:allow(iosp)").unwrap();
     assert_eq!(s.dimensions, vec![Dimension::Iosp]);

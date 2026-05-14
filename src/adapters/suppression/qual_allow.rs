@@ -93,14 +93,42 @@ fn parse_iosp_legacy(line_number: usize, trimmed: &str) -> Option<Suppression> {
     }
 }
 
+// qual:api
+/// Detect a `// qual:allow(...)` marker whose parens contain text but
+/// no recognized dimension name (typo: `srp_params`, removed dim,
+/// stray text). Returns the offending spec for orphan-finding text.
+/// Bare `// qual:allow`, `// qual:allow()`, and the special-purpose
+/// `// qual:allow(unsafe)` form are NOT flagged — the first two
+/// carry no intent, the third is its own annotation handled by
+/// `is_unsafe_allow_marker`.
+pub fn detect_invalid_qual_allow(trimmed: &str) -> Option<String> {
+    if is_unsafe_allow_marker(trimmed) {
+        return None;
+    }
+    let rest = trimmed.strip_prefix("// qual:allow")?.trim_start();
+    if !rest.starts_with('(') {
+        return None;
+    }
+    let close_paren = rest.find(')')?;
+    let dims_str = rest[1..close_paren].trim();
+    if dims_str.is_empty() {
+        return None;
+    }
+    let any_recognized = dims_str
+        .split(',')
+        .any(|s| Dimension::from_str_opt(s.trim()).is_some());
+    if any_recognized {
+        return None;
+    }
+    Some(dims_str.to_string())
+}
+
 /// Parse the part after "// qual:allow".
-/// Returns `None` for any form that produces an empty dimensions list:
-/// bare `// qual:allow`, empty parens `// qual:allow()`, or all-args
-/// unrecognized like `// qual:allow(srp_params)`. Such forms are
-/// silently treated as not-an-annotation so typos can't accidentally
-/// suppress every dimension. Authors must spell out the targeted
-/// dimension(s) explicitly; the orphan-suppression detector continues
-/// to surface annotations that match no real finding.
+/// Returns `None` for any form that produces an empty dimensions list
+/// (bare allow, empty parens, all-args unrecognized) — those forms
+/// can't act as suppressions. Typos like `// qual:allow(srp_params)`
+/// are also surfaced as invalid markers via `detect_invalid_qual_allow`
+/// so the author still sees a stale-suppression finding.
 /// Operation: string parsing for dimensions and reason (no own calls;
 /// extract_reason is called via closures for IOSP compliance).
 fn parse_qual_allow(line_number: usize, rest: &str) -> Option<Suppression> {
