@@ -4,26 +4,27 @@
 //! were promoted via `[architecture.call_parity] promoted_attributes`.
 //! See `candidates::collect_private_candidates` for the candidate-
 //! selection walk and `enrich_with_hints` for how candidates are
-//! projected onto findings via reverse-BFS reachability.
+//! projected onto findings.
 //!
-//! Best-effort: the reachability probe runs on the workspace call
-//! graph without applying `call_depth` or peer-adapter constraints
-//! that the touchpoint walker enforces. A hint can therefore suggest
-//! a promotion that the actual walker wouldn't accept (candidate
-//! beyond depth, behind a peer-adapter boundary, in a hidden module
-//! chain). The author re-runs after promoting; if the finding stays,
-//! the hint was a false lead — cheap to verify, expensive to make
-//! perfect.
+//! Reachability check uses the SAME `compute_touchpoints` walker the
+//! production check uses. No parallel reachability logic — any
+//! `call_depth` / peer-adapter / boundary-stop change in the walker
+//! flows through automatically. A candidate appears in the hint iff
+//! `compute_touchpoints(candidate)` (treating the candidate as if it
+//! were a handler) contains the unreached target — i.e. promoting
+//! its attribute will ACTUALLY put the target in the adapter's
+//! coverage set.
 
 mod candidates;
 
 pub(super) use candidates::{collect_private_candidates, PrivateCandidate};
 
+use super::touchpoints::{compute_touchpoints, TouchpointContext};
 use super::workspace_graph::CallGraph;
+use crate::adapters::analyzers::architecture::compiled::CompiledCallParity;
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
-// qual:api
 /// Attach a hint to every `CallParityMissingAdapter` finding for
 /// which a private attributed candidate would resolve the gap.
 /// Empty `candidates` short-circuits — the common case when no
@@ -31,6 +32,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 pub(super) fn enrich_with_hints(
     findings: &mut [MatchLocation],
     graph: &CallGraph,
+    cp: &CompiledCallParity,
     candidates: &[PrivateCandidate],
 ) {
     if candidates.is_empty() {
@@ -39,8 +41,9 @@ pub(super) fn enrich_with_hints(
     let by_adapter = group_by_adapter(candidates);
     let mut probe = HintProbe {
         graph,
+        cp,
         by_adapter: &by_adapter,
-        upstream_cache: HashMap::new(),
+        candidate_touchpoints: HashMap::new(),
     };
     for f in findings {
         if let ViolationKind::CallParityMissingAdapter {
@@ -55,58 +58,87 @@ pub(super) fn enrich_with_hints(
     }
 }
 
-/// Per-call probe state. The `upstream_cache` memoises one reverse
-/// BFS per unique `target_fn` so multiple findings on the same
-/// target share a single graph walk.
+/// Per-call probe state. `candidate_touchpoints` memoises one
+/// `compute_touchpoints` walk per candidate so a candidate that's
+/// relevant to multiple findings (or to multiple missing adapters of
+/// the same finding) only pays one walk. The walk is delegated to
+/// the production touchpoint code — by construction, a candidate is
+/// listed in the hint iff promoting it would put the target in the
+/// adapter's coverage set under the same call_depth + peer-adapter
+/// + boundary rules Check B uses.
 struct HintProbe<'a> {
     graph: &'a CallGraph,
+    cp: &'a CompiledCallParity,
     by_adapter: &'a HashMap<&'a str, Vec<&'a PrivateCandidate>>,
-    upstream_cache: HashMap<String, HashSet<String>>,
+    candidate_touchpoints: HashMap<String, HashSet<String>>,
 }
 
 impl<'a> HintProbe<'a> {
     fn hint_for(&mut self, target_fn: &str, missing_adapters: &[String]) -> Option<String> {
-        let graph = self.graph;
-        let upstream = self
-            .upstream_cache
-            .entry(target_fn.to_string())
-            .or_insert_with(|| reverse_bfs(graph, target_fn));
-        let by_adapter = collect_hits_per_adapter(self.by_adapter, missing_adapters, upstream);
+        let by_adapter = self.collect_hits_per_adapter(missing_adapters, target_fn);
         if by_adapter.is_empty() {
             None
         } else {
             Some(format_hint(&by_adapter))
         }
     }
-}
 
-/// Reverse BFS from `target` over `graph.reverse` — every node from
-/// which `target` is transitively reachable. Excludes `target`
-/// itself; candidates can never coincide with the target since they
-/// come from the missing-adapter layer, not the target layer.
-fn reverse_bfs(graph: &CallGraph, target: &str) -> HashSet<String> {
-    let mut upstream: HashSet<String> = HashSet::new();
-    let mut queue: VecDeque<String> = VecDeque::new();
-    enqueue_callers(graph, target, &mut upstream, &mut queue);
-    while let Some(node) = queue.pop_front() {
-        enqueue_callers(graph, &node, &mut upstream, &mut queue);
-    }
-    upstream
-}
-
-fn enqueue_callers(
-    graph: &CallGraph,
-    node: &str,
-    upstream: &mut HashSet<String>,
-    queue: &mut VecDeque<String>,
-) {
-    let Some(callers) = graph.reverse.get(node) else {
-        return;
-    };
-    for c in callers {
-        if upstream.insert(c.clone()) {
-            queue.push_back(c.clone());
+    /// Per missing adapter, take its candidates and keep the ones
+    /// whose `compute_touchpoints` (treating the candidate as a
+    /// handler in that adapter) contains `target_fn`. Sort by
+    /// (file, line, fn_name) for deterministic hint output.
+    fn collect_hits_per_adapter(
+        &mut self,
+        missing_adapters: &[String],
+        target_fn: &str,
+    ) -> Vec<(String, Vec<&'a PrivateCandidate>)> {
+        let mut out: Vec<(String, Vec<&PrivateCandidate>)> = Vec::new();
+        for adapter in missing_adapters {
+            let Some(adapter_candidates) = self.by_adapter.get(adapter.as_str()) else {
+                continue;
+            };
+            let mut hits: Vec<&PrivateCandidate> = Vec::new();
+            for candidate in adapter_candidates.iter().copied() {
+                if self.candidate_reaches_target(candidate, adapter, target_fn) {
+                    hits.push(candidate);
+                }
+            }
+            if !hits.is_empty() {
+                hits.sort_by(|a, b| {
+                    a.file
+                        .cmp(&b.file)
+                        .then(a.line.cmp(&b.line))
+                        .then(a.fn_name.cmp(&b.fn_name))
+                });
+                out.push((adapter.clone(), hits));
+            }
         }
+        out
+    }
+
+    fn candidate_reaches_target(
+        &mut self,
+        candidate: &PrivateCandidate,
+        adapter: &str,
+        target_fn: &str,
+    ) -> bool {
+        let graph = self.graph;
+        let cp = self.cp;
+        let canonical = candidate.canonical.clone();
+        let touchpoints = self
+            .candidate_touchpoints
+            .entry(canonical.clone())
+            .or_insert_with(|| {
+                let ctx = TouchpointContext {
+                    graph,
+                    target_layer: &cp.target,
+                    call_depth: cp.call_depth,
+                    origin_adapter: adapter,
+                    adapter_layers: &cp.adapters,
+                };
+                compute_touchpoints(&canonical, &ctx)
+            });
+        touchpoints.contains(target_fn)
     }
 }
 
@@ -118,37 +150,6 @@ fn group_by_adapter(candidates: &[PrivateCandidate]) -> HashMap<&str, Vec<&Priva
     for c in candidates {
         if let Some(layer) = c.layer.as_deref() {
             out.entry(layer).or_default().push(c);
-        }
-    }
-    out
-}
-
-/// Per missing adapter, intersect its candidates with `upstream` and
-/// keep adapters that have at least one hit. Sorted (file, line,
-/// fn_name) for deterministic hint output.
-fn collect_hits_per_adapter<'a>(
-    by_adapter: &'a HashMap<&'a str, Vec<&'a PrivateCandidate>>,
-    missing_adapters: &[String],
-    upstream: &HashSet<String>,
-) -> Vec<(String, Vec<&'a PrivateCandidate>)> {
-    let mut out: Vec<(String, Vec<&PrivateCandidate>)> = Vec::new();
-    for adapter in missing_adapters {
-        let Some(adapter_candidates) = by_adapter.get(adapter.as_str()) else {
-            continue;
-        };
-        let mut hits: Vec<&PrivateCandidate> = adapter_candidates
-            .iter()
-            .copied()
-            .filter(|c| upstream.contains(&c.canonical))
-            .collect();
-        if !hits.is_empty() {
-            hits.sort_by(|a, b| {
-                a.file
-                    .cmp(&b.file)
-                    .then(a.line.cmp(&b.line))
-                    .then(a.fn_name.cmp(&b.fn_name))
-            });
-            out.push((adapter.clone(), hits));
         }
     }
     out

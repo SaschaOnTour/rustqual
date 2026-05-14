@@ -38,8 +38,14 @@ enum MatchMode {
 }
 
 /// Detect `// qual:allow(...)` markers that do not match any finding
-/// within their annotation window. Bare `// qual:allow` (no
-/// dimensions) is a wildcard and matches any finding in range.
+/// within their annotation window. Two input streams:
+///
+/// - `suppression_lines`: real `Suppression` entries from the parser.
+///   Always carry at least one recognised dimension since 1.2.3 (bare
+///   and empty-dim forms are silently ignored upstream).
+/// - `invalid_qual_allow_lines`: side-channel for malformed markers
+///   (typos like `qual:allow(srp_params)`, unclosed parens). Always
+///   surface as orphan — they suppress nothing.
 ///
 /// Coupling-only markers are handled specially: they are verifiable
 /// when the file has at least one line-anchored Coupling finding
@@ -100,15 +106,20 @@ fn invalid_marker_orphans(
 }
 
 /// True if the suppression can be verified against line-anchored
-/// findings. Bare suppressions (empty `dimensions`) are wildcards
-/// and always verifiable. Suppressions with at least one non-Coupling
-/// dimension are verifiable on that dimension's positions. Coupling-
-/// only suppressions are verifiable *only* when the file has a
+/// findings. Suppressions with at least one non-Coupling dimension
+/// are verifiable on that dimension's positions. Coupling-only
+/// suppressions are verifiable *only* when the file has a
 /// line-anchored Coupling finding (e.g. a Structural OI/SIT/DEH/IET
 /// warning carries `dimension == Coupling`). Pure module-global
 /// coupling / cycle / SDP reports have no line anchor, so an
 /// unverifiable coupling-only marker is skipped rather than reported
 /// as a potentially-false orphan.
+///
+/// **Defensive-only:** the empty-dimensions branch (treat as
+/// wildcard) is unreachable from production since 1.2.3 — the
+/// parser drops bare/empty `qual:allow` upstream. The branch stays
+/// to keep test fixtures and any future internal misuse stable
+/// rather than producing confusing false-orphan reports.
 /// Operation: predicate over dimensions + file position lookup.
 fn is_verifiable(
     sup: &Suppression,

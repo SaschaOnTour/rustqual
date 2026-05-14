@@ -117,7 +117,7 @@ pub fn collect_findings(
             &compiled.layers,
             &cp.transparent_wrappers,
         );
-        hint::enrich_with_hints(&mut check_b_hits, &graph, &private_candidates);
+        hint::enrich_with_hints(&mut check_b_hits, &graph, cp, &private_candidates);
     }
     for hit in check_b_hits {
         out.push(project_call_parity(hit, cp));

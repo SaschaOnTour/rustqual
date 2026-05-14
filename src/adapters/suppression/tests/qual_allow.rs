@@ -41,6 +41,37 @@ fn test_detect_invalid_qual_allow_does_not_flag_bare_or_empty() {
 }
 
 #[test]
+fn test_parse_qual_allow_unclosed_parens_is_ignored_as_suppression() {
+    // `// qual:allow(iosp` (missing close-paren) used to fall back
+    // to `rest.len()` and become a real IOSP suppression. The parser
+    // must reject malformed parens entirely so the marker routes
+    // through `detect_invalid_qual_allow` instead.
+    assert!(parse_suppression(1, "// qual:allow(iosp").is_none());
+    assert!(parse_suppression(1, "// qual:allow(srp_params").is_none());
+    assert!(parse_suppression(1, "// qual:allow(iosp, complexity").is_none());
+}
+
+#[test]
+fn test_detect_invalid_qual_allow_catches_unclosed_parens() {
+    // Mirror of the parser's reject path: unclosed forms must
+    // surface as invalid markers so the typo is visible. Without
+    // this, `// qual:allow(srp_params` (no close) would silently
+    // disappear — neither suppression nor orphan.
+    assert_eq!(
+        detect_invalid_qual_allow("// qual:allow(srp_params"),
+        Some("srp_params".to_string())
+    );
+    assert_eq!(
+        detect_invalid_qual_allow("// qual:allow(iosp"),
+        None,
+        "unclosed but with valid dim — parser rejects it, detector \
+         skips it (no orphan), author sees nothing. Trade-off: \
+         narrow false-negative vs. forcing the user to re-type a \
+         valid dim with a missing paren as orphan."
+    );
+}
+
+#[test]
 fn test_detect_invalid_qual_allow_passes_partial_recognized_dims() {
     // At least one recognized dim → partially valid → not flagged
     // here (the parser keeps the recognized parts as a real

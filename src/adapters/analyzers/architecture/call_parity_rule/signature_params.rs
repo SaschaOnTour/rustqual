@@ -4,7 +4,6 @@
 //! (graph-build) — both need the same `(name, &Type)` pairs that the
 //! `CanonicalCallCollector` seeds into its binding scope.
 
-// qual:api
 /// Extract `(name, &Type)` pairs for every typed positional parameter
 /// of a fn signature. Framework-extractor patterns like
 /// `fn h(State(db): State<Db>)` contribute `("db", State<Db>)` — the
@@ -23,7 +22,6 @@ pub(crate) fn extract_signature_params(sig: &syn::Signature) -> Vec<(String, &sy
         .collect()
 }
 
-// qual:api
 /// Extract `(name, [trait_bound_path_segs, ...])` for every type
 /// parameter declared in a fn signature. Merges inline bounds
 /// (`fn f<Q: Trait>`) with `where`-clause bounds (`fn f<Q>(...) where
@@ -35,7 +33,6 @@ pub(crate) fn extract_generic_params(sig: &syn::Signature) -> Vec<(String, Vec<V
     extract_generics(&sig.generics)
 }
 
-// qual:api
 /// Same shape as `extract_generic_params` but reads from any
 /// `syn::Generics` — used to capture impl-level bounds
 /// (`impl<Q: Trait> Foo<Q> { ... }`) which apply to every method's
@@ -60,13 +57,15 @@ pub(crate) fn extract_generics(generics: &syn::Generics) -> Vec<(String, Vec<Vec
     bounds_by_name
 }
 
-// qual:api
-/// Combine impl-level and method-level generic params. Method-level
-/// params with the same name shadow impl-level ones (Rust requires
-/// the names to be distinct, but the merger is robust to overlap by
-/// preferring the inner scope). Bound lists for matching names are
-/// concatenated so a method that adds `where Q: Send` to an impl-level
-/// `Q: Trait` keeps both bounds.
+/// Combine impl-level and method-level generic params. Same-name
+/// generics across impl and method are forbidden by Rust (E0403:
+/// "the name `Q` is already used for a generic parameter in this
+/// item's generic parameters"), so the only way a name appears in
+/// both lists is when method-level `where`-clauses ADD bounds to an
+/// impl-level param via `extract_generics(method.sig.generics)`
+/// returning the same param name with extra bounds. Concatenation
+/// is therefore correct: it accumulates the full bound set for a
+/// param that was introduced once at the impl level.
 pub(crate) fn merge_generic_params(
     outer: Vec<(String, Vec<Vec<String>>)>,
     inner: Vec<(String, Vec<Vec<String>>)>,

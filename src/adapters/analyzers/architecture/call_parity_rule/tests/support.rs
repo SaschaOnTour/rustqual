@@ -222,6 +222,7 @@ pub(super) fn run_check(
             crate::adapters::analyzers::architecture::call_parity_rule::hint::enrich_with_hints(
                 &mut hits,
                 &graph,
+                cp,
                 &candidates,
             );
             hits

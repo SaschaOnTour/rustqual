@@ -1286,3 +1286,103 @@ fn bug17_hint_excludes_already_covering_adapter() {
         "candidate in cli (already covering) must not surface in the hint when only mcp is missing"
     );
 }
+
+#[test]
+fn bug17_no_hint_when_candidate_path_exceeds_call_depth() {
+    // Walker semantic test: a private #[tool] fn whose body chain
+    // would only reach the target via depth > call_depth must NOT
+    // produce a hint. Without walker reuse the old reverse-BFS
+    // probe happily suggested it; promotion would do nothing
+    // because compute_touchpoints stops at call_depth.
+    //
+    // call_depth = 1 means: handler (depth 0) → first callee
+    // (depth 1, BOUNDARY). With this fixture, `tool_a` reaches
+    // `RlmSession::open` only via 2 hops, so even after promotion
+    // `compute_touchpoints(tool_a)` stops at `helper1` and never
+    // sees `open`. Hint must stay silent.
+    let ws = build_workspace(&[
+        (
+            "src/application/session.rs",
+            r#"
+            pub struct RlmSession;
+            impl RlmSession { pub fn open() {} }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::session::RlmSession;
+            pub fn cmd_open() { RlmSession::open(); }
+            "#,
+        ),
+        (
+            "src/mcp/server.rs",
+            r#"
+            use crate::application::session::RlmSession;
+            pub struct RlmServer;
+            impl RlmServer {
+                #[tool(description = "deep")]
+                fn tool_a(&self) { helper1(); }
+            }
+            fn helper1() { RlmSession::open(); }
+            "#,
+        ),
+    ]);
+    let mut cp = rlm_cfg_for_eval();
+    cp.call_depth = 1;
+    let findings = run_check_b(&ws, &rlm_layers_for_eval(), &cp, &empty_cfg_test());
+    let open = "crate::application::session::RlmSession::open";
+    assert!(
+        hint_for(&findings, open).is_none(),
+        "tool_a → helper1 → open is depth 2, exceeds call_depth=1 — \
+         walker would not accept tool_a as touchpoint after promotion, \
+         so no hint expected. Got: {:?}",
+        hint_for(&findings, open),
+    );
+}
+
+#[test]
+fn bug17_no_hint_when_candidate_reaches_target_only_via_peer_adapter() {
+    // Walker semantic test: a candidate in adapter A whose only
+    // path to the target goes through adapter B's code must NOT
+    // produce a hint — compute_touchpoints from A skips peer
+    // adapters, so promotion wouldn't add the target to A's
+    // coverage.
+    let ws = build_workspace(&[
+        (
+            "src/application/session.rs",
+            r#"
+            pub struct RlmSession;
+            impl RlmSession { pub fn open() {} }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::session::RlmSession;
+            pub fn cli_helper() { RlmSession::open(); }
+            pub fn cmd_open() { RlmSession::open(); }
+            "#,
+        ),
+        (
+            "src/mcp/server.rs",
+            r#"
+            pub struct RlmServer;
+            impl RlmServer {
+                #[tool(description = "via peer")]
+                fn tool_a(&self) { crate::cli::handlers::cli_helper(); }
+            }
+            "#,
+        ),
+    ]);
+    let cp = rlm_cfg_for_eval();
+    let findings = run_check_b(&ws, &rlm_layers_for_eval(), &cp, &empty_cfg_test());
+    let open = "crate::application::session::RlmSession::open";
+    assert!(
+        hint_for(&findings, open).is_none(),
+        "tool_a reaches open only via cli (peer adapter from mcp) — \
+         walker would not traverse past cli boundary after promotion, \
+         so no hint expected. Got: {:?}",
+        hint_for(&findings, open),
+    );
+}

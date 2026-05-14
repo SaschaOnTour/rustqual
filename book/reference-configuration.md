@@ -272,14 +272,12 @@ hint: 1 private method in mcp transitively reaches this target:
 Add the attribute name to `[architecture.call_parity] promoted_attributes` if it marks a macro-generated handler entry point.
 ```
 
-The hint is a best-effort heuristic that highlights likely
-promotion candidates (private + non-stdlib-attributed fn in the
-missing adapter that reverse-reaches the target). It does NOT
-apply `call_depth` or peer-adapter constraints, so a candidate may
-still fail the actual touchpoint walk after promotion — re-run
-rustqual to confirm. False leads cost one extra run; matching the
-walker exactly would roughly triple the hint code for marginal
-correctness gain.
+The hint reuses the production `compute_touchpoints` walker to
+verify reachability — `call_depth`, peer-adapter, and
+boundary-stop rules are applied identically to the actual Check B
+walk. A candidate appears in the hint iff promoting it would
+actually put the target into the adapter's coverage. No parallel
+reachability logic to maintain, no false leads.
 
 **Deprecated handlers** (`#[deprecated]` on adapter `pub fn`s) are
 excluded from Checks A/B/C/D automatically — no config knob.

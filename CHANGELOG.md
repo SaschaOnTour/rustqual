@@ -23,18 +23,20 @@ analysis stay 100% green after the fixes land.
   pure opt-in) lifts a private fn onto the handler surface when it
   carries a matching attribute. Implementation in `pub_fns.rs`.
 - **Bug 1 / discoverable hint** — every `CallParityMissingAdapter`
-  finding now carries an optional best-effort hint that points at
-  private attributed fn(s) in the missing adapter likely to resolve
-  the finding if their attribute were promoted. The candidate
-  predicate filters on missing-adapter membership, syntactic
-  privacy, non-stdlib attribute, visible enclosing-mod chain,
-  visible impl self-type, and reverse-reachability of the target;
-  `call_depth` and peer-adapter constraints from
-  `compute_touchpoints` are NOT applied — the hint is a heuristic
-  to highlight likely candidates, not a guarantee promotion will
-  fix the finding. Embedded in the `Finding.message` text so all
-  output formats (text / JSON / SARIF / GitHub / AI / findings_list)
-  surface it without per-format plumbing. New module `hint/`.
+  finding now carries an optional hint that points at private
+  attributed fn(s) in the missing adapter that would resolve the
+  finding if their attribute were promoted. Candidates are
+  filtered on missing-adapter membership, syntactic privacy,
+  non-stdlib attribute, visible enclosing-mod chain, and visible
+  impl self-type; reachability is verified by reusing the
+  production `compute_touchpoints` walker (treating the candidate
+  as if it were a handler) so `call_depth`, peer-adapter, and
+  boundary-stop semantics are applied identically — a hint
+  appears iff promoting the attribute would actually put the
+  target into the adapter's coverage. Embedded in the
+  `Finding.message` text so all output formats (text / JSON /
+  SARIF / GitHub / AI / findings_list) surface it without
+  per-format plumbing. New module `hint/`.
 - **Bug 2 (call-parity / `pub use` re-exports)** — caller writing
   `middleware::record_operation()` against a `pub use
   savings_recorder::record_operation` re-export saw the edge dropped
@@ -65,10 +67,14 @@ analysis stay 100% green after the fixes land.
   empty / unrecognized dimension lists. To keep typos auditable
   rather than silently dropping them, `detect_invalid_qual_allow`
   flags `// qual:allow(<unknown>)` forms (parens with content but
-  no recognised dimension); these surface as `ORPHAN_SUPPRESSION`
-  findings via a synthetic Suppression carrier with the
-  `INVALID_QUAL_ALLOW_REASON_PREFIX` reason. Bare `// qual:allow`
-  and `// qual:allow()` carry no intent and are silently ignored.
+  no recognised dimension, including malformed `qual:allow(srp` with
+  no close-paren); a separate side-channel
+  (`collect_invalid_qual_allow_lines`) projects them directly to
+  `ORPHAN_SUPPRESSION` findings, bypassing the suppression-application
+  pipeline so the marker can never accidentally suppress real
+  findings via the empty-dimensions wildcard semantic. Bare
+  `// qual:allow` and `// qual:allow()` carry no intent and are
+  silently ignored.
 - **Hint precision (post-Codex review)** — three precision
   refinements to `hint`: (a) `CandidateCollector` requires
   `Visibility::Inherited` explicitly so `pub` fns excluded from

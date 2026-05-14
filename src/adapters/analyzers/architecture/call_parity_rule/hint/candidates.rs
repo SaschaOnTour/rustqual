@@ -53,7 +53,6 @@ pub(crate) struct PrivateCandidate {
     pub attr_names: Vec<String>,
 }
 
-// qual:api
 /// Walk every workspace file once, return every syntactically private
 /// fn that carries at least one non-stdlib attribute AND lives on a
 /// would-be-visible surface (visible enclosing mod chain, visible
