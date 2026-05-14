@@ -455,6 +455,42 @@ fn bug4_generic_param_method_call_emits_trait_anchor_edge() {
         callees_of(&graph_where, runner),
     );
 
+    // Impl-level bound: `impl<Q: SymbolQuery> Runner<Q> { fn run(...) { Q::execute(...) } }`.
+    // The Q bound lives on the IMPL block, not on the method sig.
+    let ws_impl = build_workspace(&[
+        (
+            "src/application/symbol.rs",
+            r#"
+            pub trait SymbolQuery { fn execute(&self); }
+            pub struct DepsQuery;
+            impl SymbolQuery for DepsQuery { fn execute(&self) {} }
+            "#,
+        ),
+        (
+            "src/application/runner.rs",
+            r#"
+            use crate::application::symbol::SymbolQuery;
+            pub struct Runner<Q>(pub Q);
+            impl<Q: SymbolQuery> Runner<Q> {
+                pub fn run(&self, q: &Q) { Q::execute(q); }
+            }
+            "#,
+        ),
+    ]);
+    let graph_impl = build_graph_only(
+        &ws_impl,
+        &rlm_layers_for_eval(),
+        &empty_cfg_test(),
+        &HashSet::new(),
+    );
+    let runner_impl = "crate::application::runner::Runner::run";
+    assert!(
+        graph_contains_edge(&graph_impl, runner_impl, anchor),
+        "impl-level generic bound must emit trait-anchor edge for Q::method() inside method body. \
+         Runner::run callees: {:?}",
+        callees_of(&graph_impl, runner_impl),
+    );
+
     assert!(
         has_anchor || has_impl,
         "bug4 — `Q::execute(&q)` emits no edge to either the trait \

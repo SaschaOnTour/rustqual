@@ -208,19 +208,13 @@ pub(crate) fn compute_comment_block_ends(source: &str) -> std::collections::Hash
 /// effective line of each suppression is shifted to the end of the
 /// contiguous `//`-comment block containing the marker, so multi-line
 /// rationales still match items within `ANNOTATION_WINDOW` of the
-/// block's last comment (Bug 3). Invalid `qual:allow(<unknown>)`
-/// markers are folded in as zero-dim Suppressions whose reason
-/// records the bad spec — the orphan-suppression detector then
-/// surfaces them as stale markers.
+/// block's last comment (Bug 3).
 /// Operation: collects raw markers, then rewrites `.line` per file
 /// via the block-ends map.
 pub(crate) fn collect_suppression_lines(
     parsed: &[(String, String, syn::File)],
 ) -> std::collections::HashMap<String, Vec<Suppression>> {
-    let mut raw = collect_per_file(parsed, |line_num, trimmed| {
-        parse_suppression(line_num, trimmed)
-            .or_else(|| invalid_marker_as_suppression(line_num, trimmed))
-    });
+    let mut raw = collect_per_file(parsed, parse_suppression);
     parsed.iter().for_each(|(path, source, _)| {
         if let Some(items) = raw.get_mut(path) {
             let ends = compute_comment_block_ends(source);
@@ -234,21 +228,30 @@ pub(crate) fn collect_suppression_lines(
     raw
 }
 
-/// Reason-prefix marking a Suppression entry as a typo-detected
-/// invalid `qual:allow` marker. Orphan-suppression treats these as
-/// always-orphan so the author sees a stale-marker finding instead
-/// of silent ignoring.
-pub(crate) const INVALID_QUAL_ALLOW_REASON_PREFIX: &str = "invalid qual:allow — ";
-
-fn invalid_marker_as_suppression(line_num: usize, trimmed: &str) -> Option<Suppression> {
-    let bad_spec = detect_invalid_qual_allow(trimmed)?;
-    Some(Suppression {
-        line: line_num,
-        dimensions: Vec::new(),
-        reason: Some(format!(
-            "{INVALID_QUAL_ALLOW_REASON_PREFIX}'{bad_spec}' did not parse to any known dimension"
-        )),
-    })
+/// Side-channel collector for `// qual:allow(<unknown>)` typo markers.
+/// Returns `(line, bad_spec)` pairs per file; line is shifted to the
+/// end of its `//`-comment block, mirroring `collect_suppression_lines`.
+/// Kept separate from real `Suppression` entries so these markers
+/// never enter the suppression-application passes (where empty
+/// dimensions would silently suppress every category in the window).
+/// Orphan-suppression detection consumes this map directly.
+pub(crate) fn collect_invalid_qual_allow_lines(
+    parsed: &[(String, String, syn::File)],
+) -> std::collections::HashMap<String, Vec<(usize, String)>> {
+    let mut raw = collect_per_file(parsed, |line_num, trimmed| {
+        detect_invalid_qual_allow(trimmed).map(|spec| (line_num, spec))
+    });
+    parsed.iter().for_each(|(path, source, _)| {
+        if let Some(items) = raw.get_mut(path) {
+            let ends = compute_comment_block_ends(source);
+            items.iter_mut().for_each(|(line, _)| {
+                if let Some(&end) = ends.get(line) {
+                    *line = end;
+                }
+            });
+        }
+    });
+    raw
 }
 
 /// Collect `// qual:api` marker line numbers per file. Each recorded

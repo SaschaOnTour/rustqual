@@ -51,6 +51,7 @@ enum MatchMode {
 /// Integration: collects finding positions, then filters unmatched markers.
 pub(crate) fn detect_orphan_suppressions(
     suppression_lines: &HashMap<String, Vec<Suppression>>,
+    invalid_qual_allow_lines: &HashMap<String, Vec<(usize, String)>>,
     analysis: &crate::report::AnalysisResult,
     config: &crate::config::Config,
 ) -> Vec<OrphanSuppression> {
@@ -59,11 +60,8 @@ pub(crate) fn detect_orphan_suppressions(
         .iter()
         .flat_map(|(file, sups)| {
             sups.iter()
-                .filter(|sup| {
-                    is_invalid_marker(sup)
-                        || (is_verifiable(sup, file, &positions)
-                            && !has_matching_finding(file, sup, &positions))
-                })
+                .filter(|sup| is_verifiable(sup, file, &positions))
+                .filter(|sup| !has_matching_finding(file, sup, &positions))
                 .map(|sup| OrphanSuppression {
                     file: file.clone(),
                     line: sup.line,
@@ -73,19 +71,32 @@ pub(crate) fn detect_orphan_suppressions(
                 .collect::<Vec<_>>()
         })
         .collect();
+    orphans.extend(invalid_marker_orphans(invalid_qual_allow_lines));
     orphans.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
     orphans
 }
 
-/// True if `sup` is the synthetic carrier emitted by
-/// `filesystem::collect_suppression_lines` for a typo-detected
-/// `qual:allow(<unknown>)` marker. Such markers must always surface
-/// as orphans regardless of nearby findings — they don't actually
-/// suppress anything, and silent ignoring is the bug we just fixed.
-fn is_invalid_marker(sup: &Suppression) -> bool {
-    sup.reason
-        .as_deref()
-        .is_some_and(|r| r.starts_with(crate::adapters::source::INVALID_QUAL_ALLOW_REASON_PREFIX))
+/// Project the `// qual:allow(<unknown>)` side-channel into orphan
+/// findings. These markers don't suppress anything (they're stored
+/// in a separate map, never reach `Suppression::covers`), but the
+/// author should still see a stale-marker finding so the typo is
+/// visible. Operation: per-marker projection.
+fn invalid_marker_orphans(
+    invalid_qual_allow_lines: &HashMap<String, Vec<(usize, String)>>,
+) -> Vec<OrphanSuppression> {
+    invalid_qual_allow_lines
+        .iter()
+        .flat_map(|(file, markers)| {
+            markers.iter().map(move |(line, spec)| OrphanSuppression {
+                file: file.clone(),
+                line: *line,
+                dimensions: Vec::new(),
+                reason: Some(format!(
+                    "invalid qual:allow — '{spec}' did not parse to any known dimension"
+                )),
+            })
+        })
+        .collect()
 }
 
 /// True if the suppression can be verified against line-anchored

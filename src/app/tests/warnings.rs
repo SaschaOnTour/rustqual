@@ -548,6 +548,7 @@ fn orphan_suppression_without_matching_finding_is_counted() {
     let analysis = empty_analysis();
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
+        &std::collections::HashMap::new(),
         &analysis,
         &Config::default(),
     )
@@ -576,6 +577,7 @@ fn suppression_covering_finding_in_window_is_not_orphan() {
         .push(make_srp_struct_finding("src/foo.rs", 8));
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
+        &std::collections::HashMap::new(),
         &analysis,
         &Config::default(),
     )
@@ -604,6 +606,7 @@ fn suppression_with_wrong_dimension_is_orphan() {
         .push(make_srp_struct_finding("src/foo.rs", 7));
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
+        &std::collections::HashMap::new(),
         &analysis,
         &Config::default(),
     )
@@ -637,6 +640,7 @@ fn empty_dim_suppression_acts_as_wildcard_defensive() {
         .push(make_srp_struct_finding("src/foo.rs", 6));
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
+        &std::collections::HashMap::new(),
         &analysis,
         &Config::default(),
     )
@@ -711,6 +715,7 @@ fn suppressed_cognitive_over_threshold_is_not_orphan() {
     )];
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
+        &std::collections::HashMap::new(),
         &analysis,
         &Config::default(),
     );
@@ -744,6 +749,7 @@ fn suppressed_cyclomatic_over_threshold_is_not_orphan() {
     )];
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
+        &std::collections::HashMap::new(),
         &analysis,
         &Config::default(),
     );
@@ -774,6 +780,7 @@ fn suppressed_function_length_over_threshold_is_not_orphan() {
     )];
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
+        &std::collections::HashMap::new(),
         &analysis,
         &Config::default(),
     );
@@ -804,6 +811,7 @@ fn suppressed_nesting_over_threshold_is_not_orphan() {
     )];
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
+        &std::collections::HashMap::new(),
         &analysis,
         &Config::default(),
     );
@@ -834,6 +842,7 @@ fn suppressed_unsafe_block_is_not_orphan() {
     )];
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
+        &std::collections::HashMap::new(),
         &analysis,
         &Config::default(),
     );
@@ -864,6 +873,7 @@ fn suppressed_error_handling_unwrap_is_not_orphan() {
     )];
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
+        &std::collections::HashMap::new(),
         &analysis,
         &Config::default(),
     );
@@ -897,6 +907,7 @@ fn suppressed_magic_number_is_not_orphan() {
     )];
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
+        &std::collections::HashMap::new(),
         &analysis,
         &Config::default(),
     );
@@ -926,6 +937,7 @@ fn suppressed_srp_param_over_threshold_is_not_orphan() {
         .push(make_srp_param_finding("src/x.rs", 6, true));
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
+        &std::collections::HashMap::new(),
         &analysis,
         &Config::default(),
     );
@@ -959,6 +971,7 @@ fn coupling_marker_is_not_orphan_for_structural_coupling_finding() {
         .push(make_structural_coupling_finding("src/foo.rs", 12));
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
+        &std::collections::HashMap::new(),
         &analysis,
         &Config::default(),
     );
@@ -987,6 +1000,7 @@ fn coupling_only_marker_with_no_line_anchored_finding_is_skipped() {
     let analysis = empty_analysis();
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
+        &std::collections::HashMap::new(),
         &analysis,
         &Config::default(),
     );
@@ -1020,6 +1034,7 @@ fn dry_marker_on_dead_code_only_is_orphan() {
         .push(make_dry_dead_code_finding("src/foo.rs", 7));
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
+        &std::collections::HashMap::new(),
         &analysis,
         &Config::default(),
     );
@@ -1052,6 +1067,7 @@ fn dry_marker_two_lines_above_wildcard_is_orphan() {
         .push(make_dry_wildcard_finding("src/foo.rs", 7));
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
+        &std::collections::HashMap::new(),
         &analysis,
         &Config::default(),
     );
@@ -1083,6 +1099,7 @@ fn dry_marker_one_line_above_wildcard_is_not_orphan() {
         .push(make_dry_wildcard_finding("src/foo.rs", 7));
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
+        &std::collections::HashMap::new(),
         &analysis,
         &Config::default(),
     );
@@ -1120,8 +1137,12 @@ fn complexity_marker_is_orphan_when_complexity_dimension_disabled() {
     )];
     let mut config = Config::default();
     config.complexity.enabled = false;
-    let orphans =
-        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &config);
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
+        &sups,
+        &std::collections::HashMap::new(),
+        &analysis,
+        &config,
+    );
     assert_eq!(
         orphans.len(),
         1,
@@ -1151,8 +1172,12 @@ fn srp_marker_is_orphan_when_srp_dimension_disabled() {
         .push(make_srp_struct_finding("src/foo.rs", 7));
     let mut config = Config::default();
     config.srp.enabled = false;
-    let orphans =
-        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &config);
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
+        &sups,
+        &std::collections::HashMap::new(),
+        &analysis,
+        &config,
+    );
     assert_eq!(
         orphans.len(),
         1,
@@ -1184,6 +1209,7 @@ fn srp_struct_marker_within_5_line_window_is_not_orphan() {
         .push(make_srp_struct_finding("src/foo.rs", 7));
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
+        &std::collections::HashMap::new(),
         &analysis,
         &Config::default(),
     );
@@ -1216,6 +1242,7 @@ fn srp_module_marker_anywhere_in_file_is_not_orphan() {
         .push(make_srp_module_finding("src/big.rs"));
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
+        &std::collections::HashMap::new(),
         &analysis,
         &Config::default(),
     );
@@ -1246,6 +1273,7 @@ fn tq_marker_within_5_line_window_is_not_orphan() {
     ));
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
+        &std::collections::HashMap::new(),
         &analysis,
         &Config::default(),
     );
@@ -1276,6 +1304,7 @@ fn structural_marker_within_5_line_window_is_not_orphan() {
         .push(make_structural_srp_finding("src/foo.rs", 15));
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
+        &std::collections::HashMap::new(),
         &analysis,
         &Config::default(),
     );
@@ -1310,8 +1339,12 @@ fn architecture_marker_only_matches_findings_in_window() {
         .push(make_architecture_finding("src/foo.rs", 500));
     let mut config = Config::default();
     config.architecture.enabled = true;
-    let orphans =
-        crate::app::orphan_suppressions::detect_orphan_suppressions(&sups, &analysis, &config);
+    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
+        &sups,
+        &std::collections::HashMap::new(),
+        &analysis,
+        &config,
+    );
     assert!(
         !orphans.is_empty(),
         "Architecture marker at line 1 with only a finding at line 500 must \
@@ -1347,6 +1380,7 @@ fn complexity_marker_without_any_overshoot_is_orphan() {
     )];
     let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &sups,
+        &std::collections::HashMap::new(),
         &analysis,
         &Config::default(),
     );

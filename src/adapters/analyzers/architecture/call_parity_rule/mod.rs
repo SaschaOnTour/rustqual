@@ -104,14 +104,21 @@ pub fn collect_findings(
         &cp.transparent_wrappers,
     );
     let touchpoints = build_handler_touchpoints(&pub_fns, &graph, cp);
-    let private_candidates =
-        hint::collect_private_candidates(&refs, &cfg_test_files, &compiled.layers);
     let mut out = Vec::new();
     for hit in check_a::check_no_delegation(&pub_fns, &touchpoints, cp) {
         out.push(project_call_parity(hit, cp));
     }
     let mut check_b_hits = check_b::check_missing_adapter(&pub_fns, &graph, &touchpoints, cp);
-    hint::enrich_with_hints(&mut check_b_hits, &graph, &private_candidates);
+    if !check_b_hits.is_empty() {
+        let private_candidates = hint::collect_private_candidates(
+            &refs,
+            &cfg_test_files,
+            &aliases_per_file,
+            &compiled.layers,
+            &cp.transparent_wrappers,
+        );
+        hint::enrich_with_hints(&mut check_b_hits, &graph, &private_candidates);
+    }
     for hit in check_b_hits {
         out.push(project_call_parity(hit, cp));
     }

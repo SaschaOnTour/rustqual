@@ -23,14 +23,18 @@ analysis stay 100% green after the fixes land.
   pure opt-in) lifts a private fn onto the handler surface when it
   carries a matching attribute. Implementation in `pub_fns.rs`.
 - **Bug 1 / discoverable hint** — every `CallParityMissingAdapter`
-  finding now carries an optional hint that names the private
-  attributed fn(s) in the missing adapter that *would* resolve the
-  finding if their attribute were promoted. Four-filter precision
-  (in missing adapter, private, non-stdlib attribute, transitively
-  reaches target) means the hint never appears unless it'd actually
+  finding now carries an optional best-effort hint that points at
+  private attributed fn(s) in the missing adapter likely to resolve
+  the finding if their attribute were promoted. The candidate
+  predicate filters on missing-adapter membership, syntactic
+  privacy, non-stdlib attribute, visible enclosing-mod chain,
+  visible impl self-type, and reverse-reachability of the target;
+  `call_depth` and peer-adapter constraints from
+  `compute_touchpoints` are NOT applied — the hint is a heuristic
+  to highlight likely candidates, not a guarantee promotion will
   fix the finding. Embedded in the `Finding.message` text so all
   output formats (text / JSON / SARIF / GitHub / AI / findings_list)
-  surface it without per-format plumbing. New module `hint.rs`.
+  surface it without per-format plumbing. New module `hint/`.
 - **Bug 2 (call-parity / `pub use` re-exports)** — caller writing
   `middleware::record_operation()` against a `pub use
   savings_recorder::record_operation` re-export saw the edge dropped
@@ -77,7 +81,7 @@ analysis stay 100% green after the fixes land.
   the per-file iteration level so test-only fns can't surface as
   hint candidates.
 
-## [1.2.2] - in development
+## [1.2.2] - 2026-05-13
 
 Patch release: **Reporter-Trait sealed two-trait + Snapshot pattern**,
 **Call-parity anchor model + Orphan-suppression in trait contract**.
