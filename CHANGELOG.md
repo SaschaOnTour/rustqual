@@ -67,8 +67,10 @@ analysis stay 100% green after the fixes land.
   empty / unrecognized dimension lists. To keep typos auditable
   rather than silently dropping them, `detect_invalid_qual_allow`
   flags `// qual:allow(<unknown>)` forms (parens with content but
-  no recognised dimension, including malformed `qual:allow(srp` with
-  no close-paren); a separate side-channel
+  no recognised dimension) and any unclosed-paren form
+  (`// qual:allow(iosp`, `// qual:allow(srp_params`, …) regardless
+  of whether the tail spells a valid dimension — structural
+  malformation always surfaces. A separate side-channel
   (`collect_invalid_qual_allow_lines`) projects them directly to
   `ORPHAN_SUPPRESSION` findings, bypassing the suppression-application
   pipeline so the marker can never accidentally suppress real

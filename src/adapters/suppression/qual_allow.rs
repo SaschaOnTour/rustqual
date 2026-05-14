@@ -113,14 +113,21 @@ pub fn detect_invalid_qual_allow(trimmed: &str) -> Option<String> {
     if !rest.starts_with('(') {
         return None;
     }
-    let dims_str = match rest.find(')') {
-        Some(close_paren) => rest[1..close_paren].trim().to_string(),
+    let (dims_str, malformed_parens) = match rest.find(')') {
+        Some(close_paren) => (rest[1..close_paren].trim().to_string(), false),
         // Missing close paren: treat the whole tail (after `(`) as
         // the bad spec so the orphan finding is visible.
-        None => rest[1..].trim().to_string(),
+        None => (rest[1..].trim().to_string(), true),
     };
     if dims_str.is_empty() {
         return None;
+    }
+    if malformed_parens {
+        // Structural malformation — surface even if the tail happens
+        // to spell a valid dim. Mirrors the parser's reject path so a
+        // user typing `// qual:allow(iosp` (no `)`) doesn't get
+        // silently zero suppression and zero orphan.
+        return Some(dims_str);
     }
     let any_recognized = dims_str
         .split(',')

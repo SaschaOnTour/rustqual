@@ -63,11 +63,11 @@ fn test_detect_invalid_qual_allow_catches_unclosed_parens() {
     );
     assert_eq!(
         detect_invalid_qual_allow("// qual:allow(iosp"),
-        None,
-        "unclosed but with valid dim — parser rejects it, detector \
-         skips it (no orphan), author sees nothing. Trade-off: \
-         narrow false-negative vs. forcing the user to re-type a \
-         valid dim with a missing paren as orphan."
+        Some("iosp".to_string()),
+        "unclosed paren is structural malformation — must surface \
+         as orphan even when the tail happens to spell a valid dim, \
+         otherwise the marker silently drops (no suppression, no \
+         orphan) which is exactly the Bug-5 class we closed."
     );
 }
 
