@@ -23,6 +23,7 @@ fn ctx<'a>(file: &'a FileScope<'a>) -> ResolveContext<'a> {
         transparent_wrappers: None,
         workspace_files: None,
         alias_param_subs: None,
+        generic_params: None,
     }
 }
 
@@ -42,6 +43,7 @@ fn test_bare_path_resolves_via_local_symbols() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(
@@ -66,6 +68,7 @@ fn test_reference_type_strips_and_recurses() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(
@@ -90,6 +93,7 @@ fn test_result_wraps_inner() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     match resolved {
@@ -119,6 +123,7 @@ fn test_option_wraps_inner() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert!(matches!(resolved, CanonicalType::Option(_)));
@@ -140,6 +145,7 @@ fn test_arc_is_stripped() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(
@@ -166,6 +172,7 @@ fn test_nested_smart_pointers_strip_to_inner() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(
@@ -192,6 +199,7 @@ fn test_rwlock_is_not_peeled() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(resolved, CanonicalType::Opaque);
@@ -213,6 +221,7 @@ fn test_vec_becomes_slice() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert!(matches!(resolved, CanonicalType::Slice(_)));
@@ -234,6 +243,7 @@ fn test_hashmap_keeps_value_type() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     match resolved {
@@ -260,6 +270,7 @@ fn test_array_becomes_slice() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert!(matches!(resolved, CanonicalType::Slice(_)));
@@ -281,6 +292,7 @@ fn test_slice_type_becomes_slice() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert!(matches!(resolved, CanonicalType::Slice(_)));
@@ -301,6 +313,7 @@ fn test_trait_object_unresolved_is_opaque() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     // Box<dyn T> → strip Box → dyn T — when T isn't resolvable (not in
@@ -324,6 +337,7 @@ fn test_trait_object_resolves_via_local_symbols() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(
@@ -352,6 +366,7 @@ fn test_impl_trait_unresolved_is_opaque() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(resolved, CanonicalType::Opaque);
@@ -375,6 +390,7 @@ fn test_impl_trait_resolves_to_trait_bound() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(
@@ -402,6 +418,7 @@ fn test_unknown_external_path_is_opaque() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(resolved, CanonicalType::Opaque);
@@ -431,6 +448,7 @@ fn test_aliased_path_resolves_via_alias_map() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(
@@ -455,6 +473,7 @@ fn test_future_wraps_output() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert!(matches!(resolved, CanonicalType::Future(_)));
@@ -486,6 +505,7 @@ fn test_impl_trait_local_send_named_trait_resolves_not_skipped() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(
@@ -522,6 +542,7 @@ fn test_impl_trait_bare_std_send_marker_still_skipped() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(
@@ -564,6 +585,7 @@ fn test_impl_trait_external_aliased_bound_skipped_workspace_bound_wins() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(
@@ -608,6 +630,7 @@ fn test_impl_aliased_future_resolves_to_future_with_output() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     let expected_output = CanonicalType::path(["crate", "app", "Session"]);
@@ -648,6 +671,7 @@ impl ScopeInputs {
             alias_map: &self.alias_map,
             aliases_per_scope: &self.aliases_per_scope,
             local_symbols: &self.local_symbols,
+            workspace_module_paths: None,
             local_decl_scopes: &self.local_decl_scopes,
             crate_root_modules: &self.crate_root_modules,
         }
@@ -700,6 +724,7 @@ fn test_alias_generic_arg_resolves_at_use_site() {
             transparent_wrappers: None,
             workspace_files: Some(&workspace_files),
             alias_param_subs: None,
+            generic_params: None,
         },
     );
     assert_eq!(

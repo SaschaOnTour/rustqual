@@ -42,6 +42,14 @@ pub(crate) struct FileScope<'a> {
     pub local_symbols: &'a HashSet<String>,
     pub local_decl_scopes: &'a HashMap<String, Vec<Vec<String>>>,
     pub crate_root_modules: &'a HashSet<String>,
+    /// All module paths in the workspace (multi-segment; derived from
+    /// every file's `file_to_module_segments`). `None` for unit-test
+    /// fixtures that don't construct a full workspace — disables the
+    /// sibling-submodule discrimination in `normalize_after_alias`,
+    /// preserving the legacy "external path returned as-is" behaviour.
+    /// Populated by production setup (`build_workspace_files_map`)
+    /// from the same `files` slice used to derive `crate_root_modules`.
+    pub workspace_module_paths: Option<&'a HashSet<Vec<String>>>,
 }
 
 /// Inputs to `build_workspace_files_map`. Bundled because the per-file
@@ -53,6 +61,13 @@ pub(crate) struct WorkspaceFilesInputs<'a> {
     pub aliases_scoped_per_file: &'a HashMap<String, ScopedAliasMap>,
     pub local_symbols_per_file: &'a HashMap<String, LocalSymbols>,
     pub crate_root_modules: &'a HashSet<String>,
+    /// Multi-segment module paths for every workspace file. Used by
+    /// `normalize_after_alias` to discriminate sibling-submodule
+    /// imports (`use response::X;`) from extern-crate imports
+    /// (`use serde::Y;`) — same first-segment shape, different
+    /// resolution semantics. `None` for unit-test fixtures with no
+    /// real workspace.
+    pub workspace_module_paths: Option<&'a HashSet<Vec<String>>>,
 }
 
 // qual:api
@@ -88,10 +103,37 @@ pub(crate) fn build_workspace_files_map<'a>(
                 local_symbols: &local.flat,
                 local_decl_scopes: &local.by_name,
                 crate_root_modules: inputs.crate_root_modules,
+                workspace_module_paths: inputs.workspace_module_paths,
             },
         );
     }
     out
+}
+
+/// Build the multi-segment module-path set from the workspace's file
+/// paths. One entry per file: `src/application/response.rs` →
+/// `["application", "response"]`; `src/lib.rs` → `[]`.
+pub(crate) fn collect_workspace_module_paths(files: &[(&str, &syn::File)]) -> HashSet<Vec<String>> {
+    files
+        .iter()
+        .map(|(p, _)| {
+            crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments(p)
+        })
+        .collect()
+}
+
+/// Bundles the workspace-derived metadata that every call-parity
+/// pre-pass needs: which files are cfg-test (skip them), which
+/// crate-root module names exist (Rust 2018+ absolute imports),
+/// and which multi-segment module paths exist (sibling-submodule
+/// import discrimination). All three are derived from the same
+/// `files` slice once at the call_parity entry point and threaded
+/// through; bundling avoids each helper carrying three separate
+/// `&HashSet<...>` parameters.
+pub(crate) struct WorkspaceLookup<'a> {
+    pub cfg_test_files: &'a HashSet<String>,
+    pub crate_root_modules: &'a HashSet<String>,
+    pub workspace_module_paths: &'a HashSet<Vec<String>>,
 }
 
 // qual:api

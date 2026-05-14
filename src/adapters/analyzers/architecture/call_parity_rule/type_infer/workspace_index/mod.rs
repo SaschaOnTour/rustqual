@@ -96,6 +96,9 @@ pub(super) fn resolve_ctx_from_build<'a>(
         transparent_wrappers: Some(ctx.transparent_wrappers),
         workspace_files: Some(ctx.workspace_files),
         alias_param_subs: None,
+        // Workspace pass-1 builds the type-alias / wrapper index
+        // before any fn-body walk; no fn-scoped generics exist yet.
+        generic_params: None,
     }
 }
 

@@ -75,6 +75,12 @@ pub struct InferContext<'a> {
     /// All workspace `FileScope`s, for cross-module alias resolution.
     /// `None` for unit-test fixtures.
     pub workspace_files: Option<&'a HashMap<String, FileScope<'a>>>,
+    /// Fn-scoped generic params with their trait bounds, plumbed
+    /// through to `ResolveContext` so let-bindings / cast targets /
+    /// generic args inside the body that reference a generic param
+    /// resolve to `TraitBound(...)` instead of `Opaque`. `None` for
+    /// unit-test fixtures.
+    pub generic_params: Option<&'a HashMap<String, Vec<Vec<String>>>>,
 }
 
 // qual:api

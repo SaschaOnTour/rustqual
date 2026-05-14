@@ -103,6 +103,7 @@ pub(super) fn canonicalise_type_segments(
         local_symbols,
         local_decl_scopes: &empty_decls,
         crate_root_modules,
+        workspace_module_paths: None,
     };
     canonicalise_type_segments_in_scope(
         segments,
@@ -134,7 +135,13 @@ pub(crate) fn canonicalise_type_segments_in_scope(
     if let Some(alias) = lookup_alias(scope, &segments[0]) {
         let mut full = alias.to_vec();
         full.extend_from_slice(&segments[1..]);
-        return normalize_after_alias(full, file.path, scope.mod_stack, file.crate_root_modules);
+        return normalize_after_alias(
+            full,
+            file.path,
+            scope.mod_stack,
+            file.crate_root_modules,
+            file.workspace_module_paths,
+        );
     }
     if file.local_symbols.contains(&segments[0]) {
         if let Some(mod_path) =
@@ -176,6 +183,7 @@ fn normalize_after_alias(
     importing_file: &str,
     mod_stack: &[String],
     crate_root_modules: &HashSet<String>,
+    workspace_module_paths: Option<&HashSet<Vec<String>>>,
 ) -> Option<Vec<String>> {
     match expanded.first().map(|s| s.as_str()) {
         Some("self") | Some("super") => {
@@ -190,8 +198,53 @@ fn normalize_after_alias(
             full.extend(expanded);
             Some(full)
         }
+        Some(first)
+            if is_workspace_submodule(workspace_module_paths, importing_file, mod_stack, first) =>
+        {
+            // Rust 2018+: `use foo::bar` inside a non-root module is
+            // implicit `use self::foo::bar` when `foo` is a submodule
+            // of the current module. Without this branch, an alias
+            // like `use response::X;` in `application/mod.rs` resolves
+            // to literal `response::X` and never matches the workspace
+            // node `crate::application::response::X`. The workspace-
+            // module-path check distinguishes this case from extern-
+            // crate imports (`use serde::Y;`), which preserve their
+            // absolute extern-path shape so `is_stdlib_prefixed` and
+            // `resolve_bound_list`'s "first == 'crate'" gate keep
+            // their existing behaviour.
+            let mut with_self = vec!["self".to_string()];
+            with_self.extend(expanded);
+            let resolved = resolve_to_crate_absolute_in(importing_file, mod_stack, &with_self)?;
+            let mut full = vec!["crate".to_string()];
+            full.extend(resolved);
+            Some(full)
+        }
         _ => Some(expanded),
     }
+}
+
+/// True when `[importing_file's mod path, mod_stack…, first]` is a
+/// known module path in the workspace — i.e. `first` names a real
+/// sibling submodule of the current module rather than an extern
+/// crate. Returns `false` when no workspace_module_paths is available
+/// (test fixtures without full workspace setup) so legacy behaviour
+/// is preserved.
+fn is_workspace_submodule(
+    workspace_module_paths: Option<&HashSet<Vec<String>>>,
+    importing_file: &str,
+    mod_stack: &[String],
+    first: &str,
+) -> bool {
+    let Some(paths) = workspace_module_paths else {
+        return false;
+    };
+    let mut candidate =
+        crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments(
+            importing_file,
+        );
+    candidate.extend_from_slice(mod_stack);
+    candidate.push(first.to_string());
+    paths.contains(&candidate)
 }
 
 pub(super) fn normalize_alias_expansion(
@@ -199,8 +252,15 @@ pub(super) fn normalize_alias_expansion(
     importing_file: &str,
     mod_stack: &[String],
     crate_root_modules: &HashSet<String>,
+    workspace_module_paths: Option<&HashSet<Vec<String>>>,
 ) -> Option<Vec<String>> {
-    normalize_after_alias(expanded, importing_file, mod_stack, crate_root_modules)
+    normalize_after_alias(
+        expanded,
+        importing_file,
+        mod_stack,
+        crate_root_modules,
+        workspace_module_paths,
+    )
 }
 
 /// Extract a `(name, canonical_type_path)` pair from a `let` statement.

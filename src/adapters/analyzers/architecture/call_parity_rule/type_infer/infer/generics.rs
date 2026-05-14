@@ -39,6 +39,7 @@ pub(super) fn turbofish_return_type(
         transparent_wrappers: Some(&ctx.workspace.transparent_wrappers),
         workspace_files: ctx.workspace_files,
         alias_param_subs: None,
+        generic_params: ctx.generic_params,
     };
     let resolved = match ctx.self_type.as_deref() {
         Some(impl_segs) => resolve_type(&substitute_bare_self(first_ty, impl_segs), &rctx),

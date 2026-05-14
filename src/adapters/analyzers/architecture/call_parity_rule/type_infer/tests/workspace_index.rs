@@ -83,6 +83,7 @@ fn test_empty_workspace_produces_empty_index() {
             aliases_scoped_per_file: &fix.aliases_scoped,
             local_symbols_per_file: &fix.local_symbols,
             crate_root_modules: roots,
+            workspace_module_paths: None,
         });
         build_workspace_type_index(&WorkspaceIndexInputs {
             files: &borrowed_files,
@@ -122,6 +123,7 @@ fn test_struct_with_named_field_is_indexed() {
             aliases_scoped_per_file: &fix.aliases_scoped,
             local_symbols_per_file: &fix.local_symbols,
             crate_root_modules: roots,
+            workspace_module_paths: None,
         });
         build_workspace_type_index(&WorkspaceIndexInputs {
             files: &borrowed_files,
@@ -158,6 +160,7 @@ fn test_struct_field_with_arc_is_stripped() {
             aliases_scoped_per_file: &fix.aliases_scoped,
             local_symbols_per_file: &fix.local_symbols,
             crate_root_modules: roots,
+            workspace_module_paths: None,
         });
         build_workspace_type_index(&WorkspaceIndexInputs {
             files: &borrowed_files,
@@ -188,6 +191,7 @@ fn test_tuple_struct_is_not_indexed() {
             aliases_scoped_per_file: &fix.aliases_scoped,
             local_symbols_per_file: &fix.local_symbols,
             crate_root_modules: roots,
+            workspace_module_paths: None,
         });
         build_workspace_type_index(&WorkspaceIndexInputs {
             files: &borrowed_files,
@@ -219,6 +223,7 @@ fn test_struct_field_with_opaque_type_is_skipped() {
             aliases_scoped_per_file: &fix.aliases_scoped,
             local_symbols_per_file: &fix.local_symbols,
             crate_root_modules: roots,
+            workspace_module_paths: None,
         });
         build_workspace_type_index(&WorkspaceIndexInputs {
             files: &borrowed_files,
@@ -256,6 +261,7 @@ fn test_inherent_method_with_concrete_return() {
             aliases_scoped_per_file: &fix.aliases_scoped,
             local_symbols_per_file: &fix.local_symbols,
             crate_root_modules: roots,
+            workspace_module_paths: None,
         });
         build_workspace_type_index(&WorkspaceIndexInputs {
             files: &borrowed_files,
@@ -298,6 +304,7 @@ fn test_method_returning_result_wraps() {
             aliases_scoped_per_file: &fix.aliases_scoped,
             local_symbols_per_file: &fix.local_symbols,
             crate_root_modules: roots,
+            workspace_module_paths: None,
         });
         build_workspace_type_index(&WorkspaceIndexInputs {
             files: &borrowed_files,
@@ -347,6 +354,7 @@ fn test_method_returning_result_self_substitutes_inner() {
             aliases_scoped_per_file: &fix.aliases_scoped,
             local_symbols_per_file: &fix.local_symbols,
             crate_root_modules: roots,
+            workspace_module_paths: None,
         });
         build_workspace_type_index(&WorkspaceIndexInputs {
             files: &borrowed_files,
@@ -387,6 +395,7 @@ fn test_method_with_unit_return_is_not_indexed() {
             aliases_scoped_per_file: &fix.aliases_scoped,
             local_symbols_per_file: &fix.local_symbols,
             crate_root_modules: roots,
+            workspace_module_paths: None,
         });
         build_workspace_type_index(&WorkspaceIndexInputs {
             files: &borrowed_files,
@@ -419,6 +428,7 @@ fn test_method_with_impl_trait_return_is_not_indexed() {
             aliases_scoped_per_file: &fix.aliases_scoped,
             local_symbols_per_file: &fix.local_symbols,
             crate_root_modules: roots,
+            workspace_module_paths: None,
         });
         build_workspace_type_index(&WorkspaceIndexInputs {
             files: &borrowed_files,
@@ -453,6 +463,7 @@ fn test_trait_impl_method_is_indexed_by_receiver_type() {
             aliases_scoped_per_file: &fix.aliases_scoped,
             local_symbols_per_file: &fix.local_symbols,
             crate_root_modules: roots,
+            workspace_module_paths: None,
         });
         build_workspace_type_index(&WorkspaceIndexInputs {
             files: &borrowed_files,
@@ -492,6 +503,7 @@ fn test_free_fn_return_is_indexed() {
             aliases_scoped_per_file: &fix.aliases_scoped,
             local_symbols_per_file: &fix.local_symbols,
             crate_root_modules: roots,
+            workspace_module_paths: None,
         });
         build_workspace_type_index(&WorkspaceIndexInputs {
             files: &borrowed_files,
@@ -527,6 +539,7 @@ fn test_generic_return_type_is_opaque_and_not_indexed() {
             aliases_scoped_per_file: &fix.aliases_scoped,
             local_symbols_per_file: &fix.local_symbols,
             crate_root_modules: roots,
+            workspace_module_paths: None,
         });
         build_workspace_type_index(&WorkspaceIndexInputs {
             files: &borrowed_files,
@@ -563,6 +576,7 @@ fn test_fn_inside_inline_mod_keys_include_mod_name() {
             aliases_scoped_per_file: &fix.aliases_scoped,
             local_symbols_per_file: &fix.local_symbols,
             crate_root_modules: roots,
+            workspace_module_paths: None,
         });
         build_workspace_type_index(&WorkspaceIndexInputs {
             files: &borrowed_files,
@@ -605,6 +619,7 @@ fn test_fn_inside_inline_mod_resolves_inner_return_type() {
             aliases_scoped_per_file: &fix.aliases_scoped,
             local_symbols_per_file: &fix.local_symbols,
             crate_root_modules: roots,
+            workspace_module_paths: None,
         });
         build_workspace_type_index(&WorkspaceIndexInputs {
             files: &borrowed_files,
@@ -648,6 +663,7 @@ fn test_struct_field_inside_inline_mod_keys_include_mod_name() {
             aliases_scoped_per_file: &fix.aliases_scoped,
             local_symbols_per_file: &fix.local_symbols,
             crate_root_modules: roots,
+            workspace_module_paths: None,
         });
         build_workspace_type_index(&WorkspaceIndexInputs {
             files: &borrowed_files,
@@ -680,6 +696,7 @@ fn test_fn_with_unit_return_is_not_indexed() {
             aliases_scoped_per_file: &fix.aliases_scoped,
             local_symbols_per_file: &fix.local_symbols,
             crate_root_modules: roots,
+            workspace_module_paths: None,
         });
         build_workspace_type_index(&WorkspaceIndexInputs {
             files: &borrowed_files,
@@ -717,6 +734,7 @@ fn test_cfg_test_file_is_skipped() {
             aliases_scoped_per_file: &fix.aliases_scoped,
             local_symbols_per_file: &fix.local_symbols,
             crate_root_modules: roots,
+            workspace_module_paths: None,
         });
         build_workspace_type_index(&WorkspaceIndexInputs {
             files: &borrowed_files,
@@ -757,6 +775,7 @@ fn test_trait_declaration_methods_are_indexed() {
             aliases_scoped_per_file: &fix.aliases_scoped,
             local_symbols_per_file: &fix.local_symbols,
             crate_root_modules: roots,
+            workspace_module_paths: None,
         });
         build_workspace_type_index(&WorkspaceIndexInputs {
             files: &borrowed_files,
@@ -792,6 +811,7 @@ fn test_trait_impl_is_indexed() {
             aliases_scoped_per_file: &fix.aliases_scoped,
             local_symbols_per_file: &fix.local_symbols,
             crate_root_modules: roots,
+            workspace_module_paths: None,
         });
         build_workspace_type_index(&WorkspaceIndexInputs {
             files: &borrowed_files,
@@ -830,6 +850,7 @@ fn test_multiple_impls_of_same_trait_all_indexed() {
             aliases_scoped_per_file: &fix.aliases_scoped,
             local_symbols_per_file: &fix.local_symbols,
             crate_root_modules: roots,
+            workspace_module_paths: None,
         });
         build_workspace_type_index(&WorkspaceIndexInputs {
             files: &borrowed_files,
@@ -863,6 +884,7 @@ fn test_inherent_impl_does_not_populate_trait_impls() {
             aliases_scoped_per_file: &fix.aliases_scoped,
             local_symbols_per_file: &fix.local_symbols,
             crate_root_modules: roots,
+            workspace_module_paths: None,
         });
         build_workspace_type_index(&WorkspaceIndexInputs {
             files: &borrowed_files,
@@ -903,6 +925,7 @@ fn test_trait_in_one_file_impl_in_another() {
             aliases_scoped_per_file: &fix.aliases_scoped,
             local_symbols_per_file: &fix.local_symbols,
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         });
         build_workspace_type_index(&WorkspaceIndexInputs {
             files: &borrowed_files,
@@ -948,6 +971,7 @@ fn test_struct_in_one_file_impl_in_another() {
             aliases_scoped_per_file: &fix.aliases_scoped,
             local_symbols_per_file: &fix.local_symbols,
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         });
         build_workspace_type_index(&WorkspaceIndexInputs {
             files: &borrowed_files,
@@ -991,6 +1015,7 @@ fn record_trait_methods_captures_method_span() {
         aliases_scoped_per_file: &fix.aliases_scoped,
         local_symbols_per_file: &fix.local_symbols,
         crate_root_modules: &roots,
+        workspace_module_paths: None,
     });
     let index = build_workspace_type_index(&WorkspaceIndexInputs {
         files: &borrowed_files,

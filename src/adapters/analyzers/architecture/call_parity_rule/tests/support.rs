@@ -157,12 +157,21 @@ pub(super) fn build_graph_only(
     transparent_wrappers: &HashSet<String>,
 ) -> crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::CallGraph {
     let borrowed = borrowed_files(ws);
+    let crate_root_modules =
+        crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::collect_crate_root_modules(&borrowed);
+    let workspace_module_paths =
+        crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::collect_workspace_module_paths(&borrowed);
+    let workspace = crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+        cfg_test_files: cfg_test,
+        crate_root_modules: &crate_root_modules,
+        workspace_module_paths: &workspace_module_paths,
+    };
     build_call_graph(
         &borrowed,
         &ws.aliases_per_file,
-        cfg_test,
         layers,
         transparent_wrappers,
+        &workspace,
     )
 }
 
@@ -181,21 +190,30 @@ fn build_pub_fns_and_graph<'ws>(
     crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::CallGraph,
 ) {
     let borrowed = borrowed_files(ws);
+    let crate_root_modules =
+        crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::collect_crate_root_modules(&borrowed);
+    let workspace_module_paths =
+        crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::collect_workspace_module_paths(&borrowed);
+    let workspace = crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+        cfg_test_files: cfg_test,
+        crate_root_modules: &crate_root_modules,
+        workspace_module_paths: &workspace_module_paths,
+    };
     use crate::adapters::analyzers::architecture::call_parity_rule::pub_fns::PubFnInputs;
     let pub_fns = collect_pub_fns_by_layer(PubFnInputs {
         files: &borrowed,
         aliases_per_file: &ws.aliases_per_file,
         layers,
-        cfg_test_files: cfg_test,
         transparent_wrappers: &cp.transparent_wrappers,
         promoted_attributes: &cp.promoted_attributes,
+        workspace: &workspace,
     });
     let graph = build_call_graph(
         &borrowed,
         &ws.aliases_per_file,
-        cfg_test,
         layers,
         &cp.transparent_wrappers,
+        &workspace,
     );
     (pub_fns, graph)
 }
@@ -215,8 +233,17 @@ pub(super) fn run_check(
         Check::A => check_no_delegation(&pub_fns, &touchpoints, cp),
         Check::B => {
             let borrowed = borrowed_files(ws);
+            let crate_root_modules =
+                crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::collect_crate_root_modules(&borrowed);
+            let workspace_module_paths =
+                crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::collect_workspace_module_paths(&borrowed);
+            let workspace = crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: cfg_test,
+                crate_root_modules: &crate_root_modules,
+                workspace_module_paths: &workspace_module_paths,
+            };
             let candidates = crate::adapters::analyzers::architecture::call_parity_rule::hint::collect_private_candidates(
-                &borrowed, cfg_test, &ws.aliases_per_file, layers, &cp.transparent_wrappers,
+                &borrowed, &ws.aliases_per_file, layers, &cp.transparent_wrappers, &workspace,
             );
             let mut hits = check_missing_adapter(&pub_fns, &graph, &touchpoints, cp);
             crate::adapters::analyzers::architecture::call_parity_rule::hint::enrich_with_hints(

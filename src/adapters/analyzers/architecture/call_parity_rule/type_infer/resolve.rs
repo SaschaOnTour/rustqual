@@ -49,6 +49,14 @@ pub(crate) struct ResolveContext<'a> {
     /// resolves naked `T` against the alias's decl-site, which can't
     /// see the use-site's symbols. `None` outside alias expansion.
     pub alias_param_subs: Option<&'a HashMap<String, CanonicalType>>,
+    /// Fn-scoped generic params with their trait bounds — populated
+    /// by `extract_method_generic_params` and threaded through the
+    /// collector so `resolve_path` can return `TraitBound(...)` for
+    /// a bare-ident path that names a generic type parameter
+    /// (`Q` in `fn f<Q: Trait>(q: &Q) { q.method() }`). `None` for
+    /// workspace-pass-1 / alias-body / test contexts that have no
+    /// fn-level generic info.
+    pub generic_params: Option<&'a HashMap<String, Vec<Vec<String>>>>,
 }
 
 /// Hard recursion cap for `resolve_type_with_depth`. Guards against
@@ -341,11 +349,19 @@ fn peel_single_generic(
 
 /// Resolve a non-wrapper path through the shared canonicalisation
 /// pipeline. On an alias hit, delegate to `resolve_alias::expand_alias`
-/// to handle param substitution + decl-site scope swap.
+/// to handle param substitution + decl-site scope swap. Single-segment
+/// paths that name a fn-scoped generic param (`Q` where `Q: Trait`)
+/// short-circuit to `TraitBound(first_bound)` — without this, the
+/// canonicalisation pipeline would either find no workspace symbol
+/// (→ `Opaque`) or accidentally collide with an unrelated workspace
+/// type (→ wrong `Path`).
 fn resolve_generic_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -> CanonicalType {
+    let segments: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
+    if let Some(bound) = generic_param_bound(&segments, ctx) {
+        return CanonicalType::TraitBound(bound);
+    }
     let canonicalise =
         |segs: &[String]| canonicalise_type_segments_in_scope(segs, &canon_scope(ctx));
-    let segments: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
     let Some(resolved) = canonicalise(&segments) else {
         return CanonicalType::Opaque;
     };
@@ -354,6 +370,23 @@ fn resolve_generic_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -
         return expand_alias(alias, path, ctx, depth);
     }
     CanonicalType::Path(resolved)
+}
+
+/// Single-segment path matching a known generic param → return its
+/// first non-empty trait bound (canonical segments). The "first
+/// bound" choice matches `resolve_bound_list`'s precedent for
+/// `dyn T1 + T2`: `CanonicalType` carries one type per receiver, so
+/// callers see one anchor per dispatch site. Multi-bound spelling
+/// (`Q: T1 + T2`) is documented as a known limit. Returns `None` if
+/// no fn-level `generic_params` available, the path is multi-segment,
+/// or the matched param has no recorded bounds.
+fn generic_param_bound(segments: &[String], ctx: &ResolveContext<'_>) -> Option<Vec<String>> {
+    if segments.len() != 1 {
+        return None;
+    }
+    let bounds = ctx.generic_params?.get(&segments[0])?;
+    let first = bounds.iter().find(|b| !b.is_empty())?;
+    Some(first.clone())
 }
 
 /// Extract the type at position `idx` from angle-bracketed generic args.

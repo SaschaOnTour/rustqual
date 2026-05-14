@@ -41,6 +41,7 @@ impl FileCtx {
             local_symbols: &self.local_symbols,
             local_decl_scopes: &self.local_decl_scopes,
             crate_root_modules: &self.crate_root_modules,
+            workspace_module_paths: None,
         }
     }
 }
@@ -505,6 +506,7 @@ fn test_collect_self_dispatch_in_impl() {
             local_symbols: &fctx.local_symbols,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &fctx.crate_root_modules,
+            workspace_module_paths: None,
         },
         mod_stack: &[],
         body: &f.block,
@@ -988,6 +990,7 @@ fn test_qualified_impl_path_does_not_double_crate() {
             local_symbols: &fctx.local_symbols,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &fctx.crate_root_modules,
+            workspace_module_paths: None,
         },
         mod_stack: &[],
         body: &f.block,

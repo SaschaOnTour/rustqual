@@ -67,8 +67,11 @@ shapes (`pub type Public = Box<private::Hidden>`, multi-step chains,
 transparent-wrapper peeling, `dyn Trait` collapsed to synthetic
 anchors, file-backed module visibility, `pub use` re-export
 rewriting at call sites (since 1.2.3), generic-param trait dispatch
-`Q::method()` where `Q: Trait` (since 1.2.3), and private fns
-promoted to the handler surface via
+`Q::method()` (UFCS, since 1.2.3) and `q.method()` (receiver-position
+method call where `q: &Q` and `Q: Trait`, since 1.2.4), concrete
+inherent UFCS into sibling submodules
+(`use response::T; T::new()`, since 1.2.4), and private fns promoted
+to the handler surface via
 `[architecture.call_parity] promoted_attributes` for proc-macro
 frameworks like rmcp `#[tool]` / axum `#[handler]` (since 1.2.3)).
 The patterns below can still produce false-negative Check-B coverage

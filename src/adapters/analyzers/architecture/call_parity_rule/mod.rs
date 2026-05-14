@@ -83,25 +83,26 @@ pub fn collect_findings(
         .iter()
         .map(|f| (f.path.as_str(), &f.ast))
         .collect();
-    let cfg_test_files = collect_cfg_test_file_paths_from_refs(&refs);
-    let aliases_per_file: HashMap<String, HashMap<String, Vec<String>>> = refs
-        .iter()
-        .map(|(p, f)| (p.to_string(), gather_alias_map(f)))
-        .collect();
+    let data = build_workspace_data(&refs);
+    let workspace = local_symbols::WorkspaceLookup {
+        cfg_test_files: &data.cfg_test_files,
+        crate_root_modules: &data.crate_root_modules,
+        workspace_module_paths: &data.workspace_module_paths,
+    };
     let pub_fns = pub_fns::collect_pub_fns_by_layer(pub_fns::PubFnInputs {
         files: &refs,
-        aliases_per_file: &aliases_per_file,
+        aliases_per_file: &data.aliases_per_file,
         layers: &compiled.layers,
-        cfg_test_files: &cfg_test_files,
         transparent_wrappers: &cp.transparent_wrappers,
         promoted_attributes: &cp.promoted_attributes,
+        workspace: &workspace,
     });
     let graph = workspace_graph::build_call_graph(
         &refs,
-        &aliases_per_file,
-        &cfg_test_files,
+        &data.aliases_per_file,
         &compiled.layers,
         &cp.transparent_wrappers,
+        &workspace,
     );
     let touchpoints = build_handler_touchpoints(&pub_fns, &graph, cp);
     let mut out = Vec::new();
@@ -112,10 +113,10 @@ pub fn collect_findings(
     if !check_b_hits.is_empty() {
         let private_candidates = hint::collect_private_candidates(
             &refs,
-            &cfg_test_files,
-            &aliases_per_file,
+            &data.aliases_per_file,
             &compiled.layers,
             &cp.transparent_wrappers,
+            &workspace,
         );
         hint::enrich_with_hints(&mut check_b_hits, &graph, cp, &private_candidates);
     }
@@ -129,6 +130,31 @@ pub fn collect_findings(
         out.push(project_call_parity(hit, cp));
     }
     out
+}
+
+/// Owned-storage backing the `WorkspaceLookup` view. Keeps the
+/// owning sets alive for the duration of `collect_findings` so the
+/// borrowed lookup struct can hand out references to all four.
+struct WorkspaceData {
+    aliases_per_file: HashMap<String, HashMap<String, Vec<String>>>,
+    cfg_test_files: HashSet<String>,
+    crate_root_modules: HashSet<String>,
+    workspace_module_paths: HashSet<Vec<String>>,
+}
+
+/// Build the per-analysis workspace setup. Extracted so
+/// `collect_findings` stays under the LONG_FN budget; every entry
+/// point that needs workspace metadata reads it from one helper.
+fn build_workspace_data(refs: &[(&str, &syn::File)]) -> WorkspaceData {
+    WorkspaceData {
+        aliases_per_file: refs
+            .iter()
+            .map(|(p, f)| (p.to_string(), gather_alias_map(f)))
+            .collect(),
+        cfg_test_files: collect_cfg_test_file_paths_from_refs(refs),
+        crate_root_modules: workspace_graph::collect_crate_root_modules(refs),
+        workspace_module_paths: local_symbols::collect_workspace_module_paths(refs),
+    }
 }
 
 /// Per-adapter-handler touchpoint cache: maps each non-deprecated

@@ -143,9 +143,13 @@ fn pub_fns_skips_cfg_test_impl_block() {
         files: &borrowed,
         aliases_per_file: &ws.aliases_per_file,
         layers: &three_layer(),
-        cfg_test_files: &empty_cfg_test(),
         transparent_wrappers: &HashSet::new(),
         promoted_attributes: &HashSet::new(),
+        workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+            cfg_test_files: &empty_cfg_test(),
+            crate_root_modules: &HashSet::new(),
+            workspace_module_paths: &HashSet::new(),
+        },
     });
     let app_fn_names: Vec<&str> = by_layer
         .get("application")

@@ -198,6 +198,7 @@ impl<'a> CanonicalCallCollector<'a> {
             transparent_wrappers: self.workspace_index.map(|w| &w.transparent_wrappers),
             workspace_files: self.workspace_files,
             alias_param_subs: None,
+            generic_params: Some(&self.generic_params),
         };
         match self.self_type_canonical.as_deref() {
             Some(impl_segs) => resolve_type(&substitute_bare_self(ty, impl_segs), &rctx),
@@ -370,6 +371,7 @@ impl<'a> CanonicalCallCollector<'a> {
             self.file.path,
             self.mod_stack,
             self.file.crate_root_modules,
+            self.file.workspace_module_paths,
         )?;
         Some(normalized.join("::"))
     }
@@ -481,6 +483,7 @@ impl<'a> CanonicalCallCollector<'a> {
             bindings: &adapter,
             self_type: self.self_type_canonical.clone(),
             workspace_files: self.workspace_files,
+            generic_params: Some(&self.generic_params),
         };
         infer_type(expr, &ctx)
     }
@@ -515,6 +518,7 @@ impl<'a> CanonicalCallCollector<'a> {
             transparent_wrappers: Some(&wi.transparent_wrappers),
             workspace_files: self.workspace_files,
             alias_param_subs: None,
+            generic_params: Some(&self.generic_params),
         };
         let name = pi.ident.to_string();
         let resolved = match self.self_type_canonical.as_deref() {
@@ -610,6 +614,7 @@ impl<'a> CanonicalCallCollector<'a> {
             bindings: &adapter,
             self_type: self.self_type_canonical.clone(),
             workspace_files: self.workspace_files,
+            generic_params: Some(&self.generic_params),
         };
         match kind {
             PatKind::Value => extract_bindings(pat, matched, &ictx),

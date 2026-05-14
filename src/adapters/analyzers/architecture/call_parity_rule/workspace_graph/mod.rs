@@ -312,11 +312,13 @@ impl WalkState {
 pub(crate) fn build_call_graph<'ast>(
     files: &[(&'ast str, &'ast syn::File)],
     aliases_per_file: &HashMap<String, HashMap<String, Vec<String>>>,
-    cfg_test_files: &HashSet<String>,
     layers: &LayerDefinitions,
     transparent_wrappers: &HashSet<String>,
+    workspace: &super::local_symbols::WorkspaceLookup<'_>,
 ) -> CallGraph {
-    let crate_root_modules = collect_crate_root_modules(files);
+    let cfg_test_files = workspace.cfg_test_files;
+    let crate_root_modules = workspace.crate_root_modules;
+    let workspace_module_paths = workspace.workspace_module_paths;
     // Pre-compute `LocalSymbols` + per-mod alias maps per file once and
     // reuse across the type-index passes + the graph collector.
     let local_symbols_per_file: HashMap<String, LocalSymbols> = files
@@ -335,7 +337,8 @@ pub(crate) fn build_call_graph<'ast>(
         aliases_per_file,
         aliases_scoped_per_file: &aliases_scoped_per_file,
         local_symbols_per_file: &local_symbols_per_file,
-        crate_root_modules: &crate_root_modules,
+        crate_root_modules,
+        workspace_module_paths: Some(workspace_module_paths),
     });
     let type_index = build_workspace_type_index(&WorkspaceIndexInputs {
         files,
@@ -350,9 +353,8 @@ pub(crate) fn build_call_graph<'ast>(
     edge_rewrite::rewrite_phantom_inherited_default_edges(&mut graph, &type_index);
     let visible_canonicals = super::pub_fns_visibility::collect_visible_type_canonicals_workspace(
         files,
-        cfg_test_files,
         aliases_per_file,
-        &crate_root_modules,
+        workspace,
         transparent_wrappers,
     );
     populate_anchor_index(&mut graph, &type_index, layers, &visible_canonicals);

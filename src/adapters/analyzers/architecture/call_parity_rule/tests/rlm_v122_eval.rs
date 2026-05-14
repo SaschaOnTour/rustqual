@@ -540,6 +540,206 @@ fn bug4_generic_param_method_call_emits_trait_anchor_edge() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// Bug 4 (v1.2.4) — receiver-position method-call on generic param
+// ═══════════════════════════════════════════════════════════════════
+//
+// 5th spelling missed in round-4 cross-product enumeration. Round-4
+// added trait-anchor edges for UFCS form `Q::method(args)` where
+// `Q: Trait`. Method-call form `q.method(args)` where `q: &Q` and
+// `Q: Trait` goes through a SEPARATE resolution path (method-call vs
+// path-call) and was not covered. 1:1 with rlm `FileQuery::execute`
+// (broken) vs `SymbolQuery::execute` (works) — sole structural
+// difference is the `&self` receiver on the trait method.
+
+#[test]
+fn bug4_method_call_on_generic_receiver_emits_trait_anchor_edge() {
+    // Verbatim from /tmp/bug1-class1-repro/src/{application,cli}.rs.
+    // Repro is a side-by-side control + bug pair: UfcsTrait (no
+    // receiver, `Q::execute(input)`) traces correctly since 1.2.3;
+    // MethodTrait (`&self` receiver, `q.execute(input)`) does NOT.
+    // Both dispatchers structurally identical apart from the call
+    // shape that follows from the receiver shape on the trait method.
+    let ws = build_workspace(&[
+        (
+            "src/application/mod.rs",
+            r#"
+            //! Two trait contracts that differ only in receiver shape.
+
+            use serde::Serialize;
+
+            // ─── Control: trait with associated function (no &self) ─────────────
+
+            pub trait UfcsTrait {
+                type Output: Serialize;
+                fn execute(input: &str) -> Self::Output;
+            }
+
+            pub fn ufcs_inner(input: &str) -> String {
+                format!("ufcs:{input}")
+            }
+
+            pub struct UfcsTraitImpl;
+
+            impl UfcsTrait for UfcsTraitImpl {
+                type Output = String;
+                fn execute(input: &str) -> Self::Output {
+                    ufcs_inner(input)
+                }
+            }
+
+            pub fn dispatch_ufcs<Q: UfcsTrait>(input: &str) -> Q::Output {
+                Q::execute(input)
+            }
+
+            // ─── Bug: trait with method-call (`&self`) ───────────────────────────
+
+            pub trait MethodTrait {
+                type Output: Serialize;
+                fn execute(&self, input: &str) -> Self::Output;
+            }
+
+            pub fn method_inner(input: &str) -> String {
+                format!("method:{input}")
+            }
+
+            pub struct MethodTraitImpl;
+
+            impl MethodTrait for MethodTraitImpl {
+                type Output = String;
+                fn execute(&self, input: &str) -> Self::Output {
+                    method_inner(input)
+                }
+            }
+
+            pub fn dispatch_method<Q: MethodTrait>(query: &Q, input: &str) -> Q::Output {
+                query.execute(input)
+            }
+            "#,
+        ),
+        (
+            "src/cli/mod.rs",
+            r#"
+            //! Adapter layer — calls both dispatchers with concrete type args.
+
+            use crate::application::{
+                dispatch_method, dispatch_ufcs, MethodTraitImpl, UfcsTraitImpl,
+            };
+
+            pub fn cmd_ufcs() -> String {
+                dispatch_ufcs::<UfcsTraitImpl>("hi")
+            }
+
+            pub fn cmd_method() -> String {
+                dispatch_method(&MethodTraitImpl, "hi")
+            }
+            "#,
+        ),
+    ]);
+    let graph = build_graph_only(
+        &ws,
+        &rlm_layers_for_eval(),
+        &empty_cfg_test(),
+        &HashSet::new(),
+    );
+
+    let dispatch_method = "crate::application::dispatch_method";
+    let method_anchor = "crate::application::MethodTrait::execute";
+
+    // Control assertion: UFCS dispatcher must already have the
+    // trait-anchor edge (round-4 fix). If this fails, something
+    // regressed in 1.2.3, not what we're testing here.
+    let dispatch_ufcs = "crate::application::dispatch_ufcs";
+    let ufcs_anchor = "crate::application::UfcsTrait::execute";
+    assert!(
+        graph_contains_edge(&graph, dispatch_ufcs, ufcs_anchor),
+        "control: UFCS form must already trace (round-4 fix). \
+         dispatch_ufcs callees: {:?}",
+        callees_of(&graph, dispatch_ufcs),
+    );
+
+    // The actual bug: method-call form on generic-param receiver
+    // must also emit the trait-anchor edge.
+    assert!(
+        graph_contains_edge(&graph, dispatch_method, method_anchor),
+        "method-call on generic receiver `query.execute(input)` where \
+         `query: &Q` and `Q: MethodTrait` must emit trait-anchor edge \
+         `{method_anchor}`. dispatch_method callees: {:?}",
+        callees_of(&graph, dispatch_method),
+    );
+}
+
+#[test]
+fn bug4_method_call_with_where_clause_bound_emits_trait_anchor_edge() {
+    // Variant: `where Q: T` instead of inline `<Q: T>`. Same edge
+    // expected — bound spelling shouldn't affect dispatch resolution.
+    let ws = build_workspace(&[(
+        "src/application/mod.rs",
+        r#"
+        pub trait MethodTrait {
+            fn execute(&self, input: &str) -> String;
+        }
+
+        pub fn dispatch_method<Q>(query: &Q, input: &str) -> String
+        where
+            Q: MethodTrait,
+        {
+            query.execute(input)
+        }
+        "#,
+    )]);
+    let graph = build_graph_only(
+        &ws,
+        &rlm_layers_for_eval(),
+        &empty_cfg_test(),
+        &HashSet::new(),
+    );
+    let dispatch_method = "crate::application::dispatch_method";
+    let anchor = "crate::application::MethodTrait::execute";
+    assert!(
+        graph_contains_edge(&graph, dispatch_method, anchor),
+        "where-clause bound on generic-param receiver must emit \
+         trait-anchor edge. dispatch_method callees: {:?}",
+        callees_of(&graph, dispatch_method),
+    );
+}
+
+#[test]
+fn bug4_method_call_with_impl_level_generic_emits_trait_anchor_edge() {
+    // Variant: bound on impl block, method-call inside the method body.
+    // `impl<Q: T> Foo<Q> { fn run(&self, q: &Q) { q.execute(...) } }`.
+    let ws = build_workspace(&[(
+        "src/application/mod.rs",
+        r#"
+        pub trait MethodTrait {
+            fn execute(&self, input: &str) -> String;
+        }
+
+        pub struct Runner<Q>(pub Q);
+
+        impl<Q: MethodTrait> Runner<Q> {
+            pub fn run(&self, q: &Q, input: &str) -> String {
+                q.execute(input)
+            }
+        }
+        "#,
+    )]);
+    let graph = build_graph_only(
+        &ws,
+        &rlm_layers_for_eval(),
+        &empty_cfg_test(),
+        &HashSet::new(),
+    );
+    let runner_run = "crate::application::Runner::run";
+    let anchor = "crate::application::MethodTrait::execute";
+    assert!(
+        graph_contains_edge(&graph, runner_run, anchor),
+        "impl-level generic bound on method-call receiver must emit \
+         trait-anchor edge. Runner::run callees: {:?}",
+        callees_of(&graph, runner_run),
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // Bug 1a-async — same as bug1a but with async fn signatures
 // ═══════════════════════════════════════════════════════════════════
 

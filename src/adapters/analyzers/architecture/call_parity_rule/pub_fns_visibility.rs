@@ -60,19 +60,12 @@ struct WalkCtx<'a> {
 /// collector.
 pub(super) fn collect_visible_type_canonicals_workspace(
     files: &[(&str, &syn::File)],
-    cfg_test_files: &HashSet<String>,
     aliases_per_file: &HashMap<String, HashMap<String, Vec<String>>>,
-    crate_root_modules: &HashSet<String>,
+    workspace: &super::local_symbols::WorkspaceLookup<'_>,
     transparent_wrappers: &HashSet<String>,
 ) -> HashSet<String> {
-    let alias_chain = collect_alias_chain(
-        files,
-        cfg_test_files,
-        aliases_per_file,
-        crate_root_modules,
-        transparent_wrappers,
-    );
-    let type_canonicals = collect_workspace_type_canonicals(files, cfg_test_files);
+    let alias_chain = collect_alias_chain(files, aliases_per_file, workspace, transparent_wrappers);
+    let type_canonicals = collect_workspace_type_canonicals(files, workspace.cfg_test_files);
     let file_root_visibility = super::file_visibility::collect_file_root_visibility(files);
     let ctx = WalkCtx {
         transparent_wrappers,
@@ -80,26 +73,20 @@ pub(super) fn collect_visible_type_canonicals_workspace(
         type_canonicals: &type_canonicals,
     };
     let mut out = HashSet::new();
-    for_each_file_scope(
-        files,
-        cfg_test_files,
-        aliases_per_file,
-        crate_root_modules,
-        |file_scope, ast| {
-            // File-backed private modules (`mod internal;` without
-            // `pub` in the parent) keep their items out of the public
-            // surface — skip them entirely so a `pub fn helper()`
-            // inside `internal.rs` doesn't enter the visible-type set.
-            if !file_root_visibility
-                .get(file_scope.path)
-                .copied()
-                .unwrap_or(true)
-            {
-                return;
-            }
-            collect_in_items(&ast.items, &[], file_scope, &ctx, &mut out);
-        },
-    );
+    for_each_file_scope(files, aliases_per_file, workspace, |file_scope, ast| {
+        // File-backed private modules (`mod internal;` without
+        // `pub` in the parent) keep their items out of the public
+        // surface — skip them entirely so a `pub fn helper()`
+        // inside `internal.rs` doesn't enter the visible-type set.
+        if !file_root_visibility
+            .get(file_scope.path)
+            .copied()
+            .unwrap_or(true)
+        {
+            return;
+        }
+        collect_in_items(&ast.items, &[], file_scope, &ctx, &mut out);
+    });
     out
 }
 
@@ -109,16 +96,17 @@ pub(super) fn collect_visible_type_canonicals_workspace(
 /// the alias-chain pre-pass share. Operation.
 fn for_each_file_scope<F>(
     files: &[(&str, &syn::File)],
-    cfg_test_files: &HashSet<String>,
     aliases_per_file: &HashMap<String, HashMap<String, Vec<String>>>,
-    crate_root_modules: &HashSet<String>,
+    workspace: &super::local_symbols::WorkspaceLookup<'_>,
     mut body: F,
 ) where
     F: FnMut(&FileScope<'_>, &syn::File),
 {
     let empty_aliases = HashMap::new();
+    let crate_root_modules = workspace.crate_root_modules;
+    let workspace_module_paths = workspace.workspace_module_paths;
     for (path, ast) in files {
-        if cfg_test_files.contains(*path) {
+        if workspace.cfg_test_files.contains(*path) {
             continue;
         }
         let alias_map = aliases_per_file.get(*path).unwrap_or(&empty_aliases);
@@ -131,6 +119,7 @@ fn for_each_file_scope<F>(
             local_symbols: &flat,
             local_decl_scopes: &by_name,
             crate_root_modules,
+            workspace_module_paths: Some(workspace_module_paths),
         };
         body(&file_scope, ast);
     }

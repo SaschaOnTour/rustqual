@@ -8,6 +8,7 @@ mod pub_fns;
 mod regressions;
 mod rlm_snapshot;
 mod rlm_v122_eval;
+mod rlm_v123_eval;
 mod support;
 mod target_anchors;
 mod touchpoints;

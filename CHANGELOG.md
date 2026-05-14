@@ -5,6 +5,60 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.4] - in development
+
+Patch release: **rlm v1.2.3 audit fixes** — closes the two remaining
+call-parity gaps surfaced by re-running the same external audit
+against rustqual 1.2.3. Both reduce to ~70 LOC isolated repros and
+each is covered by a failing-first regression test.
+
+### Fixed
+
+- **Class 1 (call-parity / receiver-position trait dispatch)** —
+  `query.execute(args)` where `query: &Q` and `Q: Trait` now emits
+  the trait-method anchor edge, matching the UFCS form
+  (`Q::execute(args)`) shipped in 1.2.3. Round-4's
+  `canonicalise_generic_param_path` only fired for `Expr::Call`
+  with `Expr::Path`, missing the `Expr::MethodCall` path entirely
+  — 5th spelling overlooked in the cross-product enumeration. Fix
+  is upstream in `resolve_type` itself: a new optional
+  `generic_params` field on `ResolveContext` + `InferContext` lets
+  the path resolver recognise a single-segment ident that names a
+  fn-scoped generic param and return `CanonicalType::TraitBound`
+  for it. The existing TraitBound → `trait_dispatch_edges` →
+  anchor pipeline picks up the seeded binding without any
+  parallel logic. Every downstream consumer of `resolve_type`
+  (signature seeding, let-binding inference, return-type chasing,
+  closure-arg seeding) benefits at one stroke. Regression tests:
+  `bug4_method_call_on_generic_receiver_emits_trait_anchor_edge`,
+  `bug4_method_call_with_where_clause_bound_emits_trait_anchor_edge`,
+  `bug4_method_call_with_impl_level_generic_emits_trait_anchor_edge`
+  in `rlm_v122_eval.rs`.
+- **Class 2 (call-parity / sibling-submodule UFCS)** —
+  `Type::new(args)` where `Type` is imported via
+  `use submodule::Type;` (relative sibling-submodule) now traces
+  correctly. Pre-existing latent gap (1.2.2 reproduces same
+  finding); newly visible in 1.2.3 because the Bug-2 `pub use`
+  fix made the enclosing generic dispatcher reachable, surfacing
+  the inner gap. Root cause: `normalize_after_alias` returned
+  relative paths (`["response", "Type", "new"]`) as-is when the
+  first segment wasn't in `crate_root_modules`, while the
+  recorded node canonical was absolute
+  (`["crate", "application", "response", "Type", "new"]`). Edge
+  pointed at a phantom node → no graph edge. Fix adds a new
+  `workspace_module_paths: HashSet<Vec<String>>` set on
+  `FileScope`, derived from every workspace file's
+  `file_to_module_segments`. The `_` arm of `normalize_after_alias`
+  now distinguishes sibling-submodule imports from extern-crate
+  imports by checking whether the would-be-absolute prefix
+  matches a known workspace module path — sibling submodules get
+  the implicit-self relative resolution (Rust 2018+ language
+  rule); extern crates preserve their absolute extern-path shape
+  so `is_stdlib_prefixed` and `resolve_bound_list`'s "first ==
+  'crate'" gate keep their existing behaviour. Regression test:
+  `bug5_concrete_ufcs_in_sibling_submodule_traces_edge` in
+  new `rlm_v123_eval.rs`.
+
 ## [1.2.3] - in development
 
 Patch release: **rlm v1.2.2 audit fixes** — closes five gaps surfaced

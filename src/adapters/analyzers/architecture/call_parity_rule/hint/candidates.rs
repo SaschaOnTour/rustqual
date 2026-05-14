@@ -66,24 +66,24 @@ pub(crate) struct PrivateCandidate {
 /// Operation: per-file scope build + AST traversal + filtering.
 pub(crate) fn collect_private_candidates(
     files: &[(&str, &syn::File)],
-    cfg_test_files: &HashSet<String>,
     aliases_per_file: &HashMap<String, HashMap<String, Vec<String>>>,
     layers: &LayerDefinitions,
     transparent_wrappers: &HashSet<String>,
+    workspace: &super::super::local_symbols::WorkspaceLookup<'_>,
 ) -> Vec<PrivateCandidate> {
-    let crate_root_modules = collect_crate_root_modules(files);
+    let crate_root_modules = workspace.crate_root_modules;
+    let workspace_module_paths = workspace.workspace_module_paths;
     let file_root_visibility = collect_file_root_visibility(files);
     let visible_canonicals = collect_visible_type_canonicals_workspace(
         files,
-        cfg_test_files,
         aliases_per_file,
-        &crate_root_modules,
+        workspace,
         transparent_wrappers,
     );
     let empty_aliases = HashMap::new();
     let mut out = Vec::new();
     for (path, ast) in files {
-        if cfg_test_files.contains(*path) {
+        if workspace.cfg_test_files.contains(*path) {
             continue;
         }
         let alias_map = aliases_per_file.get(*path).unwrap_or(&empty_aliases);
@@ -95,7 +95,8 @@ pub(crate) fn collect_private_candidates(
             aliases_per_scope: &aliases_per_scope,
             local_symbols: &flat,
             local_decl_scopes: &by_name,
-            crate_root_modules: &crate_root_modules,
+            crate_root_modules,
+            workspace_module_paths: Some(workspace_module_paths),
         };
         let file_visible = file_root_visibility.get(*path).copied().unwrap_or(true);
         let mut collector = CandidateCollector {

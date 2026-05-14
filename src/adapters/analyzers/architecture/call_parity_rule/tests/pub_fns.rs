@@ -47,9 +47,13 @@ fn test_collect_pub_fns_in_layer_free_fn() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let cli = names_for_layer(&by_layer, "cli");
@@ -71,9 +75,13 @@ fn test_collect_pub_fns_skips_private_fns() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let cli = names_for_layer(&by_layer, "cli");
@@ -98,9 +106,13 @@ fn test_pub_crate_is_treated_as_public_for_intra_crate_layers() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let cli = names_for_layer(&by_layer, "cli");
@@ -122,9 +134,13 @@ fn test_pub_super_and_pub_in_path_treated_as_public() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let cli = names_for_layer(&by_layer, "cli");
@@ -150,9 +166,13 @@ fn test_collect_pub_fns_collects_pub_impl_methods_for_pub_type() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let app = names_for_layer(&by_layer, "application");
@@ -189,9 +209,13 @@ fn test_collect_pub_fns_recognises_impl_across_files() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let app = names_for_layer(&by_layer, "application");
@@ -221,9 +245,13 @@ fn test_collect_pub_fns_skips_impl_methods_on_private_type() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let app = names_for_layer(&by_layer, "application");
@@ -249,9 +277,13 @@ fn test_collect_pub_fns_groups_by_layer() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     assert_eq!(
@@ -279,9 +311,13 @@ fn test_collect_pub_fns_skips_cfg_test_files() {
         files: &files,
         aliases_per_file: &aliases,
         layers: &three_layer(),
-        cfg_test_files: &cfg_test,
         transparent_wrappers: &HashSet::new(),
         promoted_attributes: &HashSet::new(),
+        workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+            cfg_test_files: &cfg_test,
+            crate_root_modules: &HashSet::new(),
+            workspace_module_paths: &HashSet::new(),
+        },
     });
     assert!(
         names_for_layer(&by_layer, "cli").is_empty(),
@@ -305,9 +341,13 @@ fn test_collect_pub_fns_skips_test_attr_fns() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let cli = names_for_layer(&by_layer, "cli");
@@ -327,9 +367,13 @@ fn test_collect_pub_fns_skips_unmatched_files() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     for layer in ["application", "cli", "mcp"] {
@@ -361,9 +405,13 @@ fn test_collect_pub_fns_skips_pub_fn_inside_private_inline_mod() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let cli = names_for_layer(&by_layer, "cli");
@@ -394,9 +442,13 @@ fn test_collect_pub_fns_treats_pub_self_as_private() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let cli = names_for_layer(&by_layer, "cli");
@@ -433,9 +485,13 @@ fn test_collect_pub_fns_skips_impl_method_on_type_in_private_inline_mod() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let cli = names_for_layer(&by_layer, "cli");
@@ -470,9 +526,13 @@ fn test_collect_pub_fns_records_impl_in_private_mod_for_public_type() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let app = names_for_layer(&by_layer, "application");
@@ -509,9 +569,13 @@ fn test_collect_pub_fns_records_impl_via_nested_pub_use_export_path() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let cli = names_for_layer(&by_layer, "cli");
@@ -546,9 +610,13 @@ fn test_collect_pub_fns_records_impl_via_chained_type_alias() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let cli = names_for_layer(&by_layer, "cli");
@@ -583,9 +651,13 @@ fn test_collect_pub_fns_does_not_promote_bare_local_arc() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let cli = names_for_layer(&by_layer, "cli");
@@ -621,9 +693,13 @@ fn test_collect_pub_fns_peels_qualified_user_wrapper() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &wrappers,
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let cli = names_for_layer(&by_layer, "cli");
@@ -658,9 +734,13 @@ fn test_collect_pub_fns_does_not_promote_qualified_local_arc() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let cli = names_for_layer(&by_layer, "cli");
@@ -697,9 +777,13 @@ fn test_collect_pub_fns_does_not_promote_local_wrapper_alias() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let cli = names_for_layer(&by_layer, "cli");
@@ -734,9 +818,13 @@ fn test_collect_pub_fns_records_impl_via_renamed_stdlib_wrapper() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let cli = names_for_layer(&by_layer, "cli");
@@ -772,9 +860,13 @@ fn test_collect_pub_fns_records_impl_via_pub_type_alias_through_user_wrapper() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &wrappers,
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let cli = names_for_layer(&by_layer, "cli");
@@ -809,9 +901,13 @@ fn test_collect_pub_fns_records_impl_via_pub_type_alias_through_wrapper() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let cli = names_for_layer(&by_layer, "cli");
@@ -846,9 +942,13 @@ fn test_collect_pub_fns_records_impl_via_pub_type_alias() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let cli = names_for_layer(&by_layer, "cli");
@@ -884,9 +984,13 @@ fn test_collect_pub_fns_records_renamed_reexport_impl_methods() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let cli = names_for_layer(&by_layer, "cli");
@@ -923,9 +1027,13 @@ fn test_collect_pub_fns_chases_reexported_type_alias_to_target() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let cli = names_for_layer(&by_layer, "cli");
@@ -963,9 +1071,13 @@ fn test_collect_pub_fns_records_pub_use_reexport_with_qualified_impl() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let cli = names_for_layer(&by_layer, "cli");
@@ -1002,9 +1114,13 @@ fn test_collect_pub_fns_skips_trait_impl_method_on_private_self_type() {
         files: &files,
         aliases_per_file: &aliases,
         layers: &three_layer(),
-        cfg_test_files: &HashSet::new(),
         transparent_wrappers: &HashSet::new(),
         promoted_attributes: &HashSet::new(),
+        workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+            cfg_test_files: &HashSet::new(),
+            crate_root_modules: &HashSet::new(),
+            workspace_module_paths: &HashSet::new(),
+        },
     });
     let app = names_for_layer(&by_layer, "application");
     assert!(
@@ -1038,9 +1154,13 @@ fn test_collect_pub_fns_records_inherited_trait_impl_methods() {
         files: &files,
         aliases_per_file: &aliases,
         layers: &three_layer(),
-        cfg_test_files: &HashSet::new(),
         transparent_wrappers: &HashSet::new(),
         promoted_attributes: &HashSet::new(),
+        workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+            cfg_test_files: &HashSet::new(),
+            crate_root_modules: &HashSet::new(),
+            workspace_module_paths: &HashSet::new(),
+        },
     });
     let app = names_for_layer(&by_layer, "application");
     assert!(
@@ -1068,9 +1188,13 @@ fn test_collect_pub_fns_excludes_orphan_file_not_declared_in_crate_root() {
         files: &files,
         aliases_per_file: &aliases,
         layers: &three_layer(),
-        cfg_test_files: &HashSet::new(),
         transparent_wrappers: &HashSet::new(),
         promoted_attributes: &HashSet::new(),
+        workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+            cfg_test_files: &HashSet::new(),
+            crate_root_modules: &HashSet::new(),
+            workspace_module_paths: &HashSet::new(),
+        },
     });
     let app_fns = names_for_layer(&by_layer, "application");
     assert!(
@@ -1101,9 +1225,13 @@ fn test_collect_pub_fns_unions_lib_and_main_root_trees() {
         files: &files,
         aliases_per_file: &aliases,
         layers: &three_layer(),
-        cfg_test_files: &HashSet::new(),
         transparent_wrappers: &HashSet::new(),
         promoted_attributes: &HashSet::new(),
+        workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+            cfg_test_files: &HashSet::new(),
+            crate_root_modules: &HashSet::new(),
+            workspace_module_paths: &HashSet::new(),
+        },
     });
     let app_fns = names_for_layer(&by_layer, "application");
     let cli_fns = names_for_layer(&by_layer, "cli");
@@ -1138,9 +1266,13 @@ fn test_collect_pub_fns_includes_crate_root_mod_decl_without_pub() {
         files: &files,
         aliases_per_file: &aliases,
         layers: &three_layer(),
-        cfg_test_files: &HashSet::new(),
         transparent_wrappers: &HashSet::new(),
         promoted_attributes: &HashSet::new(),
+        workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+            cfg_test_files: &HashSet::new(),
+            crate_root_modules: &HashSet::new(),
+            workspace_module_paths: &HashSet::new(),
+        },
     });
     let cli = names_for_layer(&by_layer, "cli");
     let app = names_for_layer(&by_layer, "application");
@@ -1172,9 +1304,13 @@ fn test_collect_pub_fns_excludes_pub_fn_under_private_ancestor_chain() {
         files: &files,
         aliases_per_file: &aliases,
         layers: &three_layer(),
-        cfg_test_files: &HashSet::new(),
         transparent_wrappers: &HashSet::new(),
         promoted_attributes: &HashSet::new(),
+        workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+            cfg_test_files: &HashSet::new(),
+            crate_root_modules: &HashSet::new(),
+            workspace_module_paths: &HashSet::new(),
+        },
     });
     let app_fns = names_for_layer(&by_layer, "application");
     assert!(
@@ -1200,9 +1336,13 @@ fn test_collect_pub_fns_excludes_pub_fn_in_file_backed_private_module() {
         files: &files,
         aliases_per_file: &aliases,
         layers: &three_layer(),
-        cfg_test_files: &HashSet::new(),
         transparent_wrappers: &HashSet::new(),
         promoted_attributes: &HashSet::new(),
+        workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+            cfg_test_files: &HashSet::new(),
+            crate_root_modules: &HashSet::new(),
+            workspace_module_paths: &HashSet::new(),
+        },
     });
     let app = names_for_layer(&by_layer, "application");
     assert!(
@@ -1226,9 +1366,13 @@ fn test_collect_pub_fns_includes_pub_fn_in_file_backed_public_module() {
         files: &files,
         aliases_per_file: &aliases,
         layers: &three_layer(),
-        cfg_test_files: &HashSet::new(),
         transparent_wrappers: &HashSet::new(),
         promoted_attributes: &HashSet::new(),
+        workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+            cfg_test_files: &HashSet::new(),
+            crate_root_modules: &HashSet::new(),
+            workspace_module_paths: &HashSet::new(),
+        },
     });
     let app = names_for_layer(&by_layer, "application");
     assert!(
@@ -1269,9 +1413,13 @@ fn test_collect_pub_fns_skips_impl_methods_under_short_name_collision() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let cli = names_for_layer(&by_layer, "cli");
@@ -1316,9 +1464,13 @@ fn pub_fn_records_deprecated_attribute_bare() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     let dep = deprecated_for_layer(&by_layer, "cli");
@@ -1340,9 +1492,13 @@ fn pub_fn_records_deprecated_with_message() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     assert_eq!(
@@ -1366,9 +1522,13 @@ fn pub_fn_records_deprecated_with_args() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     assert_eq!(
@@ -1391,9 +1551,13 @@ fn pub_fn_no_attribute_not_deprecated() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     assert_eq!(
@@ -1418,9 +1582,13 @@ fn pub_fn_other_attribute_not_deprecated() {
             files: &files,
             aliases_per_file: &aliases,
             layers: &three_layer(),
-            cfg_test_files: &HashSet::new(),
             transparent_wrappers: &HashSet::new(),
             promoted_attributes: &HashSet::new(),
+            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+                cfg_test_files: &HashSet::new(),
+                crate_root_modules: &HashSet::new(),
+                workspace_module_paths: &HashSet::new(),
+            },
         })
     };
     assert_eq!(

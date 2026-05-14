@@ -1202,20 +1202,27 @@ fn check_b_anchor_inspected_even_when_target_layer_absent_from_pub_fns_map() {
     let cp = ports_cp();
     let cfg_test = empty_cfg_test();
     let borrowed = borrowed_files(&ws);
+    let crate_root_modules = HashSet::new();
+    let workspace_module_paths = HashSet::new();
+    let workspace = crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+        cfg_test_files: &cfg_test,
+        crate_root_modules: &crate_root_modules,
+        workspace_module_paths: &workspace_module_paths,
+    };
     let mut pub_fns = collect_pub_fns_by_layer(PubFnInputs {
         files: &borrowed,
         aliases_per_file: &ws.aliases_per_file,
         layers: &layers,
-        cfg_test_files: &cfg_test,
         transparent_wrappers: &cp.transparent_wrappers,
         promoted_attributes: &cp.promoted_attributes,
+        workspace: &workspace,
     });
     let graph = build_call_graph(
         &borrowed,
         &ws.aliases_per_file,
-        &cfg_test,
         &layers,
         &cp.transparent_wrappers,
+        &workspace,
     );
     let touchpoints = build_handler_touchpoints(&pub_fns, &graph, &cp);
     pub_fns.remove("application");

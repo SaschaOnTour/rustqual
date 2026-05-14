@@ -82,6 +82,7 @@ impl TypeInferFixture {
             local_symbols: &self.local_symbols,
             local_decl_scopes: &self.local_decl_scopes,
             crate_root_modules: &self.crate_roots,
+            workspace_module_paths: None,
         }
     }
 
@@ -93,6 +94,7 @@ impl TypeInferFixture {
             bindings: &self.bindings as &dyn BindingLookup,
             self_type: self.self_type.clone(),
             workspace_files: None,
+            generic_params: None,
         }
     }
 }

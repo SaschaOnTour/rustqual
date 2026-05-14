@@ -74,15 +74,16 @@ fn walk_type_canonicals(
 /// unconditional walker. Operation.
 pub(super) fn collect_alias_chain(
     files: &[(&str, &syn::File)],
-    cfg_test_files: &HashSet<String>,
     aliases_per_file: &HashMap<String, HashMap<String, Vec<String>>>,
-    crate_root_modules: &HashSet<String>,
+    workspace: &super::local_symbols::WorkspaceLookup<'_>,
     transparent_wrappers: &HashSet<String>,
 ) -> HashMap<String, String> {
     let mut chain = HashMap::new();
     let empty_aliases = HashMap::new();
+    let crate_root_modules = workspace.crate_root_modules;
+    let workspace_module_paths = workspace.workspace_module_paths;
     for (path, ast) in files {
-        if cfg_test_files.contains(*path) {
+        if workspace.cfg_test_files.contains(*path) {
             continue;
         }
         let alias_map = aliases_per_file.get(*path).unwrap_or(&empty_aliases);
@@ -95,6 +96,7 @@ pub(super) fn collect_alias_chain(
             local_symbols: &flat,
             local_decl_scopes: &by_name,
             crate_root_modules,
+            workspace_module_paths: Some(workspace_module_paths),
         };
         walk_alias_chain(
             &ast.items,
