@@ -57,17 +57,20 @@ regression tests in `call_parity_rule/tests/rlm_v123_eval.rs`
   `["application", "orphan"]` to the lookup, making
   `use orphan::T` from a sibling look like a local sibling import
   and fabricating an edge to `crate::application::orphan::T` — a
-  canonical that isn't in the call graph. Fix: filter the lookup
-  by `file_root_visibility::collect_file_root_visibility`, so only
-  files reachable from a crate root via `mod` declarations
-  contribute paths. cfg-test files were already excluded via the
-  inline-mod walk's cfg-test skip; this closes the parallel
-  file-level case. Regression test:
-  `bug9_orphan_file_does_not_act_as_sibling_submodule`.
+  canonical that isn't in the call graph. Fix: only files
+  reachable from a crate root via declared `mod` edges contribute
+  paths. Orphan files are unreachable in that walk and so stay
+  out of the lookup. cfg-test mods are skipped uniformly across
+  file-backed and inline declarations. Regression test:
+  `bug9_orphan_file_does_not_act_as_sibling_submodule`. (The
+  initial 1.2.4 fix wired the lookup through
+  `file_root_visibility`; bug 10 below replaced that with a
+  declared-edge walk that handles both invariants in one pass —
+  the description here reflects the final shape.)
 - **Bug 10 — private `mod foo;` dropped from sibling-submodule
-  lookup when ancestor chain hidden by `file_root_visibility`.**
-  The bug 9 fix wired `collect_workspace_module_paths` through
-  `file_root_visibility`, which is the right filter for
+  lookup when ancestor chain was hidden.**
+  The initial bug 9 fix wired `collect_workspace_module_paths`
+  through `file_root_visibility`, which is the right filter for
   public-surface decisions but too narrow for module membership.
   Inside a subtree hidden by a non-root private `mod hidden;`,
   every child file inherited `visibility=false` and its own
