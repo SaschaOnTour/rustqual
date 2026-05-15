@@ -29,9 +29,15 @@ pub enum CanonicalType {
     Slice(Box<CanonicalType>),
     /// `HashMap<_, V>` — only the value type is tracked.
     Map(Box<CanonicalType>),
-    /// Trait object / generic bound. Reserved for Stage 2 — Stage 1 never
-    /// emits this variant.
-    TraitBound(Vec<String>),
+    /// Trait object / generic bound: each element is one trait's
+    /// canonical path (`["crate", "app", "Handler"]`). Multiple
+    /// elements model multi-bound spellings — `dyn T1 + T2`,
+    /// `impl T1 + T2`, and `<Q: T1 + T2>` all collect every
+    /// resolvable trait so receiver-position dispatch can fan out
+    /// one edge per trait via `trait_dispatch_edges`. The first
+    /// trait that defines the called method wins for return-type
+    /// inference.
+    TraitBound(Vec<Vec<String>>),
     /// Locally known to be unresolvable: external crate, unannotated
     /// generic, unsupported construct. Distinct from "not yet evaluated".
     Opaque,

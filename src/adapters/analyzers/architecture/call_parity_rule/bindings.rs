@@ -193,30 +193,24 @@ fn normalize_after_alias(
             Some(full)
         }
         Some("crate") => Some(expanded),
-        Some(first) if crate_root_modules.contains(first) => {
-            let mut full = vec!["crate".to_string()];
-            full.extend(expanded);
-            Some(full)
-        }
+        // Rust 2018+ resolution priority: local sibling submodule wins
+        // over crate-root module of the same name. `use foo::bar` inside
+        // `crate::application` resolves to `crate::application::foo::bar`
+        // when that submodule exists, even if `crate::foo` also exists.
+        // Reversing this order misroutes valid local imports.
         Some(first)
             if is_workspace_submodule(workspace_module_paths, importing_file, mod_stack, first) =>
         {
-            // Rust 2018+: `use foo::bar` inside a non-root module is
-            // implicit `use self::foo::bar` when `foo` is a submodule
-            // of the current module. Without this branch, an alias
-            // like `use response::X;` in `application/mod.rs` resolves
-            // to literal `response::X` and never matches the workspace
-            // node `crate::application::response::X`. The workspace-
-            // module-path check distinguishes this case from extern-
-            // crate imports (`use serde::Y;`), which preserve their
-            // absolute extern-path shape so `is_stdlib_prefixed` and
-            // `resolve_bound_list`'s "first == 'crate'" gate keep
-            // their existing behaviour.
             let mut with_self = vec!["self".to_string()];
             with_self.extend(expanded);
             let resolved = resolve_to_crate_absolute_in(importing_file, mod_stack, &with_self)?;
             let mut full = vec!["crate".to_string()];
             full.extend(resolved);
+            Some(full)
+        }
+        Some(first) if crate_root_modules.contains(first) => {
+            let mut full = vec!["crate".to_string()];
+            full.extend(expanded);
             Some(full)
         }
         _ => Some(expanded),

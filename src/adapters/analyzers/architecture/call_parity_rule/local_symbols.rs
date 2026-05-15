@@ -110,16 +110,48 @@ pub(crate) fn build_workspace_files_map<'a>(
     out
 }
 
-/// Build the multi-segment module-path set from the workspace's file
-/// paths. One entry per file: `src/application/response.rs` →
-/// `["application", "response"]`; `src/lib.rs` → `[]`.
+/// Build the multi-segment module-path set from the workspace.
+/// Includes BOTH file-backed modules (one entry per file from
+/// `file_to_module_segments`) AND inline `mod foo { … }` blocks
+/// found by walking each file's AST. Without the inline walk, a
+/// shape like `mod outer { mod inner { … } use inner::X; }` would
+/// leave `[outer, inner]` out of the set, defeating the sibling-
+/// submodule discrimination in `normalize_after_alias`.
 pub(crate) fn collect_workspace_module_paths(files: &[(&str, &syn::File)]) -> HashSet<Vec<String>> {
-    files
-        .iter()
-        .map(|(p, _)| {
-            crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments(p)
-        })
-        .collect()
+    let mut out = HashSet::new();
+    for (path, ast) in files {
+        let base =
+            crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments(path);
+        out.insert(base.clone());
+        walk_inline_mod_paths(&ast.items, &base, &mut out);
+    }
+    out
+}
+
+/// Recursively walk `Item::Mod` blocks, recording each inline mod's
+/// full path (file-modules + ancestor mod names + this mod). Skips
+/// cfg-test mods so test-only inline modules don't leak into the
+/// production lookup. File-backed `pub mod foo;` (no inline content)
+/// is already covered by the per-file walk above; this only adds the
+/// inline cases. Operation: closure-hidden recursion.
+// qual:recursive
+fn walk_inline_mod_paths(items: &[syn::Item], stack: &[String], out: &mut HashSet<Vec<String>>) {
+    let recurse = |inner: &[syn::Item], next: &[String], out: &mut HashSet<Vec<String>>| {
+        walk_inline_mod_paths(inner, next, out);
+    };
+    for item in items {
+        if let syn::Item::Mod(m) = item {
+            if has_cfg_test(&m.attrs) {
+                continue;
+            }
+            let mut next = stack.to_vec();
+            next.push(m.ident.to_string());
+            out.insert(next.clone());
+            if let Some((_, inner)) = m.content.as_ref() {
+                recurse(inner, &next, out);
+            }
+        }
+    }
 }
 
 /// Bundles the workspace-derived metadata that every call-parity

@@ -721,7 +721,10 @@ fn canonical_edges_for_method(
             full.push(method.to_string());
             vec![full.join("::")]
         }
-        CanonicalType::TraitBound(segs) => trait_dispatch_edges(segs, method, workspace),
+        CanonicalType::TraitBound(bounds) => bounds
+            .iter()
+            .flat_map(|trait_segs| trait_dispatch_edges(trait_segs, method, workspace))
+            .collect(),
         _ => Vec::new(),
     }
 }

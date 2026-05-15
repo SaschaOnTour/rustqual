@@ -7,10 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.2.4] - in development
 
-Patch release: **rlm v1.2.3 audit fixes** — closes the two remaining
-call-parity gaps surfaced by re-running the same external audit
-against rustqual 1.2.3. Both reduce to ~70 LOC isolated repros and
-each is covered by a failing-first regression test.
+Patch release: **rlm v1.2.3 audit fixes + Codex round-7 review** —
+closes the two remaining call-parity gaps surfaced by re-running the
+external audit against rustqual 1.2.3, plus three Codex P2 findings
+on the v1.2.4 dev branch. Five failing-first regression tests in
+`call_parity_rule/tests/rlm_v123_eval.rs` (bug5–bug8) anchor the
+fixes.
+
+### Fixed (Codex round 7 — sibling-resolution + multi-bound)
+
+- **Bug 6 — sibling submodule loses to crate-root with same name.**
+  `normalize_after_alias` checked `crate_root_modules` before the
+  sibling-submodule branch, mis-routing `use foo::X` inside
+  `crate::application` (where both `crate::application::foo` and
+  `crate::foo` exist) to the crate-root module. Fix: reorder the
+  match arms — local sibling check fires first, matching Rust 2018+
+  resolution priority. Regression test:
+  `bug6_sibling_submodule_wins_over_crate_root_with_same_name`.
+- **Bug 7 — inline mods invisible to sibling discriminator.**
+  `collect_workspace_module_paths` collected only file-backed paths,
+  leaving inline `mod foo { mod bar { ... } use bar::X }` patterns
+  with no entry for `[foo, bar]`. Fix: walk each file's AST for
+  `Item::Mod` blocks (cfg-test skipped) and add their paths.
+  Regression test: `bug7_inline_mod_sibling_import_traces_edge`.
+- **Bug 8 — multi-bound generic receiver drops later bounds.**
+  `q.method()` where `q: &Q` and `Q: T1 + T2`: the receiver path
+  returned only the first bound, so if the method lived on `T2`,
+  `trait_dispatch_edges` filtered the first bound out and never
+  tried the second. Fix: `CanonicalType::TraitBound` payload
+  extended from `Vec<String>` to `Vec<Vec<String>>` (one entry per
+  bound). All three multi-bound spellings (`dyn T1 + T2`,
+  `impl T1 + T2`, `<Q: T1 + T2>`) now collect every resolvable
+  bound; `canonical_edges_for_method` fans out one edge per bound;
+  `lookup_trait_method_return` finds the first bound that defines
+  the method. The previous "first non-marker bound wins"
+  limitation is gone — UFCS and receiver paths are now symmetric.
+  Regression test:
+  `bug8_multi_bound_receiver_dispatch_finds_method_on_later_bound`.
 
 ### Fixed
 

@@ -124,34 +124,33 @@ fn dispatch_type(ty: &syn::Type, ctx: &ResolveContext<'_>, next: u8) -> Canonica
         syn::Type::Array(a) => into_slice(recurse(&a.elem)),
         syn::Type::Slice(s) => into_slice(recurse(&s.elem)),
         syn::Type::TraitObject(tto) => resolve_bound_list(&tto.bounds, ctx, next),
-        // `impl Trait` return type — the concrete type is hidden by the
-        // compiler, but we can still extract the first non-marker trait
-        // bound and treat the result like `dyn Trait` so trait-dispatch
-        // over-approximation fires on the method call.
+        // `impl Trait` return type — the concrete type is hidden by
+        // the compiler, but we collect every non-marker trait bound
+        // and treat the result like `dyn Trait` so trait-dispatch
+        // over-approximation fires per bound on the method call.
         syn::Type::ImplTrait(iti) => resolve_bound_list(&iti.bounds, ctx, next),
         _ => CanonicalType::Opaque,
     }
 }
 
-/// Extract the first resolvable non-marker trait bound from a
-/// `dyn T1 + T2` or `impl T1 + T2` list and canonicalise it to
-/// `TraitBound(path)`. Marker traits (`Send`, `Sync`, `Unpin`, `Copy`,
-/// `Clone`, etc.) and lifetime bounds are skipped, as are bounds that
-/// can't be canonicalised (external crates not in the workspace) — so
-/// `dyn ExternalTrait + LocalTrait` still dispatches via `LocalTrait`.
-/// Yields `Opaque` if no resolvable trait bound exists. Operation.
-///
-/// **Limit:** when multiple non-marker bounds resolve (e.g.
-/// `impl Future<Output = Session> + Handler`), only the first one
-/// shapes the result. `CanonicalType` carries one type per receiver,
-/// so callers see either `Future<Session>` *or* `TraitBound(Handler)`
-/// but not both. Workaround: split the return into two methods, or
-/// suppress the resulting Check A/B finding with `qual:allow`.
+/// Collect every resolvable non-marker trait bound from a
+/// `dyn T1 + T2` or `impl T1 + T2` list and canonicalise to
+/// `TraitBound(Vec<path>)`. Marker traits (`Send`, `Sync`, `Unpin`,
+/// `Copy`, `Clone`, etc.) and lifetime bounds are skipped; bounds
+/// that can't be canonicalised (external crates not in the
+/// workspace) are filtered out so `dyn ExternalTrait + LocalTrait`
+/// still dispatches via `LocalTrait`. A `Future<Output = T>` bound
+/// short-circuits to `Future(T)` (combinator-table compatibility) —
+/// in that case any peer trait bounds are skipped because
+/// `CanonicalType` can't represent both `Future` and `TraitBound`
+/// simultaneously. Yields `Opaque` if no resolvable trait bound
+/// exists. Operation.
 fn resolve_bound_list(
     bounds: &syn::punctuated::Punctuated<syn::TypeParamBound, syn::Token![+]>,
     ctx: &ResolveContext<'_>,
     depth: u8,
 ) -> CanonicalType {
+    let mut collected: Vec<Vec<String>> = Vec::new();
     for bound in bounds {
         let syn::TypeParamBound::Trait(trait_bound) = bound else {
             continue;
@@ -160,11 +159,9 @@ fn resolve_bound_list(
             continue;
         }
         // `impl Future<Output = T>` deserves the same `Future(T)` shape
-        // the path-form `Future<Output = T>` produces, so `.await` on
-        // the result resolves through the combinator table. Goes via
-        // `identify_wrapper_name` so aliased Future imports
-        // (`use std::future::Future as Fut;`) still match, while
-        // keeping the original `Output = T` args from the bound.
+        // the path-form produces, so `.await` resolves through the
+        // combinator table. Future short-circuits even when peer
+        // trait bounds exist — `CanonicalType` can't carry both.
         if let Some(args) = future_bound_args(trait_bound, ctx) {
             return wrap_future_output(args, ctx, depth);
         }
@@ -175,19 +172,19 @@ fn resolve_bound_list(
             .map(|s| s.ident.to_string())
             .collect();
         // Trait dispatch only knows the workspace, so only crate-rooted
-        // canonicals are valid bounds. External aliases
-        // (`use serde::Serialize;`) expand to `["serde", "Serialize"]`
-        // and must be skipped just like fully-qualified
-        // `serde::Serialize` (which `canonicalise_type_segments_in_scope`
-        // already returns `None` for) — otherwise the external bound
-        // shadows a later workspace bound on the same `+` list.
+        // canonicals count. External aliases like `serde::Serialize`
+        // resolve to `["serde", "Serialize"]` and are filtered out.
         if let Some(resolved) = canonicalise_type_segments_in_scope(&segs, &canon_scope(ctx)) {
             if resolved.first().map(String::as_str) == Some("crate") {
-                return CanonicalType::TraitBound(resolved);
+                collected.push(resolved);
             }
         }
     }
-    CanonicalType::Opaque
+    if collected.is_empty() {
+        CanonicalType::Opaque
+    } else {
+        CanonicalType::TraitBound(collected)
+    }
 }
 
 /// Return the path arguments of a `Future` trait bound when the bound
@@ -350,15 +347,16 @@ fn peel_single_generic(
 /// Resolve a non-wrapper path through the shared canonicalisation
 /// pipeline. On an alias hit, delegate to `resolve_alias::expand_alias`
 /// to handle param substitution + decl-site scope swap. Single-segment
-/// paths that name a fn-scoped generic param (`Q` where `Q: Trait`)
-/// short-circuit to `TraitBound(first_bound)` — without this, the
+/// paths that name a fn-scoped generic param (`Q` where `Q: T1 + T2`)
+/// short-circuit to `TraitBound(all-bounds)` so receiver-position
+/// dispatch can fan out one edge per bound — without this, the
 /// canonicalisation pipeline would either find no workspace symbol
 /// (→ `Opaque`) or accidentally collide with an unrelated workspace
 /// type (→ wrong `Path`).
 fn resolve_generic_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -> CanonicalType {
     let segments: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
-    if let Some(bound) = generic_param_bound(&segments, ctx) {
-        return CanonicalType::TraitBound(bound);
+    if let Some(bounds) = generic_param_bounds(&segments, ctx) {
+        return CanonicalType::TraitBound(bounds);
     }
     let canonicalise =
         |segs: &[String]| canonicalise_type_segments_in_scope(segs, &canon_scope(ctx));
@@ -372,21 +370,24 @@ fn resolve_generic_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -
     CanonicalType::Path(resolved)
 }
 
-/// Single-segment path matching a known generic param → return its
-/// first non-empty trait bound (canonical segments). The "first
-/// bound" choice matches `resolve_bound_list`'s precedent for
-/// `dyn T1 + T2`: `CanonicalType` carries one type per receiver, so
-/// callers see one anchor per dispatch site. Multi-bound spelling
-/// (`Q: T1 + T2`) is documented as a known limit. Returns `None` if
-/// no fn-level `generic_params` available, the path is multi-segment,
-/// or the matched param has no recorded bounds.
-fn generic_param_bound(segments: &[String], ctx: &ResolveContext<'_>) -> Option<Vec<String>> {
+/// Single-segment path matching a known generic param → return all
+/// of its non-empty trait bounds (canonical segments). Multi-bound
+/// (`Q: T1 + T2`) yields all bounds so `canonical_edges_for_method`
+/// can fan out one edge per bound — same behaviour as the UFCS
+/// branch in `canonicalise_generic_param_path`. Returns `None` if no
+/// fn-level `generic_params` available, the path is multi-segment,
+/// or the matched param has only empty bounds (unbounded `<Q>`).
+fn generic_param_bounds(segments: &[String], ctx: &ResolveContext<'_>) -> Option<Vec<Vec<String>>> {
     if segments.len() != 1 {
         return None;
     }
     let bounds = ctx.generic_params?.get(&segments[0])?;
-    let first = bounds.iter().find(|b| !b.is_empty())?;
-    Some(first.clone())
+    let collected: Vec<Vec<String>> = bounds.iter().filter(|b| !b.is_empty()).cloned().collect();
+    if collected.is_empty() {
+        None
+    } else {
+        Some(collected)
+    }
 }
 
 /// Extract the type at position `idx` from angle-bracketed generic args.

@@ -105,7 +105,9 @@ fn lookup_method_on_type(
         CanonicalType::Result(_) | CanonicalType::Option(_) | CanonicalType::Future(_) => {
             super::super::combinators::combinator_return(ty, method)
         }
-        CanonicalType::TraitBound(segs) => lookup_trait_method_return(segs, method, ctx),
+        CanonicalType::TraitBound(bounds) => bounds
+            .iter()
+            .find_map(|trait_segs| lookup_trait_method_return(trait_segs, method, ctx)),
         _ => None,
     }
 }

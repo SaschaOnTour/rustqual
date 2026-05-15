@@ -342,11 +342,11 @@ fn test_trait_object_resolves_via_local_symbols() {
     );
     assert_eq!(
         resolved,
-        CanonicalType::TraitBound(vec![
+        CanonicalType::TraitBound(vec![vec![
             "crate".to_string(),
             "app".to_string(),
             "Handler".to_string(),
-        ])
+        ]])
     );
 }
 
@@ -395,11 +395,11 @@ fn test_impl_trait_resolves_to_trait_bound() {
     );
     assert_eq!(
         resolved,
-        CanonicalType::TraitBound(vec![
+        CanonicalType::TraitBound(vec![vec![
             "crate".to_string(),
             "app".to_string(),
             "Handler".to_string(),
-        ])
+        ]])
     );
 }
 
@@ -510,11 +510,11 @@ fn test_impl_trait_local_send_named_trait_resolves_not_skipped() {
     );
     assert_eq!(
         resolved,
-        CanonicalType::TraitBound(vec![
+        CanonicalType::TraitBound(vec![vec![
             "crate".to_string(),
             "ports".to_string(),
             "Send".to_string(),
-        ]),
+        ]]),
         "workspace `Send`-named trait must resolve to its canonical path, \
          not be discarded as a std marker; got {resolved:?}",
     );
@@ -547,11 +547,11 @@ fn test_impl_trait_bare_std_send_marker_still_skipped() {
     );
     assert_eq!(
         resolved,
-        CanonicalType::TraitBound(vec![
+        CanonicalType::TraitBound(vec![vec![
             "crate".to_string(),
             "app".to_string(),
             "Handler".to_string(),
-        ]),
+        ]]),
         "bare std-marker `Send` must still be skipped so dispatch picks \
          up the local `Handler`; got {resolved:?}",
     );
@@ -590,11 +590,11 @@ fn test_impl_trait_external_aliased_bound_skipped_workspace_bound_wins() {
     );
     assert_eq!(
         resolved,
-        CanonicalType::TraitBound(vec![
+        CanonicalType::TraitBound(vec![vec![
             "crate".to_string(),
             "app".to_string(),
             "Handler".to_string(),
-        ]),
+        ]]),
         "external aliased bound `serde::Serialize` must be skipped so \
          workspace `Handler` is picked; got {resolved:?}",
     );
