@@ -413,3 +413,88 @@ fn bug9_orphan_file_does_not_act_as_sibling_submodule() {
         callees_of(&graph, dispatch),
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// Bug 10 (v1.2.4) — module MEMBERSHIP ≠ public visibility
+// ═══════════════════════════════════════════════════════════════════
+//
+// `collect_workspace_module_paths` derived its set from
+// `collect_file_root_visibility`, which filters files by the public
+// visibility chain (`pub` at every non-root `mod X` link). For
+// sibling-submodule normalisation that filter is too narrow: Rust's
+// resolution of `use foo::T` inside a parent module depends on whether
+// `mod foo;` was *declared* in the parent, NOT on whether external
+// callers can reach the parent via `pub` chain. A private `mod foo;`
+// is still a real child module for code inside the parent.
+//
+// In the trivial top-level case (`src/application/mod.rs` declares
+// `mod response;`) the emergent behaviour of `walk_inline_mod_paths`
+// happens to insert the path anyway, masking the bug. The bug becomes
+// visible as soon as the parent file ITSELF is filtered out by the
+// visibility chain — i.e. when a private `mod X;` higher up hides the
+// whole subtree from `collect_file_root_visibility`. From the
+// perspective of code INSIDE the hidden subtree, sibling-submodule
+// resolution must still work — those mods are children of the current
+// module regardless of how the subtree relates to external callers.
+
+#[test]
+fn bug10_private_mod_sibling_import_traces_edge_even_when_ancestor_hidden() {
+    // src/lib.rs declares `pub mod application;` — visible.
+    // src/application/mod.rs declares `mod hidden;` (private) — that
+    // marks `src/application/hidden.rs` as not-visible per file_root
+    // visibility. From inside `hidden.rs`, `use response::Local;` must
+    // STILL normalise to `crate::application::hidden::response::Local`
+    // because `mod response;` is declared in `hidden.rs` itself.
+    let ws = build_workspace(&[
+        (
+            "src/lib.rs",
+            r#"
+            pub mod application;
+            "#,
+        ),
+        (
+            "src/application/mod.rs",
+            r#"
+            mod hidden;
+            "#,
+        ),
+        (
+            "src/application/hidden.rs",
+            r#"
+            mod response;
+
+            use response::Local;
+
+            pub fn dispatch() {
+                Local::run();
+            }
+            "#,
+        ),
+        (
+            "src/application/hidden/response.rs",
+            r#"
+            pub struct Local;
+            impl Local {
+                pub fn run() {}
+            }
+            "#,
+        ),
+    ]);
+    let graph = build_graph_only(
+        &ws,
+        &rlm_layers_for_eval(),
+        &empty_cfg_test(),
+        &HashSet::new(),
+    );
+    let dispatch = "crate::application::hidden::dispatch";
+    let target = "crate::application::hidden::response::Local::run";
+    assert!(
+        graph_contains_edge(&graph, dispatch, target),
+        "private `mod response;` declared INSIDE a file whose ancestor \
+         chain is hidden by a non-root private `mod hidden;` is still a \
+         real child module for code inside `hidden.rs`. \
+         `use response::Local` must normalise to `{target}` regardless \
+         of public-visibility filtering. dispatch callees: {:?}",
+        callees_of(&graph, dispatch),
+    );
+}

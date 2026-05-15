@@ -64,6 +64,22 @@ regression tests in `call_parity_rule/tests/rlm_v123_eval.rs`
   inline-mod walk's cfg-test skip; this closes the parallel
   file-level case. Regression test:
   `bug9_orphan_file_does_not_act_as_sibling_submodule`.
+- **Bug 10 — private `mod foo;` dropped from sibling-submodule
+  lookup when ancestor chain hidden by `file_root_visibility`.**
+  The bug 9 fix wired `collect_workspace_module_paths` through
+  `file_root_visibility`, which is the right filter for
+  public-surface decisions but too narrow for module membership.
+  Inside a subtree hidden by a non-root private `mod hidden;`,
+  every child file inherited `visibility=false` and its own
+  `mod response;` declarations stopped contributing paths — even
+  though, from code INSIDE the hidden subtree, `use response::T`
+  must still resolve to `crate::…::hidden::response::T`. Fix:
+  drop the visibility filter for module-membership collection.
+  Walk from crate roots through every declared `mod X` (file-
+  backed and inline, any visibility), skipping cfg-test mods.
+  Orphan exclusion (the bug 9 invariant) is preserved because
+  unreachable files are never visited by the walker. Regression
+  test: `bug10_private_mod_sibling_import_traces_edge_even_when_ancestor_hidden`.
 
 ### Fixed
 
