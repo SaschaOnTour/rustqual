@@ -111,15 +111,22 @@ pub(crate) fn build_workspace_files_map<'a>(
 }
 
 /// Build the multi-segment module-path set from the workspace.
-/// Includes BOTH file-backed modules (one entry per file from
-/// `file_to_module_segments`) AND inline `mod foo { … }` blocks
-/// found by walking each file's AST. Without the inline walk, a
-/// shape like `mod outer { mod inner { … } use inner::X; }` would
-/// leave `[outer, inner]` out of the set, defeating the sibling-
-/// submodule discrimination in `normalize_after_alias`.
+/// Includes file-backed modules AND inline `mod foo { … }` blocks,
+/// but ONLY for files that are actually reachable from a crate root
+/// via `mod` declarations (per `file_root_visibility`). Stale files
+/// that exist on disk but no `mod` declaration backs are excluded —
+/// otherwise the sibling-submodule discriminator in
+/// `normalize_after_alias` would treat `use orphan::T` as a local
+/// import and fabricate a `crate::<parent>::orphan::T` edge that
+/// never resolves to a real workspace node.
 pub(crate) fn collect_workspace_module_paths(files: &[(&str, &syn::File)]) -> HashSet<Vec<String>> {
+    let visibility =
+        crate::adapters::analyzers::architecture::call_parity_rule::file_visibility::collect_file_root_visibility(files);
     let mut out = HashSet::new();
     for (path, ast) in files {
+        if !visibility.get(*path).copied().unwrap_or(true) {
+            continue;
+        }
         let base =
             crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments(path);
         out.insert(base.clone());

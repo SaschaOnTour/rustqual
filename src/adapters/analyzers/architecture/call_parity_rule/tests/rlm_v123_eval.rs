@@ -343,3 +343,73 @@ fn bug8_multi_bound_receiver_dispatch_finds_method_on_later_bound() {
         callees_of(&graph, dispatch),
     );
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// Bug 9 (v1.2.4) — orphan file must not act as sibling submodule
+// ═══════════════════════════════════════════════════════════════════
+//
+// `workspace_module_paths` was derived from raw file paths (every
+// file gets its module-segment entry, regardless of whether the
+// parent module declares it via `mod orphan;`). A stale file that
+// no `mod` declaration backs is dead code from Rust's perspective,
+// but the discriminator would still treat `use orphan::X` from a
+// sibling as a local sibling import — fabricating a false edge to
+// `crate::<parent>::orphan::X`. Codex P2 round 8 (2026-05-15)
+// flagged this. Fix: filter `workspace_module_paths` by
+// `file_root_visibility`, so only files actually reachable from a
+// crate root via `mod` declarations contribute paths.
+
+#[test]
+fn bug9_orphan_file_does_not_act_as_sibling_submodule() {
+    // application/mod.rs declares NO `pub mod orphan;`. The orphan
+    // file exists on disk but is unreachable from Rust's module
+    // tree. The import lives at the SAME mod-scope where the orphan
+    // would be a sibling — the false-positive trigger.
+    let ws = build_workspace(&[
+        (
+            "src/application/mod.rs",
+            r#"
+            use orphan::Local;
+
+            pub fn dispatch() {
+                Local::run();
+            }
+            "#,
+        ),
+        (
+            "src/application/orphan.rs",
+            r#"
+            pub struct Local;
+            impl Local {
+                pub fn run() {}
+            }
+            "#,
+        ),
+        (
+            "src/cli/mod.rs",
+            r#"
+            use crate::application::dispatch;
+
+            pub fn cmd_run() {
+                dispatch();
+            }
+            "#,
+        ),
+    ]);
+    let graph = build_graph_only(
+        &ws,
+        &rlm_layers_for_eval(),
+        &empty_cfg_test(),
+        &HashSet::new(),
+    );
+    let dispatch = "crate::application::dispatch";
+    let phantom_target = "crate::application::orphan::Local::run";
+    assert!(
+        !graph_contains_edge(&graph, dispatch, phantom_target),
+        "orphan file `application/orphan.rs` (no `mod orphan;` decl in \
+         application/mod.rs) must NOT be treated as a real sibling \
+         submodule — `use orphan::Local` is an external/unresolved \
+         import, not a workspace canonical. dispatch callees: {:?}",
+        callees_of(&graph, dispatch),
+    );
+}

@@ -7,12 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.2.4] - in development
 
-Patch release: **rlm v1.2.3 audit fixes + Codex round-7 review** —
-closes the two remaining call-parity gaps surfaced by re-running the
-external audit against rustqual 1.2.3, plus three Codex P2 findings
-on the v1.2.4 dev branch. Five failing-first regression tests in
-`call_parity_rule/tests/rlm_v123_eval.rs` (bug5–bug8) anchor the
-fixes.
+Patch release: **rlm v1.2.3 audit fixes + Codex round-7/round-8
+review** — closes the two remaining call-parity gaps surfaced by
+re-running the external audit against rustqual 1.2.3, plus four
+Codex P2 findings on the v1.2.4 dev branch. Failing-first
+regression tests in `call_parity_rule/tests/rlm_v123_eval.rs`
+(bug5–bug9) anchor the fixes.
 
 ### Fixed (Codex round 7 — sibling-resolution + multi-bound)
 
@@ -36,14 +36,34 @@ fixes.
   `trait_dispatch_edges` filtered the first bound out and never
   tried the second. Fix: `CanonicalType::TraitBound` payload
   extended from `Vec<String>` to `Vec<Vec<String>>` (one entry per
-  bound). All three multi-bound spellings (`dyn T1 + T2`,
+  bound). All three multi-bound TRAIT spellings (`dyn T1 + T2`,
   `impl T1 + T2`, `<Q: T1 + T2>`) now collect every resolvable
-  bound; `canonical_edges_for_method` fans out one edge per bound;
-  `lookup_trait_method_return` finds the first bound that defines
-  the method. The previous "first non-marker bound wins"
-  limitation is gone — UFCS and receiver paths are now symmetric.
-  Regression test:
+  trait bound; `canonical_edges_for_method` fans out one edge per
+  bound; `lookup_trait_method_return` finds the first bound that
+  defines the method. UFCS and receiver paths are now symmetric
+  for trait-bound dispatch. **Remaining limit:** a `Future<Output =
+  T>` bound still short-circuits to `CanonicalType::Future` and
+  drops any peer trait bounds — `CanonicalType` can't carry both a
+  Future and a TraitBound simultaneously, so
+  `impl Future<Output = T> + Handler` is still resolved as `Future`
+  only. Regression test:
   `bug8_multi_bound_receiver_dispatch_finds_method_on_later_bound`.
+- **Bug 9 — orphan files faked as sibling submodules.**
+  `collect_workspace_module_paths` derived its set from raw file
+  paths plus inline `mod` blocks, with no check that the parent
+  module actually declared the file. A stale file like
+  `src/application/orphan.rs` (no `pub mod orphan;` in
+  `application/mod.rs`) would still contribute
+  `["application", "orphan"]` to the lookup, making
+  `use orphan::T` from a sibling look like a local sibling import
+  and fabricating an edge to `crate::application::orphan::T` — a
+  canonical that isn't in the call graph. Fix: filter the lookup
+  by `file_root_visibility::collect_file_root_visibility`, so only
+  files reachable from a crate root via `mod` declarations
+  contribute paths. cfg-test files were already excluded via the
+  inline-mod walk's cfg-test skip; this closes the parallel
+  file-level case. Regression test:
+  `bug9_orphan_file_does_not_act_as_sibling_submodule`.
 
 ### Fixed
 
