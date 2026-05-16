@@ -733,3 +733,90 @@ fn test_alias_generic_arg_resolves_at_use_site() {
         "alias generic args must resolve at the use-site, got {resolved:?}"
     );
 }
+
+#[test]
+fn unbounded_generic_param_shadows_same_named_workspace_symbol() {
+    // `fn f<Q>(...)` with NO bound on Q. Inside the body, a path like
+    // `Q` must resolve to `Opaque` (the fn-scoped param shadows any
+    // workspace symbol of the same name), not to the workspace
+    // canonical for a top-level type named `Q`. Without explicit
+    // shadowing, `resolve_generic_path` would fall through to
+    // `canonicalise_type_segments_in_scope` and resolve `Q` to
+    // `crate::Q`, producing wrong method-dispatch edges.
+    let alias_map = HashMap::new();
+    let mut local = HashSet::new();
+    local.insert("Q".to_string());
+    let roots = HashSet::new();
+    let file_scope = FileScope {
+        path: "src/app/runner.rs",
+        alias_map: &alias_map,
+        aliases_per_scope: &ScopedAliasMap::new(),
+        local_symbols: &local,
+        local_decl_scopes: &HashMap::new(),
+        crate_root_modules: &roots,
+        workspace_module_paths: None,
+    };
+    let mut generics: HashMap<String, Vec<Vec<String>>> = HashMap::new();
+    // Unbounded `<Q>` — the param exists, but with no usable bounds.
+    generics.insert("Q".to_string(), vec![]);
+    let ty = parse_type("Q");
+    let resolved = resolve_type(
+        &ty,
+        &ResolveContext {
+            file: &file_scope,
+            mod_stack: &[],
+            type_aliases: None,
+            transparent_wrappers: None,
+            workspace_files: None,
+            alias_param_subs: None,
+            generic_params: Some(&generics),
+        },
+    );
+    assert_eq!(
+        resolved,
+        CanonicalType::Opaque,
+        "unbounded generic param `Q` must shadow same-named workspace \
+         symbol — falling through to canonicalisation would resolve \
+         to `crate::Q` and produce wrong dispatch edges, got {resolved:?}"
+    );
+}
+
+#[test]
+fn unbounded_generic_param_shadowing_does_not_affect_unrelated_path() {
+    // Sanity: the shadowing fix must not affect a workspace symbol
+    // whose name is NOT in `generic_params`. `Session` still resolves
+    // to the workspace canonical even when `Q` is in the param map.
+    let alias_map = HashMap::new();
+    let mut local = HashSet::new();
+    local.insert("Session".to_string());
+    let roots = HashSet::new();
+    let file_scope = FileScope {
+        path: "src/app/session.rs",
+        alias_map: &alias_map,
+        aliases_per_scope: &ScopedAliasMap::new(),
+        local_symbols: &local,
+        local_decl_scopes: &HashMap::new(),
+        crate_root_modules: &roots,
+        workspace_module_paths: None,
+    };
+    let mut generics: HashMap<String, Vec<Vec<String>>> = HashMap::new();
+    generics.insert("Q".to_string(), vec![]);
+    let ty = parse_type("Session");
+    let resolved = resolve_type(
+        &ty,
+        &ResolveContext {
+            file: &file_scope,
+            mod_stack: &[],
+            type_aliases: None,
+            transparent_wrappers: None,
+            workspace_files: None,
+            alias_param_subs: None,
+            generic_params: Some(&generics),
+        },
+    );
+    assert_eq!(
+        resolved,
+        CanonicalType::path(["crate", "app", "session", "Session"]),
+        "path NOT in generic_params must still resolve normally, got {resolved:?}"
+    );
+}

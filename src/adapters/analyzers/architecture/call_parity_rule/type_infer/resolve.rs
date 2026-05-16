@@ -355,8 +355,8 @@ fn peel_single_generic(
 /// type (→ wrong `Path`).
 fn resolve_generic_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -> CanonicalType {
     let segments: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
-    if let Some(bounds) = generic_param_bounds(&segments, ctx) {
-        return CanonicalType::TraitBound(bounds);
+    if let Some(shadow) = generic_param_shadow(&segments, ctx) {
+        return shadow;
     }
     let canonicalise =
         |segs: &[String]| canonicalise_type_segments_in_scope(segs, &canon_scope(ctx));
@@ -370,24 +370,20 @@ fn resolve_generic_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -
     CanonicalType::Path(resolved)
 }
 
-/// Single-segment path matching a known generic param → return all
-/// of its non-empty trait bounds (canonical segments). Multi-bound
-/// (`Q: T1 + T2`) yields all bounds so `canonical_edges_for_method`
-/// can fan out one edge per bound — same behaviour as the UFCS
-/// branch in `canonicalise_generic_param_path`. Returns `None` if no
-/// fn-level `generic_params` available, the path is multi-segment,
-/// or the matched param has only empty bounds (unbounded `<Q>`).
-fn generic_param_bounds(segments: &[String], ctx: &ResolveContext<'_>) -> Option<Vec<Vec<String>>> {
+/// `Some(TraitBound(..))` for bounded fn-scoped generics, `Some(Opaque)`
+/// for unbounded ones (shadowing — must not fall through to a same-
+/// named workspace symbol), `None` when the path isn't a known param.
+fn generic_param_shadow(segments: &[String], ctx: &ResolveContext<'_>) -> Option<CanonicalType> {
     if segments.len() != 1 {
         return None;
     }
     let bounds = ctx.generic_params?.get(&segments[0])?;
     let collected: Vec<Vec<String>> = bounds.iter().filter(|b| !b.is_empty()).cloned().collect();
-    if collected.is_empty() {
-        None
+    Some(if collected.is_empty() {
+        CanonicalType::Opaque
     } else {
-        Some(collected)
-    }
+        CanonicalType::TraitBound(collected)
+    })
 }
 
 /// Extract the type at position `idx` from angle-bracketed generic args.

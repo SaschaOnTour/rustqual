@@ -7,30 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.2.4] - in development
 
-Patch release: **rlm v1.2.3 audit fixes + Codex round-7/round-8
-review** — closes the two remaining call-parity gaps surfaced by
+Patch release: **call-parity audit follow-up + post-review
+sharpening** — closes the two remaining call-parity gaps surfaced by
 re-running the external audit against rustqual 1.2.3, plus four
-Codex P2 findings on the v1.2.4 dev branch. Failing-first
-regression tests in `call_parity_rule/tests/rlm_v123_eval.rs`
-(bug5–bug9) anchor the fixes.
+sibling-resolution / multi-bound findings from the post-1.2.3 review
+pass. Failing-first regression tests live in
+`call_parity_rule/tests/{module_resolution,target_anchors,type_infer/tests/resolve}.rs`.
 
-### Fixed (Codex round 7 — sibling-resolution + multi-bound)
+### Fixed (sibling-resolution + multi-bound)
 
-- **Bug 6 — sibling submodule loses to crate-root with same name.**
+- **Sibling submodule loses to crate-root with same name.**
   `normalize_after_alias` checked `crate_root_modules` before the
   sibling-submodule branch, mis-routing `use foo::X` inside
   `crate::application` (where both `crate::application::foo` and
   `crate::foo` exist) to the crate-root module. Fix: reorder the
   match arms — local sibling check fires first, matching Rust 2018+
   resolution priority. Regression test:
-  `bug6_sibling_submodule_wins_over_crate_root_with_same_name`.
-- **Bug 7 — inline mods invisible to sibling discriminator.**
+  `sibling_submodule_wins_over_crate_root_with_same_leaf_name` in
+  `module_resolution.rs`.
+- **Inline mods invisible to sibling discriminator.**
   `collect_workspace_module_paths` collected only file-backed paths,
   leaving inline `mod foo { mod bar { ... } use bar::X }` patterns
   with no entry for `[foo, bar]`. Fix: walk each file's AST for
   `Item::Mod` blocks (cfg-test skipped) and add their paths.
-  Regression test: `bug7_inline_mod_sibling_import_traces_edge`.
-- **Bug 8 — multi-bound generic receiver drops later bounds.**
+  Regression test: `inline_mod_sibling_import_traces_edge` in
+  `module_resolution.rs`.
+- **Multi-bound generic receiver drops later bounds.**
   `q.method()` where `q: &Q` and `Q: T1 + T2`: the receiver path
   returned only the first bound, so if the method lived on `T2`,
   `trait_dispatch_edges` filtered the first bound out and never
@@ -47,8 +49,9 @@ regression tests in `call_parity_rule/tests/rlm_v123_eval.rs`
   Future and a TraitBound simultaneously, so
   `impl Future<Output = T> + Handler` is still resolved as `Future`
   only. Regression test:
-  `bug8_multi_bound_receiver_dispatch_finds_method_on_later_bound`.
-- **Bug 9 — orphan files faked as sibling submodules.**
+  `multi_bound_generic_receiver_method_call_emits_anchor_for_defining_bound`
+  in `target_anchors.rs`.
+- **Orphan files faked as sibling submodules.**
   `collect_workspace_module_paths` derived its set from raw file
   paths plus inline `mod` blocks, with no check that the parent
   module actually declared the file. A stale file like
@@ -62,14 +65,14 @@ regression tests in `call_parity_rule/tests/rlm_v123_eval.rs`
   paths. Orphan files are unreachable in that walk and so stay
   out of the lookup. cfg-test mods are skipped uniformly across
   file-backed and inline declarations. Regression test:
-  `bug9_orphan_file_does_not_act_as_sibling_submodule`. (The
-  initial 1.2.4 fix wired the lookup through
-  `file_root_visibility`; bug 10 below replaced that with a
-  declared-edge walk that handles both invariants in one pass —
-  the description here reflects the final shape.)
-- **Bug 10 — private `mod foo;` dropped from sibling-submodule
-  lookup when ancestor chain was hidden.**
-  The initial bug 9 fix wired `collect_workspace_module_paths`
+  `orphan_file_does_not_act_as_sibling_submodule` in
+  `module_resolution.rs`. (The initial 1.2.4 fix wired the lookup
+  through `file_root_visibility`; the private-mod fix below replaced
+  that with a declared-edge walk that handles both invariants in
+  one pass — the description here reflects the final shape.)
+- **Private `mod foo;` dropped from sibling-submodule lookup when
+  ancestor chain was hidden.**
+  The initial orphan-file fix wired `collect_workspace_module_paths`
   through `file_root_visibility`, which is the right filter for
   public-surface decisions but too narrow for module membership.
   Inside a subtree hidden by a non-root private `mod hidden;`,
@@ -80,9 +83,22 @@ regression tests in `call_parity_rule/tests/rlm_v123_eval.rs`
   drop the visibility filter for module-membership collection.
   Walk from crate roots through every declared `mod X` (file-
   backed and inline, any visibility), skipping cfg-test mods.
-  Orphan exclusion (the bug 9 invariant) is preserved because
+  Orphan exclusion (the prior invariant) is preserved because
   unreachable files are never visited by the walker. Regression
-  test: `bug10_private_mod_sibling_import_traces_edge_even_when_ancestor_hidden`.
+  test:
+  `private_mod_sibling_import_resolves_even_when_ancestor_chain_is_hidden`
+  in `module_resolution.rs`.
+- **Unbounded generic param could collide with same-named workspace
+  symbol.** `resolve_generic_path` short-circuited to `TraitBound`
+  only when the fn-scoped generic param had at least one non-empty
+  bound; an unbounded `<Q>` fell through to normal canonicalisation,
+  which could resolve `Q` to a workspace type/module of the same
+  name and produce wrong method-dispatch edges. Fix: classify the
+  match into three states (`Bounded` / `Unbounded` / `NotAParam`)
+  so an unbounded match shadows the workspace lookup with `Opaque`.
+  Regression test:
+  `unbounded_generic_param_shadows_same_named_workspace_symbol` in
+  `type_infer/tests/resolve.rs`.
 
 ### Fixed
 
@@ -102,10 +118,10 @@ regression tests in `call_parity_rule/tests/rlm_v123_eval.rs`
   parallel logic. Every downstream consumer of `resolve_type`
   (signature seeding, let-binding inference, return-type chasing,
   closure-arg seeding) benefits at one stroke. Regression tests:
-  `bug4_method_call_on_generic_receiver_emits_trait_anchor_edge`,
-  `bug4_method_call_with_where_clause_bound_emits_trait_anchor_edge`,
-  `bug4_method_call_with_impl_level_generic_emits_trait_anchor_edge`
-  in `rlm_v122_eval.rs`.
+  `method_call_on_generic_receiver_emits_trait_anchor_edge`,
+  `method_call_on_where_clause_bound_generic_emits_trait_anchor_edge`,
+  `method_call_on_impl_level_generic_emits_trait_anchor_edge`
+  in `target_anchors.rs`.
 - **Class 2 (call-parity / sibling-submodule UFCS)** —
   `Type::new(args)` where `Type` is imported via
   `use submodule::Type;` (relative sibling-submodule) now traces
@@ -128,16 +144,16 @@ regression tests in `call_parity_rule/tests/rlm_v123_eval.rs`
   rule); extern crates preserve their absolute extern-path shape
   so `is_stdlib_prefixed` and `resolve_bound_list`'s "first ==
   'crate'" gate keep their existing behaviour. Regression test:
-  `bug5_concrete_ufcs_in_sibling_submodule_traces_edge` in
-  new `rlm_v123_eval.rs`.
+  `concrete_ufcs_via_sibling_submodule_import_traces_edge` in
+  `call_parity_rule/tests/module_resolution.rs`.
 
-## [1.2.3] - in development
+## [1.2.3] - 2026-05-14
 
-Patch release: **rlm v1.2.2 audit fixes** — closes five gaps surfaced
+Patch release: **call_parity audit fixes** — closes five gaps surfaced
 by an external rmcp-based project's call-parity audit. Each fix is
 reproduced by a failing-first regression test in
-`call_parity_rule/tests/rlm_v122_eval.rs`; all 1637 tests + self-
-analysis stay 100% green after the fixes land.
+`call_parity_rule/tests/{receiver_tracing,module_resolution,target_anchors,check_b}.rs`;
+all tests + self-analysis stay 100% green after the fixes land.
 
 - **Bug 1 (call-parity / rmcp `#[tool_router]`)** — proc-macros
   generate the public dispatch surface at expansion time around a

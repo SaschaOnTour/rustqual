@@ -305,6 +305,38 @@ pub(super) fn empty_cfg_test() -> HashSet<String> {
     HashSet::new()
 }
 
+/// Does `graph` contain a forward edge `from → to`? Used by workspace-
+/// level edge-tracing assertions across the call_parity test suite.
+/// Operation: HashMap + HashSet lookup.
+pub(super) fn graph_contains_edge(
+    graph: &crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::CallGraph,
+    from: &str,
+    to: &str,
+) -> bool {
+    graph
+        .forward
+        .get(from)
+        .is_some_and(|callees| callees.contains(to))
+}
+
+/// Sorted list of callees from `from` for assertion-message context.
+/// Returns `Vec<&str>` borrowing from the graph for a stable, readable
+/// debug output. Operation: HashMap lookup + sort.
+pub(super) fn callees_of<'g>(
+    graph: &'g crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::CallGraph,
+    from: &str,
+) -> Vec<&'g str> {
+    graph
+        .forward
+        .get(from)
+        .map(|set| {
+            let mut v: Vec<&str> = set.iter().map(String::as_str).collect();
+            v.sort();
+            v
+        })
+        .unwrap_or_default()
+}
+
 /// Build pub-fns + graph and compute touchpoints for one named handler.
 /// Integration: builds the workspace graph, finds the handler by its
 /// short fn_name, then delegates to `compute_touchpoints`.

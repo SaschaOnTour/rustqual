@@ -5,7 +5,10 @@
 //! `dyn Trait.method()` dispatch must be checked against them, not
 //! against the concrete impls those dispatches reach.
 
-use super::support::{build_graph_only, build_workspace, empty_cfg_test, ports_app_cli_mcp};
+use super::support::{
+    build_graph_only, build_workspace, callees_of, empty_cfg_test, graph_contains_edge,
+    ports_app_cli_mcp, three_layer,
+};
 use std::collections::HashSet;
 
 #[test]
@@ -390,5 +393,373 @@ fn target_anchor_capabilities_excludes_signature_only_target_layer_trait() {
     assert!(
         !caps.contains("crate::application::handler::Handler::handle"),
         "pure-signature trait method (no default, no impl) must NOT be a target capability; got {caps:?}"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Generic-param dispatch (`Q: Trait`) must emit trait-anchor edges
+// regardless of bound spelling (inline, where-clause, impl-level) or
+// call shape (UFCS path-call vs method-call receiver).
+// ─────────────────────────────────────────────────────────────────────
+
+#[test]
+fn ufcs_path_call_on_generic_param_emits_trait_anchor_edge() {
+    // `pub fn run<Q: SymbolQuery>(q: Q) { Q::execute(&q); }` must emit
+    // an edge to the trait anchor `SymbolQuery::execute`, the same
+    // form that `populate_anchor_index` registers.
+    let ws = build_workspace(&[
+        (
+            "src/application/symbol.rs",
+            r#"
+            pub trait SymbolQuery {
+                fn execute(&self);
+            }
+            pub struct DepsQuery;
+            impl SymbolQuery for DepsQuery {
+                fn execute(&self) {}
+            }
+            "#,
+        ),
+        (
+            "src/application/runner.rs",
+            r#"
+            use crate::application::symbol::SymbolQuery;
+
+            pub fn run<Q: SymbolQuery>(q: Q) {
+                Q::execute(&q);
+            }
+            "#,
+        ),
+    ]);
+    let graph = build_graph_only(&ws, &three_layer(), &empty_cfg_test(), &HashSet::new());
+
+    let runner = "crate::application::runner::run";
+    let anchor = "crate::application::symbol::SymbolQuery::execute";
+    let impl_method = "crate::application::symbol::DepsQuery::execute";
+
+    let has_anchor = graph_contains_edge(&graph, runner, anchor);
+    let has_impl = graph_contains_edge(&graph, runner, impl_method);
+
+    // Sanity: where-clause spelling must produce the same edge — both
+    // forms are semantically identical.
+    let ws_where = build_workspace(&[
+        (
+            "src/application/symbol.rs",
+            r#"
+            pub trait SymbolQuery { fn execute(&self); }
+            pub struct DepsQuery;
+            impl SymbolQuery for DepsQuery { fn execute(&self) {} }
+            "#,
+        ),
+        (
+            "src/application/runner.rs",
+            r#"
+            use crate::application::symbol::SymbolQuery;
+            pub fn run<Q>(q: Q) where Q: SymbolQuery { Q::execute(&q); }
+            "#,
+        ),
+    ]);
+    let graph_where = build_graph_only(
+        &ws_where,
+        &three_layer(),
+        &empty_cfg_test(),
+        &HashSet::new(),
+    );
+    assert!(
+        graph_contains_edge(&graph_where, runner, anchor),
+        "where-clause variant must emit the same trait-anchor edge as inline-bound. \
+         run callees: {:?}",
+        callees_of(&graph_where, runner),
+    );
+
+    // Impl-level bound: `impl<Q: SymbolQuery> Runner<Q> { fn run(...) }`.
+    // The Q bound lives on the IMPL block, not the method sig.
+    let ws_impl = build_workspace(&[
+        (
+            "src/application/symbol.rs",
+            r#"
+            pub trait SymbolQuery { fn execute(&self); }
+            pub struct DepsQuery;
+            impl SymbolQuery for DepsQuery { fn execute(&self) {} }
+            "#,
+        ),
+        (
+            "src/application/runner.rs",
+            r#"
+            use crate::application::symbol::SymbolQuery;
+            pub struct Runner<Q>(pub Q);
+            impl<Q: SymbolQuery> Runner<Q> {
+                pub fn run(&self, q: &Q) { Q::execute(q); }
+            }
+            "#,
+        ),
+    ]);
+    let graph_impl = build_graph_only(&ws_impl, &three_layer(), &empty_cfg_test(), &HashSet::new());
+    let runner_impl = "crate::application::runner::Runner::run";
+    assert!(
+        graph_contains_edge(&graph_impl, runner_impl, anchor),
+        "impl-level generic bound must emit trait-anchor edge for Q::method() inside method body. \
+         Runner::run callees: {:?}",
+        callees_of(&graph_impl, runner_impl),
+    );
+
+    assert!(
+        has_anchor || has_impl,
+        "`Q::execute(&q)` emits no edge to either the trait anchor \
+         `{anchor}` or the impl method `{impl_method}`.\n\
+         run callees: {:?}",
+        callees_of(&graph, runner),
+    );
+
+    // Method-level where clause on impl-level generic: bound only in
+    // the method's where clause, not on the impl. Without merging the
+    // method-where against impl-level names, the predicate would drop.
+    let ws_method_where = build_workspace(&[
+        (
+            "src/application/symbol.rs",
+            r#"
+            pub trait SymbolQuery { fn execute(&self); }
+            pub struct DepsQuery;
+            impl SymbolQuery for DepsQuery { fn execute(&self) {} }
+            "#,
+        ),
+        (
+            "src/application/runner.rs",
+            r#"
+            use crate::application::symbol::SymbolQuery;
+            pub struct Runner<Q>(pub Q);
+            impl<Q> Runner<Q> {
+                pub fn run(&self, q: &Q) where Q: SymbolQuery { Q::execute(q); }
+            }
+            "#,
+        ),
+    ]);
+    let graph_method_where = build_graph_only(
+        &ws_method_where,
+        &three_layer(),
+        &empty_cfg_test(),
+        &HashSet::new(),
+    );
+    assert!(
+        graph_contains_edge(&graph_method_where, runner_impl, anchor),
+        "method-level where clause on impl-level generic must emit \
+         trait-anchor edge. Runner::run callees: {:?}",
+        callees_of(&graph_method_where, runner_impl),
+    );
+}
+
+#[test]
+fn method_call_on_generic_receiver_emits_trait_anchor_edge() {
+    // Side-by-side control + bug pair: UFCS form (`Q::execute(input)`)
+    // and method-call form (`q.execute(input)`) go through different
+    // resolution paths. Both must emit the trait-anchor edge.
+    let ws = build_workspace(&[
+        (
+            "src/application/mod.rs",
+            r#"
+            use serde::Serialize;
+
+            // Control: trait with associated function (no &self).
+            pub trait UfcsTrait {
+                type Output: Serialize;
+                fn execute(input: &str) -> Self::Output;
+            }
+
+            pub fn ufcs_inner(input: &str) -> String {
+                format!("ufcs:{input}")
+            }
+
+            pub struct UfcsTraitImpl;
+            impl UfcsTrait for UfcsTraitImpl {
+                type Output = String;
+                fn execute(input: &str) -> Self::Output {
+                    ufcs_inner(input)
+                }
+            }
+
+            pub fn dispatch_ufcs<Q: UfcsTrait>(input: &str) -> Q::Output {
+                Q::execute(input)
+            }
+
+            // Bug shape: trait with `&self` receiver.
+            pub trait MethodTrait {
+                type Output: Serialize;
+                fn execute(&self, input: &str) -> Self::Output;
+            }
+
+            pub fn method_inner(input: &str) -> String {
+                format!("method:{input}")
+            }
+
+            pub struct MethodTraitImpl;
+            impl MethodTrait for MethodTraitImpl {
+                type Output = String;
+                fn execute(&self, input: &str) -> Self::Output {
+                    method_inner(input)
+                }
+            }
+
+            pub fn dispatch_method<Q: MethodTrait>(query: &Q, input: &str) -> Q::Output {
+                query.execute(input)
+            }
+            "#,
+        ),
+        (
+            "src/cli/mod.rs",
+            r#"
+            use crate::application::{
+                dispatch_method, dispatch_ufcs, MethodTraitImpl, UfcsTraitImpl,
+            };
+
+            pub fn cmd_ufcs() -> String {
+                dispatch_ufcs::<UfcsTraitImpl>("hi")
+            }
+
+            pub fn cmd_method() -> String {
+                dispatch_method(&MethodTraitImpl, "hi")
+            }
+            "#,
+        ),
+    ]);
+    let graph = build_graph_only(&ws, &three_layer(), &empty_cfg_test(), &HashSet::new());
+
+    let dispatch_method = "crate::application::dispatch_method";
+    let method_anchor = "crate::application::MethodTrait::execute";
+
+    // Control: UFCS form must already trace.
+    let dispatch_ufcs = "crate::application::dispatch_ufcs";
+    let ufcs_anchor = "crate::application::UfcsTrait::execute";
+    assert!(
+        graph_contains_edge(&graph, dispatch_ufcs, ufcs_anchor),
+        "control: UFCS form must already trace. \
+         dispatch_ufcs callees: {:?}",
+        callees_of(&graph, dispatch_ufcs),
+    );
+
+    // The actual coverage: method-call form on generic-param receiver
+    // must also emit the trait-anchor edge.
+    assert!(
+        graph_contains_edge(&graph, dispatch_method, method_anchor),
+        "method-call on generic receiver `query.execute(input)` where \
+         `query: &Q` and `Q: MethodTrait` must emit trait-anchor edge \
+         `{method_anchor}`. dispatch_method callees: {:?}",
+        callees_of(&graph, dispatch_method),
+    );
+}
+
+#[test]
+fn method_call_on_where_clause_bound_generic_emits_trait_anchor_edge() {
+    // `where Q: T` instead of inline `<Q: T>`. Same edge expected —
+    // bound spelling shouldn't affect dispatch resolution.
+    let ws = build_workspace(&[(
+        "src/application/mod.rs",
+        r#"
+        pub trait MethodTrait {
+            fn execute(&self, input: &str) -> String;
+        }
+
+        pub fn dispatch_method<Q>(query: &Q, input: &str) -> String
+        where
+            Q: MethodTrait,
+        {
+            query.execute(input)
+        }
+        "#,
+    )]);
+    let graph = build_graph_only(&ws, &three_layer(), &empty_cfg_test(), &HashSet::new());
+    let dispatch_method = "crate::application::dispatch_method";
+    let anchor = "crate::application::MethodTrait::execute";
+    assert!(
+        graph_contains_edge(&graph, dispatch_method, anchor),
+        "where-clause bound on generic-param receiver must emit \
+         trait-anchor edge. dispatch_method callees: {:?}",
+        callees_of(&graph, dispatch_method),
+    );
+}
+
+#[test]
+fn method_call_on_impl_level_generic_emits_trait_anchor_edge() {
+    // Bound lives on the impl block, method-call inside the method
+    // body: `impl<Q: T> Foo<Q> { fn run(&self, q: &Q) { q.execute(...) } }`.
+    let ws = build_workspace(&[(
+        "src/application/mod.rs",
+        r#"
+        pub trait MethodTrait {
+            fn execute(&self, input: &str) -> String;
+        }
+
+        pub struct Runner<Q>(pub Q);
+
+        impl<Q: MethodTrait> Runner<Q> {
+            pub fn run(&self, q: &Q, input: &str) -> String {
+                q.execute(input)
+            }
+        }
+        "#,
+    )]);
+    let graph = build_graph_only(&ws, &three_layer(), &empty_cfg_test(), &HashSet::new());
+    let runner_run = "crate::application::Runner::run";
+    let anchor = "crate::application::MethodTrait::execute";
+    assert!(
+        graph_contains_edge(&graph, runner_run, anchor),
+        "impl-level generic bound on method-call receiver must emit \
+         trait-anchor edge. Runner::run callees: {:?}",
+        callees_of(&graph, runner_run),
+    );
+}
+
+#[test]
+fn multi_bound_generic_receiver_method_call_emits_anchor_for_defining_bound() {
+    // `Q: Audit + Handler` where `Audit` has no `handle` method but
+    // `Handler` does. `q.handle()` must emit edge to `Handler::handle`
+    // even though `Handler` is the SECOND bound and `Audit` (first)
+    // doesn't define the method. UFCS form (`Q::handle()`) already
+    // emits one edge per bound; the receiver form must be symmetric.
+    let ws = build_workspace(&[
+        (
+            "src/application/mod.rs",
+            r#"
+            pub trait Audit {
+                fn audit(&self);
+            }
+
+            pub trait Handler {
+                fn handle(&self);
+            }
+
+            pub fn dispatch<Q: Audit + Handler>(q: &Q) {
+                q.handle();
+            }
+            "#,
+        ),
+        (
+            "src/cli/mod.rs",
+            r#"
+            use crate::application::{dispatch, Audit, Handler};
+
+            pub struct Real;
+            impl Audit for Real {
+                fn audit(&self) {}
+            }
+            impl Handler for Real {
+                fn handle(&self) {}
+            }
+
+            pub fn cmd_run() {
+                dispatch(&Real);
+            }
+            "#,
+        ),
+    ]);
+    let graph = build_graph_only(&ws, &three_layer(), &empty_cfg_test(), &HashSet::new());
+    let dispatch = "crate::application::dispatch";
+    let handler_anchor = "crate::application::Handler::handle";
+    assert!(
+        graph_contains_edge(&graph, dispatch, handler_anchor),
+        "multi-bound generic receiver `q: &Q` where `Q: Audit + Handler`: \
+         `q.handle()` must emit edge to `{handler_anchor}` even though \
+         `Handler` is the SECOND bound and `Audit` (first) doesn't define \
+         the method. dispatch callees: {:?}",
+        callees_of(&graph, dispatch),
     );
 }
