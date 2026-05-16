@@ -7,7 +7,7 @@
 //! `pub type Public = Inner; type Inner = private::Hidden;` reach
 //! the source type even when intermediate aliases are private.
 
-use super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
+use super::bindings::{canonicalise_workspace_path, CanonScope};
 use super::local_symbols::{collect_local_symbols_scoped, FileScope, LocalSymbols};
 use super::pub_fns_visibility::{canonical_for_decl, peel_to_inner_path};
 use crate::adapters::shared::cfg_test::has_cfg_test;
@@ -179,7 +179,9 @@ pub(super) fn resolve_alias_target_canonical(
         file: file_scope,
         mod_stack,
     };
-    canonicalise_type_segments_in_scope(&segs, &scope).map(|c| c.join("::"))
+    // Use-site gate: `type Repo = ::ext::Store;` alias targets that
+    // are extern-rooted don't expose a workspace canonical.
+    canonicalise_workspace_path(&segs, p.path.leading_colon.is_some(), &scope).map(|c| c.join("::"))
 }
 
 /// Follow an alias chain from `start` through `alias_chain` until a

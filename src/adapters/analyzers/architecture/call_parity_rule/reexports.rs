@@ -18,7 +18,7 @@
 //! is *not* a re-export and is excluded — the existing per-file
 //! alias map already handles those.
 
-use super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
+use super::bindings::{canonicalise_workspace_path, CanonScope};
 use super::local_symbols::FileScope;
 use super::workspace_graph::{apply_edge_rewrite, CallGraph};
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
@@ -86,7 +86,7 @@ fn walk_pub_uses(
             }
             let mut leaves: Vec<(Vec<String>, String)> = Vec::new();
             collect_pub_use_leaves(&[], &u.tree, &mut leaves);
-            register_pub_use_leaves(&leaves, file, mod_stack, map);
+            register_pub_use_leaves(&leaves, u.leading_colon.is_some(), file, mod_stack, map);
         }
         if let syn::Item::Mod(m) = item {
             if has_cfg_test(&m.attrs) {
@@ -102,17 +102,23 @@ fn walk_pub_uses(
 }
 
 /// Resolve each leaf against the file scope and insert into the map.
+/// `leading_colon_set` propagates the absolute-path gate from the
+/// surrounding `pub use ::ext::Foo;` statement so extern-rooted
+/// re-exports don't false-route to workspace symbols.
 /// Operation: per-leaf canonicalisation + reexport-canonical assembly.
 fn register_pub_use_leaves(
     leaves: &[(Vec<String>, String)],
+    leading_colon_set: bool,
     file: &FileScope<'_>,
     mod_stack: &[String],
     map: &mut HashMap<String, String>,
 ) {
     for (path_segs, name) in leaves {
-        let Some(target) =
-            canonicalise_type_segments_in_scope(path_segs, &CanonScope { file, mod_stack })
-        else {
+        let Some(target) = canonicalise_workspace_path(
+            path_segs,
+            leading_colon_set,
+            &CanonScope { file, mod_stack },
+        ) else {
             continue;
         };
         let reexport = build_reexport_canonical(file.path, mod_stack, name);

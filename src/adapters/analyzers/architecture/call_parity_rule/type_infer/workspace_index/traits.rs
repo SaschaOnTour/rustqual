@@ -22,7 +22,7 @@
 
 use super::{canonical_type_key, BuildContext, MethodLocation, WorkspaceTypeIndex};
 use crate::adapters::analyzers::architecture::call_parity_rule::bindings::{
-    canonicalise_type_segments_in_scope, CanonScope,
+    canonicalise_workspace_path, CanonScope,
 };
 use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::resolve_impl_self_type;
 use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
@@ -203,8 +203,11 @@ fn resolve_trait_path(
     mod_stack: &[String],
 ) -> Option<String> {
     let segs: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
-    let resolved = canonicalise_type_segments_in_scope(
+    // Route through the use-site gate so `impl ::ext::Trait for X`
+    // doesn't false-register as a workspace trait impl.
+    let resolved = canonicalise_workspace_path(
         &segs,
+        path.leading_colon.is_some(),
         &CanonScope {
             file: ctx.file,
             mod_stack,

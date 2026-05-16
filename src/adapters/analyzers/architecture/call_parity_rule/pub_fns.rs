@@ -334,7 +334,7 @@ fn is_impl_for_visible_trait(
     scope: &CanonScope<'_>,
     visible_canonicals: &HashSet<String>,
 ) -> bool {
-    use crate::adapters::analyzers::architecture::call_parity_rule::bindings::canonicalise_type_segments_in_scope;
+    use crate::adapters::analyzers::architecture::call_parity_rule::bindings::canonicalise_workspace_path;
     let Some((_, trait_path, _)) = node.trait_.as_ref() else {
         return false;
     };
@@ -343,7 +343,11 @@ fn is_impl_for_visible_trait(
         .iter()
         .map(|s| s.ident.to_string())
         .collect();
-    let Some(canonical) = canonicalise_type_segments_in_scope(&segs, scope) else {
+    // Use-site gate: `impl ::ext::Trait for X` doesn't refer to a
+    // workspace trait, even if a same-named workspace trait exists.
+    let Some(canonical) =
+        canonicalise_workspace_path(&segs, trait_path.leading_colon.is_some(), scope)
+    else {
         return false;
     };
     visible_canonicals.contains(&canonical.join("::"))

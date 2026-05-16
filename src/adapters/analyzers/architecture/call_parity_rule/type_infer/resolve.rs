@@ -182,9 +182,13 @@ fn resolve_bound_list(
             .map(|s| s.ident.to_string())
             .collect();
         // Trait dispatch only knows the workspace, so only crate-rooted
-        // canonicals count. External aliases like `serde::Serialize`
-        // resolve to `["serde", "Serialize"]` and are filtered out.
-        if let Some(resolved) = canonicalise_type_segments_in_scope(&segs, &canon_scope(ctx)) {
+        // canonicals count. Route through `canonicalise_workspace_path`
+        // so a leading-colon bound (`dyn ::ext::Trait` /
+        // `impl ::ext::Trait`) short-circuits — without this, a
+        // same-named workspace trait would steal the dispatch.
+        let leading_colon = trait_bound.path.leading_colon.is_some();
+        if let Some(resolved) = canonicalise_workspace_path(&segs, leading_colon, &canon_scope(ctx))
+        {
             if resolved.first().map(String::as_str) == Some("crate") {
                 collected.push(resolved);
             }

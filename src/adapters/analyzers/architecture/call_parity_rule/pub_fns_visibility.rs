@@ -7,7 +7,7 @@
 //! distinct types sharing a short ident don't collide and re-exports /
 //! type-aliases bridge to their source canonicals.
 
-use super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
+use super::bindings::{canonicalise_workspace_path, CanonScope};
 use super::local_symbols::{collect_local_symbols_scoped, FileScope, LocalSymbols};
 use super::pub_fns_alias_chain::{
     chase_alias_chain, collect_alias_chain, collect_workspace_type_canonicals,
@@ -151,14 +151,15 @@ fn collect_in_items(
             &ident.to_string(),
         ));
     };
-    let collect_use = |tree: &syn::UseTree, out: &mut HashSet<String>| {
+    let collect_use = |item_use: &syn::ItemUse, out: &mut HashSet<String>| {
         let use_ctx = super::pub_fns_use_tree::UseTreeCtx {
             file_scope,
             mod_stack,
             type_canonicals: ctx.type_canonicals,
             alias_chain: ctx.alias_chain,
+            leading_colon_set: item_use.leading_colon.is_some(),
         };
-        super::pub_fns_use_tree::walk_use_tree(tree, &mut Vec::new(), &use_ctx, out);
+        super::pub_fns_use_tree::walk_use_tree(&item_use.tree, &mut Vec::new(), &use_ctx, out);
     };
     let add_alias_target = |ty: &syn::Type, out: &mut HashSet<String>| {
         register_alias_target(ty, file_scope, mod_stack, ctx, out);
@@ -173,7 +174,7 @@ fn collect_in_items(
                 add_decl(&t.ident, out);
                 add_alias_target(&t.ty, out);
             }
-            syn::Item::Use(u) if is_visible(&u.vis) => collect_use(&u.tree, out),
+            syn::Item::Use(u) if is_visible(&u.vis) => collect_use(u, out),
             syn::Item::Mod(m) if is_visible(&m.vis) && !has_cfg_test(&m.attrs) => {
                 if let Some((_, inner)) = m.content.as_ref() {
                     let mut next = mod_stack.to_vec();
@@ -292,7 +293,11 @@ fn is_transparent_wrapper(
         mod_stack,
     };
     let segs: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
-    if let Some(canonical) = canonicalise_type_segments_in_scope(&segs, &scope) {
+    // Use-site gate: `::ext::Box`-style attribute paths don't refer
+    // to the workspace.
+    if let Some(canonical) =
+        canonicalise_workspace_path(&segs, path.leading_colon.is_some(), &scope)
+    {
         let Some(last_seg) = canonical.last() else {
             return false;
         };

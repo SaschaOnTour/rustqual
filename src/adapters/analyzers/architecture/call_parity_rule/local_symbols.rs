@@ -245,7 +245,9 @@ fn walk_fallback_roots(
 /// workspace — i.e. `base` has an ancestor that will reach it (or
 /// pointedly NOT reach it) via its own walker. Operation: prefix scan.
 fn has_workspace_ancestor(base: &[String], segs_to_path: &HashMap<Vec<String>, &str>) -> bool {
-    (1..base.len()).any(|len| segs_to_path.contains_key(&base[..len].to_vec()))
+    // `Vec<T>: Borrow<[T]>` — pass the slice directly so the lookup
+    // doesn't allocate a fresh `Vec` per prefix probe.
+    (1..base.len()).any(|len| segs_to_path.contains_key(&base[..len] as &[String]))
 }
 
 /// Bundles the workspace-derived metadata that every call-parity

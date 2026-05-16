@@ -298,6 +298,45 @@ pass. Failing-first regression tests live in
     Regression tests:
     `absolute_leading_colon_type_path_does_not_route_to_same_named_workspace_type`,
     `absolute_leading_colon_call_path_does_not_route_to_same_named_workspace_fn`.
+  - Trait bounds had the same leak through TWO additional sites:
+    `signature_params::trait_bound_paths` stripped `leading_colon`
+    at extraction time (so `<Q: ::ext::Trait>` stored bare segments
+    that then canonicalised to a same-named workspace trait), and
+    `type_infer::resolve_bound_list` (for `dyn Trait` / `impl Trait`
+    types) called `canonicalise_type_segments_in_scope` directly
+    without `leading_colon`. Fix: `trait_bound_paths` filters out
+    leading-colon bounds at extraction; `resolve_bound_list` routes
+    per-bound through `canonicalise_workspace_path`. Regression
+    tests:
+    `generic_param_bound_with_leading_colon_does_not_route_to_workspace_trait`,
+    `dyn_trait_with_leading_colon_does_not_route_to_workspace_trait_anchor`.
+  - Final sweep — all other direct callers of
+    `canonicalise_type_segments_in_scope` that take a `syn::Path`
+    were converted to `canonicalise_workspace_path`:
+    `binding_type_from_init` (let-binding ctors),
+    `canonical_from_type` (legacy type-annotation resolver),
+    `workspace_index/traits::resolve_trait_path` (`impl Trait for X`
+    self-types), `is_impl_for_visible_trait` (pub-surface visibility),
+    `is_transparent_wrapper_path` (pub-fn-visibility marker check),
+    `resolve_alias_target_canonical` (alias-chain follow-through),
+    `resolve_use_source_type` + `register_pub_use_leaves` (`use` /
+    `pub use` resolution — `leading_colon` threaded via `UseTreeCtx`
+    and an extra param on the leaf registrar),
+    `workspace_graph::resolve_impl_self_type` (impl self-types),
+    `is_marker_trait` + `identify_wrapper_name` (stdlib markers /
+    wrappers — extern-rooted paths no longer mis-match same-named
+    workspace traits). The only remaining direct callers of the
+    primitive are the wrapper itself, the legacy flat-map adapter
+    (which gates inline), and `canonicalise_bounds` (whose inputs
+    are filtered by `trait_bound_paths` at extraction).
+
+### Performance
+
+- `local_symbols::has_workspace_ancestor` no longer allocates a
+  fresh `Vec<String>` per prefix probe (`base[..len].to_vec()` →
+  `&base[..len] as &[String]`). The `Vec<T>: Borrow<[T]>` impl lets
+  `HashMap::contains_key` take the slice directly. Hot path on
+  large workspaces; flamegraph surfaced the transient allocation.
 
 ### Fixed
 

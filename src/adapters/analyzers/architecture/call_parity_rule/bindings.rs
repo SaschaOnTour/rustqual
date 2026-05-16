@@ -34,6 +34,12 @@ pub(super) fn canonical_from_type(
                 .iter()
                 .map(|s| s.ident.to_string())
                 .collect();
+            // Use-site gate: extern-root `::ext::Foo` doesn't match
+            // workspace symbols, so short-circuit before the
+            // workspace canonicaliser.
+            if tp.path.leading_colon.is_some() {
+                return None;
+            }
             canonicalise_type_segments(
                 &segments,
                 alias_map,
@@ -83,10 +89,13 @@ pub(crate) struct CanonScope<'a> {
     pub mod_stack: &'a [String],
 }
 
-/// Legacy helper for callers that have only the flat per-file maps
-/// (unit-test fixtures, the `canonical_from_type` adapter). Builds an
-/// empty `ScopedAliasMap` / `local_decl_scopes` overlay so the
-/// scope-aware path falls back to flat behaviour automatically.
+/// Legacy helper for callers without a full `FileScope` (unit-test
+/// fixtures, the `canonical_from_type` adapter). Builds an empty
+/// `ScopedAliasMap` / `local_decl_scopes` overlay so the scope-aware
+/// primitive falls back to flat behaviour automatically. Callers
+/// dealing with user-written `syn::Path` must check
+/// `path.leading_colon.is_some()` themselves BEFORE invoking this
+/// helper — the flat-map shape doesn't carry the leading-colon bit.
 pub(super) fn canonicalise_type_segments(
     segments: &[String],
     alias_map: &HashMap<String, Vec<String>>,
@@ -152,9 +161,19 @@ pub(crate) fn canonicalise_workspace_path(
 /// Resolve a type-path segment list into a canonical `[crate, …]` path
 /// against `scope`. Returns `None` for unresolvable paths (external
 /// crates, unknown idents, or in-file names not declared at the
-/// current `mod_stack`). Primitive — use-site callers must go through
-/// `canonicalise_workspace_path` (above) to honour leading-colon
-/// extern-root semantics.
+/// current `mod_stack`).
+///
+/// **PRIMITIVE — DO NOT CALL FROM USE-SITE CONTEXTS.** This function
+/// has no `leading_colon` awareness; the segment-list interface
+/// cannot carry the `::` prefix. Callers handling a `syn::Path` from
+/// user code (call expressions, type references in fn bodies, trait
+/// bounds, `let`-binding annotations, `impl Trait for X` paths,
+/// `pub use` targets, etc.) MUST go through
+/// `canonicalise_workspace_path`, passing `path.leading_colon.is_some()`
+/// so an explicit absolute path (`::ext::Foo`) doesn't false-match a
+/// same-named workspace symbol. The only remaining direct caller is
+/// the legacy flat-map adapter `canonicalise_type_segments`, whose
+/// own callers gate `leading_colon` inline before invoking it.
 pub(crate) fn canonicalise_type_segments_in_scope(
     segments: &[String],
     scope: &CanonScope<'_>,
@@ -377,6 +396,11 @@ fn binding_type_from_init(
         return None;
     }
     let type_segments = &segments[..segments.len() - 1];
+    // Use-site gate: `let x = ::ext::Foo::ctor()` extern-root path
+    // must not false-match a workspace `Foo`.
+    if path.leading_colon.is_some() {
+        return None;
+    }
     canonicalise_type_segments(
         type_segments,
         alias_map,

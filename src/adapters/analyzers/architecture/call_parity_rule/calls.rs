@@ -17,8 +17,7 @@
 //! the binding scan patterns.
 
 use super::bindings::{
-    canonical_from_type, canonicalise_type_segments_in_scope, extract_let_binding,
-    normalize_alias_expansion, CanonScope,
+    canonical_from_type, extract_let_binding, normalize_alias_expansion, CanonScope,
 };
 use super::local_symbols::{scope_for_local, FileScope};
 use super::type_infer::resolve::{resolve_type, ResolveContext};

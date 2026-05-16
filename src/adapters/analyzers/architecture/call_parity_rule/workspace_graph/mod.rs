@@ -26,7 +26,7 @@ pub(crate) use edge_rewrite::apply_edge_rewrite;
 use super::anchor_index::{
     build_anchor_info, is_anchor_target_capability, AnchorInfo, TraitAnchorMeta,
 };
-use super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
+use super::bindings::{canonicalise_workspace_path, CanonScope};
 use super::file_fn_collector::FileFnCollector;
 use super::type_infer::{build_workspace_type_index, WorkspaceIndexInputs, WorkspaceTypeIndex};
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
@@ -249,7 +249,13 @@ pub(crate) fn resolve_impl_self_type(
     scope: &CanonScope<'_>,
 ) -> Option<Vec<String>> {
     let raw = impl_self_ty_segments(self_ty)?;
-    Some(canonicalise_type_segments_in_scope(&raw, scope).unwrap_or(raw))
+    let leading_colon = matches!(self_ty, syn::Type::Path(p) if p.path.leading_colon.is_some());
+    // Use-site gate: `impl ::ext::Foo { ... }` doesn't canonicalise
+    // against the workspace. On extern paths we still keep `raw` as
+    // the bare-segment identity so the impl-stack frame at least
+    // tracks the syntactic self-type — but the workspace lookup is
+    // skipped to avoid false `crate::...::Foo` matches.
+    Some(canonicalise_workspace_path(&raw, leading_colon, scope).unwrap_or(raw))
 }
 
 /// Flatten a `syn::Type::Path` to its segment identifiers — the shape

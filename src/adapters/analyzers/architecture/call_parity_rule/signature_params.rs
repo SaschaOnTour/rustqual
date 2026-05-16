@@ -281,21 +281,31 @@ fn single_ident_type(ty: &syn::Type) -> Option<String> {
 }
 
 /// Flatten each trait bound into its segment idents. Lifetime bounds
-/// and `?Sized`-style negative bounds are dropped. Operation:
-/// per-bound projection.
+/// and `?Sized`-style negative bounds are dropped. Extern-root bounds
+/// (`Q: ::ext::Trait`, Rust 2018+) are also dropped here: the leading
+/// colon explicitly disambiguates AWAY from workspace symbols, so the
+/// bound contributes no dispatchable anchor to the call graph, and
+/// keeping the bare segments would let the downstream
+/// `canonicalise_bounds` mis-resolve them to a same-named workspace
+/// trait. Operation: per-bound projection + leading-colon filter.
 fn trait_bound_paths(
     bounds: &syn::punctuated::Punctuated<syn::TypeParamBound, syn::Token![+]>,
 ) -> Vec<Vec<String>> {
     bounds
         .iter()
         .filter_map(|b| match b {
-            syn::TypeParamBound::Trait(tb) => Some(
-                tb.path
-                    .segments
-                    .iter()
-                    .map(|s| s.ident.to_string())
-                    .collect(),
-            ),
+            syn::TypeParamBound::Trait(tb) => {
+                if tb.path.leading_colon.is_some() {
+                    return None;
+                }
+                Some(
+                    tb.path
+                        .segments
+                        .iter()
+                        .map(|s| s.ident.to_string())
+                        .collect(),
+                )
+            }
             _ => None,
         })
         .collect()

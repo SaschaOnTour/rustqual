@@ -2669,3 +2669,194 @@ fn absolute_leading_colon_call_path_does_not_route_to_same_named_workspace_fn() 
          disambiguates AWAY from workspace symbols. Got calls: {calls:?}"
     );
 }
+
+#[test]
+fn generic_param_bound_with_leading_colon_does_not_route_to_workspace_trait() {
+    // `fn run<Q: ::ports::handler::Handler>(q: Q) { Q::handle(&q); }`
+    // — the trait bound on Q is an explicit absolute path `::ports::...`.
+    // With a workspace-local `crate::ports::handler::Handler` trait in
+    // the same crate, the bound's segments `["ports", "handler",
+    // "Handler"]` would otherwise canonicalise to that workspace trait
+    // and `Q::handle()` would emit a false `Handler::handle` anchor
+    // edge. The leading colon must be preserved through bound
+    // extraction so the workspace canonicalisation gate sees it.
+    use crate::adapters::analyzers::architecture::call_parity_rule::calls::{
+        collect_canonical_calls, FnContext,
+    };
+    use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::FileScope;
+    use crate::adapters::analyzers::architecture::call_parity_rule::signature_params::item_canonical_generics;
+    use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::{
+        collect_crate_root_modules, collect_local_symbols,
+    };
+    use crate::adapters::shared::use_tree::gather_alias_map;
+
+    let fix = fixture(&[(
+        "src/ports/handler.rs",
+        r#"
+        pub trait Handler { fn handle(&self); }
+        "#,
+    )]);
+    let borrowed_files = borrowed(&fix);
+    let workspace_index = {
+        let cfg_test = &HashSet::new();
+        let roots = &crate_roots(&["src/ports/handler.rs"]);
+        let wraps = &HashSet::new();
+        let workspace_files = build_workspace_files_map(WorkspaceFilesInputs {
+            files: &borrowed_files,
+            cfg_test_files: cfg_test,
+            aliases_per_file: &fix.aliases,
+            aliases_scoped_per_file: &fix.aliases_scoped,
+            local_symbols_per_file: &fix.local_symbols,
+            crate_root_modules: roots,
+            workspace_module_paths: None,
+        });
+        build_workspace_type_index(&WorkspaceIndexInputs {
+            files: &borrowed_files,
+            workspace_files: &workspace_files,
+            cfg_test_files: cfg_test,
+            transparent_wrappers: wraps,
+        })
+    };
+    let use_site = parse_file(
+        r#"
+        pub fn run<Q: ::ports::handler::Handler>(q: Q) {
+            Q::handle(&q);
+        }
+        "#,
+    );
+    let alias_map = gather_alias_map(&use_site);
+    let local_symbols = collect_local_symbols(&use_site);
+    // Include both files so `ports` is in crate_root_modules — that's
+    // what makes the bound canonicalisable to the workspace trait
+    // (the false-positive trigger).
+    let crate_roots_set = collect_crate_root_modules(&[
+        ("src/app/runner.rs", &use_site),
+        ("src/ports/handler.rs", borrowed_files[0].1),
+    ]);
+    let file_scope = FileScope {
+        path: "src/app/runner.rs",
+        alias_map: &alias_map,
+        aliases_per_scope: &Default::default(),
+        local_symbols: &local_symbols,
+        local_decl_scopes: &Default::default(),
+        crate_root_modules: &crate_roots_set,
+        workspace_module_paths: None,
+    };
+    let (body, sig) = match &use_site.items[0] {
+        syn::Item::Fn(item_fn) => (&item_fn.block, &item_fn.sig),
+        _ => panic!("expected fn item at index 0 of use_site"),
+    };
+    let generics = item_canonical_generics(&sig.generics, &file_scope, &[]);
+    let ctx = FnContext {
+        file: &file_scope,
+        mod_stack: &[],
+        body,
+        signature_params: vec![],
+        generic_params: generics,
+        self_type: None,
+        workspace_index: Some(&workspace_index),
+        workspace_files: None,
+    };
+    let calls = collect_canonical_calls(&ctx);
+    let phantom_anchor = "crate::ports::handler::Handler::handle";
+    assert!(
+        !calls.contains(phantom_anchor),
+        "`Q::handle(&q)` where `Q: ::ports::handler::Handler` (extern \
+         leading-colon bound) must NOT emit anchor edge `{phantom_anchor}` \
+         — the leading colon disambiguates AWAY from the workspace \
+         trait. Got calls: {calls:?}"
+    );
+}
+
+#[test]
+fn dyn_trait_with_leading_colon_does_not_route_to_workspace_trait_anchor() {
+    // `fn use_it(x: &dyn ::ports::handler::Handler) { x.handle(); }`
+    // — the `dyn` trait object's path is explicitly absolute. Without
+    // propagating leading_colon through `resolve_bound_list`, the
+    // bound canonicalises to `crate::ports::handler::Handler` and
+    // `x.handle()` routes through the workspace trait-anchor.
+    use crate::adapters::analyzers::architecture::call_parity_rule::calls::{
+        collect_canonical_calls, FnContext,
+    };
+    use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::FileScope;
+    use crate::adapters::analyzers::architecture::call_parity_rule::signature_params::extract_signature_params;
+    use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::{
+        collect_crate_root_modules, collect_local_symbols,
+    };
+    use crate::adapters::shared::use_tree::gather_alias_map;
+
+    let fix = fixture(&[(
+        "src/ports/handler.rs",
+        r#"
+        pub trait Handler { fn handle(&self); }
+        "#,
+    )]);
+    let borrowed_files = borrowed(&fix);
+    let workspace_index = {
+        let cfg_test = &HashSet::new();
+        let roots = &crate_roots(&["src/ports/handler.rs"]);
+        let wraps = &HashSet::new();
+        let workspace_files = build_workspace_files_map(WorkspaceFilesInputs {
+            files: &borrowed_files,
+            cfg_test_files: cfg_test,
+            aliases_per_file: &fix.aliases,
+            aliases_scoped_per_file: &fix.aliases_scoped,
+            local_symbols_per_file: &fix.local_symbols,
+            crate_root_modules: roots,
+            workspace_module_paths: None,
+        });
+        build_workspace_type_index(&WorkspaceIndexInputs {
+            files: &borrowed_files,
+            workspace_files: &workspace_files,
+            cfg_test_files: cfg_test,
+            transparent_wrappers: wraps,
+        })
+    };
+    let use_site = parse_file(
+        r#"
+        pub fn use_it(x: &dyn ::ports::handler::Handler) {
+            x.handle();
+        }
+        "#,
+    );
+    let alias_map = gather_alias_map(&use_site);
+    let local_symbols = collect_local_symbols(&use_site);
+    // Include both files so `ports` is in crate_root_modules — the
+    // false-positive trigger requires the workspace trait to be
+    // canonicalisable from the use_site's scope.
+    let crate_roots_set = collect_crate_root_modules(&[
+        ("src/app/use_site.rs", &use_site),
+        ("src/ports/handler.rs", borrowed_files[0].1),
+    ]);
+    let file_scope = FileScope {
+        path: "src/app/use_site.rs",
+        alias_map: &alias_map,
+        aliases_per_scope: &Default::default(),
+        local_symbols: &local_symbols,
+        local_decl_scopes: &Default::default(),
+        crate_root_modules: &crate_roots_set,
+        workspace_module_paths: None,
+    };
+    let (body, sig) = match &use_site.items[0] {
+        syn::Item::Fn(item_fn) => (&item_fn.block, &item_fn.sig),
+        _ => panic!("expected fn item at index 0 of use_site"),
+    };
+    let ctx = FnContext {
+        file: &file_scope,
+        mod_stack: &[],
+        body,
+        signature_params: extract_signature_params(sig),
+        generic_params: std::collections::HashMap::new(),
+        self_type: None,
+        workspace_index: Some(&workspace_index),
+        workspace_files: None,
+    };
+    let calls = collect_canonical_calls(&ctx);
+    let phantom_anchor = "crate::ports::handler::Handler::handle";
+    assert!(
+        !calls.contains(phantom_anchor),
+        "`x.handle()` where `x: &dyn ::ports::handler::Handler` (extern \
+         leading-colon `dyn Trait`) must NOT emit anchor edge \
+         `{phantom_anchor}`. Got calls: {calls:?}"
+    );
+}

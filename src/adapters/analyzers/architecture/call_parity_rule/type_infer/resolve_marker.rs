@@ -9,7 +9,7 @@
 //! whose leaf happens to match a marker name (`use crate::ports::Send;`)
 //! still reach dispatch.
 
-use super::super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
+use super::super::bindings::{canonicalise_workspace_path, CanonScope};
 use super::resolve::{is_stdlib_prefixed, ResolveContext};
 
 /// Marker traits (plus common auto-derive names) that are skipped when
@@ -33,7 +33,13 @@ pub(super) fn is_marker_trait(path: &syn::Path, ctx: &ResolveContext<'_>) -> boo
         file: ctx.file,
         mod_stack: ctx.mod_stack,
     };
-    if let Some(canonical) = canonicalise_type_segments_in_scope(&segs, &scope) {
+    // Use-site gate: an explicit `::Send` extern-root path skips
+    // workspace canonicalisation, falls through to the conservative
+    // single-segment check below, and gets correctly classified as
+    // a marker even when a same-named workspace trait exists.
+    if let Some(canonical) =
+        canonicalise_workspace_path(&segs, path.leading_colon.is_some(), &scope)
+    {
         let canon_leaf = canonical.last().map(String::as_str).unwrap_or("");
         return is_stdlib_prefixed(&canonical) && MARKER_TRAITS.contains(&canon_leaf);
     }
