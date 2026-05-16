@@ -2209,3 +2209,190 @@ fn method_call_wrapper_around_generic_param_return_substitutes_inner() {
          {session_diff}. Got calls: {calls:?}"
     );
 }
+
+#[test]
+fn vec_around_generic_param_return_substitutes_inner_via_turbofish() {
+    // `fn get<Q: Handler>() -> Vec<Q>` — `resolve_type` normalises
+    // `Vec<Q>` to `CanonicalType::Slice(GenericParamBound { ... })`.
+    // Iteration via `for s in get::<Session>()` extracts the Slice's
+    // inner element, so without recursing turbofish substitution
+    // through `Slice`, `s`'s type stays `GenericParamBound([Handler])`
+    // and `s.diff()` routes via Handler-anchor (Handler has no diff)
+    // instead of producing the concrete `Session::diff` edge.
+    //
+    // Required: turbofish_substitute must recurse into Slice (and
+    // Map, by analogy with `HashMap<K, Q>` → Map(Q)) the same way it
+    // already recurses into Result / Option / Future.
+    use crate::adapters::analyzers::architecture::call_parity_rule::calls::{
+        collect_canonical_calls, FnContext,
+    };
+    use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::FileScope;
+    use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::{
+        collect_crate_root_modules, collect_local_symbols,
+    };
+    use crate::adapters::shared::use_tree::gather_alias_map;
+
+    let fix = fixture(&[
+        (
+            "src/ports/handler.rs",
+            r#"
+            pub trait Handler { fn handle(&self); }
+            "#,
+        ),
+        (
+            "src/app/session.rs",
+            r#"
+            pub struct Session;
+            impl Session { pub fn diff(&self) {} }
+            "#,
+        ),
+        (
+            "src/app/make.rs",
+            r#"
+            use crate::ports::handler::Handler;
+            pub fn get<Q: Handler>() -> Vec<Q> { unimplemented!() }
+            "#,
+        ),
+    ]);
+    let borrowed_files = borrowed(&fix);
+    let workspace_index = {
+        let cfg_test = &HashSet::new();
+        let roots = &crate_roots(&[
+            "src/ports/handler.rs",
+            "src/app/session.rs",
+            "src/app/make.rs",
+        ]);
+        let wraps = &HashSet::new();
+        let workspace_files = build_workspace_files_map(WorkspaceFilesInputs {
+            files: &borrowed_files,
+            cfg_test_files: cfg_test,
+            aliases_per_file: &fix.aliases,
+            aliases_scoped_per_file: &fix.aliases_scoped,
+            local_symbols_per_file: &fix.local_symbols,
+            crate_root_modules: roots,
+            workspace_module_paths: None,
+        });
+        build_workspace_type_index(&WorkspaceIndexInputs {
+            files: &borrowed_files,
+            workspace_files: &workspace_files,
+            cfg_test_files: cfg_test,
+            transparent_wrappers: wraps,
+        })
+    };
+    let use_site = parse_file(
+        r#"
+        use crate::app::make::get;
+        use crate::app::session::Session;
+        pub fn use_it() {
+            for s in get::<Session>() {
+                s.diff();
+            }
+        }
+        "#,
+    );
+    let alias_map = gather_alias_map(&use_site);
+    let local_symbols = collect_local_symbols(&use_site);
+    let crate_roots_set = collect_crate_root_modules(&[("src/cli/use_site.rs", &use_site)]);
+    let file_scope = FileScope {
+        path: "src/cli/use_site.rs",
+        alias_map: &alias_map,
+        aliases_per_scope: &Default::default(),
+        local_symbols: &local_symbols,
+        local_decl_scopes: &Default::default(),
+        crate_root_modules: &crate_roots_set,
+        workspace_module_paths: None,
+    };
+    let body = match &use_site.items[2] {
+        syn::Item::Fn(item_fn) => &item_fn.block,
+        _ => panic!("expected fn item at index 2 of use_site"),
+    };
+    let ctx = FnContext {
+        file: &file_scope,
+        mod_stack: &[],
+        body,
+        signature_params: vec![],
+        generic_params: std::collections::HashMap::new(),
+        self_type: None,
+        workspace_index: Some(&workspace_index),
+        workspace_files: None,
+    };
+    let calls = collect_canonical_calls(&ctx);
+    let session_diff = "crate::app::session::Session::diff";
+    assert!(
+        calls.contains(session_diff),
+        "`for s in get::<Session>() {{ s.diff(); }}` where \
+         `get<Q: Handler>() -> Vec<Q>` must substitute Q=Session inside \
+         the Vec/Slice wrapper so the iterator binding yields Session \
+         and `.diff()` resolves to {session_diff}. Got calls: {calls:?}"
+    );
+}
+
+#[test]
+fn absolute_leading_colon_path_is_not_shadowed_by_in_scope_generic() {
+    // `::Q::method()` is an explicit absolute path (Rust 2018+: from
+    // an extern crate root). Even when an in-scope fn-generic param
+    // is named `Q`, the leading-colon form intentionally disambiguates
+    // AWAY from the generic. Pre-fix, `generic_param_shadow` matched
+    // purely on segment text (no leading_colon check), so the absolute
+    // `::Q` got mis-resolved as the generic's `Q` (GenericParamBound)
+    // instead of falling through to normal canonicalisation.
+    use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::FileScope;
+    use crate::adapters::analyzers::architecture::call_parity_rule::signature_params::ParamInfo;
+    use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::resolve::{
+        resolve_type, ResolveContext,
+    };
+    use crate::adapters::shared::use_tree::ScopedAliasMap;
+
+    // Sanity check on the fixture: `::Q` must parse with leading_colon set.
+    let ty: syn::Type = syn::parse_str("::Q").expect("parse `::Q`");
+    let leading_colon_set = matches!(&ty, syn::Type::Path(tp) if tp.path.leading_colon.is_some());
+    assert!(
+        leading_colon_set,
+        "fixture invariant: `::Q` must parse with leading_colon set"
+    );
+
+    let alias_map = HashMap::new();
+    let mut local = HashSet::new();
+    local.insert("Q".to_string());
+    let roots = HashSet::new();
+    let file_scope = FileScope {
+        path: "src/app/runner.rs",
+        alias_map: &alias_map,
+        aliases_per_scope: &ScopedAliasMap::new(),
+        local_symbols: &local,
+        local_decl_scopes: &HashMap::new(),
+        crate_root_modules: &roots,
+        workspace_module_paths: None,
+    };
+    let mut generics: HashMap<String, ParamInfo> = HashMap::new();
+    generics.insert(
+        "Q".to_string(),
+        ParamInfo {
+            bounds: vec![vec![
+                "crate".to_string(),
+                "ports".to_string(),
+                "Handler".to_string(),
+            ]],
+            turbofish_index: Some(0),
+        },
+    );
+    let resolved = resolve_type(
+        &ty,
+        &ResolveContext {
+            file: &file_scope,
+            mod_stack: &[],
+            type_aliases: None,
+            transparent_wrappers: None,
+            workspace_files: None,
+            alias_param_subs: None,
+            generic_params: Some(&generics),
+        },
+    );
+    assert!(
+        !matches!(resolved, CanonicalType::GenericParamBound { .. }),
+        "`::Q` (leading_colon set) must NOT short-circuit through \
+         generic_param_shadow — the absolute path is intentionally \
+         disambiguated AWAY from the in-scope generic param Q. \
+         Got: {resolved:?}"
+    );
+}

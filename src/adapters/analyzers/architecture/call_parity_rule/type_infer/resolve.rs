@@ -367,8 +367,17 @@ fn peel_single_generic(
 /// type (→ wrong `Path`).
 fn resolve_generic_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -> CanonicalType {
     let segments: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
-    if let Some(shadow) = generic_param_shadow(&segments, ctx) {
-        return shadow;
+    // Skip generic-param shadowing for explicit absolute paths
+    // (`::Q`, Rust 2018+: from an extern crate root). The leading
+    // double-colon is the caller's way of disambiguating AWAY from
+    // any in-scope generic, so collapsing it to GenericParamBound
+    // would invert the explicit intent. Multi-segment paths
+    // (`crate::Q`, `self::Q`, `super::Q`) are already filtered out
+    // by `generic_param_shadow`'s `segments.len() != 1` guard.
+    if path.leading_colon.is_none() {
+        if let Some(shadow) = generic_param_shadow(&segments, ctx) {
+            return shadow;
+        }
     }
     let canonicalise =
         |segs: &[String]| canonicalise_type_segments_in_scope(segs, &canon_scope(ctx));

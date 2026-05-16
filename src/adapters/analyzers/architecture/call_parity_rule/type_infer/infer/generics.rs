@@ -32,13 +32,17 @@ use super::InferContext;
 // qual:api
 /// Apply turbofish substitution when the inferred return is a
 /// `GenericParamBound` (bare callee-generic-param ident return).
-/// Recurses through `Result` / `Option` / `Future` wrappers so a
-/// `Result<Q, E>` return with turbofish `<Session>` substitutes the
-/// inner `Q → Session` and rewraps as `Result(Session)` — `.unwrap()`
-/// then yields Session and `.diff()` resolves correctly. The
-/// substitution uses the param's `turbofish_index` to pick the right
-/// turbofish arg (handles `fn get<A, Q: T>() -> Q` where Q is at
-/// position 1, not 0). For impl-level params merged into a method
+/// Recurses through every multi-typed wrapper variant in
+/// `CanonicalType` so the inner generic param gets substituted before
+/// the unwrapping primitive peels the wrapper:
+/// - `Result(Q)` / `Option(Q)` / `Future(Q)` — peeled by `.unwrap()`,
+///   `?`, `.await`
+/// - `Slice(Q)` — peeled by `for s in xs { ... }` iteration
+/// - `Map(Q)` — peeled by `HashMap::get` / `.values()` iteration
+///
+/// The substitution uses the param's `turbofish_index` to pick the
+/// right turbofish arg (handles `fn get<A, Q: T>() -> Q` where Q is
+/// at position 1, not 0). For impl-level params merged into a method
 /// (turbofish_index = None) or any non-substitutable shape (`Path`,
 /// `TraitBound` from `impl Trait` / `dyn Trait`, `Opaque`), returns
 /// the input unchanged. Integration.
@@ -58,8 +62,13 @@ pub(super) fn turbofish_substitute(
                 turbofish_index: Some(idx),
             }),
         // Recurse into wrappers so generic-param returns inside
-        // `Result<Q, _>` / `Option<Q>` / `Future<Output = Q>` get
-        // substituted before `.unwrap()` / `.await` peel the wrapper.
+        // `Result<Q, _>` / `Option<Q>` / `Future<Output = Q>` /
+        // `Vec<Q>` / `HashMap<_, Q>` get substituted before the
+        // unwrapping primitives (`.unwrap()`, `.await`, `for s in …`,
+        // hashmap-value extraction) peel the wrapper. Without
+        // recursion through `Slice` and `Map`, iterator bindings and
+        // map-value lookups would yield `GenericParamBound` and miss
+        // the concrete-type dispatch.
         CanonicalType::Result(inner) => {
             CanonicalType::Result(Box::new(turbofish_substitute(*inner, turbofish, ctx)))
         }
@@ -68,6 +77,12 @@ pub(super) fn turbofish_substitute(
         }
         CanonicalType::Future(inner) => {
             CanonicalType::Future(Box::new(turbofish_substitute(*inner, turbofish, ctx)))
+        }
+        CanonicalType::Slice(inner) => {
+            CanonicalType::Slice(Box::new(turbofish_substitute(*inner, turbofish, ctx)))
+        }
+        CanonicalType::Map(inner) => {
+            CanonicalType::Map(Box::new(turbofish_substitute(*inner, turbofish, ctx)))
         }
         other => other,
     }

@@ -255,6 +255,26 @@ pass. Failing-first regression tests live in
   `multi_generic_fn_turbofish_picks_correct_arg_for_returned_param`,
   `wrapper_around_generic_param_return_substitutes_inner_via_turbofish`,
   `method_call_wrapper_around_generic_param_return_substitutes_inner`.
+- **Turbofish substitution missed `Vec<Q>` / `HashMap<_, Q>` wrappers
+  and shadowed explicit absolute paths.** Two sister gaps from the
+  same review pass:
+  - `turbofish_substitute` recursed through `Result` / `Option` /
+    `Future` but not through `Slice` (`Vec<Q>` → `Slice(Q)` in the
+    resolver) or `Map` (`HashMap<K, Q>` → `Map(Q)`). So
+    `for s in get::<Session>() { s.diff(); }` for
+    `fn get<Q: Handler>() -> Vec<Q>` left the inner Q un-substituted
+    and the iterator binding's `s` stayed as `GenericParamBound`,
+    losing the `Session::diff` edge. Fix: added `Slice` / `Map` arms
+    to the recursion. Regression test:
+    `vec_around_generic_param_return_substitutes_inner_via_turbofish`.
+  - `generic_param_shadow` matched purely on segment text, so an
+    explicit absolute path `::Q::method()` (Rust 2018+ extern-crate
+    root) was mis-shadowed by an in-scope generic param named `Q`.
+    Fix: `resolve_generic_path` now skips the shadow when
+    `path.leading_colon.is_some()` — the leading double-colon is the
+    caller's explicit disambiguation away from the generic.
+    Regression test:
+    `absolute_leading_colon_path_is_not_shadowed_by_in_scope_generic`.
 
 ### Fixed
 
