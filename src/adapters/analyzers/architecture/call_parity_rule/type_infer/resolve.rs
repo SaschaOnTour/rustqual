@@ -370,9 +370,11 @@ fn resolve_generic_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -
     CanonicalType::Path(resolved)
 }
 
-/// `Some(TraitBound(..))` for bounded fn-scoped generics, `Some(Opaque)`
-/// for unbounded ones (shadowing — must not fall through to a same-
-/// named workspace symbol), `None` when the path isn't a known param.
+/// `Some(GenericParamBound(..))` for bounded fn-scoped generics — the
+/// distinct variant signals "this return type is one of the fn's own
+/// params, turbofish on the call site substitutes it." `Some(Opaque)`
+/// for unbounded params (shadowing — must not fall through to a same-
+/// named workspace symbol). `None` when the path isn't a known param.
 fn generic_param_shadow(segments: &[String], ctx: &ResolveContext<'_>) -> Option<CanonicalType> {
     if segments.len() != 1 {
         return None;
@@ -382,7 +384,7 @@ fn generic_param_shadow(segments: &[String], ctx: &ResolveContext<'_>) -> Option
     Some(if collected.is_empty() {
         CanonicalType::Opaque
     } else {
-        CanonicalType::TraitBound(collected)
+        CanonicalType::GenericParamBound(collected)
     })
 }
 

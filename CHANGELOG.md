@@ -187,14 +187,34 @@ pass. Failing-first regression tests live in
   inline in `infer_call` but not in `infer_method_call` — an
   asymmetry that would have silently dropped
   `s.method::<Session>().diff()` edges when method-call turbofish
-  meets a `TraitBound` method return. Both call shapes now route
-  through `resolve_with_turbofish_override(inferred, turbofish, ctx)`
-  in `infer/generics.rs`, parameterised by an
-  `Option<&AngleBracketedGenericArguments>`. Free-fn calls extract
-  the args via `path_turbofish_args` (preserves the single-segment
-  guard against `Vec::<u32>::new()`-style over-approximation);
-  method calls pass `ExprMethodCall.turbofish` directly. Regression
-  test: `method_call_turbofish_overrides_bounded_generic_param_return`.
+  meets a generic-param method return. Both call shapes now share
+  `turbofish_substitute(inferred, turbofish, ctx)` in
+  `infer/generics.rs`. The free-fn-only `turbofish_fallback(...)`
+  remains separate by design: an unindexed method on an Opaque
+  receiver gives no signal that the turbofish substitution is
+  meaningful, so method calls would otherwise synthesise false
+  `Session::method()` edges whenever the receiver type is unknown.
+  Regression tests:
+  `method_call_turbofish_overrides_bounded_generic_param_return`,
+  `free_fn_impl_trait_return_turbofish_does_not_substitute_return`,
+  `method_call_impl_trait_return_turbofish_does_not_substitute_return`.
+- **Split `CanonicalType::TraitBound` into two variants.**
+  The previous single `TraitBound` variant conflated two semantically
+  distinct return shapes that look the same in the index: (a) bare
+  fn-generic-param ident return (`fn f<Q: T>() -> Q` where `Q` IS
+  the return) — turbofish substitution at the call site CAN replace
+  it; (b) `impl Trait` / `dyn Trait` return — the return type is
+  opaque even when bounds are known; turbofish on OTHER generic
+  params doesn't substitute it. `turbofish_substitute` fired on both
+  and produced false `Session::diff` edges for
+  `fn make<T>() -> impl Handler` + `make::<Session>().diff()`. Fix:
+  new `CanonicalType::GenericParamBound(Vec<Vec<String>>)` variant
+  produced exclusively by `generic_param_shadow` (case a);
+  `TraitBound` stays for cases b. Both variants dispatch identically
+  through the trait-anchor index (every consumer that used to match
+  `TraitBound` now goes through `CanonicalType::as_trait_bounds()`
+  which handles both). Only `turbofish_substitute` distinguishes
+  them — fires only for `GenericParamBound`.
 
 ### Fixed
 

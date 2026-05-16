@@ -1,6 +1,6 @@
 //! Turbofish as return-type override for generic fn / method calls.
 //!
-//! Two call shapes flow through the same helper:
+//! Two call shapes flow through this module:
 //! - Path-call (`get::<Session>()`): turbofish lives on the last
 //!   path segment's `PathArguments::AngleBracketed`. Restricted to
 //!   single-segment paths so `Vec::<u32>::new()` (turbofish on the
@@ -8,11 +8,21 @@
 //! - Method-call (`s.method::<Session>()`): turbofish lives directly
 //!   on `ExprMethodCall.turbofish`.
 //!
-//! Both shapes use `resolve_with_turbofish_override`: if the index-
-//! inferred return type is a `TraitBound` (generic-param return), the
-//! turbofish substitution is strictly more specific and wins; if the
-//! index says nothing, the turbofish is the fallback; otherwise the
-//! index wins.
+//! Two semantically distinct rules — kept as two helpers so the call
+//! sites compose them explicitly:
+//! - `turbofish_substitute(inferred, …)` — applied by BOTH call shapes
+//!   when the index returned a `GenericParamBound` (bare fn-generic-
+//!   param ident return); the turbofish substitution is strictly more
+//!   specific than the param's bound and wins. For any other shape
+//!   (concrete `Path`, `TraitBound` from `impl Trait` / `dyn Trait`,
+//!   wrappers, `Opaque`), returns the input unchanged — the turbofish
+//!   args don't substitute those return positions.
+//! - `turbofish_fallback(…)` — free-fn-only fallback when the index
+//!   misses entirely (`external_fn::<X>()` patterns). Method calls
+//!   deliberately do NOT use this — an unindexed method on an Opaque
+//!   receiver gives no signal that the turbofish substitution is
+//!   meaningful, and firing it would synthesise false
+//!   `Session::method()` edges whenever the receiver type is unknown.
 
 use super::super::canonical::CanonicalType;
 use super::super::resolve::{resolve_type, ResolveContext};
@@ -20,26 +30,42 @@ use super::super::self_subst::substitute_bare_self;
 use super::InferContext;
 
 // qual:api
-/// Combine an index-inferred return type with an optional explicit
-/// turbofish substitution. The single source of truth for the
-/// "TraitBound + explicit turbofish → turbofish wins" rule used by
-/// both `infer_call` (path-style) and `infer_method_call`
-/// (method-style). Integration.
-pub(super) fn resolve_with_turbofish_override(
-    inferred: Option<CanonicalType>,
+/// Apply turbofish substitution when the inferred return is a
+/// `GenericParamBound` (bare fn-generic-param ident return). Shared by
+/// `infer_call` (path-style) and `infer_method_call` (method-style):
+/// both call shapes have the symmetric rule "the caller named the
+/// concrete type via turbofish; that's strictly more specific than
+/// the param's bound." For any other inferred shape (`Path`,
+/// `TraitBound` from `impl Trait` / `dyn Trait`, wrappers, `Opaque`),
+/// returns the input unchanged — the turbofish args don't substitute
+/// those return positions. Operation.
+pub(super) fn turbofish_substitute(
+    inferred: CanonicalType,
+    turbofish: Option<&syn::AngleBracketedGenericArguments>,
+    ctx: &InferContext<'_>,
+) -> CanonicalType {
+    if matches!(inferred, CanonicalType::GenericParamBound(_)) {
+        if let Some(tf) = turbofish.and_then(|args| resolve_first_type_arg(args, ctx)) {
+            return tf;
+        }
+    }
+    inferred
+}
+
+// qual:api
+/// Free-fn-only fallback: when the workspace index doesn't have a
+/// concrete return for a single-segment generic path call, take the
+/// turbofish's first type arg as a best-effort guess (`external_fn::<X>()`
+/// patterns). Method calls deliberately do NOT use this fallback — an
+/// unindexed method on an Opaque receiver gives no signal that the
+/// turbofish substitution is meaningful, and firing it would synthesise
+/// false `Session::method()` edges on `s.method::<Session>()` whenever
+/// `s`'s type is unknown. Operation.
+pub(super) fn turbofish_fallback(
     turbofish: Option<&syn::AngleBracketedGenericArguments>,
     ctx: &InferContext<'_>,
 ) -> Option<CanonicalType> {
-    let turbofish_type = turbofish.and_then(|args| resolve_first_type_arg(args, ctx));
-    match (inferred, turbofish_type) {
-        // Generic-param return → turbofish substitutes the concrete
-        // type, which carries strictly more dispatch info than the bound.
-        (Some(CanonicalType::TraitBound(_)), Some(tf)) => Some(tf),
-        // Concrete index return wins; turbofish is the fallback when
-        // the index has nothing.
-        (Some(t), _) => Some(t),
-        (None, tf) => tf,
-    }
+    turbofish.and_then(|args| resolve_first_type_arg(args, ctx))
 }
 
 // qual:api

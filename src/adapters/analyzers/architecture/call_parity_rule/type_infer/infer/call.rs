@@ -9,7 +9,7 @@
 //!   `(receiver_canonical, method)` in the workspace index.
 
 use super::super::canonical::CanonicalType;
-use super::generics::{path_turbofish_args, resolve_with_turbofish_override};
+use super::generics::{path_turbofish_args, turbofish_fallback, turbofish_substitute};
 use super::InferContext;
 use crate::adapters::analyzers::architecture::call_parity_rule::bindings::{
     canonicalise_type_segments_in_scope, CanonScope,
@@ -29,33 +29,40 @@ pub(super) fn infer_path_expr(p: &syn::ExprPath, ctx: &InferContext<'_>) -> Opti
 /// A call like `foo()` or `T::ctor(...)` or `crate::path::fn(...)`.
 /// Resolve the func path to its canonical form, try the workspace
 /// index two ways (fn-style first, method-style as fallback), then
-/// delegate to `resolve_with_turbofish_override` so the turbofish
-/// (`get::<Session>()`) wins over a bounded-generic-param return and
-/// otherwise serves as the fallback when the index has nothing.
-/// Integration: delegates to the lookup helpers + shared override.
+/// apply `turbofish_substitute` so an explicit turbofish
+/// (`get::<Session>()`) wins over a `GenericParamBound` return. If
+/// the index has nothing, fall back to `turbofish_fallback` — the
+/// "external generic fn called with turbofish" heuristic that
+/// predates the override and stays free-fn-only. Integration:
+/// delegates to the lookup helpers + override + fallback.
 pub(super) fn infer_call(call: &syn::ExprCall, ctx: &InferContext<'_>) -> Option<CanonicalType> {
     let syn::Expr::Path(p) = call.func.as_ref() else {
         return None;
     };
     let segs = path_segments(p);
-    let inferred = infer_call_from_segments(&segs, ctx);
-    resolve_with_turbofish_override(inferred, path_turbofish_args(&p.path), ctx)
+    let turbofish = path_turbofish_args(&p.path);
+    infer_call_from_segments(&segs, ctx)
+        .map(|t| turbofish_substitute(t, turbofish, ctx))
+        .or_else(|| turbofish_fallback(turbofish, ctx))
 }
 
 /// Receiver-type-driven method resolution: `expr.method(…)`. Recurses
 /// into `expr` via the top-level `infer_type`, looks the result up in
-/// the workspace index, then delegates to
-/// `resolve_with_turbofish_override` so `s.method::<Session>()` gets
-/// the same turbofish-overrides-TraitBound semantics that `infer_call`
-/// applies to free-fn calls. Integration.
+/// the workspace index, then applies `turbofish_substitute` so
+/// `s.method::<Session>()` gets the same GenericParamBound override
+/// semantics as free-fn calls. Deliberately does NOT use
+/// `turbofish_fallback` — an unindexed method on an Opaque receiver
+/// gives no signal that the turbofish substitution is meaningful, so
+/// firing the fallback would synthesise false `Session::method()`
+/// edges. Integration.
 pub(super) fn infer_method_call(
     m: &syn::ExprMethodCall,
     ctx: &InferContext<'_>,
 ) -> Option<CanonicalType> {
     let receiver_type = super::infer_type(&m.receiver, ctx)?;
     let method = m.method.to_string();
-    let inferred = lookup_method_on_type(&receiver_type, &method, ctx);
-    resolve_with_turbofish_override(inferred, m.turbofish.as_ref(), ctx)
+    lookup_method_on_type(&receiver_type, &method, ctx)
+        .map(|t| turbofish_substitute(t, m.turbofish.as_ref(), ctx))
 }
 
 /// Try `fn_returns` first, fall back to `method_returns` if path has
@@ -99,6 +106,15 @@ fn lookup_method_on_type(
     method: &str,
     ctx: &InferContext<'_>,
 ) -> Option<CanonicalType> {
+    // Both TraitBound (impl/dyn Trait) and GenericParamBound (bare
+    // fn-generic-param ident return) dispatch identically through
+    // the trait anchor — only their turbofish-overridability differs
+    // (handled in `turbofish_substitute`, not here).
+    if let Some(bounds) = ty.as_trait_bounds() {
+        return bounds
+            .iter()
+            .find_map(|trait_segs| lookup_trait_method_return(trait_segs, method, ctx));
+    }
     match ty {
         CanonicalType::Path(segs) => {
             let key = segs.join("::");
@@ -107,9 +123,6 @@ fn lookup_method_on_type(
         CanonicalType::Result(_) | CanonicalType::Option(_) | CanonicalType::Future(_) => {
             super::super::combinators::combinator_return(ty, method)
         }
-        CanonicalType::TraitBound(bounds) => bounds
-            .iter()
-            .find_map(|trait_segs| lookup_trait_method_return(trait_segs, method, ctx)),
         _ => None,
     }
 }

@@ -715,16 +715,22 @@ fn canonical_edges_for_method(
     method: &str,
     workspace: &WorkspaceTypeIndex,
 ) -> Vec<String> {
+    // Both TraitBound (impl/dyn Trait) and GenericParamBound
+    // (`fn f<Q: T>() -> Q`) dispatch identically through the trait
+    // anchor — only their turbofish-overridability differs. Use
+    // `as_trait_bounds()` so both variants route together.
+    if let Some(bounds) = ty.as_trait_bounds() {
+        return bounds
+            .iter()
+            .flat_map(|trait_segs| trait_dispatch_edges(trait_segs, method, workspace))
+            .collect();
+    }
     match ty {
         CanonicalType::Path(segs) => {
             let mut full = segs.clone();
             full.push(method.to_string());
             vec![full.join("::")]
         }
-        CanonicalType::TraitBound(bounds) => bounds
-            .iter()
-            .flat_map(|trait_segs| trait_dispatch_edges(trait_segs, method, workspace))
-            .collect(),
         _ => Vec::new(),
     }
 }
