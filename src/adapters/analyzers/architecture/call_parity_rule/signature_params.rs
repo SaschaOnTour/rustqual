@@ -8,6 +8,20 @@ use super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
 use super::local_symbols::FileScope;
 use std::collections::HashMap;
 
+// qual:api
+/// Per-param entry in the canonical generics map: the canonicalised
+/// trait bounds for the param plus its turbofish substitution position
+/// (`Some(idx)` for params reachable via a call-site turbofish — fn-own
+/// params for free fns, method-own params for methods, struct-own
+/// params for fields. `None` for impl-level params merged into a method
+/// context: those are determined by receiver-type inference, not by
+/// the method-call turbofish).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParamInfo {
+    pub bounds: Vec<Vec<String>>,
+    pub turbofish_index: Option<usize>,
+}
+
 /// Extract `(name, &Type)` pairs for every typed positional parameter
 /// of a fn signature. Framework-extractor patterns like
 /// `fn h(State(db): State<Db>)` contribute `("db", State<Db>)` — the
@@ -29,36 +43,98 @@ pub(crate) fn extract_signature_params(sig: &syn::Signature) -> Vec<(String, &sy
 // qual:api
 /// Canonical generic-param map for a free fn / struct / impl-block —
 /// any item whose generics aren't merged with an outer scope. Returns
-/// `{name → canonicalised trait-bound paths}`; entries with empty
-/// bound lists are kept so `generic_param_shadow` still recognises
-/// the param as a generic (shadows same-named workspace symbols).
-/// Integration: one helper owns the whole pipeline so call sites
-/// can't compose the atomic steps incorrectly.
+/// `{name → ParamInfo}` with each param's `turbofish_index` set to its
+/// position in the item's own generics list (all params are call-site
+/// substitutable in this shape). Entries with empty bound lists are
+/// kept so `generic_param_shadow` still recognises the param as a
+/// generic (shadows same-named workspace symbols). Integration: one
+/// helper owns the whole pipeline so call sites can't compose the
+/// atomic steps incorrectly.
 pub(crate) fn item_canonical_generics(
     generics: &syn::Generics,
     file: &FileScope<'_>,
     mod_stack: &[String],
-) -> HashMap<String, Vec<Vec<String>>> {
-    resolve_generic_param_bounds(&extract_item_generics(generics), file, mod_stack)
+) -> HashMap<String, ParamInfo> {
+    let raw = extract_item_generics(generics);
+    let mut out = HashMap::new();
+    for (idx, (name, bounds)) in raw.into_iter().enumerate() {
+        out.insert(
+            name,
+            ParamInfo {
+                bounds: canonicalise_bounds(&bounds, file, mod_stack),
+                turbofish_index: Some(idx),
+            },
+        );
+    }
+    out
 }
 
 // qual:api
 /// Canonical generic-param map for a method inside an `impl` block.
-/// Merges impl-level generics with method-level inline + where bounds
-/// (the where bounds on impl-level generic names get picked up via
-/// `extract_method_with_outer`), then canonicalises against the file
-/// scope. Integration: the only correct way to assemble the
-/// generic-params map for a method.
+/// Tags each param with its origin so turbofish substitution at the
+/// call site only fires for method-own params:
+/// - Method-own params (`fn current<Q: T>(&self) -> Q`) get
+///   `turbofish_index = Some(position-in-method-sig)`. The call-site
+///   turbofish `s.current::<X>()` substitutes them.
+/// - Impl-level params (`impl<I> S<I> { ... }`) get
+///   `turbofish_index = None` — they're determined by the receiver
+///   type, not by a method-call turbofish.
+///
+/// Method-level `where Q: T` predicates that target an impl-level
+/// generic merge onto the impl-level entry (still `None`-indexed) so
+/// the bound is captured but no turbofish substitution is attempted.
+/// Integration: the only correct way to assemble the generic-params
+/// map for a method.
 pub(crate) fn method_canonical_generics(
     sig: &syn::Signature,
     impl_generics: &[(String, Vec<Vec<String>>)],
     file: &FileScope<'_>,
     mod_stack: &[String],
-) -> HashMap<String, Vec<Vec<String>>> {
+) -> HashMap<String, ParamInfo> {
     let outer_names: Vec<&str> = impl_generics.iter().map(|(n, _)| n.as_str()).collect();
     let method_raw = extract_method_with_outer(sig, &outer_names);
-    let merged = merge_generic_params(impl_generics.to_vec(), method_raw);
-    resolve_generic_param_bounds(&merged, file, mod_stack)
+    let method_positions: HashMap<String, usize> = sig
+        .generics
+        .params
+        .iter()
+        .filter_map(|p| match p {
+            syn::GenericParam::Type(tp) => Some(tp.ident.to_string()),
+            _ => None,
+        })
+        .enumerate()
+        .map(|(i, n)| (n, i))
+        .collect();
+    let mut out = HashMap::new();
+    // Impl-level entries: turbofish_index = None (receiver-driven).
+    for (name, bounds) in impl_generics {
+        out.insert(
+            name.clone(),
+            ParamInfo {
+                bounds: canonicalise_bounds(bounds, file, mod_stack),
+                turbofish_index: None,
+            },
+        );
+    }
+    // Method-level + outer-extending entries: merge bounds onto existing
+    // impl-level entries (preserving their None index), or insert fresh
+    // entries with the method's own position.
+    for (name, bounds) in method_raw {
+        let canonical = canonicalise_bounds(&bounds, file, mod_stack);
+        match out.get_mut(&name) {
+            Some(existing) => existing.bounds.extend(canonical),
+            None => {
+                let turbofish_index = method_positions.get(&name).copied();
+                out.insert(
+                    name,
+                    ParamInfo {
+                        bounds: canonical,
+                        turbofish_index,
+                    },
+                );
+            }
+        }
+    }
+    out
 }
 
 // qual:api
@@ -115,31 +191,6 @@ fn collect_inline_bounds(generics: &syn::Generics) -> Vec<(String, Vec<Vec<Strin
         .collect()
 }
 
-/// Combine impl-level and method-level generic params. Same-name
-/// generics across impl and method are forbidden by Rust (E0403:
-/// "the name `Q` is already used for a generic parameter in this
-/// item's generic parameters"), so the only way a name appears in
-/// both lists is when method-level `where`-clauses ADD bounds to an
-/// impl-level param via `extract_method_with_outer` (which extends
-/// `bounds_by_name` with an outer-name entry when the method's where
-/// clause references an impl-level generic). Concatenation is
-/// therefore correct: it accumulates the full bound set for a param
-/// that was introduced once at the impl level. Private: only
-/// `method_canonical_generics` composes this with the canonicaliser.
-fn merge_generic_params(
-    outer: Vec<(String, Vec<Vec<String>>)>,
-    inner: Vec<(String, Vec<Vec<String>>)>,
-) -> Vec<(String, Vec<Vec<String>>)> {
-    let mut out = outer;
-    for (name, bounds) in inner {
-        match out.iter_mut().find(|(n, _)| n == &name) {
-            Some(entry) => entry.1.extend(bounds),
-            None => out.push((name, bounds)),
-        }
-    }
-    out
-}
-
 /// For each `T: Trait` predicate where `T` is a single-ident type,
 /// append the trait bounds to the matching entry in `bounds_by_name`.
 /// Predicates with non-trivial bounded types (`Vec<T>: ...`,
@@ -159,9 +210,9 @@ fn merge_where_bounds(
 /// Like `merge_where_bounds`, but if the predicate's name isn't in
 /// `bounds_by_name` AND is in `extending_names`, push a fresh entry.
 /// Used by the method-side extractor so a method's `where Q: Trait`
-/// for an impl-level `Q` produces an entry that survives into the
-/// `merge_generic_params` step (where it accumulates onto the
-/// impl-level entry).
+/// for an impl-level `Q` produces an entry that survives the
+/// downstream merge in `method_canonical_generics` (which accumulates
+/// the where-clause bound onto the impl-level entry there).
 fn merge_where_bounds_extending(
     bounds_by_name: &mut Vec<(String, Vec<Vec<String>>)>,
     where_clause: &syn::WhereClause,
@@ -239,27 +290,23 @@ fn param_name_from_pat(pat: &syn::Pat) -> Option<String> {
     }
 }
 
-/// Canonicalise each raw trait-bound segment list against `file`'s
+/// Canonicalise one raw trait-bound segment list against `file`'s
 /// scope. Bounds that resolve become anchor prefixes; unresolvable
-/// bounds (external trait, typo) are dropped — the param entry stays
-/// in the map (so `generic_param_shadow` still recognises `Q` as a
-/// generic) but with an empty bound list, producing zero anchor
-/// edges. Private: composed by `item_canonical_generics` /
-/// `method_canonical_generics`; external callers must use those.
-fn resolve_generic_param_bounds(
-    raw: &[(String, Vec<Vec<String>>)],
+/// bounds (external trait, typo) are dropped from the result. The
+/// param entry that carries this list stays in the canonical map
+/// regardless of bound resolvability (so `generic_param_shadow` still
+/// recognises the param as a generic), just with an empty bound list
+/// that produces zero anchor edges. Private: composed by
+/// `item_canonical_generics` / `method_canonical_generics`.
+fn canonicalise_bounds(
+    bounds: &[Vec<String>],
     file: &FileScope<'_>,
     mod_stack: &[String],
-) -> HashMap<String, Vec<Vec<String>>> {
-    let mut out = HashMap::new();
+) -> Vec<Vec<String>> {
     let scope = CanonScope { file, mod_stack };
-    for (name, bounds) in raw {
-        let resolved: Vec<Vec<String>> = bounds
-            .iter()
-            .filter_map(|b| canonicalise_type_segments_in_scope(b, &scope))
-            .filter(|c| c.first().map(String::as_str) == Some("crate"))
-            .collect();
-        out.insert(name.clone(), resolved);
-    }
-    out
+    bounds
+        .iter()
+        .filter_map(|b| canonicalise_type_segments_in_scope(b, &scope))
+        .filter(|c| c.first().map(String::as_str) == Some("crate"))
+        .collect()
 }

@@ -18,7 +18,7 @@ use super::super::self_subst::substitute_bare_self;
 use super::{canonical_type_key, resolve_ctx_with_generics, BuildContext, WorkspaceTypeIndex};
 use crate::adapters::analyzers::architecture::call_parity_rule::bindings::CanonScope;
 use crate::adapters::analyzers::architecture::call_parity_rule::signature_params::{
-    impl_block_generics, method_canonical_generics,
+    impl_block_generics, method_canonical_generics, ParamInfo,
 };
 use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::resolve_impl_self_type;
 use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
@@ -145,7 +145,7 @@ fn resolve_method_return(
     impl_segs: &[String],
     ctx: &BuildContext<'_>,
     mod_stack: &[String],
-    generic_params: &HashMap<String, Vec<Vec<String>>>,
+    generic_params: &HashMap<String, ParamInfo>,
 ) -> CanonicalType {
     let substituted = substitute_bare_self(ret_ty, impl_segs);
     resolve_type(

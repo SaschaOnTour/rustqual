@@ -50,13 +50,16 @@ pub(crate) struct ResolveContext<'a> {
     /// see the use-site's symbols. `None` outside alias expansion.
     pub alias_param_subs: Option<&'a HashMap<String, CanonicalType>>,
     /// Fn-scoped generic params with their canonicalised trait bounds
-    /// — built via `signature_params::item_canonical_generics` or
+    /// AND their turbofish-substitution position — built via
+    /// `signature_params::item_canonical_generics` or
     /// `method_canonical_generics` and threaded through the collector
-    /// so `resolve_path` can return `TraitBound(...)` for a bare-ident
-    /// path that names a generic type parameter
-    /// (`Q` in `fn f<Q: Trait>(q: &Q) { q.method() }`). `None` for
-    /// alias-body / test contexts that have no fn-level generic info.
-    pub generic_params: Option<&'a HashMap<String, Vec<Vec<String>>>>,
+    /// so `generic_param_shadow` (inside `resolve_generic_path`) can
+    /// short-circuit a bare-ident path that names a generic type
+    /// parameter to `CanonicalType::GenericParamBound { bounds,
+    /// turbofish_index }` (bounded) or `Opaque` (unbounded `<Q>`,
+    /// shadows same-named workspace symbol). `None` for alias-body /
+    /// test contexts that have no fn-level generic info.
+    pub generic_params: Option<&'a HashMap<String, super::super::signature_params::ParamInfo>>,
 }
 
 /// Hard recursion cap for `resolve_type_with_depth`. Guards against
@@ -135,16 +138,21 @@ fn dispatch_type(ty: &syn::Type, ctx: &ResolveContext<'_>, next: u8) -> Canonica
 
 /// Collect every resolvable non-marker trait bound from a
 /// `dyn T1 + T2` or `impl T1 + T2` list and canonicalise to
-/// `TraitBound(Vec<path>)`. Marker traits (`Send`, `Sync`, `Unpin`,
-/// `Copy`, `Clone`, etc.) and lifetime bounds are skipped; bounds
-/// that can't be canonicalised (external crates not in the
-/// workspace) are filtered out so `dyn ExternalTrait + LocalTrait`
-/// still dispatches via `LocalTrait`. A `Future<Output = T>` bound
-/// short-circuits to `Future(T)` (combinator-table compatibility) —
-/// in that case any peer trait bounds are skipped because
-/// `CanonicalType` can't represent both `Future` and `TraitBound`
-/// simultaneously. Yields `Opaque` if no resolvable trait bound
-/// exists. Operation.
+/// `CanonicalType::TraitBound(Vec<Vec<String>>)` — one outer entry per
+/// resolved trait, each inner `Vec<String>` is the trait's canonical
+/// path segments. Marker traits (`Send`, `Sync`, `Unpin`, `Copy`,
+/// `Clone`, etc.) and lifetime bounds are skipped; bounds that can't
+/// be canonicalised (external crates not in the workspace) are
+/// filtered out so `dyn ExternalTrait + LocalTrait` still dispatches
+/// via `LocalTrait`. A `Future<Output = T>` bound short-circuits to
+/// `Future(T)` (combinator-table compatibility) — in that case any
+/// peer trait bounds are skipped because `CanonicalType` can't
+/// represent both `Future` and `TraitBound` simultaneously. Yields
+/// `Opaque` if no resolvable trait bound exists. Distinct from
+/// `GenericParamBound` (produced by `generic_param_shadow` for bare
+/// fn-generic-param ident returns) — `TraitBound` is for `impl Trait`
+/// / `dyn Trait` shapes whose opaque concrete type isn't substituted
+/// by a call-site turbofish. Operation.
 fn resolve_bound_list(
     bounds: &syn::punctuated::Punctuated<syn::TypeParamBound, syn::Token![+]>,
     ctx: &ResolveContext<'_>,
@@ -348,8 +356,12 @@ fn peel_single_generic(
 /// pipeline. On an alias hit, delegate to `resolve_alias::expand_alias`
 /// to handle param substitution + decl-site scope swap. Single-segment
 /// paths that name a fn-scoped generic param (`Q` where `Q: T1 + T2`)
-/// short-circuit to `TraitBound(all-bounds)` so receiver-position
-/// dispatch can fan out one edge per bound — without this, the
+/// short-circuit to `CanonicalType::GenericParamBound { bounds,
+/// turbofish_index }` so receiver-position dispatch can fan out one
+/// edge per bound AND the call-site turbofish can substitute a
+/// concrete type at the param's position. Unbounded `<Q>` short-
+/// circuits to `Opaque` (shadows any same-named workspace symbol).
+/// Without this short-circuit, the
 /// canonicalisation pipeline would either find no workspace symbol
 /// (→ `Opaque`) or accidentally collide with an unrelated workspace
 /// type (→ wrong `Path`).
@@ -370,21 +382,32 @@ fn resolve_generic_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -
     CanonicalType::Path(resolved)
 }
 
-/// `Some(GenericParamBound(..))` for bounded fn-scoped generics — the
-/// distinct variant signals "this return type is one of the fn's own
-/// params, turbofish on the call site substitutes it." `Some(Opaque)`
-/// for unbounded params (shadowing — must not fall through to a same-
-/// named workspace symbol). `None` when the path isn't a known param.
+/// `Some(GenericParamBound { bounds, turbofish_index })` for bounded
+/// fn-scoped generics — `turbofish_index` carries the position of the
+/// param in the callee's substitutable generics list so the call site
+/// can pick the matching turbofish arg (handles
+/// `fn get<A, Q: T>() -> Q` correctly, not just single-generic shapes).
+/// `Some(Opaque)` for unbounded params (shadowing — must not fall
+/// through to a same-named workspace symbol). `None` when the path
+/// isn't a known param.
 fn generic_param_shadow(segments: &[String], ctx: &ResolveContext<'_>) -> Option<CanonicalType> {
     if segments.len() != 1 {
         return None;
     }
-    let bounds = ctx.generic_params?.get(&segments[0])?;
-    let collected: Vec<Vec<String>> = bounds.iter().filter(|b| !b.is_empty()).cloned().collect();
+    let info = ctx.generic_params?.get(&segments[0])?;
+    let collected: Vec<Vec<String>> = info
+        .bounds
+        .iter()
+        .filter(|b| !b.is_empty())
+        .cloned()
+        .collect();
     Some(if collected.is_empty() {
         CanonicalType::Opaque
     } else {
-        CanonicalType::GenericParamBound(collected)
+        CanonicalType::GenericParamBound {
+            bounds: collected,
+            turbofish_index: info.turbofish_index,
+        }
     })
 }
 

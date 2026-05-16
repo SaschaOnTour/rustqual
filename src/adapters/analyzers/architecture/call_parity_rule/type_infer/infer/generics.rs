@@ -31,25 +31,46 @@ use super::InferContext;
 
 // qual:api
 /// Apply turbofish substitution when the inferred return is a
-/// `GenericParamBound` (bare fn-generic-param ident return). Shared by
-/// `infer_call` (path-style) and `infer_method_call` (method-style):
-/// both call shapes have the symmetric rule "the caller named the
-/// concrete type via turbofish; that's strictly more specific than
-/// the param's bound." For any other inferred shape (`Path`,
-/// `TraitBound` from `impl Trait` / `dyn Trait`, wrappers, `Opaque`),
-/// returns the input unchanged — the turbofish args don't substitute
-/// those return positions. Operation.
+/// `GenericParamBound` (bare callee-generic-param ident return).
+/// Recurses through `Result` / `Option` / `Future` wrappers so a
+/// `Result<Q, E>` return with turbofish `<Session>` substitutes the
+/// inner `Q → Session` and rewraps as `Result(Session)` — `.unwrap()`
+/// then yields Session and `.diff()` resolves correctly. The
+/// substitution uses the param's `turbofish_index` to pick the right
+/// turbofish arg (handles `fn get<A, Q: T>() -> Q` where Q is at
+/// position 1, not 0). For impl-level params merged into a method
+/// (turbofish_index = None) or any non-substitutable shape (`Path`,
+/// `TraitBound` from `impl Trait` / `dyn Trait`, `Opaque`), returns
+/// the input unchanged. Integration.
 pub(super) fn turbofish_substitute(
     inferred: CanonicalType,
     turbofish: Option<&syn::AngleBracketedGenericArguments>,
     ctx: &InferContext<'_>,
 ) -> CanonicalType {
-    if matches!(inferred, CanonicalType::GenericParamBound(_)) {
-        if let Some(tf) = turbofish.and_then(|args| resolve_first_type_arg(args, ctx)) {
-            return tf;
+    match inferred {
+        CanonicalType::GenericParamBound {
+            bounds,
+            turbofish_index: Some(idx),
+        } => turbofish
+            .and_then(|args| resolve_type_arg_at(args, idx, ctx))
+            .unwrap_or(CanonicalType::GenericParamBound {
+                bounds,
+                turbofish_index: Some(idx),
+            }),
+        // Recurse into wrappers so generic-param returns inside
+        // `Result<Q, _>` / `Option<Q>` / `Future<Output = Q>` get
+        // substituted before `.unwrap()` / `.await` peel the wrapper.
+        CanonicalType::Result(inner) => {
+            CanonicalType::Result(Box::new(turbofish_substitute(*inner, turbofish, ctx)))
         }
+        CanonicalType::Option(inner) => {
+            CanonicalType::Option(Box::new(turbofish_substitute(*inner, turbofish, ctx)))
+        }
+        CanonicalType::Future(inner) => {
+            CanonicalType::Future(Box::new(turbofish_substitute(*inner, turbofish, ctx)))
+        }
+        other => other,
     }
-    inferred
 }
 
 // qual:api
@@ -65,7 +86,7 @@ pub(super) fn turbofish_fallback(
     turbofish: Option<&syn::AngleBracketedGenericArguments>,
     ctx: &InferContext<'_>,
 ) -> Option<CanonicalType> {
-    turbofish.and_then(|args| resolve_first_type_arg(args, ctx))
+    turbofish.and_then(|args| resolve_type_arg_at(args, 0, ctx))
 }
 
 // qual:api
@@ -85,17 +106,23 @@ pub(super) fn path_turbofish_args(
     Some(ab)
 }
 
-/// Resolve the first type argument inside an angle-bracketed args list
-/// against the inference context, returning `None` if the type
+/// Resolve the type argument at position `idx` inside an angle-bracketed
+/// args list (skipping lifetime / const args; `idx` counts only type
+/// args). Returns `None` if the index is out of bounds or the type
 /// collapses to `Opaque`. Operation.
-fn resolve_first_type_arg(
+fn resolve_type_arg_at(
     args: &syn::AngleBracketedGenericArguments,
+    idx: usize,
     ctx: &InferContext<'_>,
 ) -> Option<CanonicalType> {
-    let first_ty = args.args.iter().find_map(|arg| match arg {
-        syn::GenericArgument::Type(t) => Some(t),
-        _ => None,
-    })?;
+    let type_arg = args
+        .args
+        .iter()
+        .filter_map(|arg| match arg {
+            syn::GenericArgument::Type(t) => Some(t),
+            _ => None,
+        })
+        .nth(idx)?;
     let rctx = ResolveContext {
         file: ctx.file,
         mod_stack: ctx.mod_stack,
@@ -106,8 +133,8 @@ fn resolve_first_type_arg(
         generic_params: ctx.generic_params,
     };
     let resolved = match ctx.self_type.as_deref() {
-        Some(impl_segs) => resolve_type(&substitute_bare_self(first_ty, impl_segs), &rctx),
-        None => resolve_type(first_ty, &rctx),
+        Some(impl_segs) => resolve_type(&substitute_bare_self(type_arg, impl_segs), &rctx),
+        None => resolve_type(type_arg, &rctx),
     };
     if matches!(resolved, CanonicalType::Opaque) {
         return None;

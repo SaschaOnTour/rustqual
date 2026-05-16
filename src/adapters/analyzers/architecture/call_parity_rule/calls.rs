@@ -52,12 +52,13 @@ pub struct FnContext<'a> {
     pub body: &'a syn::Block,
     /// Named signature parameters with their declared types.
     pub signature_params: Vec<(String, &'a syn::Type)>,
-    /// Canonical generic-param map: `name → canonicalised trait-bound
-    /// paths`. Callers MUST build this via
-    /// `signature_params::item_canonical_generics` or
+    /// Canonical generic-param map: `name → ParamInfo` (canonicalised
+    /// bounds + turbofish substitution position). Callers MUST build
+    /// this via `signature_params::item_canonical_generics` or
     /// `method_canonical_generics`; constructing it ad-hoc bypasses
-    /// the canonicaliser and leaves `Q::method()` dispatch broken.
-    pub generic_params: HashMap<String, Vec<Vec<String>>>,
+    /// the canonicaliser AND the position-tagging and leaves
+    /// `Q::method()` dispatch / turbofish substitution broken.
+    pub generic_params: HashMap<String, super::signature_params::ParamInfo>,
     /// Type-path of the enclosing `impl` block, if any.
     pub self_type: Option<Vec<String>>,
     /// Workspace type-index for shallow inference fallback. `None` for
@@ -94,7 +95,7 @@ struct CanonicalCallCollector<'a> {
     /// Generic type-param name → canonicalised trait-bound paths.
     /// Empty bounds keep the param-name reservation so an unbound
     /// `Q::method(...)` doesn't fall through to `crate_root_modules`.
-    generic_params: HashMap<String, Vec<Vec<String>>>,
+    generic_params: HashMap<String, super::signature_params::ParamInfo>,
     /// Scope stack of variable-name → canonical-type-path bindings.
     /// Always non-empty while a collection is in flight.
     bindings: Vec<HashMap<String, Vec<String>>>,
@@ -290,9 +291,10 @@ impl<'a> CanonicalCallCollector<'a> {
         if segments.len() < 2 {
             return None;
         }
-        let bounds = self.generic_params.get(&segments[0])?;
+        let info = self.generic_params.get(&segments[0])?;
         let method_tail = &segments[1..];
-        let canonicals: Vec<String> = bounds
+        let canonicals: Vec<String> = info
+            .bounds
             .iter()
             .map(|bound| {
                 let mut full = bound.clone();

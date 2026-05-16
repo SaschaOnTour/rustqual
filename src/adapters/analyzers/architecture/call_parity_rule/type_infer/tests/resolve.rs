@@ -756,9 +756,16 @@ fn unbounded_generic_param_shadows_same_named_workspace_symbol() {
         crate_root_modules: &roots,
         workspace_module_paths: None,
     };
-    let mut generics: HashMap<String, Vec<Vec<String>>> = HashMap::new();
+    use crate::adapters::analyzers::architecture::call_parity_rule::signature_params::ParamInfo;
+    let mut generics: HashMap<String, ParamInfo> = HashMap::new();
     // Unbounded `<Q>` — the param exists, but with no usable bounds.
-    generics.insert("Q".to_string(), vec![]);
+    generics.insert(
+        "Q".to_string(),
+        ParamInfo {
+            bounds: vec![],
+            turbofish_index: Some(0),
+        },
+    );
     let ty = parse_type("Q");
     let resolved = resolve_type(
         &ty,
@@ -799,8 +806,15 @@ fn unbounded_generic_param_shadowing_does_not_affect_unrelated_path() {
         crate_root_modules: &roots,
         workspace_module_paths: None,
     };
-    let mut generics: HashMap<String, Vec<Vec<String>>> = HashMap::new();
-    generics.insert("Q".to_string(), vec![]);
+    use crate::adapters::analyzers::architecture::call_parity_rule::signature_params::ParamInfo;
+    let mut generics: HashMap<String, ParamInfo> = HashMap::new();
+    generics.insert(
+        "Q".to_string(),
+        ParamInfo {
+            bounds: vec![],
+            turbofish_index: Some(0),
+        },
+    );
     let ty = parse_type("Session");
     let resolved = resolve_type(
         &ty,

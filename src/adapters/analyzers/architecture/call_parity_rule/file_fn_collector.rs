@@ -11,7 +11,8 @@ use super::bindings::CanonScope;
 use super::calls::{collect_canonical_calls, FnContext};
 use super::local_symbols::FileScope;
 use super::signature_params::{
-    extract_signature_params, impl_block_generics, method_canonical_generics,
+    extract_signature_params, impl_block_generics, item_canonical_generics,
+    method_canonical_generics,
 };
 use super::type_infer::WorkspaceTypeIndex;
 use super::workspace_graph::{canonical_fn_name, resolve_impl_self_type, CallGraph};
@@ -54,13 +55,13 @@ impl<'a> FileFnCollector<'a> {
     ) {
         let (self_type, impl_generics) = match self.impl_type_stack.last() {
             // Free fn (no enclosing impl).
-            None => (None, Vec::new()),
+            None => (None, None),
             // Resolved impl — use its canonical self-type plus the
             // impl-level generic params for `Q::method()` resolution.
             Some(ImplFrame {
                 self_type: Some(segs),
                 generic_params,
-            }) => (Some(segs.clone()), generic_params.clone()),
+            }) => (Some(segs.clone()), Some(generic_params.as_slice())),
             // Unresolved impl (trait object / reference receiver) —
             // don't record; see `resolve_impl_self_type`'s doc.
             Some(ImplFrame {
@@ -73,17 +74,19 @@ impl<'a> FileFnCollector<'a> {
             &self.mod_stack,
             fn_name,
         );
+        // Distinct call-shape helpers keep the intent clear and avoid
+        // coupling free-fn generics handling to method-specific logic:
+        // free fns have no outer scope, methods inherit the impl's.
+        let generic_params = match impl_generics {
+            Some(outer) => method_canonical_generics(sig, outer, self.file, &self.mod_stack),
+            None => item_canonical_generics(&sig.generics, self.file, &self.mod_stack),
+        };
         let ctx = FnContext {
             file: self.file,
             mod_stack: &self.mod_stack,
             body,
             signature_params: extract_signature_params(sig),
-            generic_params: method_canonical_generics(
-                sig,
-                &impl_generics,
-                self.file,
-                &self.mod_stack,
-            ),
+            generic_params,
             self_type,
             workspace_index: Some(self.type_index),
             workspace_files: Some(self.workspace_files),

@@ -709,7 +709,7 @@ fn bounded_fn_generic_param_return_carries_canonicalised_trait_bound() {
             "Handler".to_string(),
         ]];
         match ret {
-            CanonicalType::GenericParamBound(bounds) => {
+            CanonicalType::GenericParamBound { bounds, .. } => {
                 assert_eq!(
                     bounds, &canonical_bounds,
                     "trait bound for `Q: Handler` must be canonicalised \
@@ -895,11 +895,12 @@ fn method_generic_param_return_canonicalises_where_bound_on_impl_generic() {
     // generic MUST be captured by `method_canonical_generics`. If the
     // extractor pipeline drops the outer-name predicate, the param
     // has empty bounds and the return resolves to Opaque (no info).
-    // Capturing it surfaces `GenericParamBound([canonical Handler])`
+    // Capturing it surfaces
+    // `GenericParamBound { bounds: [canonical Handler], turbofish_index: None }`
     // so downstream `service.current().handle()` routes through the
-    // trait anchor (and a future `service.current::<Session>()` can
-    // be turbofish-overridden — the `GenericParamBound` variant is
-    // what enables that).
+    // trait anchor. Note `turbofish_index: None` because Q is impl-
+    // level (substituted via receiver type, not by a method-call
+    // turbofish on `current`).
     let ret = index
         .method_return("crate::app::service::Service", "current")
         .expect("method-level where-bound must surface as GenericParamBound, not be dropped");
@@ -909,11 +910,17 @@ fn method_generic_param_return_canonicalises_where_bound_on_impl_generic() {
         "handler".to_string(),
         "Handler".to_string(),
     ]];
+    // Impl-level Q: turbofish_index is None (substituted via receiver
+    // type, not method-call turbofish).
     assert_eq!(
         ret,
-        &CanonicalType::GenericParamBound(canonical_bounds),
+        &CanonicalType::GenericParamBound {
+            bounds: canonical_bounds,
+            turbofish_index: None,
+        },
         "method-level `where Q: Handler` on impl-level `Q` must produce \
-         a canonicalised GenericParamBound on the method's return, got {ret:?}"
+         a canonicalised GenericParamBound (with no method-turbofish \
+         position) on the method's return, got {ret:?}"
     );
 }
 
@@ -1844,5 +1851,361 @@ fn method_call_impl_trait_return_turbofish_does_not_substitute_return() {
          `make_handler<T>(&self) -> impl Handler` must NOT produce edge \
          `{phantom_session_diff}` — return is opaque `impl Handler`. \
          Calls: {calls:?}"
+    );
+}
+
+#[test]
+fn multi_generic_fn_turbofish_picks_correct_arg_for_returned_param() {
+    // `fn get<A, Q: Handler>() -> Q` — A is the FIRST generic param,
+    // Q is the SECOND and IS the return. Calling
+    // `get::<Audit, Session>()` substitutes A=Audit and Q=Session.
+    // The return is Q → Session. The bug: pre-fix `turbofish_substitute`
+    // always picks the FIRST turbofish arg, so it would substitute
+    // Audit instead of Session, then `.diff()` would route to
+    // `Audit::diff` (false edge) or miss `Session::diff`.
+    //
+    // Required: GenericParamBound must carry the position of the
+    // returned param in the call-site-substitutable generics list, so
+    // turbofish substitution picks arg-at-position.
+    use crate::adapters::analyzers::architecture::call_parity_rule::calls::{
+        collect_canonical_calls, FnContext,
+    };
+    use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::FileScope;
+    use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::{
+        collect_crate_root_modules, collect_local_symbols,
+    };
+    use crate::adapters::shared::use_tree::gather_alias_map;
+
+    let fix = fixture(&[
+        (
+            "src/ports/handler.rs",
+            r#"
+            pub trait Handler { fn handle(&self); }
+            "#,
+        ),
+        (
+            "src/app/audit.rs",
+            r#"
+            pub struct Audit;
+            impl Audit { pub fn audit_method(&self) {} }
+            "#,
+        ),
+        (
+            "src/app/session.rs",
+            r#"
+            pub struct Session;
+            impl Session { pub fn diff(&self) {} }
+            "#,
+        ),
+        (
+            "src/app/make.rs",
+            r#"
+            use crate::ports::handler::Handler;
+            pub fn get<A, Q: Handler>() -> Q { unimplemented!() }
+            "#,
+        ),
+    ]);
+    let borrowed_files = borrowed(&fix);
+    let workspace_index = {
+        let cfg_test = &HashSet::new();
+        let roots = &crate_roots(&[
+            "src/ports/handler.rs",
+            "src/app/audit.rs",
+            "src/app/session.rs",
+            "src/app/make.rs",
+        ]);
+        let wraps = &HashSet::new();
+        let workspace_files = build_workspace_files_map(WorkspaceFilesInputs {
+            files: &borrowed_files,
+            cfg_test_files: cfg_test,
+            aliases_per_file: &fix.aliases,
+            aliases_scoped_per_file: &fix.aliases_scoped,
+            local_symbols_per_file: &fix.local_symbols,
+            crate_root_modules: roots,
+            workspace_module_paths: None,
+        });
+        build_workspace_type_index(&WorkspaceIndexInputs {
+            files: &borrowed_files,
+            workspace_files: &workspace_files,
+            cfg_test_files: cfg_test,
+            transparent_wrappers: wraps,
+        })
+    };
+    let use_site = parse_file(
+        r#"
+        use crate::app::make::get;
+        use crate::app::audit::Audit;
+        use crate::app::session::Session;
+        pub fn use_it() {
+            get::<Audit, Session>().diff();
+        }
+        "#,
+    );
+    let alias_map = gather_alias_map(&use_site);
+    let local_symbols = collect_local_symbols(&use_site);
+    let crate_roots_set = collect_crate_root_modules(&[("src/cli/use_site.rs", &use_site)]);
+    let file_scope = FileScope {
+        path: "src/cli/use_site.rs",
+        alias_map: &alias_map,
+        aliases_per_scope: &Default::default(),
+        local_symbols: &local_symbols,
+        local_decl_scopes: &Default::default(),
+        crate_root_modules: &crate_roots_set,
+        workspace_module_paths: None,
+    };
+    let body = match &use_site.items[3] {
+        syn::Item::Fn(item_fn) => &item_fn.block,
+        _ => panic!("expected fn item at index 3 of use_site"),
+    };
+    let ctx = FnContext {
+        file: &file_scope,
+        mod_stack: &[],
+        body,
+        signature_params: vec![],
+        generic_params: std::collections::HashMap::new(),
+        self_type: None,
+        workspace_index: Some(&workspace_index),
+        workspace_files: None,
+    };
+    let calls = collect_canonical_calls(&ctx);
+    let session_diff = "crate::app::session::Session::diff";
+    let phantom_audit_diff = "crate::app::audit::Audit::diff";
+    assert!(
+        calls.contains(session_diff),
+        "`get::<Audit, Session>().diff()` where `get<A, Q: Handler>() -> Q` \
+         must substitute Q=Session (the SECOND turbofish arg, matching Q's \
+         position). Got calls: {calls:?}"
+    );
+    assert!(
+        !calls.contains(phantom_audit_diff),
+        "must NOT substitute Q=Audit (the FIRST turbofish arg, matching A's \
+         position — but A is not the return). Got calls: {calls:?}"
+    );
+}
+
+#[test]
+fn wrapper_around_generic_param_return_substitutes_inner_via_turbofish() {
+    // `fn get<Q: Handler>() -> Result<Q, E>` — return type is a Result
+    // wrapping the generic-param Q. Calling `get::<Session>()` substitutes
+    // Q=Session inside the wrapper, so `.unwrap()` produces a Session.
+    // Then `.diff()` resolves to `Session::diff`. Bug: pre-fix
+    // `turbofish_substitute` only fired when the whole inferred type
+    // was GenericParamBound — it didn't recurse into Result/Option/
+    // Future wrappers, so the Q inside `Result<Q, E>` was left
+    // un-substituted. After `.unwrap()` peeled the Result, the turbofish
+    // context was gone and `.diff()` couldn't resolve to Session::diff.
+    use crate::adapters::analyzers::architecture::call_parity_rule::calls::{
+        collect_canonical_calls, FnContext,
+    };
+    use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::FileScope;
+    use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::{
+        collect_crate_root_modules, collect_local_symbols,
+    };
+    use crate::adapters::shared::use_tree::gather_alias_map;
+
+    let fix = fixture(&[
+        (
+            "src/ports/handler.rs",
+            r#"
+            pub trait Handler { fn handle(&self); }
+            "#,
+        ),
+        (
+            "src/app/session.rs",
+            r#"
+            pub struct Session;
+            impl Session { pub fn diff(&self) {} }
+            "#,
+        ),
+        (
+            "src/app/make.rs",
+            r#"
+            use crate::ports::handler::Handler;
+            pub struct MyErr;
+            pub fn get<Q: Handler>() -> Result<Q, MyErr> { unimplemented!() }
+            "#,
+        ),
+    ]);
+    let borrowed_files = borrowed(&fix);
+    let workspace_index = {
+        let cfg_test = &HashSet::new();
+        let roots = &crate_roots(&[
+            "src/ports/handler.rs",
+            "src/app/session.rs",
+            "src/app/make.rs",
+        ]);
+        let wraps = &HashSet::new();
+        let workspace_files = build_workspace_files_map(WorkspaceFilesInputs {
+            files: &borrowed_files,
+            cfg_test_files: cfg_test,
+            aliases_per_file: &fix.aliases,
+            aliases_scoped_per_file: &fix.aliases_scoped,
+            local_symbols_per_file: &fix.local_symbols,
+            crate_root_modules: roots,
+            workspace_module_paths: None,
+        });
+        build_workspace_type_index(&WorkspaceIndexInputs {
+            files: &borrowed_files,
+            workspace_files: &workspace_files,
+            cfg_test_files: cfg_test,
+            transparent_wrappers: wraps,
+        })
+    };
+    let use_site = parse_file(
+        r#"
+        use crate::app::make::get;
+        use crate::app::session::Session;
+        pub fn use_it() {
+            get::<Session>().unwrap().diff();
+        }
+        "#,
+    );
+    let alias_map = gather_alias_map(&use_site);
+    let local_symbols = collect_local_symbols(&use_site);
+    let crate_roots_set = collect_crate_root_modules(&[("src/cli/use_site.rs", &use_site)]);
+    let file_scope = FileScope {
+        path: "src/cli/use_site.rs",
+        alias_map: &alias_map,
+        aliases_per_scope: &Default::default(),
+        local_symbols: &local_symbols,
+        local_decl_scopes: &Default::default(),
+        crate_root_modules: &crate_roots_set,
+        workspace_module_paths: None,
+    };
+    let body = match &use_site.items[2] {
+        syn::Item::Fn(item_fn) => &item_fn.block,
+        _ => panic!("expected fn item at index 2 of use_site"),
+    };
+    let ctx = FnContext {
+        file: &file_scope,
+        mod_stack: &[],
+        body,
+        signature_params: vec![],
+        generic_params: std::collections::HashMap::new(),
+        self_type: None,
+        workspace_index: Some(&workspace_index),
+        workspace_files: None,
+    };
+    let calls = collect_canonical_calls(&ctx);
+    let session_diff = "crate::app::session::Session::diff";
+    assert!(
+        calls.contains(session_diff),
+        "`get::<Session>().unwrap().diff()` where `get<Q: Handler>() -> \
+         Result<Q, MyErr>` must substitute Q=Session INSIDE the Result \
+         wrapper so `.unwrap()` yields Session and `.diff()` resolves to \
+         {session_diff}. Got calls: {calls:?}"
+    );
+}
+
+#[test]
+fn method_call_wrapper_around_generic_param_return_substitutes_inner() {
+    // Method-call variant of the wrapper-recursion case:
+    // `fn current<Q: Handler>(&self) -> Result<Q, MyErr>` —
+    // `s.current::<Session>().unwrap().diff()` must produce
+    // `Session::diff` by recursing into the Result wrapper.
+    use crate::adapters::analyzers::architecture::call_parity_rule::calls::{
+        collect_canonical_calls, FnContext,
+    };
+    use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::FileScope;
+    use crate::adapters::analyzers::architecture::call_parity_rule::signature_params::extract_signature_params;
+    use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::{
+        collect_crate_root_modules, collect_local_symbols,
+    };
+    use crate::adapters::shared::use_tree::gather_alias_map;
+
+    let fix = fixture(&[
+        (
+            "src/ports/handler.rs",
+            r#"
+            pub trait Handler { fn handle(&self); }
+            "#,
+        ),
+        (
+            "src/app/session.rs",
+            r#"
+            pub struct Session;
+            impl Session { pub fn diff(&self) {} }
+            "#,
+        ),
+        (
+            "src/app/service.rs",
+            r#"
+            use crate::ports::handler::Handler;
+            pub struct MyErr;
+            pub struct Service;
+            impl Service {
+                pub fn current<Q: Handler>(&self) -> Result<Q, MyErr> { unimplemented!() }
+            }
+            "#,
+        ),
+    ]);
+    let borrowed_files = borrowed(&fix);
+    let workspace_index = {
+        let cfg_test = &HashSet::new();
+        let roots = &crate_roots(&[
+            "src/ports/handler.rs",
+            "src/app/session.rs",
+            "src/app/service.rs",
+        ]);
+        let wraps = &HashSet::new();
+        let workspace_files = build_workspace_files_map(WorkspaceFilesInputs {
+            files: &borrowed_files,
+            cfg_test_files: cfg_test,
+            aliases_per_file: &fix.aliases,
+            aliases_scoped_per_file: &fix.aliases_scoped,
+            local_symbols_per_file: &fix.local_symbols,
+            crate_root_modules: roots,
+            workspace_module_paths: None,
+        });
+        build_workspace_type_index(&WorkspaceIndexInputs {
+            files: &borrowed_files,
+            workspace_files: &workspace_files,
+            cfg_test_files: cfg_test,
+            transparent_wrappers: wraps,
+        })
+    };
+    let use_site = parse_file(
+        r#"
+        use crate::app::service::Service;
+        use crate::app::session::Session;
+        pub fn use_it(s: &Service) {
+            s.current::<Session>().unwrap().diff();
+        }
+        "#,
+    );
+    let alias_map = gather_alias_map(&use_site);
+    let local_symbols = collect_local_symbols(&use_site);
+    let crate_roots_set = collect_crate_root_modules(&[("src/cli/use_site.rs", &use_site)]);
+    let file_scope = FileScope {
+        path: "src/cli/use_site.rs",
+        alias_map: &alias_map,
+        aliases_per_scope: &Default::default(),
+        local_symbols: &local_symbols,
+        local_decl_scopes: &Default::default(),
+        crate_root_modules: &crate_roots_set,
+        workspace_module_paths: None,
+    };
+    let (body, sig) = match &use_site.items[2] {
+        syn::Item::Fn(item_fn) => (&item_fn.block, &item_fn.sig),
+        _ => panic!("expected fn item at index 2 of use_site"),
+    };
+    let ctx = FnContext {
+        file: &file_scope,
+        mod_stack: &[],
+        body,
+        signature_params: extract_signature_params(sig),
+        generic_params: std::collections::HashMap::new(),
+        self_type: None,
+        workspace_index: Some(&workspace_index),
+        workspace_files: None,
+    };
+    let calls = collect_canonical_calls(&ctx);
+    let session_diff = "crate::app::session::Session::diff";
+    assert!(
+        calls.contains(session_diff),
+        "`s.current::<Session>().unwrap().diff()` where \
+         `current<Q: Handler>(&self) -> Result<Q, MyErr>` must substitute \
+         Q=Session inside the Result wrapper so `.diff()` resolves to \
+         {session_diff}. Got calls: {calls:?}"
     );
 }

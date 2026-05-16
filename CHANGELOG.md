@@ -89,16 +89,22 @@ pass. Failing-first regression tests live in
   `private_mod_sibling_import_resolves_even_when_ancestor_chain_is_hidden`
   in `module_resolution.rs`.
 - **Unbounded generic param could collide with same-named workspace
-  symbol.** `resolve_generic_path` short-circuited to `TraitBound`
+  symbol.** `resolve_generic_path` short-circuited to a trait bound
   only when the fn-scoped generic param had at least one non-empty
   bound; an unbounded `<Q>` fell through to normal canonicalisation,
   which could resolve `Q` to a workspace type/module of the same
-  name and produce wrong method-dispatch edges. Fix: classify the
-  match into three states (`Bounded` / `Unbounded` / `NotAParam`)
+  name and produce wrong method-dispatch edges. Fix: extracted a
+  `generic_param_shadow` helper that classifies the match into three
+  states (bounded → `GenericParamBound` carrying the canonical
+  bounds, unbounded → `Opaque` shadow, not-a-param → fall through)
   so an unbounded match shadows the workspace lookup with `Opaque`.
   Regression test:
   `unbounded_generic_param_shadows_same_named_workspace_symbol` in
-  `type_infer/tests/resolve.rs`.
+  `type_infer/tests/resolve.rs`. (Initially introduced as the new
+  variant `TraitBound`; later split into a dedicated
+  `GenericParamBound` variant when the same-named conflation with
+  `impl Trait` / `dyn Trait` returns surfaced — see "Split
+  `CanonicalType::TraitBound`" below.)
 - **Workspace type index ignored fn / method / impl / struct
   generics.** The shadowing fix above only fires when
   `ResolveContext.generic_params` is populated, but the
@@ -111,9 +117,11 @@ pass. Failing-first regression tests live in
   as the workspace struct `Q`, poisoning later inference — e.g.
   `get::<Session>().diff()` could short-circuit on the wrong concrete
   return instead of using the turbofish. Fix: threaded the fn's,
-  impl's, and struct's generic params (via the existing
-  `extract_generics` / `merge_generic_params` helpers) into the
-  per-collector resolve context across all three indexing surfaces.
+  impl's, and struct's canonical generics (via the unified
+  `signature_params::item_canonical_generics` /
+  `method_canonical_generics` helpers — see "Unified generics-
+  canonicalisation pipeline" below) into the per-collector resolve
+  context across all three indexing surfaces.
   Audit covered every `ResolveContext` construction in the crate;
   the alias-body case in `resolve_alias::expand_alias` correctly
   keeps `generic_params: None` because alias bodies live at the
@@ -126,37 +134,40 @@ pass. Failing-first regression tests live in
 - **Workspace-index generic bounds were not canonicalised.** The
   first version of the workspace-index generics threading (above)
   stored raw bound segments (e.g. `[["Handler"]]`) —
-  `generic_param_shadow` in `resolve.rs` then wrapped those into
-  `TraitBound` literally, so downstream `trait_has_method` /
+  `generic_param_shadow` in `resolve.rs` then wrapped those into the
+  bound variant literally, so downstream `trait_has_method` /
   anchor-index lookups (keyed on
   `crate::ports::handler::Handler`) silently missed and trait
   dispatch on a `Q: Handler` return dropped valid edges. The body
-  collector already had a canonicaliser
-  (`resolve_generic_param_bounds`); it has been lifted from
-  `calls.rs` into `signature_params.rs`, and the three workspace-
-  index collectors (`functions.rs`, `methods.rs`, `fields.rs`) now
-  route their `extract_generics` output through it before
-  constructing the resolve context. Regression test:
+  collector already had a canonicaliser; it has been lifted from
+  `calls.rs` into `signature_params.rs`, and the workspace-index
+  collectors now route their generics through it before constructing
+  the resolve context. (Subsequently folded into the unified
+  `item_canonical_generics` / `method_canonical_generics` helpers —
+  see "Unified generics-canonicalisation pipeline" below.) Regression
+  test:
   `bounded_fn_generic_param_return_carries_canonicalised_trait_bound`.
 - **Bounded generic-param return blocked turbofish inference.**
-  Once `fn get<Q: Handler>() -> Q` could be indexed as
-  `TraitBound([Handler])`, `infer_call` (which tried `fn_returns`
-  before `turbofish_return_type`) used the bound and never reached
-  the turbofish — so `get::<Session>().diff()` lost the inherent
-  `Session::diff` edge. Fix: when the index returns a `TraitBound`
-  AND the call site carries an explicit turbofish, the turbofish
-  wins (it's strictly more specific than the param's bound). Plain
-  bare-call sites still get the bound so trait-anchor dispatch on
-  the return value keeps working. Regression test:
+  Once `fn get<Q: Handler>() -> Q` could be indexed with the bound
+  available, `infer_call` (which tried `fn_returns` before any
+  turbofish fallback) used the bound and never reached the
+  turbofish — so `get::<Session>().diff()` lost the inherent
+  `Session::diff` edge. Fix: when the index returns a
+  `GenericParamBound` AND the call site carries an explicit
+  turbofish, the turbofish wins (it's strictly more specific than
+  the param's bound). Plain bare-call sites still get the bound so
+  trait-anchor dispatch on the return value keeps working.
+  Regression test:
   `bounded_fn_generic_param_return_does_not_block_turbofish_inference`.
 - **Method-return indexing missed method-level where-bounds on
-  impl-level generics.** `methods.rs` used
-  `extract_generics(&sig.generics)` which ignores
-  `where Q: T` when `Q` is an impl-level (not method-level) generic.
-  The body collector had already needed
-  `extract_method_generic_params(sig, outer_names)` for this exact
-  shape (`impl<Q> Service<Q> { fn current(&self) -> Q where Q: Handler }`).
-  `methods.rs` now uses the same helper. Regression test:
+  impl-level generics.** `methods.rs` used a method-only generics
+  extractor that ignored `where Q: T` when `Q` was an impl-level
+  (not method-level) generic. The body collector had already needed
+  to thread outer names through the method's where clause for this
+  exact shape (`impl<Q> Service<Q> { fn current(&self) -> Q where
+  Q: Handler }`). `methods.rs` now goes through the unified
+  `method_canonical_generics(sig, impl_generics, …)` helper which
+  handles the outer-name-extending pass. Regression test:
   `method_generic_param_return_canonicalises_where_bound_on_impl_generic`.
 
 ### Changed (architectural)
@@ -174,13 +185,14 @@ pass. Failing-first regression tests live in
   - `method_canonical_generics(sig, impl_generics, file, mod_stack)` —
     for methods inside `impl` blocks (merges impl-level + method-
     level + canonicalises).
-  The atomic helpers (`extract_*`, `merge_generic_params`,
-  `resolve_generic_param_bounds`) are now private to
-  `signature_params.rs`. External callers can no longer compose them
-  incorrectly; the only way to construct a canonical generics map
-  is via one of the two public entry points. `FnContext.generic_params`
-  type changed from `Vec<(String, Vec<Vec<String>>)>` (raw) to
-  `HashMap<String, Vec<Vec<String>>>` (canonical) — callers MUST
+  The atomic helpers (`extract_*`, `canonicalise_bounds`) are private
+  to `signature_params.rs`. External callers can no longer compose
+  them incorrectly; the only way to construct a canonical generics
+  map is via one of the two public entry points.
+  `FnContext.generic_params` type changed from
+  `Vec<(String, Vec<Vec<String>>)>` (raw) to
+  `HashMap<String, ParamInfo>` (canonical + turbofish-position
+  tagged) — callers MUST
   build it via the helpers.
 - **Unified turbofish-override across path-call and method-call.**
   The "turbofish wins over a bounded-generic-param return" rule lived
@@ -208,13 +220,41 @@ pass. Failing-first regression tests live in
   params doesn't substitute it. `turbofish_substitute` fired on both
   and produced false `Session::diff` edges for
   `fn make<T>() -> impl Handler` + `make::<Session>().diff()`. Fix:
-  new `CanonicalType::GenericParamBound(Vec<Vec<String>>)` variant
-  produced exclusively by `generic_param_shadow` (case a);
-  `TraitBound` stays for cases b. Both variants dispatch identically
-  through the trait-anchor index (every consumer that used to match
-  `TraitBound` now goes through `CanonicalType::as_trait_bounds()`
-  which handles both). Only `turbofish_substitute` distinguishes
-  them — fires only for `GenericParamBound`.
+  new `CanonicalType::GenericParamBound` variant produced exclusively
+  by `generic_param_shadow` (case a); `TraitBound` stays for case b.
+  Both variants dispatch identically through the trait-anchor index
+  (every consumer that used to match `TraitBound` now goes through
+  `CanonicalType::as_trait_bounds()` which handles both). Only
+  `turbofish_substitute` distinguishes them — fires only for
+  `GenericParamBound`.
+- **Turbofish substitution lost which generic param position is
+  returned, and didn't recurse through wrapper returns.**
+  `turbofish_substitute` always picked the FIRST turbofish arg, so
+  `fn get<A, Q: Handler>() -> Q` called as `get::<Audit, Session>()`
+  would substitute `Audit` (position 0) instead of `Session`
+  (Q's position 1). And the substitution only fired when the WHOLE
+  inferred return was `GenericParamBound` — wrapper returns like
+  `fn get<Q: Handler>() -> Result<Q, E>` left the inner `Q`
+  un-substituted, so `get::<Session>().unwrap().diff()` lost the
+  Session::diff edge after `.unwrap()` peeled the Result. Fix:
+  `GenericParamBound` now carries `turbofish_index: Option<usize>`,
+  populated at index-build time by
+  `signature_params::item_canonical_generics` /
+  `method_canonical_generics` based on the param's position in the
+  callee's substitutable generics list (method-own params for
+  methods, fn-own params for free fns; impl-level params get `None`
+  because they're determined by the receiver type, not the method-
+  call turbofish). `turbofish_substitute` now uses the index to pick
+  the correct turbofish arg AND recurses through `Result` /
+  `Option` / `Future` wrappers so the inner `Q` substitutes before
+  combinator-unwrap peels the wrapper. The atomic
+  `signature_params::ParamInfo { bounds, turbofish_index }` struct
+  replaces the old `Vec<Vec<String>>` value type in
+  `FnContext.generic_params` / `ResolveContext.generic_params` /
+  `InferContext.generic_params`. Regression tests:
+  `multi_generic_fn_turbofish_picks_correct_arg_for_returned_param`,
+  `wrapper_around_generic_param_return_substitutes_inner_via_turbofish`,
+  `method_call_wrapper_around_generic_param_return_substitutes_inner`.
 
 ### Fixed
 

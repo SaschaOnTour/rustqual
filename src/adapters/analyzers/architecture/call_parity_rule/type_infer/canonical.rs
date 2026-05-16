@@ -41,15 +41,23 @@ pub enum CanonicalType {
     /// it (the `impl Trait` opaque type isn't named by the param).
     TraitBound(Vec<Vec<String>>),
     /// Bare fn-generic-param ident with its trait bounds — the return
-    /// type IS one of the fn's own type parameters (`fn f<Q: T>() -> Q`).
-    /// Carries the same dispatch info as `TraitBound` (every consumer
-    /// of TraitBound MUST also handle this variant for dispatch). The
-    /// distinction matters at exactly one site: `infer_call` /
-    /// `infer_method_call` let an explicit turbofish substitute the
-    /// concrete type, because the caller IS naming the param —
-    /// strictly more specific than the bound. Multi-bound payload
-    /// matches `<Q: T1 + T2>`.
-    GenericParamBound(Vec<Vec<String>>),
+    /// type IS one of the callee's own type parameters
+    /// (`fn f<Q: T>() -> Q`). Carries the same dispatch info as
+    /// `TraitBound` (every consumer of TraitBound MUST also handle
+    /// this variant for dispatch; both flow through
+    /// `as_trait_bounds()`). The distinction matters at exactly one
+    /// site: `infer_call` / `infer_method_call` let an explicit
+    /// turbofish substitute the concrete type, because the caller IS
+    /// naming the param — strictly more specific than the bound.
+    /// `turbofish_index` is the position of this param in the
+    /// call-site-substitutable generics list (method-own params for
+    /// methods, fn-own params for free fns / structs); `None` means
+    /// the param can't be substituted via a call-site turbofish
+    /// (e.g. an impl-level `<Q>` referenced from a method return).
+    GenericParamBound {
+        bounds: Vec<Vec<String>>,
+        turbofish_index: Option<usize>,
+    },
     /// Locally known to be unresolvable: external crate, unannotated
     /// generic, unsupported construct. Distinct from "not yet evaluated".
     Opaque,
@@ -95,7 +103,7 @@ impl CanonicalType {
     /// `GenericParamBound` variant doesn't silently miss dispatch.
     pub fn as_trait_bounds(&self) -> Option<&[Vec<String>]> {
         match self {
-            Self::TraitBound(b) | Self::GenericParamBound(b) => Some(b),
+            Self::TraitBound(b) | Self::GenericParamBound { bounds: b, .. } => Some(b),
             _ => None,
         }
     }

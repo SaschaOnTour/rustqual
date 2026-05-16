@@ -94,7 +94,12 @@ pub(super) fn canonical_type_key(
 pub(super) fn resolve_ctx_with_generics<'a>(
     ctx: &'a BuildContext<'a>,
     mod_stack: &'a [String],
-    generic_params: Option<&'a HashMap<String, Vec<Vec<String>>>>,
+    generic_params: Option<
+        &'a HashMap<
+            String,
+            crate::adapters::analyzers::architecture::call_parity_rule::signature_params::ParamInfo,
+        >,
+    >,
 ) -> super::resolve::ResolveContext<'a> {
     super::resolve::ResolveContext {
         file: ctx.file,
