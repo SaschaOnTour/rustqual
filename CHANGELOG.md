@@ -99,6 +99,30 @@ pass. Failing-first regression tests live in
   Regression test:
   `unbounded_generic_param_shadows_same_named_workspace_symbol` in
   `type_infer/tests/resolve.rs`.
+- **Workspace type index ignored fn / method / impl / struct
+  generics.** The shadowing fix above only fires when
+  `ResolveContext.generic_params` is populated, but the
+  `workspace_index/{functions,methods,fields}.rs` collectors all
+  constructed their `ResolveContext` via a helper that hard-coded
+  `generic_params: None`. So `pub struct Q;` plus any of
+  `pub fn get<Q>() -> Q`,
+  `impl<Q> Service<Q> { fn first(&self) -> Q }`, or
+  `pub struct Container<Q> { item: Q }` would index the return / field
+  as the workspace struct `Q`, poisoning later inference — e.g.
+  `get::<Session>().diff()` could short-circuit on the wrong concrete
+  return instead of using the turbofish. Fix: threaded the fn's,
+  impl's, and struct's generic params (via the existing
+  `extract_generics` / `merge_generic_params` helpers) into the
+  per-collector resolve context across all three indexing surfaces.
+  Audit covered every `ResolveContext` construction in the crate;
+  the alias-body case in `resolve_alias::expand_alias` correctly
+  keeps `generic_params: None` because alias bodies live at the
+  alias decl-site, not the use-site fn. Regression tests:
+  `fn_generic_param_return_does_not_collide_with_same_named_workspace_type`,
+  `method_generic_param_return_does_not_collide_with_same_named_workspace_type`,
+  `impl_level_generic_param_return_does_not_collide_with_same_named_workspace_type`,
+  `struct_generic_param_field_does_not_collide_with_same_named_workspace_type`
+  in `type_infer/tests/workspace_index.rs`.
 
 ### Fixed
 
@@ -1324,15 +1348,17 @@ fallback markers rather than fabricate edges:
   `// qual:allow(architecture)` on the enclosing fn.
 
 ### Infrastructure
-- **`tests/rlm_snapshot.rs`** — end-to-end regression snapshot with a
-  3-file rlm-shape fixture (application/session, cli/handlers,
-  mcp/handlers). Asserts a budget of **0 Check A findings + 5 Check B
-  findings** (the 5 legitimate asymmetries / dead-code items). Any
-  drift in this count is a clear regression signal.
-- **`tests/regressions.rs`** — unit-level tests covering every rlm
-  Group-2 / Group-3 pattern plus Stage-2 trait-dispatch /
-  turbofish cases and Stage-3 type-alias / user-wrapper cases.
-  Negative tests pin documented limits in place.
+- **`tests/end_to_end_snapshot.rs`** — end-to-end regression snapshot
+  with a 3-file session/handler fixture (application/session,
+  cli/handlers, mcp/handlers). Asserts a budget of **0 Check A
+  findings + 5 Check B findings** (the 5 legitimate asymmetries /
+  dead-code items). Any drift in this count is a clear regression
+  signal. (Renamed from `tests/rlm_snapshot.rs` in v1.2.4.)
+- **`tests/regressions.rs`** — unit-level tests covering every
+  method-chain-constructor and cascading-struct-field-access pattern,
+  plus Stage-2 trait-dispatch / turbofish cases and Stage-3
+  type-alias / user-wrapper cases. Negative tests pin documented
+  limits in place.
 - **~160 new unit tests** across `type_infer/tests/` covering
   `CanonicalType`, `resolve_type`, workspace-index building, inference
   dispatch, pattern binding, the stdlib-combinator table, trait

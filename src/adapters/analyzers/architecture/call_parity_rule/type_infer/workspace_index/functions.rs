@@ -8,9 +8,11 @@
 
 use super::super::canonical::CanonicalType;
 use super::super::resolve::resolve_type;
-use super::{resolve_ctx_from_build, BuildContext, WorkspaceTypeIndex};
+use super::{resolve_ctx_with_generics, BuildContext, WorkspaceTypeIndex};
+use crate::adapters::analyzers::architecture::call_parity_rule::signature_params::extract_generics;
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
 use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
+use std::collections::HashMap;
 use syn::visit::Visit;
 
 /// Walk `ast` and populate `index.fn_returns`. Integration.
@@ -57,14 +59,23 @@ impl<'ast, 'i, 'c> Visit<'ast> for FnCollector<'i, 'c> {
 
 /// Record one free fn's return type. `async fn foo() -> T` is treated
 /// as returning `Future<Output = T>` to match rustc's desugaring so
-/// downstream `.await` unwraps correctly. Operation.
+/// downstream `.await` unwraps correctly. The fn's own generic params
+/// are threaded into the resolve context so a return type spelled `Q`
+/// shadows any workspace symbol named `Q`. Operation.
 fn record_fn(
     index: &mut WorkspaceTypeIndex,
     ctx: &BuildContext<'_>,
     mod_stack: &[String],
     node: &syn::ItemFn,
 ) {
-    let resolve = |ty: &syn::Type| resolve_type(ty, &resolve_ctx_from_build(ctx, mod_stack));
+    let generics: HashMap<String, Vec<Vec<String>>> =
+        extract_generics(&node.sig.generics).into_iter().collect();
+    let resolve = |ty: &syn::Type| {
+        resolve_type(
+            ty,
+            &resolve_ctx_with_generics(ctx, mod_stack, Some(&generics)),
+        )
+    };
     let syn::ReturnType::Type(_, ret_ty) = &node.sig.output else {
         return;
     };

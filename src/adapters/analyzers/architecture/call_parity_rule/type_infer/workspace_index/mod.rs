@@ -81,13 +81,20 @@ pub(super) fn canonical_type_key(
     out.join("::")
 }
 
-/// Build a `ResolveContext` from the shared `BuildContext` inputs —
-/// extracted so the per-field / per-method / per-free-fn collectors
-/// don't each repeat the same construction. `mod_stack` is the current
-/// mod-path inside `ctx.file.path` — pass `&[]` for top-level items.
-pub(super) fn resolve_ctx_from_build<'a>(
+/// Build a `ResolveContext` from the shared `BuildContext` inputs +
+/// the caller's fn-scoped generic-param map — extracted so the
+/// per-field / per-free-fn / per-method collectors don't each repeat
+/// the same construction. `mod_stack` is the current mod-path inside
+/// `ctx.file.path` (pass `&[]` for top-level items). Callers indexing
+/// inside an item with type generics (`fn get<Q>() -> Q`, `struct
+/// Container<Q> { item: Q }`, `impl<Q> S<Q> { fn first(&self) -> Q }`)
+/// must pass `Some(&map)` so the fn-scoped param shadows any
+/// same-named workspace symbol; pass `None` when there are no
+/// in-scope generics (alias collection, field types on plain structs).
+pub(super) fn resolve_ctx_with_generics<'a>(
     ctx: &'a BuildContext<'a>,
     mod_stack: &'a [String],
+    generic_params: Option<&'a HashMap<String, Vec<Vec<String>>>>,
 ) -> super::resolve::ResolveContext<'a> {
     super::resolve::ResolveContext {
         file: ctx.file,
@@ -96,9 +103,7 @@ pub(super) fn resolve_ctx_from_build<'a>(
         transparent_wrappers: Some(ctx.transparent_wrappers),
         workspace_files: Some(ctx.workspace_files),
         alias_param_subs: None,
-        // Workspace pass-1 builds the type-alias / wrapper index
-        // before any fn-body walk; no fn-scoped generics exist yet.
-        generic_params: None,
+        generic_params,
     }
 }
 

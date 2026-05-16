@@ -553,6 +553,200 @@ fn test_generic_return_type_is_opaque_and_not_indexed() {
 }
 
 #[test]
+fn fn_generic_param_return_does_not_collide_with_same_named_workspace_type() {
+    // `pub struct Q;` plus `pub fn get<Q>() -> Q` — the workspace
+    // type `Q` shares the leading segment with the fn-scoped generic
+    // param `Q`. Without threading the fn's generics into the
+    // workspace-index resolve context, `resolve_type(Q)` falls through
+    // to the canonicaliser and resolves `Q` to `crate::app::make::Q`
+    // (the struct), making `fn_returns["...::get"] = crate::app::make::Q`.
+    // Downstream `get::<Session>().diff()` inference would then short-
+    // circuit on the (wrong) concrete return type instead of using the
+    // turbofish.
+    //
+    // Expected: the fn-scoped param shadows the workspace symbol,
+    // resolution yields `Opaque`, and the entry is not indexed.
+    let fix = fixture(&[(
+        "src/app/make.rs",
+        r#"
+        pub struct Q;
+        pub fn get<Q>() -> Q { unimplemented!() }
+        "#,
+    )]);
+    let borrowed_files = borrowed(&fix);
+    let index = {
+        let cfg_test = &HashSet::new();
+        let roots = &crate_roots(&["src/app/make.rs"]);
+        let wraps = &HashSet::new();
+        let workspace_files = build_workspace_files_map(WorkspaceFilesInputs {
+            files: &borrowed_files,
+            cfg_test_files: cfg_test,
+            aliases_per_file: &fix.aliases,
+            aliases_scoped_per_file: &fix.aliases_scoped,
+            local_symbols_per_file: &fix.local_symbols,
+            crate_root_modules: roots,
+            workspace_module_paths: None,
+        });
+        build_workspace_type_index(&WorkspaceIndexInputs {
+            files: &borrowed_files,
+            workspace_files: &workspace_files,
+            cfg_test_files: cfg_test,
+            transparent_wrappers: wraps,
+        })
+    };
+    assert_eq!(
+        index.fn_return("crate::app::make::get"),
+        None,
+        "fn-scoped generic param `Q` must shadow workspace struct `Q` \
+         and yield Opaque (skipped from index). Got: {:?}",
+        index.fn_returns,
+    );
+}
+
+#[test]
+fn method_generic_param_return_does_not_collide_with_same_named_workspace_type() {
+    // Same shadowing concern, method-level: `impl Service { fn get<Q>(&self) -> Q }`
+    // where the workspace also has `pub struct Q;`. Without threading
+    // the method's generic params into the resolve context, the return
+    // type resolves to the workspace struct and poisons the
+    // `method_returns` map.
+    let fix = fixture(&[(
+        "src/app/make.rs",
+        r#"
+        pub struct Q;
+        pub struct Service;
+        impl Service {
+            pub fn get<Q>(&self) -> Q { unimplemented!() }
+        }
+        "#,
+    )]);
+    let borrowed_files = borrowed(&fix);
+    let index = {
+        let cfg_test = &HashSet::new();
+        let roots = &crate_roots(&["src/app/make.rs"]);
+        let wraps = &HashSet::new();
+        let workspace_files = build_workspace_files_map(WorkspaceFilesInputs {
+            files: &borrowed_files,
+            cfg_test_files: cfg_test,
+            aliases_per_file: &fix.aliases,
+            aliases_scoped_per_file: &fix.aliases_scoped,
+            local_symbols_per_file: &fix.local_symbols,
+            crate_root_modules: roots,
+            workspace_module_paths: None,
+        });
+        build_workspace_type_index(&WorkspaceIndexInputs {
+            files: &borrowed_files,
+            workspace_files: &workspace_files,
+            cfg_test_files: cfg_test,
+            transparent_wrappers: wraps,
+        })
+    };
+    assert_eq!(
+        index.method_return("crate::app::make::Service", "get"),
+        None,
+        "method-scoped generic param `Q` must shadow workspace struct \
+         `Q` and yield Opaque (skipped from method_returns). Got: {:?}",
+        index.method_returns,
+    );
+}
+
+#[test]
+fn struct_generic_param_field_does_not_collide_with_same_named_workspace_type() {
+    // Workspace has both `pub struct Q;` and a generic
+    // `pub struct Container<Q> { pub item: Q }`. The field type `Q`
+    // is the struct's own generic param, NOT a reference to the
+    // workspace struct. Without threading the struct's generics into
+    // the field-collector resolve context, the canonicaliser resolves
+    // `Q` to `crate::app::make::Q` (the workspace struct) and
+    // `struct_fields["Container"]["item"] = crate::app::make::Q`,
+    // poisoning later `self.item.method()` resolution.
+    //
+    // Expected: struct's generic `Q` shadows the workspace struct,
+    // the field resolves to `Opaque`, and the entry is dropped.
+    let fix = fixture(&[(
+        "src/app/make.rs",
+        r#"
+        pub struct Q;
+        pub struct Container<Q> { pub item: Q }
+        "#,
+    )]);
+    let borrowed_files = borrowed(&fix);
+    let index = {
+        let cfg_test = &HashSet::new();
+        let roots = &crate_roots(&["src/app/make.rs"]);
+        let wraps = &HashSet::new();
+        let workspace_files = build_workspace_files_map(WorkspaceFilesInputs {
+            files: &borrowed_files,
+            cfg_test_files: cfg_test,
+            aliases_per_file: &fix.aliases,
+            aliases_scoped_per_file: &fix.aliases_scoped,
+            local_symbols_per_file: &fix.local_symbols,
+            crate_root_modules: roots,
+            workspace_module_paths: None,
+        });
+        build_workspace_type_index(&WorkspaceIndexInputs {
+            files: &borrowed_files,
+            workspace_files: &workspace_files,
+            cfg_test_files: cfg_test,
+            transparent_wrappers: wraps,
+        })
+    };
+    assert_eq!(
+        index.struct_field("crate::app::make::Container", "item"),
+        None,
+        "struct-scoped generic param `Q` must shadow workspace struct \
+         `Q` and yield Opaque (skipped from struct_fields). Got: {:?}",
+        index.struct_fields,
+    );
+}
+
+#[test]
+fn impl_level_generic_param_return_does_not_collide_with_same_named_workspace_type() {
+    // Impl-level generic: `impl<Q> Service<Q> { fn first(&self) -> Q }`
+    // with the workspace also exposing `pub struct Q;`. The impl-level
+    // `Q` must shadow the workspace struct for every method's return-
+    // type resolution.
+    let fix = fixture(&[(
+        "src/app/make.rs",
+        r#"
+        pub struct Q;
+        pub struct Service<Q>(pub Q);
+        impl<Q> Service<Q> {
+            pub fn first(&self) -> Q { unimplemented!() }
+        }
+        "#,
+    )]);
+    let borrowed_files = borrowed(&fix);
+    let index = {
+        let cfg_test = &HashSet::new();
+        let roots = &crate_roots(&["src/app/make.rs"]);
+        let wraps = &HashSet::new();
+        let workspace_files = build_workspace_files_map(WorkspaceFilesInputs {
+            files: &borrowed_files,
+            cfg_test_files: cfg_test,
+            aliases_per_file: &fix.aliases,
+            aliases_scoped_per_file: &fix.aliases_scoped,
+            local_symbols_per_file: &fix.local_symbols,
+            crate_root_modules: roots,
+            workspace_module_paths: None,
+        });
+        build_workspace_type_index(&WorkspaceIndexInputs {
+            files: &borrowed_files,
+            workspace_files: &workspace_files,
+            cfg_test_files: cfg_test,
+            transparent_wrappers: wraps,
+        })
+    };
+    assert_eq!(
+        index.method_return("crate::app::make::Service", "first"),
+        None,
+        "impl-level generic `Q` must shadow workspace struct `Q` for \
+         every method's return resolution. Got: {:?}",
+        index.method_returns,
+    );
+}
+
+#[test]
 fn test_fn_inside_inline_mod_keys_include_mod_name() {
     let fix = fixture(&[(
         "src/app/mod.rs",

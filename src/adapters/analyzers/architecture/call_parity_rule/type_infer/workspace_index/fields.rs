@@ -7,9 +7,11 @@
 
 use super::super::canonical::CanonicalType;
 use super::super::resolve::resolve_type;
-use super::{resolve_ctx_from_build, BuildContext, WorkspaceTypeIndex};
+use super::{resolve_ctx_with_generics, BuildContext, WorkspaceTypeIndex};
+use crate::adapters::analyzers::architecture::call_parity_rule::signature_params::extract_generics;
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
 use crate::adapters::shared::cfg_test::has_cfg_test;
+use std::collections::HashMap;
 use syn::visit::Visit;
 
 /// Walk `ast` and populate `index.struct_fields`. Uses `syn::visit::Visit`
@@ -58,8 +60,10 @@ impl<'ast, 'i, 'c> Visit<'ast> for FieldCollector<'i, 'c> {
     }
 }
 
-/// Record every named field of `item`. Integration: canonicalisation +
-/// per-field delegation.
+/// Record every named field of `item`. The struct's own generic params
+/// are threaded into the per-field resolve context so a field type
+/// spelled `Q` shadows any same-named workspace symbol. Integration:
+/// canonicalisation + per-field delegation.
 fn record_struct(
     index: &mut WorkspaceTypeIndex,
     ctx: &BuildContext<'_>,
@@ -71,8 +75,11 @@ fn record_struct(
     let syn::Fields::Named(named) = &item.fields else {
         return;
     };
+    let generics: HashMap<String, Vec<Vec<String>>> =
+        extract_generics(&item.generics).into_iter().collect();
+    let rctx = resolve_ctx_with_generics(ctx, mod_stack, Some(&generics));
     for field in &named.named {
-        record_field(index, &canonical, ctx, mod_stack, field);
+        record_field(index, &canonical, &rctx, field);
     }
 }
 
@@ -81,15 +88,13 @@ fn record_struct(
 fn record_field(
     index: &mut WorkspaceTypeIndex,
     canonical: &str,
-    ctx: &BuildContext<'_>,
-    mod_stack: &[String],
+    rctx: &super::super::resolve::ResolveContext<'_>,
     field: &syn::Field,
 ) {
-    let resolve = |ty: &syn::Type| resolve_type(ty, &resolve_ctx_from_build(ctx, mod_stack));
     let Some(ident) = field.ident.as_ref() else {
         return;
     };
-    let field_type = resolve(&field.ty);
+    let field_type = resolve_type(&field.ty, rctx);
     if matches!(field_type, CanonicalType::Opaque) {
         return;
     }

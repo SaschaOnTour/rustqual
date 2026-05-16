@@ -1,16 +1,18 @@
-//! Regression harness for the Task 1.6 call-parity inference wiring.
+//! Regression harness for call-parity receiver-type inference at the
+//! `collect_canonical_calls` level.
 //!
-//! Each test sets up a workspace type-index resembling rlm's layout
-//! (`Session` type with `open()`/`diff()`/… methods, `Ctx` with a
-//! `session` field) and runs a minimal fn body through
+//! Each test sets up a workspace type-index with a `Session` type
+//! (`open()`/`diff()`/… methods) and a `Ctx` struct carrying a
+//! `session` field, then runs a minimal fn body through
 //! `collect_canonical_calls`. Positive tests assert the expected
-//! `crate::…::Type::method` edge appears in the output; negative tests
-//! assert that documented limits correctly fall back to `<method>:name`
-//! instead of producing a spurious edge.
+//! `crate::…::Type::method` edge appears in the output; negative
+//! tests assert that documented limits correctly fall back to
+//! `<method>:name` instead of producing a spurious edge.
 //!
-//! Coverage targets the rlm classification published in the Task 1.6
-//! brief: Group-2 (method-chain ctors) and Group-3 (cascading struct
-//! field access), plus the fast-path patterns that must stay green.
+//! Coverage targets two pattern families: method-chain constructors
+//! (`Type::ctor().chain()?.method()`) and cascading struct-field
+//! access (`self.field.method()`), plus the fast-path patterns that
+//! must stay green.
 
 use crate::adapters::analyzers::architecture::call_parity_rule::calls::{
     collect_canonical_calls, FnContext,
@@ -50,8 +52,8 @@ fn parse(src: &str) -> RegFixture {
     }
 }
 
-/// Pre-populated workspace index modelling rlm's Session + Ctx shape.
-fn rlm_index() -> WorkspaceTypeIndex {
+/// Pre-populated workspace index modelling a Session + Ctx shape.
+fn sample_session_index() -> WorkspaceTypeIndex {
     let session = CanonicalType::path(["crate", "app", "session", "Session"]);
     let response = CanonicalType::path(["crate", "app", "Response"]);
     let error = CanonicalType::path(["crate", "app", "Error"]);
@@ -125,7 +127,7 @@ fn run(fx: &RegFixture, index: &WorkspaceTypeIndex, fn_name: &str) -> HashSet<St
 /// collector with `self_type` set to crate-rooted segments. The
 /// caller passes the canonical path so the test can bind to whichever
 /// module the workspace index models for `Type` (e.g. Session lives
-/// under `crate::app::session::*` in `rlm_index()`).
+/// under `crate::app::session::*` in `sample_session_index()`).
 fn run_impl_method(
     fx: &RegFixture,
     index: &WorkspaceTypeIndex,
@@ -203,11 +205,11 @@ fn impl_self_segments(item: &syn::ItemImpl) -> Option<Vec<String>> {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Positive: rlm Group-2 patterns (method-chain ctors)
+// Positive: method-chain constructor patterns
 // ═══════════════════════════════════════════════════════════════════
 
 #[test]
-fn rlm_group2_open_map_err_unwrap() {
+fn method_chain_ctor_open_map_err_unwrap_resolves_receiver() {
     let fx = parse(
         r#"
         use crate::app::session::Session;
@@ -217,7 +219,7 @@ fn rlm_group2_open_map_err_unwrap() {
         }
         "#,
     );
-    let calls = run(&fx, &rlm_index(), "cmd");
+    let calls = run(&fx, &sample_session_index(), "cmd");
     assert!(
         calls.contains("crate::app::session::Session::diff"),
         "expected Session::diff edge, got {calls:?}"
@@ -225,8 +227,9 @@ fn rlm_group2_open_map_err_unwrap() {
 }
 
 #[test]
-fn rlm_group2_open_cwd_map_err_try() {
-    // The exact pattern from the original rlm bug report.
+fn method_chain_ctor_open_cwd_map_err_try_resolves_receiver() {
+    // The exact pattern that motivated this inference work:
+    // `let session = open_cwd().map_err(f)?` then `session.method()`.
     let fx = parse(
         r#"
         use crate::app::session::Session;
@@ -236,7 +239,7 @@ fn rlm_group2_open_cwd_map_err_try() {
         }
         "#,
     );
-    let calls = run(&fx, &rlm_index(), "cmd");
+    let calls = run(&fx, &sample_session_index(), "cmd");
     assert!(
         calls.contains("crate::app::session::Session::diff"),
         "expected Session::diff edge, got {calls:?}"
@@ -244,7 +247,7 @@ fn rlm_group2_open_cwd_map_err_try() {
 }
 
 #[test]
-fn rlm_group2_plain_unwrap() {
+fn method_chain_ctor_plain_unwrap_resolves_receiver() {
     let fx = parse(
         r#"
         use crate::app::session::Session;
@@ -254,12 +257,12 @@ fn rlm_group2_plain_unwrap() {
         }
         "#,
     );
-    let calls = run(&fx, &rlm_index(), "cmd");
+    let calls = run(&fx, &sample_session_index(), "cmd");
     assert!(calls.contains("crate::app::session::Session::files"));
 }
 
 #[test]
-fn rlm_group2_expect_message() {
+fn method_chain_ctor_expect_message_resolves_receiver() {
     let fx = parse(
         r#"
         use crate::app::session::Session;
@@ -269,12 +272,12 @@ fn rlm_group2_expect_message() {
         }
         "#,
     );
-    let calls = run(&fx, &rlm_index(), "cmd");
+    let calls = run(&fx, &sample_session_index(), "cmd");
     assert!(calls.contains("crate::app::session::Session::diff"));
 }
 
 #[test]
-fn rlm_group2_unwrap_or_else_closure() {
+fn method_chain_ctor_unwrap_or_else_closure_resolves_receiver() {
     let fx = parse(
         r#"
         use crate::app::session::Session;
@@ -284,12 +287,12 @@ fn rlm_group2_unwrap_or_else_closure() {
         }
         "#,
     );
-    let calls = run(&fx, &rlm_index(), "cmd");
+    let calls = run(&fx, &sample_session_index(), "cmd");
     assert!(calls.contains("crate::app::session::Session::diff"));
 }
 
 #[test]
-fn rlm_group2_chained_inline() {
+fn method_chain_ctor_chained_inline_call_resolves_receiver() {
     // No intermediate `let` — the chain resolves inside a single
     // method-call expression.
     let fx = parse(
@@ -300,12 +303,12 @@ fn rlm_group2_chained_inline() {
         }
         "#,
     );
-    let calls = run(&fx, &rlm_index(), "cmd");
+    let calls = run(&fx, &sample_session_index(), "cmd");
     assert!(calls.contains("crate::app::session::Session::diff"));
 }
 
 #[test]
-fn rlm_group2_insert_returns_result_chained() {
+fn method_chain_ctor_insert_returning_result_chained_resolves_receiver() {
     // Session::insert returns Result<Response, _> — verify the outer
     // call edge is recorded even on a Result-wrapped receiver chain.
     let fx = parse(
@@ -316,16 +319,16 @@ fn rlm_group2_insert_returns_result_chained() {
         }
         "#,
     );
-    let calls = run(&fx, &rlm_index(), "cmd");
+    let calls = run(&fx, &sample_session_index(), "cmd");
     assert!(calls.contains("crate::app::session::Session::insert"));
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Positive: rlm Group-3 patterns (struct-field access)
+// Positive: cascading struct-field access patterns
 // ═══════════════════════════════════════════════════════════════════
 
 #[test]
-fn rlm_group3_ctx_field_access() {
+fn cascading_struct_field_access_resolves_receiver() {
     let fx = parse(
         r#"
         use crate::app::Ctx;
@@ -334,12 +337,12 @@ fn rlm_group3_ctx_field_access() {
         }
         "#,
     );
-    let calls = run(&fx, &rlm_index(), "handle");
+    let calls = run(&fx, &sample_session_index(), "handle");
     assert!(calls.contains("crate::app::session::Session::diff"));
 }
 
 #[test]
-fn rlm_group3_ctx_field_access_via_let() {
+fn cascading_struct_field_access_via_let_binding_resolves_receiver() {
     let fx = parse(
         r#"
         use crate::app::Ctx;
@@ -349,7 +352,7 @@ fn rlm_group3_ctx_field_access_via_let() {
         }
         "#,
     );
-    let calls = run(&fx, &rlm_index(), "handle");
+    let calls = run(&fx, &sample_session_index(), "handle");
     // `&ctx.session` inferred as Session (Reference is transparent).
     assert!(calls.contains("crate::app::session::Session::diff"));
 }
@@ -379,7 +382,7 @@ fn self_method_call_resolves_via_impl_type() {
         "session".to_string(),
         "Session".to_string(),
     ];
-    let calls = run_impl_method(&fx, &rlm_index(), "Session", "run", self_segs);
+    let calls = run_impl_method(&fx, &sample_session_index(), "Session", "run", self_segs);
     assert!(
         calls.contains("crate::app::session::Session::diff"),
         "self.diff() must route through workspace_index, got {calls:?}"
@@ -401,7 +404,7 @@ fn self_field_access_resolves_via_impl_type() {
         "#,
     );
     let self_segs = vec!["crate".to_string(), "app".to_string(), "Ctx".to_string()];
-    let calls = run_impl_method(&fx, &rlm_index(), "Ctx", "run", self_segs);
+    let calls = run_impl_method(&fx, &sample_session_index(), "Ctx", "run", self_segs);
     assert!(
         calls.contains("crate::app::session::Session::diff"),
         "self.session.diff() must chain through field type, got {calls:?}"
@@ -428,7 +431,7 @@ fn signature_param_typed_self_resolves() {
         "session".to_string(),
         "Session".to_string(),
     ];
-    let calls = run_impl_method(&fx, &rlm_index(), "Session", "merge", self_segs);
+    let calls = run_impl_method(&fx, &sample_session_index(), "Session", "merge", self_segs);
     assert!(
         calls.contains("crate::app::session::Session::diff"),
         "param `other: Self` must resolve to Session, got {calls:?}"
@@ -455,7 +458,7 @@ fn let_annotation_self_resolves() {
         "session".to_string(),
         "Session".to_string(),
     ];
-    let calls = run_impl_method(&fx, &rlm_index(), "Session", "run", self_segs);
+    let calls = run_impl_method(&fx, &sample_session_index(), "Session", "run", self_segs);
     assert!(
         calls.contains("crate::app::session::Session::diff"),
         "`let other: Self = …` must bind to Session, got {calls:?}"
@@ -483,7 +486,7 @@ fn turbofish_self_inside_impl_resolves() {
         "session".to_string(),
         "Session".to_string(),
     ];
-    let calls = run_impl_method(&fx, &rlm_index(), "Session", "run", self_segs);
+    let calls = run_impl_method(&fx, &sample_session_index(), "Session", "run", self_segs);
     assert!(
         calls.contains("crate::app::session::Session::diff"),
         "`get::<Self>()` turbofish must resolve to Session, got {calls:?}"
@@ -511,7 +514,7 @@ fn annotated_destructuring_self_resolves() {
         "session".to_string(),
         "Session".to_string(),
     ];
-    let calls = run_impl_method(&fx, &rlm_index(), "Session", "run", self_segs);
+    let calls = run_impl_method(&fx, &sample_session_index(), "Session", "run", self_segs);
     assert!(
         calls.contains("crate::app::session::Session::diff"),
         "annotated destructuring with Self must bind to Session, got {calls:?}"
@@ -538,7 +541,7 @@ fn cast_as_self_resolves() {
         "session".to_string(),
         "Session".to_string(),
     ];
-    let calls = run_impl_method(&fx, &rlm_index(), "Session", "run", self_segs);
+    let calls = run_impl_method(&fx, &sample_session_index(), "Session", "run", self_segs);
     assert!(
         calls.contains("crate::app::session::Session::diff"),
         "`as Self` cast must resolve to Session, got {calls:?}"
@@ -563,7 +566,7 @@ fn qualified_path_does_not_alias_promote_through_leaf() {
         }
         "#,
     );
-    let calls = run(&fx, &rlm_index(), "handle");
+    let calls = run(&fx, &sample_session_index(), "handle");
     assert!(
         !calls.contains("crate::app::session::Session::diff"),
         "qualified path must not be alias-promoted, got {calls:?}"
@@ -585,7 +588,7 @@ fn qualified_local_arc_does_not_auto_peel() {
         }
         "#,
     );
-    let calls = run(&fx, &rlm_index(), "handle");
+    let calls = run(&fx, &sample_session_index(), "handle");
     assert!(
         !calls.contains("crate::app::session::Session::diff"),
         "qualified local Arc must not auto-peel as stdlib Arc, got {calls:?}"
@@ -608,7 +611,7 @@ fn bare_local_arc_does_not_auto_peel() {
         }
         "#,
     );
-    let calls = run(&fx, &rlm_index(), "handle");
+    let calls = run(&fx, &sample_session_index(), "handle");
     assert!(
         !calls.contains("crate::app::session::Session::diff"),
         "bare Arc shadowed by local must not auto-peel, got {calls:?}"
@@ -629,7 +632,7 @@ fn fully_qualified_user_wrapper_peels_via_leaf_match() {
         }
         "#,
     );
-    let mut index = rlm_index();
+    let mut index = sample_session_index();
     index.transparent_wrappers.insert("State".to_string());
     let calls = run(&fx, &index, "handle");
     assert!(
@@ -655,7 +658,7 @@ fn renamed_external_user_wrapper_peels_via_user_config() {
         }
         "#,
     );
-    let mut index = rlm_index();
+    let mut index = sample_session_index();
     index.transparent_wrappers.insert("State".to_string());
     let calls = run(&fx, &index, "handle");
     assert!(
@@ -681,7 +684,7 @@ fn aliased_local_wrapper_does_not_auto_peel() {
         }
         "#,
     );
-    let calls = run(&fx, &rlm_index(), "handle");
+    let calls = run(&fx, &sample_session_index(), "handle");
     assert!(
         !calls.contains("crate::app::session::Session::diff"),
         "aliased local wrapper must not auto-peel as stdlib Arc, got {calls:?}"
@@ -721,7 +724,7 @@ fn aliased_stdlib_wrapper_inside_inline_mod_peels_to_inner() {
         signature_params: sig_params(&f.sig),
         generic_params: vec![],
         self_type: None,
-        workspace_index: Some(&rlm_index()),
+        workspace_index: Some(&sample_session_index()),
         workspace_files: None,
     };
     let calls = collect_canonical_calls(&ctx);
@@ -761,7 +764,7 @@ fn aliased_stdlib_wrapper_peels_to_inner() {
         }
         "#,
     );
-    let calls = run(&fx, &rlm_index(), "handle");
+    let calls = run(&fx, &sample_session_index(), "handle");
     assert!(
         calls.contains("crate::app::session::Session::diff"),
         "aliased Arc wrapper must peel to Session, got {calls:?}"
@@ -782,7 +785,7 @@ fn free_fn_result_chain() {
         }
         "#,
     );
-    let calls = run(&fx, &rlm_index(), "cmd");
+    let calls = run(&fx, &sample_session_index(), "cmd");
     assert!(calls.contains("crate::app::session::Session::diff"));
 }
 
@@ -800,7 +803,7 @@ fn fast_path_signature_param_resolves() {
         }
         "#,
     );
-    let calls = run(&fx, &rlm_index(), "handle");
+    let calls = run(&fx, &sample_session_index(), "handle");
     assert!(calls.contains("crate::app::session::Session::diff"));
 }
 
@@ -815,7 +818,7 @@ fn fast_path_let_type_annotation() {
         }
         "#,
     );
-    let calls = run(&fx, &rlm_index(), "cmd");
+    let calls = run(&fx, &sample_session_index(), "cmd");
     assert!(calls.contains("crate::app::session::Session::diff"));
 }
 
@@ -834,7 +837,7 @@ fn fast_path_direct_constructor() {
         }
         "#,
     );
-    let calls = run(&fx, &rlm_index(), "cmd");
+    let calls = run(&fx, &sample_session_index(), "cmd");
     // This pattern is pathological (caller should `?` or `unwrap`), but
     // we verify the resolver doesn't invent a false Session::diff edge.
     assert!(
@@ -859,7 +862,7 @@ fn negative_external_type_method_is_bare() {
         }
         "#,
     );
-    let calls = run(&fx, &rlm_index(), "cmd");
+    let calls = run(&fx, &sample_session_index(), "cmd");
     assert!(
         calls.contains("<method>:custom_method"),
         "expected <method>:custom_method fallback, got {calls:?}"
@@ -881,7 +884,7 @@ fn negative_unannotated_generic_stays_unresolved() {
         }
         "#,
     );
-    let calls = run(&fx, &rlm_index(), "cmd");
+    let calls = run(&fx, &sample_session_index(), "cmd");
     assert!(calls.contains("<method>:some_method"));
 }
 
@@ -899,7 +902,7 @@ fn negative_stdlib_map_closure_is_unresolved() {
         }
         "#,
     );
-    let calls = run(&fx, &rlm_index(), "cmd");
+    let calls = run(&fx, &sample_session_index(), "cmd");
     // The inner `r.diff()` is unresolved; assert it stays <method>:diff.
     assert!(
         calls.iter().any(|c| c == "<method>:diff"),
@@ -919,7 +922,7 @@ fn negative_tuple_destructuring_is_limit() {
         }
         "#,
     );
-    let calls = run(&fx, &rlm_index(), "cmd");
+    let calls = run(&fx, &sample_session_index(), "cmd");
     // Documented limit: tuple-destructured bindings are Opaque.
     assert!(
         calls.contains("<method>:diff"),
@@ -1239,7 +1242,7 @@ fn turbofish_gives_concrete_return_type() {
         }
         "#,
     );
-    let calls = run(&fx, &rlm_index(), "cmd");
+    let calls = run(&fx, &sample_session_index(), "cmd");
     assert!(
         calls.contains("crate::app::session::Session::diff"),
         "turbofish should resolve generic-ctor return type, got {calls:?}"
@@ -1259,7 +1262,7 @@ fn turbofish_on_type_method_is_not_overridden() {
         }
         "#,
     );
-    let calls = run(&fx, &rlm_index(), "cmd");
+    let calls = run(&fx, &sample_session_index(), "cmd");
     // Important: we must NOT fabricate a `crate::…::u32::custom_method`
     // edge from the turbofish arg.
     assert!(
@@ -1284,7 +1287,7 @@ fn mixed_resolutions_in_single_body() {
         }
         "#,
     );
-    let calls = run(&fx, &rlm_index(), "cmd");
+    let calls = run(&fx, &sample_session_index(), "cmd");
     assert!(
         calls.contains("crate::app::session::Session::diff"),
         "resolved: Session::diff missing, got {calls:?}"
