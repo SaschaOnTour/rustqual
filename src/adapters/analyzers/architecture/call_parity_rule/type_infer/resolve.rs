@@ -18,7 +18,9 @@
 //! — both turn `syn::Type`s into `CanonicalType`s with identical
 //! semantics.
 
-use super::super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
+use super::super::bindings::{
+    canonicalise_type_segments_in_scope, canonicalise_workspace_path, CanonScope,
+};
 use super::super::local_symbols::FileScope;
 use super::canonical::CanonicalType;
 use super::resolve_alias::{expand_alias, lookup_alias_param};
@@ -367,11 +369,15 @@ fn peel_single_generic(
 /// type (→ wrong `Path`).
 fn resolve_generic_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -> CanonicalType {
     let segments: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
-    if let Some(shadow) = generic_param_shadow(&segments, path.leading_colon.is_some(), ctx) {
+    let leading_colon = path.leading_colon.is_some();
+    if let Some(shadow) = generic_param_shadow(&segments, leading_colon, ctx) {
         return shadow;
     }
+    // Use the use-site canonicalisation gate so `::Q` extern-root
+    // paths skip workspace lookup (otherwise a same-named workspace
+    // `Q` would be a false-positive Path canonical).
     let canonicalise =
-        |segs: &[String]| canonicalise_type_segments_in_scope(segs, &canon_scope(ctx));
+        |segs: &[String]| canonicalise_workspace_path(segs, leading_colon, &canon_scope(ctx));
     let Some(resolved) = canonicalise(&segments) else {
         return CanonicalType::Opaque;
     };

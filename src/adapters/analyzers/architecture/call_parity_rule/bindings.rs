@@ -114,10 +114,47 @@ pub(super) fn canonicalise_type_segments(
     )
 }
 
+// qual:api
+/// Use-site path canonicalisation: resolve a path's segments to a
+/// workspace canonical, respecting Rust 2018+ `::Foo` extern-root
+/// semantics. THE single gate for "user-written path (call
+/// expression, type reference in fn body, turbofish target, …) →
+/// workspace canonical" — every site that takes a `syn::Path` from
+/// user code MUST route through this helper, NOT call
+/// `canonicalise_type_segments_in_scope` directly.
+///
+/// `leading_colon_set` short-circuits the workspace lookup: an
+/// absolute path (`::Foo::bar`) is explicit extern-crate syntax (we
+/// don't model extern crates as workspace symbols) and must NOT
+/// match a same-named workspace `Foo`. The primitive
+/// `canonicalise_type_segments_in_scope` (which this wraps) can't
+/// see the leading colon — segment lists carry no `::` info — so
+/// without this gate, `::Foo::bar` mis-resolves to
+/// `crate::...::Foo::bar` when a workspace `Foo` exists.
+///
+/// Declaration-side canonicalisation (e.g. resolving alias targets
+/// in `use foo::Bar`, sig-param types from declarations, trait-impl
+/// self-types) can continue calling
+/// `canonicalise_type_segments_in_scope` directly: declarations
+/// don't carry leading-colon paths in workspace-internal code.
+/// Operation: leading-colon gate + delegate.
+pub(crate) fn canonicalise_workspace_path(
+    segments: &[String],
+    leading_colon_set: bool,
+    scope: &CanonScope<'_>,
+) -> Option<Vec<String>> {
+    if leading_colon_set {
+        return None;
+    }
+    canonicalise_type_segments_in_scope(segments, scope)
+}
+
 /// Resolve a type-path segment list into a canonical `[crate, …]` path
 /// against `scope`. Returns `None` for unresolvable paths (external
 /// crates, unknown idents, or in-file names not declared at the
-/// current `mod_stack`).
+/// current `mod_stack`). Primitive — use-site callers must go through
+/// `canonicalise_workspace_path` (above) to honour leading-colon
+/// extern-root semantics.
 pub(crate) fn canonicalise_type_segments_in_scope(
     segments: &[String],
     scope: &CanonScope<'_>,

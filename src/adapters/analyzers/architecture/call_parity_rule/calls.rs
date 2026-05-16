@@ -317,11 +317,24 @@ impl<'a> CanonicalCallCollector<'a> {
     }
 
     /// Turn a path-segment list into the canonical String used for all
-    /// call-target comparisons in the call-parity check. Integration:
-    /// each branch delegates to a dedicated helper.
-    fn canonicalise_path(&self, segments: &[String]) -> String {
+    /// call-target comparisons in the call-parity check.
+    /// `leading_colon_set` reflects `syn::Path.leading_colon` —
+    /// `::Foo::bar()` is Rust 2018+ extern-root syntax that explicitly
+    /// disambiguates AWAY from workspace symbols, so it short-circuits
+    /// straight to `<bare>:` without consulting the alias / local /
+    /// crate-root resolvers. Mirrors the same gate
+    /// `canonicalise_workspace_path` enforces for `Option`-returning
+    /// type canonicalisation. Integration: each branch delegates to a
+    /// dedicated helper.
+    fn canonicalise_path(&self, segments: &[String], leading_colon_set: bool) -> String {
         if segments.is_empty() {
             return String::new();
+        }
+        // Extern-root path (`::Foo::bar`) — workspace canonicalisation
+        // does not apply. Without this gate, a same-named workspace
+        // symbol would produce a false `crate::...::Foo::bar` edge.
+        if leading_colon_set {
+            return bare(&segments.join("::"));
         }
         if segments[0] == "Self" {
             return self.canonicalise_self_path(segments);
@@ -994,7 +1007,7 @@ impl<'a, 'ast> Visit<'ast> for CanonicalCallCollector<'a> {
                     self.record_call(t);
                 }
             } else {
-                let canonical = self.canonicalise_path(&segments);
+                let canonical = self.canonicalise_path(&segments, leading_colon);
                 self.record_call(canonical);
             }
         }

@@ -12,7 +12,7 @@ use super::super::canonical::CanonicalType;
 use super::generics::{path_turbofish_args, turbofish_fallback, turbofish_substitute};
 use super::InferContext;
 use crate::adapters::analyzers::architecture::call_parity_rule::bindings::{
-    canonicalise_type_segments_in_scope, CanonScope,
+    canonicalise_workspace_path, CanonScope,
 };
 
 /// A bare `Expr::Path` in expression position is always either a local
@@ -40,8 +40,9 @@ pub(super) fn infer_call(call: &syn::ExprCall, ctx: &InferContext<'_>) -> Option
         return None;
     };
     let segs = path_segments(p);
+    let leading_colon = p.path.leading_colon.is_some();
     let turbofish = path_turbofish_args(&p.path);
-    infer_call_from_segments(&segs, ctx)
+    infer_call_from_segments(&segs, leading_colon, ctx)
         .map(|t| turbofish_substitute(t, turbofish, ctx))
         .or_else(|| turbofish_fallback(turbofish, ctx))
 }
@@ -66,30 +67,46 @@ pub(super) fn infer_method_call(
 }
 
 /// Try `fn_returns` first, fall back to `method_returns` if path has
-/// at least two segments. Operation: delegation via `.or_else`.
-fn infer_call_from_segments(segs: &[String], ctx: &InferContext<'_>) -> Option<CanonicalType> {
+/// at least two segments. `leading_colon_set` (mirrored from
+/// `syn::Path.leading_colon`) propagates through every workspace
+/// canonicalisation so absolute `::Foo` paths don't false-match
+/// workspace symbols. Operation: delegation via `.or_else`.
+fn infer_call_from_segments(
+    segs: &[String],
+    leading_colon_set: bool,
+    ctx: &InferContext<'_>,
+) -> Option<CanonicalType> {
     if segs.is_empty() {
         return None;
     }
-    try_fn_return(segs, ctx).or_else(|| try_method_return(segs, ctx))
+    try_fn_return(segs, leading_colon_set, ctx)
+        .or_else(|| try_method_return(segs, leading_colon_set, ctx))
 }
 
 /// Canonicalise the full path and probe `fn_returns`. Operation.
-fn try_fn_return(segs: &[String], ctx: &InferContext<'_>) -> Option<CanonicalType> {
-    let full = canonicalise_call_path(segs, ctx)?;
+fn try_fn_return(
+    segs: &[String],
+    leading_colon_set: bool,
+    ctx: &InferContext<'_>,
+) -> Option<CanonicalType> {
+    let full = canonicalise_call_path(segs, leading_colon_set, ctx)?;
     let key = full.join("::");
     ctx.workspace.fn_return(&key).cloned()
 }
 
 /// Split the last segment off as method name, canonicalise the prefix
 /// as a type path, and probe `method_returns`. Operation.
-fn try_method_return(segs: &[String], ctx: &InferContext<'_>) -> Option<CanonicalType> {
+fn try_method_return(
+    segs: &[String],
+    leading_colon_set: bool,
+    ctx: &InferContext<'_>,
+) -> Option<CanonicalType> {
     if segs.len() < 2 {
         return None;
     }
     let method = segs.last()?;
     let type_segs = &segs[..segs.len() - 1];
-    let type_full = canonicalise_call_path(type_segs, ctx)?;
+    let type_full = canonicalise_call_path(type_segs, leading_colon_set, ctx)?;
     let key = type_full.join("::");
     ctx.workspace.method_return(&key, method).cloned()
 }
@@ -147,15 +164,23 @@ fn lookup_trait_method_return(
 }
 
 /// Canonicalise a path's segments for lookup, with `Self`-substitution
-/// applied before the generic pipeline. Operation: substitution +
-/// delegate.
-fn canonicalise_call_path(segs: &[String], ctx: &InferContext<'_>) -> Option<Vec<String>> {
+/// applied before the generic pipeline. Routes through
+/// `canonicalise_workspace_path` so `leading_colon_set` (Rust 2018+
+/// `::Foo` extern-root) short-circuits workspace lookup — otherwise
+/// `::Q::handle()` could false-match a workspace `Q::handle`.
+/// Operation: substitution + delegate.
+fn canonicalise_call_path(
+    segs: &[String],
+    leading_colon_set: bool,
+    ctx: &InferContext<'_>,
+) -> Option<Vec<String>> {
     if segs.is_empty() {
         return None;
     }
     let expanded = substitute_self(segs, ctx.self_type.as_ref())?;
-    canonicalise_type_segments_in_scope(
+    canonicalise_workspace_path(
         &expanded,
+        leading_colon_set,
         &CanonScope {
             file: ctx.file,
             mod_stack: ctx.mod_stack,

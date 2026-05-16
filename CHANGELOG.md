@@ -273,10 +273,8 @@ pass. Failing-first regression tests live in
     Initial fix targeted only the type resolver (`resolve_generic_path`).
     The CALL collector (`visit_expr_call` →
     `canonicalise_generic_param_path` in `calls.rs`) had a parallel
-    generic-param lookup that ALSO ignored `leading_colon`, so
-    `::Q::handle(&q)` inside `fn run<Q: Handler>(...)` still
-    mis-routed to the `Handler::handle` anchor edge. Unified fix:
-    extracted `signature_params::matched_generic_param(segments,
+    generic-param lookup that ALSO ignored `leading_colon`. Unified
+    via `signature_params::matched_generic_param(segments,
     leading_colon_set, generic_params)` as the single gate. Both
     `generic_param_shadow` (type path) and
     `canonicalise_generic_param_path` (call path) route through it.
@@ -285,6 +283,21 @@ pass. Failing-first regression tests live in
     catches new drift candidates. Regression tests:
     `absolute_leading_colon_path_is_not_shadowed_by_in_scope_generic`,
     `absolute_leading_colon_call_path_does_not_shadow_to_trait_anchor`.
+  - Even after the generic-param gate, both fallback paths still
+    dropped `leading_colon` when consulting the workspace
+    canonicalisation primitive — `::Q` with a workspace-local `Q`
+    would resolve to `crate::...::Q` (false workspace edge). Added
+    `bindings::canonicalise_workspace_path(segments, leading_colon_set,
+    scope)` as the central use-site canonicalisation gate (wraps
+    `canonicalise_type_segments_in_scope` with the leading-colon
+    short-circuit). `resolve_generic_path` (type) and
+    `canonicalise_call_path` in `infer/call.rs` (inference) both
+    route through it. The call collector's `canonicalise_path`
+    (which doesn't go through the primitive) gets an inline
+    early-return at the top — same gate semantic, locally enforced.
+    Regression tests:
+    `absolute_leading_colon_type_path_does_not_route_to_same_named_workspace_type`,
+    `absolute_leading_colon_call_path_does_not_route_to_same_named_workspace_fn`.
 
 ### Fixed
 

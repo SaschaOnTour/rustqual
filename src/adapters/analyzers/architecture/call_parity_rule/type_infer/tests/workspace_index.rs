@@ -2512,3 +2512,160 @@ fn absolute_leading_colon_call_path_does_not_shadow_to_trait_anchor() {
          the in-scope generic param Q. Got calls: {calls:?}"
     );
 }
+
+#[test]
+fn absolute_leading_colon_type_path_does_not_route_to_same_named_workspace_type() {
+    // Sister to the generic-param-shadow gate: even when no in-scope
+    // generic matches `Q`, an absolute path `::Q` must NOT canonicalise
+    // to a workspace `Q` via the fallback `canonicalise_type_segments_in_scope`.
+    // Rust 2018+: `::Q` is from an extern crate root, so workspace
+    // canonicalisation does not apply. Pre-fix, with `pub struct Q;`
+    // in the workspace, `::Q` in a fn body resolves to
+    // `crate::...::Q` via local-symbols / crate-roots lookup —
+    // false-positive workspace edge.
+    use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::FileScope;
+    use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::resolve::{
+        resolve_type, ResolveContext,
+    };
+    use crate::adapters::shared::use_tree::ScopedAliasMap;
+
+    let ty: syn::Type = syn::parse_str("::Q").expect("parse `::Q`");
+    let alias_map = HashMap::new();
+    // Workspace has a local `Q` — exactly the false-positive trigger.
+    let mut local = HashSet::new();
+    local.insert("Q".to_string());
+    let local_decl_scopes: HashMap<String, Vec<Vec<String>>> = {
+        let mut m = HashMap::new();
+        m.insert("Q".to_string(), vec![vec![]]);
+        m
+    };
+    let roots = HashSet::new();
+    let file_scope = FileScope {
+        path: "src/app/runner.rs",
+        alias_map: &alias_map,
+        aliases_per_scope: &ScopedAliasMap::new(),
+        local_symbols: &local,
+        local_decl_scopes: &local_decl_scopes,
+        crate_root_modules: &roots,
+        workspace_module_paths: None,
+    };
+    let resolved = resolve_type(
+        &ty,
+        &ResolveContext {
+            file: &file_scope,
+            mod_stack: &[],
+            type_aliases: None,
+            transparent_wrappers: None,
+            workspace_files: None,
+            alias_param_subs: None,
+            generic_params: None, // No generic in scope — purely a workspace-Q test
+        },
+    );
+    // Must NOT be Path(crate::app::runner::Q) — the absolute leading
+    // colon disambiguates AWAY from workspace symbols too, not just
+    // generics.
+    if let CanonicalType::Path(segs) = &resolved {
+        assert!(
+            !segs.contains(&"Q".to_string()) || segs.first().map(String::as_str) != Some("crate"),
+            "`::Q` with `pub struct Q;` in the workspace must NOT canonicalise \
+             to a workspace `Q` path. Got: {resolved:?}"
+        );
+    }
+}
+
+#[test]
+fn absolute_leading_colon_call_path_does_not_route_to_same_named_workspace_fn() {
+    // Sister test for the call collector: `::Q::handle()` with a
+    // workspace `Q` available (local symbol or crate-root module)
+    // must NOT produce a `crate::...::Q::handle` edge. The leading
+    // colon disambiguates the call AWAY from workspace symbols too,
+    // not just generic params.
+    use crate::adapters::analyzers::architecture::call_parity_rule::calls::{
+        collect_canonical_calls, FnContext,
+    };
+    use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::FileScope;
+    use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::{
+        collect_crate_root_modules, collect_local_symbols,
+    };
+    use crate::adapters::shared::use_tree::gather_alias_map;
+
+    let fix = fixture(&[(
+        "src/app/q.rs",
+        r#"
+        // Workspace-local `Q` — the false-positive trigger.
+        pub struct Q;
+        impl Q { pub fn handle(&self) {} }
+        "#,
+    )]);
+    let borrowed_files = borrowed(&fix);
+    let workspace_index = {
+        let cfg_test = &HashSet::new();
+        let roots = &crate_roots(&["src/app/q.rs"]);
+        let wraps = &HashSet::new();
+        let workspace_files = build_workspace_files_map(WorkspaceFilesInputs {
+            files: &borrowed_files,
+            cfg_test_files: cfg_test,
+            aliases_per_file: &fix.aliases,
+            aliases_scoped_per_file: &fix.aliases_scoped,
+            local_symbols_per_file: &fix.local_symbols,
+            crate_root_modules: roots,
+            workspace_module_paths: None,
+        });
+        build_workspace_type_index(&WorkspaceIndexInputs {
+            files: &borrowed_files,
+            workspace_files: &workspace_files,
+            cfg_test_files: cfg_test,
+            transparent_wrappers: wraps,
+        })
+    };
+    // Use site: `Q` is in the crate root via the `q` module (local
+    // symbol of nothing here — instead we'll check via crate-root
+    // modules). To trigger the bug, we put a workspace-local Q in
+    // the file's local_symbols by writing a file where Q is local.
+    let use_site = parse_file(
+        r#"
+        pub struct Q;
+        impl Q { pub fn handle(&self) {} }
+        pub fn use_it() {
+            ::Q::handle();
+        }
+        "#,
+    );
+    let alias_map = gather_alias_map(&use_site);
+    let local_symbols = collect_local_symbols(&use_site);
+    let crate_roots_set = collect_crate_root_modules(&[("src/cli/use_site.rs", &use_site)]);
+    let file_scope = FileScope {
+        path: "src/cli/use_site.rs",
+        alias_map: &alias_map,
+        aliases_per_scope: &Default::default(),
+        local_symbols: &local_symbols,
+        local_decl_scopes: &Default::default(),
+        crate_root_modules: &crate_roots_set,
+        workspace_module_paths: None,
+    };
+    let body = match &use_site.items[2] {
+        syn::Item::Fn(item_fn) => &item_fn.block,
+        _ => panic!("expected fn item at index 2 of use_site"),
+    };
+    let ctx = FnContext {
+        file: &file_scope,
+        mod_stack: &[],
+        body,
+        signature_params: vec![],
+        generic_params: std::collections::HashMap::new(),
+        self_type: None,
+        workspace_index: Some(&workspace_index),
+        workspace_files: None,
+    };
+    let calls = collect_canonical_calls(&ctx);
+    // Must NOT produce a workspace edge — the leading colon means
+    // extern. Acceptable canonicals: `<bare>:Q::handle` or similar.
+    // Forbidden: any `crate::...::Q::handle` workspace canonical.
+    let phantom_workspace_edge = "crate::cli::use_site::Q::handle";
+    assert!(
+        !calls.contains(phantom_workspace_edge),
+        "`::Q::handle()` with workspace-local `Q` must NOT produce \
+         workspace edge `{phantom_workspace_edge}` — the leading colon \
+         disambiguates AWAY from workspace symbols. Got calls: {calls:?}"
+    );
+}
