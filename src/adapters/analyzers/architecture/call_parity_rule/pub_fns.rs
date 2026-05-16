@@ -25,7 +25,7 @@ use super::signature_params::extract_signature_params;
 use super::workspace_graph::{collect_crate_root_modules, resolve_impl_self_type};
 use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
 use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
-use crate::adapters::shared::use_tree::gather_alias_map_scoped;
+use crate::adapters::shared::use_tree::{gather_alias_map_scoped, AliasMap};
 use std::collections::{HashMap, HashSet};
 use syn::visit::Visit;
 
@@ -57,7 +57,7 @@ pub(crate) struct PubFnInfo<'ast> {
 /// per-file lookup table explicit at the call site.
 pub(crate) struct PubFnInputs<'a, 'ast> {
     pub files: &'a [(&'ast str, &'ast syn::File)],
-    pub aliases_per_file: &'a HashMap<String, HashMap<String, Vec<String>>>,
+    pub aliases_per_file: &'a HashMap<String, AliasMap>,
     pub layers: &'a LayerDefinitions,
     pub transparent_wrappers: &'a HashSet<String>,
     pub promoted_attributes: &'a HashSet<String>,

@@ -51,7 +51,7 @@ use crate::adapters::analyzers::architecture::compiled::{
 use crate::adapters::analyzers::architecture::rendering::build_architecture_finding;
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths_from_refs;
-use crate::adapters::shared::use_tree::gather_alias_map;
+use crate::adapters::shared::use_tree::{gather_alias_map, AliasMap};
 use crate::config::architecture::SingleTouchpointMode;
 use crate::domain::{Finding, Severity};
 use crate::ports::AnalysisContext;
@@ -136,7 +136,7 @@ pub fn collect_findings(
 /// owning sets alive for the duration of `collect_findings` so the
 /// borrowed lookup struct can hand out references to all four.
 struct WorkspaceData {
-    aliases_per_file: HashMap<String, HashMap<String, Vec<String>>>,
+    aliases_per_file: HashMap<String, AliasMap>,
     cfg_test_files: HashSet<String>,
     crate_root_modules: HashSet<String>,
     workspace_module_paths: HashSet<Vec<String>>,

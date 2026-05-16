@@ -4,6 +4,7 @@ use super::support::TypeInferFixture;
 use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::{
     infer_type, CanonicalType,
 };
+use crate::adapters::shared::use_tree::AliasTarget;
 
 fn infer(f: &TypeInferFixture, src: &str) -> Option<CanonicalType> {
     let expr: syn::Expr = syn::parse_str(src).ok()?;
@@ -86,12 +87,12 @@ fn test_call_ctor_via_alias() {
     let mut f = TypeInferFixture::new();
     f.alias_map.insert(
         "Session".to_string(),
-        vec![
+        AliasTarget::relative(vec![
             "crate".to_string(),
             "app".to_string(),
             "session".to_string(),
             "Session".to_string(),
-        ],
+        ]),
     );
     f.index.insert_method_return(
         "crate::app::session::Session",

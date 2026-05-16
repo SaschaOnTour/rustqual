@@ -11,7 +11,7 @@ use super::super::workspace_graph::{
 };
 use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
 use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
-use crate::adapters::shared::use_tree::gather_alias_map_scoped;
+use crate::adapters::shared::use_tree::{gather_alias_map_scoped, AliasMap};
 use std::collections::{HashMap, HashSet};
 use syn::visit::Visit;
 
@@ -66,7 +66,7 @@ pub(crate) struct PrivateCandidate {
 /// Operation: per-file scope build + AST traversal + filtering.
 pub(crate) fn collect_private_candidates(
     files: &[(&str, &syn::File)],
-    aliases_per_file: &HashMap<String, HashMap<String, Vec<String>>>,
+    aliases_per_file: &HashMap<String, AliasMap>,
     layers: &LayerDefinitions,
     transparent_wrappers: &HashSet<String>,
     workspace: &super::super::local_symbols::WorkspaceLookup<'_>,

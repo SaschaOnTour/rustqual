@@ -29,6 +29,7 @@ use super::type_infer::{
 use crate::adapters::analyzers::architecture::forbidden_rule::{
     file_to_module_segments, resolve_to_crate_absolute_in,
 };
+use crate::adapters::shared::use_tree::AliasTarget;
 use std::collections::{HashMap, HashSet};
 use syn::visit::Visit;
 
@@ -389,26 +390,24 @@ impl<'a> CanonicalCallCollector<'a> {
     /// module). Returns `None` when no alias matches.
     fn canonicalise_alias_path(&self, segments: &[String]) -> Option<String> {
         let alias = self.lookup_alias_at_scope(&segments[0])?;
-        let mut full = alias.to_vec();
+        let mut full = alias.segments.to_vec();
         full.extend_from_slice(&segments[1..]);
-        let normalized = normalize_alias_expansion(
-            full,
-            self.file.path,
-            self.mod_stack,
-            self.file.crate_root_modules,
-            self.file.workspace_module_paths,
-        )?;
+        let scope = CanonScope {
+            file: self.file,
+            mod_stack: self.mod_stack,
+        };
+        let normalized = normalize_alias_expansion(full, alias.absolute_root, &scope)?;
         Some(normalized.join("::"))
     }
 
     /// Look up `name` in the alias map for exactly the current
     /// `mod_stack`. Falls back to the flat top-level `alias_map` for
     /// legacy callers that don't populate `aliases_per_scope`.
-    fn lookup_alias_at_scope(&self, name: &str) -> Option<&[String]> {
+    fn lookup_alias_at_scope(&self, name: &str) -> Option<&AliasTarget> {
         if let Some(map) = self.file.aliases_per_scope.get(self.mod_stack) {
-            return map.get(name).map(Vec::as_slice);
+            return map.get(name);
         }
-        self.file.alias_map.get(name).map(Vec::as_slice)
+        self.file.alias_map.get(name)
     }
 
     /// Same-file fallback: first segment is declared in this file at

@@ -12,7 +12,7 @@
 //!   `crate::<file>::inner::Session` when the type is declared there.
 
 use crate::adapters::shared::cfg_test::has_cfg_test;
-use crate::adapters::shared::use_tree::ScopedAliasMap;
+use crate::adapters::shared::use_tree::{AliasMap, ScopedAliasMap};
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 
@@ -34,7 +34,7 @@ pub(crate) struct FileScope<'a> {
     /// `aliases_per_scope.get(&[])` when the scoped map was built via
     /// `gather_alias_map_scoped`; kept as a separate field so legacy /
     /// unit-test callers can populate just this one.
-    pub alias_map: &'a HashMap<String, Vec<String>>,
+    pub alias_map: &'a AliasMap,
     /// Per-mod alias maps (output of `gather_alias_map_scoped`). Tests
     /// can pass an empty map; the lookup then falls back to
     /// `alias_map` for the legacy flat behaviour.
@@ -57,7 +57,7 @@ pub(crate) struct FileScope<'a> {
 pub(crate) struct WorkspaceFilesInputs<'a> {
     pub files: &'a [(&'a str, &'a syn::File)],
     pub cfg_test_files: &'a HashSet<String>,
-    pub aliases_per_file: &'a HashMap<String, HashMap<String, Vec<String>>>,
+    pub aliases_per_file: &'a HashMap<String, AliasMap>,
     pub aliases_scoped_per_file: &'a HashMap<String, ScopedAliasMap>,
     pub local_symbols_per_file: &'a HashMap<String, LocalSymbols>,
     pub crate_root_modules: &'a HashSet<String>,
@@ -133,17 +133,10 @@ pub(crate) fn build_workspace_files_map<'a>(
 /// part of the `file_root_visibility`-based filter (the
 /// orphan-exclusion property exercised by bug 9) is preserved.
 pub(crate) fn collect_workspace_module_paths(files: &[(&str, &syn::File)]) -> HashSet<Vec<String>> {
-    let segs_to_path: HashMap<Vec<String>, &str> = files
-        .iter()
-        .map(|(path, _)| {
-            (
-                crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments(
-                    path,
-                ),
-                *path,
-            )
-        })
-        .collect();
+    let segs_to_path =
+        crate::adapters::analyzers::architecture::forbidden_rule::build_module_segs_to_path_map(
+            files,
+        );
     let path_to_ast: HashMap<&str, &syn::File> = files.iter().map(|(p, ast)| (*p, *ast)).collect();
     let ctx = ModuleWalkCtx {
         segs_to_path: &segs_to_path,

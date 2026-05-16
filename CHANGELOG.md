@@ -16,6 +16,36 @@ pass. Failing-first regression tests live in
 
 ### Fixed (sibling-resolution + multi-bound)
 
+- **Alias map silently dropped `ItemUse.leading_colon`.**
+  `gather_alias_map` / `gather_alias_map_scoped` only passed `u.tree`
+  into `collect_alias_entries`, so `use ::ext::Foo as Local;` was
+  stored byte-equivalent to `use ext::Foo as Local;`. At the use site
+  `Local::method()`, `normalize_after_alias` then happily prepended
+  `crate::` once `ext` matched a workspace top-level module, creating
+  a false workspace edge to a symbol the program never addressed.
+  Fix: `AliasMap` value is now `AliasTarget { segments,
+  absolute_root: bool }` — `collect_alias_entries` reads the parent
+  `ItemUse.leading_colon` once and stamps every entry; the new gate
+  short-circuits in `normalize_after_alias`. Single ownership of the
+  flag end-to-end so future drift between extraction and use-site is
+  compiler-prevented. Regression test:
+  `absolute_use_alias_does_not_re_canonicalise_to_workspace` in
+  `module_resolution.rs`.
+- **`src/foo.rs` and `src/foo/mod.rs` collision was order-dependent.**
+  `collect_workspace_module_paths` and `collect_file_root_visibility`
+  both built a `module-segments → file-path` index via
+  `.collect()` into a HashMap. When both files exist (stale-leftover
+  refactor), `file_to_module_segments` mapped them to the same key
+  `["foo"]` and whichever entry landed last in iteration order
+  silently overwrote the other — the walker then descended into the
+  wrong AST, producing non-deterministic `workspace_module_paths`
+  and missed call edges. Fix: new shared helper
+  `forbidden_rule::build_module_segs_to_path_map` applies Rust's
+  modern precedence rule (prefer `foo.rs` over `foo/mod.rs`); both
+  collectors route through it so the tie-break lives in one place.
+  Regression test:
+  `file_rs_wins_over_dir_mod_rs_when_both_back_the_same_module_path`
+  in `module_resolution.rs`.
 - **Sibling submodule loses to crate-root with same name.**
   `normalize_after_alias` checked `crate_root_modules` before the
   sibling-submodule branch, mis-routing `use foo::X` inside

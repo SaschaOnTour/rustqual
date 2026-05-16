@@ -354,3 +354,108 @@ fn pub_use_reexport_call_resolves_to_real_definition() {
         callees_of(&graph, search),
     );
 }
+
+#[test]
+fn absolute_use_alias_does_not_re_canonicalise_to_workspace() {
+    // `use ::ext::A as Local;` is a Rust 2018+ absolute path. The
+    // leading colon says: "this is the extern-crate `ext`, not our
+    // workspace's `ext`." So `Local::m()` must NOT silently route to
+    // `crate::ext::A::m` even when a same-named workspace module
+    // exists.
+    //
+    // The bug: `gather_alias_map` / `gather_alias_map_scoped` only
+    // pass `u.tree` into `collect_alias_entries`, dropping
+    // `u.leading_colon`. The use-site canonicaliser then treats the
+    // alias as relative, and `normalize_after_alias` happily prepends
+    // `crate::` once it spots `ext` as a workspace top-level module.
+    // Result: a false workspace edge to a symbol that the program
+    // never actually addressed.
+    let ws = build_workspace(&[
+        ("src/lib.rs", "pub mod ext;\npub mod app;\n"),
+        (
+            "src/ext.rs",
+            r#"
+            pub struct A;
+            impl A { pub fn m() {} }
+            "#,
+        ),
+        (
+            "src/app.rs",
+            r#"
+            // Absolute path — refers to the extern crate `ext`, NOT
+            // the workspace's `crate::ext`.
+            use ::ext::A as Local;
+            pub fn dispatch() { Local::m(); }
+            "#,
+        ),
+    ]);
+    let graph = build_graph_only(&ws, &three_layer(), &empty_cfg_test(), &HashSet::new());
+    let dispatch = "crate::app::dispatch";
+    let workspace_phantom = "crate::ext::A::m";
+    assert!(
+        !graph_contains_edge(&graph, dispatch, workspace_phantom),
+        "`use ::ext::A as Local;` is an extern-rooted import (the \
+         leading `::` means extern crate `ext`, not the workspace's \
+         `crate::ext`). `Local::m()` must NOT route to \
+         `{workspace_phantom}` even when a same-named workspace \
+         module exists. dispatch callees: {:?}",
+        callees_of(&graph, dispatch),
+    );
+}
+
+#[test]
+fn file_rs_wins_over_dir_mod_rs_when_both_back_the_same_module_path() {
+    // Stale-leftover scenario: both `src/foo.rs` and `src/foo/mod.rs`
+    // exist in the workspace (e.g. after a refactor that switched
+    // legacy `mod.rs` style to single-file style but forgot to delete
+    // the old file). `file_to_module_segments` maps both paths to
+    // `["foo"]`, so the `segs_to_path` lookup in
+    // `collect_workspace_module_paths` saw a collision and silently
+    // kept whichever entry happened to land last in iteration order.
+    // Whichever AST won determined which submodule declarations got
+    // registered — driving non-deterministic graph results and
+    // dropped call edges when the "wrong" file's submodules were
+    // walked.
+    //
+    // After the fix, `foo.rs` deterministically wins (matches modern
+    // Rust precedence), so `mod alpha;` declared in `foo.rs` always
+    // ends up in `workspace_module_paths` and the sibling-submodule
+    // discriminator routes `use alpha::Local;` correctly.
+    //
+    // Test ordering: putting `foo/mod.rs` AFTER `foo.rs` in the input
+    // slice reproduces the bug deterministically — the later insert
+    // wins the HashMap collision in the buggy code.
+    let ws = build_workspace(&[
+        ("src/lib.rs", "pub mod foo;\n"),
+        (
+            "src/foo.rs",
+            r#"
+            pub mod alpha;
+            use alpha::Local;
+            pub fn dispatch() { Local::run(); }
+            "#,
+        ),
+        (
+            "src/foo/alpha.rs",
+            r#"
+            pub struct Local;
+            impl Local { pub fn run() {} }
+            "#,
+        ),
+        // Stale leftover from a legacy mod.rs layout. Declares a
+        // *different* submodule. Must NOT shadow `foo.rs`.
+        ("src/foo/mod.rs", "pub mod beta;\n"),
+        ("src/foo/beta.rs", "pub fn unused() {}\n"),
+    ]);
+    let graph = build_graph_only(&ws, &three_layer(), &empty_cfg_test(), &HashSet::new());
+    let dispatch = "crate::foo::dispatch";
+    let target = "crate::foo::alpha::Local::run";
+    assert!(
+        graph_contains_edge(&graph, dispatch, target),
+        "when both `src/foo.rs` and `src/foo/mod.rs` exist, the analyser \
+         must deterministically prefer `foo.rs` (Rust 2018+ convention) \
+         and walk its declared submodules. `use alpha::Local;` inside \
+         `foo.rs` must resolve to `{target}`. dispatch callees: {:?}",
+        callees_of(&graph, dispatch),
+    );
+}

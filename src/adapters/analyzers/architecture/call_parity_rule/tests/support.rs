@@ -14,14 +14,14 @@ use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph:
 use crate::adapters::analyzers::architecture::compiled::CompiledCallParity;
 use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
 use crate::adapters::analyzers::architecture::MatchLocation;
-use crate::adapters::shared::use_tree::gather_alias_map;
+use crate::adapters::shared::use_tree::{gather_alias_map, AliasMap};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use std::collections::{HashMap, HashSet};
 
 /// In-memory workspace built from `(path, source)` pairs.
 pub(super) struct Workspace {
     pub files: Vec<(String, String, syn::File)>,
-    pub aliases_per_file: HashMap<String, HashMap<String, Vec<String>>>,
+    pub aliases_per_file: HashMap<String, AliasMap>,
 }
 
 pub(super) fn parse(src: &str) -> syn::File {

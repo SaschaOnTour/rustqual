@@ -8,7 +8,7 @@ use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::cano
 use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::resolve::{
     resolve_type, ResolveContext,
 };
-use crate::adapters::shared::use_tree::ScopedAliasMap;
+use crate::adapters::shared::use_tree::{AliasTarget, ScopedAliasMap};
 use std::collections::{HashMap, HashSet};
 
 fn parse_type(src: &str) -> syn::Type {
@@ -429,12 +429,12 @@ fn test_aliased_path_resolves_via_alias_map() {
     let mut alias_map = HashMap::new();
     alias_map.insert(
         "Session".to_string(),
-        vec![
+        AliasTarget::relative(vec![
             "crate".to_string(),
             "app".to_string(),
             "session".to_string(),
             "Session".to_string(),
-        ],
+        ]),
     );
     let local = HashSet::new();
     let roots = HashSet::new();
@@ -491,7 +491,11 @@ fn test_impl_trait_local_send_named_trait_resolves_not_skipped() {
     let mut alias_map = HashMap::new();
     alias_map.insert(
         "Send".to_string(),
-        vec!["crate".to_string(), "ports".to_string(), "Send".to_string()],
+        AliasTarget::relative(vec![
+            "crate".to_string(),
+            "ports".to_string(),
+            "Send".to_string(),
+        ]),
     );
     let local = HashSet::new();
     let roots = HashSet::new();
@@ -570,7 +574,7 @@ fn test_impl_trait_external_aliased_bound_skipped_workspace_bound_wins() {
     let mut alias_map = HashMap::new();
     alias_map.insert(
         "Serialize".to_string(),
-        vec!["serde".to_string(), "Serialize".to_string()],
+        AliasTarget::relative(vec!["serde".to_string(), "Serialize".to_string()]),
     );
     let mut local = HashSet::new();
     local.insert("Handler".to_string());
@@ -611,11 +615,11 @@ fn test_impl_aliased_future_resolves_to_future_with_output() {
     let mut alias_map = HashMap::new();
     alias_map.insert(
         "Fut".to_string(),
-        vec![
+        AliasTarget::relative(vec![
             "std".to_string(),
             "future".to_string(),
             "Future".to_string(),
-        ],
+        ]),
     );
     let mut local = HashSet::new();
     local.insert("Session".to_string());
@@ -646,7 +650,7 @@ fn test_impl_aliased_future_resolves_to_future_with_output() {
 /// produces a fresh borrow at call sites.
 struct ScopeInputs {
     path: String,
-    alias_map: HashMap<String, Vec<String>>,
+    alias_map: crate::adapters::shared::use_tree::AliasMap,
     aliases_per_scope: ScopedAliasMap,
     local_symbols: HashSet<String>,
     local_decl_scopes: HashMap<String, Vec<Vec<String>>>,
@@ -690,11 +694,11 @@ fn test_alias_generic_arg_resolves_at_use_site() {
     let mut app = ScopeInputs::new("src/app.rs");
     app.alias_map.insert(
         "Wrap".to_string(),
-        vec![
+        AliasTarget::relative(vec![
             "crate".to_string(),
             "domain".to_string(),
             "Wrap".to_string(),
-        ],
+        ]),
     );
     app.local_symbols.insert("Session".to_string());
 

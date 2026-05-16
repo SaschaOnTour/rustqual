@@ -163,6 +163,46 @@ pub(crate) fn file_to_module_segments(path: &str) -> Vec<String> {
     parts
 }
 
+// qual:api
+/// Build a `module-segments → file-path` index over the workspace
+/// files, applying Rust's precedence rule when two files map to the
+/// same module identity.
+///
+/// Both `src/foo.rs` and `src/foo/mod.rs` produce `["foo"]` from
+/// [`file_to_module_segments`], so a naive `.collect()` lets iteration
+/// order pick the winner — non-deterministic, and the stale-leftover
+/// case (refactor switched to single-file style but forgot to delete
+/// the old `mod.rs`) silently shadows the live file. Modern Rust
+/// rejects the pair as a duplicate-module error; rustqual mirrors the
+/// modern convention by deterministically preferring the non-`mod.rs`
+/// form. Workspace-resolution callers (`collect_workspace_module_paths`,
+/// `collect_file_root_visibility`, …) MUST go through this helper so
+/// the precedence is defined in one place.
+/// Operation: linear scan with explicit precedence resolution, no own
+/// calls.
+pub(crate) fn build_module_segs_to_path_map<'a>(
+    files: &[(&'a str, &syn::File)],
+) -> std::collections::HashMap<Vec<String>, &'a str> {
+    let mut out: std::collections::HashMap<Vec<String>, &'a str> =
+        std::collections::HashMap::with_capacity(files.len());
+    for (path, _) in files {
+        let segs = file_to_module_segments(path);
+        match out.get(&segs) {
+            Some(existing) if existing.replace('\\', "/").ends_with("/mod.rs") => {
+                out.insert(segs, *path);
+            }
+            Some(_) => {
+                // Existing entry is the modern `foo.rs` form — keep
+                // it; the incoming `foo/mod.rs` is the legacy form.
+            }
+            None => {
+                out.insert(segs, *path);
+            }
+        }
+    }
+    out
+}
+
 /// Synthesise the candidate `src/…` file paths for a segment prefix (the
 /// `crate::` already stripped). Every ancestor of the leaf is a
 /// candidate — the leaf may be a module file, a module directory, or

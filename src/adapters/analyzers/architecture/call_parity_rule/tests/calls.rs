@@ -9,7 +9,7 @@ use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::F
 use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::{
     collect_crate_root_modules, collect_local_symbols,
 };
-use crate::adapters::shared::use_tree::{gather_alias_map, ScopedAliasMap};
+use crate::adapters::shared::use_tree::{gather_alias_map, AliasMap, ScopedAliasMap};
 use std::collections::{HashMap, HashSet};
 
 fn parse_file(src: &str) -> syn::File {
@@ -25,7 +25,7 @@ fn parse_type(src: &str) -> syn::Type {
 /// automatically.
 struct FileCtx {
     file: syn::File,
-    alias_map: HashMap<String, Vec<String>>,
+    alias_map: AliasMap,
     aliases_per_scope: ScopedAliasMap,
     local_symbols: HashSet<String>,
     local_decl_scopes: HashMap<String, Vec<Vec<String>>>,

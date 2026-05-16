@@ -31,8 +31,7 @@ use super::file_fn_collector::FileFnCollector;
 use super::type_infer::{build_workspace_type_index, WorkspaceIndexInputs, WorkspaceTypeIndex};
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
 use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
-use crate::adapters::shared::use_tree::gather_alias_map_scoped;
-use crate::adapters::shared::use_tree::ScopedAliasMap;
+use crate::adapters::shared::use_tree::{gather_alias_map_scoped, AliasMap, ScopedAliasMap};
 use std::collections::{HashMap, HashSet, VecDeque};
 use syn::visit::Visit;
 
@@ -317,7 +316,7 @@ impl WalkState {
 /// Integration: walks files + delegates per-fn canonical-call collection.
 pub(crate) fn build_call_graph<'ast>(
     files: &[(&'ast str, &'ast syn::File)],
-    aliases_per_file: &HashMap<String, HashMap<String, Vec<String>>>,
+    aliases_per_file: &HashMap<String, AliasMap>,
     layers: &LayerDefinitions,
     transparent_wrappers: &HashSet<String>,
     workspace: &super::local_symbols::WorkspaceLookup<'_>,

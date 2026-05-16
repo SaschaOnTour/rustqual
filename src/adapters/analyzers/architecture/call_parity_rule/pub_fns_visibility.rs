@@ -16,7 +16,7 @@ use super::pub_fns_alias_chain::{
 use super::type_infer::resolve::is_stdlib_prefixed;
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
 use crate::adapters::shared::cfg_test::has_cfg_test;
-use crate::adapters::shared::use_tree::gather_alias_map_scoped;
+use crate::adapters::shared::use_tree::{gather_alias_map_scoped, AliasMap};
 use std::collections::{HashMap, HashSet};
 use syn::Visibility;
 
@@ -60,7 +60,7 @@ struct WalkCtx<'a> {
 /// collector.
 pub(super) fn collect_visible_type_canonicals_workspace(
     files: &[(&str, &syn::File)],
-    aliases_per_file: &HashMap<String, HashMap<String, Vec<String>>>,
+    aliases_per_file: &HashMap<String, AliasMap>,
     workspace: &super::local_symbols::WorkspaceLookup<'_>,
     transparent_wrappers: &HashSet<String>,
 ) -> HashSet<String> {
@@ -96,7 +96,7 @@ pub(super) fn collect_visible_type_canonicals_workspace(
 /// the alias-chain pre-pass share. Operation.
 fn for_each_file_scope<F>(
     files: &[(&str, &syn::File)],
-    aliases_per_file: &HashMap<String, HashMap<String, Vec<String>>>,
+    aliases_per_file: &HashMap<String, AliasMap>,
     workspace: &super::local_symbols::WorkspaceLookup<'_>,
     mut body: F,
 ) where

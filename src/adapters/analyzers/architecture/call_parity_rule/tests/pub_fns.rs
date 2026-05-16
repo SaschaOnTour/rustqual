@@ -5,14 +5,12 @@ use super::support::three_layer;
 use crate::adapters::analyzers::architecture::call_parity_rule::pub_fns::{
     collect_pub_fns_by_layer, PubFnInfo, PubFnInputs,
 };
-use crate::adapters::shared::use_tree::gather_alias_map;
+use crate::adapters::shared::use_tree::{gather_alias_map, AliasMap};
 use std::collections::{HashMap, HashSet};
 
 /// Build an `aliases_per_file` map from a workspace slice — mirrors
 /// what the call-parity entry point computes.
-fn aliases_from_files(
-    files: &[(&str, &syn::File)],
-) -> HashMap<String, HashMap<String, Vec<String>>> {
+fn aliases_from_files(files: &[(&str, &syn::File)]) -> HashMap<String, AliasMap> {
     files
         .iter()
         .map(|(p, f)| (p.to_string(), gather_alias_map(f)))

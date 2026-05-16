@@ -11,7 +11,7 @@ use super::bindings::{canonicalise_workspace_path, CanonScope};
 use super::local_symbols::{collect_local_symbols_scoped, FileScope, LocalSymbols};
 use super::pub_fns_visibility::{canonical_for_decl, peel_to_inner_path};
 use crate::adapters::shared::cfg_test::has_cfg_test;
-use crate::adapters::shared::use_tree::gather_alias_map_scoped;
+use crate::adapters::shared::use_tree::{gather_alias_map_scoped, AliasMap};
 use std::collections::{HashMap, HashSet};
 
 /// Collect every type-item canonical (struct/enum/union/trait/type) in
@@ -74,7 +74,7 @@ fn walk_type_canonicals(
 /// unconditional walker. Operation.
 pub(super) fn collect_alias_chain(
     files: &[(&str, &syn::File)],
-    aliases_per_file: &HashMap<String, HashMap<String, Vec<String>>>,
+    aliases_per_file: &HashMap<String, AliasMap>,
     workspace: &super::local_symbols::WorkspaceLookup<'_>,
     transparent_wrappers: &HashSet<String>,
 ) -> HashMap<String, String> {

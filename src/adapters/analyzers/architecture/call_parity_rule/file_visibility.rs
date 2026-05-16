@@ -29,15 +29,14 @@
 
 use std::collections::HashMap;
 
-use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
+use crate::adapters::analyzers::architecture::forbidden_rule::{
+    build_module_segs_to_path_map, file_to_module_segments,
+};
 
 /// Map every workspace file to whether its file-root contents are
 /// reachable as call-parity public surface.
 pub(crate) fn collect_file_root_visibility(files: &[(&str, &syn::File)]) -> HashMap<String, bool> {
-    let segs_to_path: HashMap<Vec<String>, &str> = files
-        .iter()
-        .map(|(path, _)| (file_to_module_segments(path), *path))
-        .collect();
+    let segs_to_path = build_module_segs_to_path_map(files);
     let ctx = WalkCtx {
         files,
         segs_to_path: &segs_to_path,

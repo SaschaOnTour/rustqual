@@ -23,7 +23,7 @@ use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::{
 };
 use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::collect_local_symbols;
 use crate::adapters::shared::use_tree::{
-    gather_alias_map, gather_alias_map_scoped, ScopedAliasMap,
+    gather_alias_map, gather_alias_map_scoped, AliasMap, ScopedAliasMap,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -35,7 +35,7 @@ const CTX_PATH: &str = "crate::app::Ctx";
 /// `collect_canonical_calls` expects.
 struct RegFixture {
     file: syn::File,
-    alias_map: HashMap<String, Vec<String>>,
+    alias_map: AliasMap,
     local_symbols: HashSet<String>,
     crate_roots: HashSet<String>,
 }

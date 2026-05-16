@@ -11,7 +11,7 @@ use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::{
     build_workspace_type_index, CanonicalType, WorkspaceIndexInputs,
 };
 use crate::adapters::shared::use_tree::{
-    gather_alias_map, gather_alias_map_scoped, ScopedAliasMap,
+    gather_alias_map, gather_alias_map_scoped, AliasMap, ScopedAliasMap,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -21,7 +21,7 @@ fn parse_file(src: &str) -> syn::File {
 
 struct WsFixture {
     parsed: Vec<(String, syn::File)>,
-    aliases: HashMap<String, HashMap<String, Vec<String>>>,
+    aliases: HashMap<String, AliasMap>,
     aliases_scoped: HashMap<String, ScopedAliasMap>,
     local_symbols: HashMap<String, LocalSymbols>,
 }

@@ -11,7 +11,7 @@ use super::local_symbols::{scope_for_local, FileScope};
 use crate::adapters::analyzers::architecture::forbidden_rule::{
     file_to_module_segments, resolve_to_crate_absolute, resolve_to_crate_absolute_in,
 };
-use crate::adapters::shared::use_tree::ScopedAliasMap;
+use crate::adapters::shared::use_tree::{AliasMap, AliasTarget, ScopedAliasMap};
 use std::collections::{HashMap, HashSet};
 
 /// Infer a canonical type-path from a `syn::Type`, stripping common
@@ -20,7 +20,7 @@ use std::collections::{HashMap, HashSet};
 /// external types without alias).
 pub(super) fn canonical_from_type(
     ty: &syn::Type,
-    alias_map: &HashMap<String, Vec<String>>,
+    alias_map: &AliasMap,
     local_symbols: &HashSet<String>,
     crate_root_modules: &HashSet<String>,
     importing_file: &str,
@@ -98,7 +98,7 @@ pub(crate) struct CanonScope<'a> {
 /// helper — the flat-map shape doesn't carry the leading-colon bit.
 pub(super) fn canonicalise_type_segments(
     segments: &[String],
-    alias_map: &HashMap<String, Vec<String>>,
+    alias_map: &AliasMap,
     local_symbols: &HashSet<String>,
     crate_root_modules: &HashSet<String>,
     importing_file: &str,
@@ -189,15 +189,9 @@ pub(crate) fn canonicalise_type_segments_in_scope(
         return Some(full);
     }
     if let Some(alias) = lookup_alias(scope, &segments[0]) {
-        let mut full = alias.to_vec();
+        let mut full = alias.segments.to_vec();
         full.extend_from_slice(&segments[1..]);
-        return normalize_after_alias(
-            full,
-            file.path,
-            scope.mod_stack,
-            file.crate_root_modules,
-            file.workspace_module_paths,
-        );
+        return normalize_after_alias(full, alias.absolute_root, scope);
     }
     if file.local_symbols.contains(&segments[0]) {
         if let Some(mod_path) =
@@ -223,27 +217,41 @@ pub(crate) fn canonicalise_type_segments_in_scope(
 /// inherit parents — so this looks up only at the current scope. When
 /// the scoped overlay has no entry for `mod_stack` (legacy / unit-test
 /// callers), falls back to the flat `alias_map`.
-fn lookup_alias<'a>(scope: &'a CanonScope<'a>, name: &str) -> Option<&'a [String]> {
+fn lookup_alias<'a>(scope: &'a CanonScope<'a>, name: &str) -> Option<&'a AliasTarget> {
     if let Some(map) = scope.file.aliases_per_scope.get(scope.mod_stack) {
-        return map.get(name).map(Vec::as_slice);
+        return map.get(name);
     }
-    scope.file.alias_map.get(name).map(Vec::as_slice)
+    scope.file.alias_map.get(name)
 }
 
 /// After alias-map substitution, re-run `self` / `super` normalisation
 /// (relative to `mod_stack` inside `importing_file`, so an alias
 /// declared inside an inline mod resolves its `self`/`super` against
 /// that mod) and prepend `crate` for Rust 2018+ absolute imports.
+///
+/// `absolute_root` is the leading-colon bit of the originating `use`
+/// item: `use ::ext::Foo as Local;` carries `absolute_root=true` and
+/// means "this is an extern path, NOT the workspace's `ext`." On that
+/// flag we MUST NOT apply workspace canonicalisation (sibling-submodule
+/// promotion, crate-root prepending) — that's the exact bug the
+/// in-tree alias-map leading-colon drift caused before v1.2.4.
 fn normalize_after_alias(
     expanded: Vec<String>,
-    importing_file: &str,
-    mod_stack: &[String],
-    crate_root_modules: &HashSet<String>,
-    workspace_module_paths: Option<&HashSet<Vec<String>>>,
+    absolute_root: bool,
+    scope: &CanonScope<'_>,
 ) -> Option<Vec<String>> {
+    if absolute_root {
+        // Extern-rooted alias (`use ::ext::Foo as Local;`). The path
+        // is intentionally NOT a workspace canonical — return it as-is
+        // so downstream lookups treat `ext::Foo::…` as the extern
+        // symbol it actually is, not a `crate::ext::Foo::…` phantom.
+        return Some(expanded);
+    }
+    let file = scope.file;
+    let mod_stack = scope.mod_stack;
     match expanded.first().map(|s| s.as_str()) {
         Some("self") | Some("super") => {
-            let resolved = resolve_to_crate_absolute_in(importing_file, mod_stack, &expanded)?;
+            let resolved = resolve_to_crate_absolute_in(file.path, mod_stack, &expanded)?;
             let mut full = vec!["crate".to_string()];
             full.extend(resolved);
             Some(full)
@@ -255,16 +263,16 @@ fn normalize_after_alias(
         // when that submodule exists, even if `crate::foo` also exists.
         // Reversing this order misroutes valid local imports.
         Some(first)
-            if is_workspace_submodule(workspace_module_paths, importing_file, mod_stack, first) =>
+            if is_workspace_submodule(file.workspace_module_paths, file.path, mod_stack, first) =>
         {
             let mut with_self = vec!["self".to_string()];
             with_self.extend(expanded);
-            let resolved = resolve_to_crate_absolute_in(importing_file, mod_stack, &with_self)?;
+            let resolved = resolve_to_crate_absolute_in(file.path, mod_stack, &with_self)?;
             let mut full = vec!["crate".to_string()];
             full.extend(resolved);
             Some(full)
         }
-        Some(first) if crate_root_modules.contains(first) => {
+        Some(first) if file.crate_root_modules.contains(first) => {
             let mut full = vec!["crate".to_string()];
             full.extend(expanded);
             Some(full)
@@ -299,18 +307,10 @@ fn is_workspace_submodule(
 
 pub(super) fn normalize_alias_expansion(
     expanded: Vec<String>,
-    importing_file: &str,
-    mod_stack: &[String],
-    crate_root_modules: &HashSet<String>,
-    workspace_module_paths: Option<&HashSet<Vec<String>>>,
+    absolute_root: bool,
+    scope: &CanonScope<'_>,
 ) -> Option<Vec<String>> {
-    normalize_after_alias(
-        expanded,
-        importing_file,
-        mod_stack,
-        crate_root_modules,
-        workspace_module_paths,
-    )
+    normalize_after_alias(expanded, absolute_root, scope)
 }
 
 /// Extract a `(name, canonical_type_path)` pair from a `let` statement.
@@ -318,7 +318,7 @@ pub(super) fn normalize_alias_expansion(
 /// inference from the initializer (`let s = T::new()`).
 pub(super) fn extract_let_binding(
     local: &syn::Local,
-    alias_map: &HashMap<String, Vec<String>>,
+    alias_map: &AliasMap,
     local_symbols: &HashSet<String>,
     crate_root_modules: &HashSet<String>,
     importing_file: &str,
@@ -369,7 +369,7 @@ fn extract_pat_name_and_type(pat: &syn::Pat) -> Option<(String, Option<&syn::Typ
 /// prefix to a canonical path via alias_map / resolve_to_crate_absolute.
 fn binding_type_from_init(
     expr: &syn::Expr,
-    alias_map: &HashMap<String, Vec<String>>,
+    alias_map: &AliasMap,
     local_symbols: &HashSet<String>,
     crate_root_modules: &HashSet<String>,
     importing_file: &str,
