@@ -367,17 +367,8 @@ fn peel_single_generic(
 /// type (→ wrong `Path`).
 fn resolve_generic_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -> CanonicalType {
     let segments: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
-    // Skip generic-param shadowing for explicit absolute paths
-    // (`::Q`, Rust 2018+: from an extern crate root). The leading
-    // double-colon is the caller's way of disambiguating AWAY from
-    // any in-scope generic, so collapsing it to GenericParamBound
-    // would invert the explicit intent. Multi-segment paths
-    // (`crate::Q`, `self::Q`, `super::Q`) are already filtered out
-    // by `generic_param_shadow`'s `segments.len() != 1` guard.
-    if path.leading_colon.is_none() {
-        if let Some(shadow) = generic_param_shadow(&segments, ctx) {
-            return shadow;
-        }
+    if let Some(shadow) = generic_param_shadow(&segments, path.leading_colon.is_some(), ctx) {
+        return shadow;
     }
     let canonicalise =
         |segs: &[String]| canonicalise_type_segments_in_scope(segs, &canon_scope(ctx));
@@ -398,12 +389,21 @@ fn resolve_generic_path(path: &syn::Path, ctx: &ResolveContext<'_>, depth: u8) -
 /// `fn get<A, Q: T>() -> Q` correctly, not just single-generic shapes).
 /// `Some(Opaque)` for unbounded params (shadowing — must not fall
 /// through to a same-named workspace symbol). `None` when the path
-/// isn't a known param.
-fn generic_param_shadow(segments: &[String], ctx: &ResolveContext<'_>) -> Option<CanonicalType> {
+/// isn't a known param OR the path is an explicit absolute path
+/// (`::Q`, gated centrally via `matched_generic_param`).
+fn generic_param_shadow(
+    segments: &[String],
+    leading_colon_set: bool,
+    ctx: &ResolveContext<'_>,
+) -> Option<CanonicalType> {
     if segments.len() != 1 {
         return None;
     }
-    let info = ctx.generic_params?.get(&segments[0])?;
+    let info = super::super::signature_params::matched_generic_param(
+        segments,
+        leading_colon_set,
+        ctx.generic_params?,
+    )?;
     let collected: Vec<Vec<String>> = info
         .bounds
         .iter()

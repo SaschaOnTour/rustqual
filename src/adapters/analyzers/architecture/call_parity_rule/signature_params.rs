@@ -22,6 +22,36 @@ pub struct ParamInfo {
     pub turbofish_index: Option<usize>,
 }
 
+// qual:api
+/// Single source of truth for "does this path qualify as an in-scope
+/// generic-param shadow against `generic_params`?" The gate enforces
+/// two invariants every caller must respect:
+/// - Absolute paths (`::Q`, `path.leading_colon.is_some()`) are the
+///   caller's explicit disambiguation AWAY from in-scope generics →
+///   never match. Pre-extraction, this check landed in the type
+///   resolver but was missed in the call collector, so `::Q::handle()`
+///   inside `fn run<Q: Handler>(...)` still mis-routed through the
+///   `Handler::handle` anchor.
+/// - The head segment must be a known generic param name.
+///
+/// Callers decide what to do with the match — the type resolver
+/// short-circuits to `GenericParamBound` for single-segment paths,
+/// the call collector fans out one anchor edge per bound for
+/// multi-segment `Q::method` dispatches — but they ALL go through
+/// this helper to look up the param. Direct `generic_params.get(name)`
+/// in any new code is a drift trap; route through here instead.
+/// Operation.
+pub(crate) fn matched_generic_param<'a>(
+    segments: &[String],
+    leading_colon_set: bool,
+    generic_params: &'a HashMap<String, ParamInfo>,
+) -> Option<&'a ParamInfo> {
+    if leading_colon_set {
+        return None;
+    }
+    generic_params.get(segments.first()?)
+}
+
 /// Extract `(name, &Type)` pairs for every typed positional parameter
 /// of a fn signature. Framework-extractor patterns like
 /// `fn h(State(db): State<Db>)` contribute `("db", State<Db>)` — the

@@ -281,17 +281,28 @@ impl<'a> CanonicalCallCollector<'a> {
     /// Resolve `Q::method(...)` where `Q` is a generic type param with
     /// trait bound(s) to the trait-method anchor canonicals. Returns
     /// `None` when the first segment isn't a known generic param, or
-    /// when the param has bounds we couldn't canonicalise. Multiple
-    /// bounds ⇒ multiple anchors (over-approximation; matches what
+    /// when the path is an explicit absolute path (`::Q::method(...)`
+    /// is the caller's disambiguation away from in-scope generics —
+    /// gated centrally via `matched_generic_param`), or when the
+    /// param has bounds we couldn't canonicalise. Multiple bounds ⇒
+    /// multiple anchors (over-approximation; matches what
     /// `populate_anchor_index` mints). Empty result for a generic
     /// without resolvable bounds — the caller short-circuits the call
     /// rather than falling into local-symbol / crate-root lookup,
     /// which would mis-route `Q` as a type. Operation.
-    fn canonicalise_generic_param_path(&self, segments: &[String]) -> Option<Vec<String>> {
+    fn canonicalise_generic_param_path(
+        &self,
+        segments: &[String],
+        leading_colon_set: bool,
+    ) -> Option<Vec<String>> {
         if segments.len() < 2 {
             return None;
         }
-        let info = self.generic_params.get(&segments[0])?;
+        let info = super::signature_params::matched_generic_param(
+            segments,
+            leading_colon_set,
+            &self.generic_params,
+        )?;
         let method_tail = &segments[1..];
         let canonicals: Vec<String> = info
             .bounds
@@ -977,7 +988,8 @@ impl<'a, 'ast> Visit<'ast> for CanonicalCallCollector<'a> {
                 .iter()
                 .map(|s| s.ident.to_string())
                 .collect();
-            if let Some(targets) = self.canonicalise_generic_param_path(&segments) {
+            let leading_colon = p.path.leading_colon.is_some();
+            if let Some(targets) = self.canonicalise_generic_param_path(&segments, leading_colon) {
                 for t in targets {
                     self.record_call(t);
                 }

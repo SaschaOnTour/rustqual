@@ -270,11 +270,21 @@ pass. Failing-first regression tests live in
   - `generic_param_shadow` matched purely on segment text, so an
     explicit absolute path `::Q::method()` (Rust 2018+ extern-crate
     root) was mis-shadowed by an in-scope generic param named `Q`.
-    Fix: `resolve_generic_path` now skips the shadow when
-    `path.leading_colon.is_some()` — the leading double-colon is the
-    caller's explicit disambiguation away from the generic.
-    Regression test:
-    `absolute_leading_colon_path_is_not_shadowed_by_in_scope_generic`.
+    Initial fix targeted only the type resolver (`resolve_generic_path`).
+    The CALL collector (`visit_expr_call` →
+    `canonicalise_generic_param_path` in `calls.rs`) had a parallel
+    generic-param lookup that ALSO ignored `leading_colon`, so
+    `::Q::handle(&q)` inside `fn run<Q: Handler>(...)` still
+    mis-routed to the `Handler::handle` anchor edge. Unified fix:
+    extracted `signature_params::matched_generic_param(segments,
+    leading_colon_set, generic_params)` as the single gate. Both
+    `generic_param_shadow` (type path) and
+    `canonicalise_generic_param_path` (call path) route through it.
+    Direct `generic_params.get(name)` lookups in any new code now
+    bypass the gate — code review / D-sweep grep for that pattern
+    catches new drift candidates. Regression tests:
+    `absolute_leading_colon_path_is_not_shadowed_by_in_scope_generic`,
+    `absolute_leading_colon_call_path_does_not_shadow_to_trait_anchor`.
 
 ### Fixed
 

@@ -2396,3 +2396,119 @@ fn absolute_leading_colon_path_is_not_shadowed_by_in_scope_generic() {
          Got: {resolved:?}"
     );
 }
+
+#[test]
+fn absolute_leading_colon_call_path_does_not_shadow_to_trait_anchor() {
+    // Sister to the resolve-side `::Q` shadowing test, but exercises
+    // the CALL collector's path handling instead of the type
+    // resolver. `visit_expr_call` strips `path.segments` to ident
+    // strings and feeds them to `canonicalise_generic_param_path` —
+    // pre-fix, that helper matched purely on segment text (no
+    // leading_colon awareness), so `::Q::handle(x)` inside
+    // `fn run<Q: Handler>(...)` got canonicalised to the trait-anchor
+    // `Handler::handle` even though the explicit leading `::` is
+    // the caller's disambiguation AWAY from the generic param.
+    //
+    // Required: when the call path has `leading_colon.is_some()`,
+    // skip the generic-param canonicalisation branch — the absolute
+    // path should fall through to normal path canonicalisation
+    // (which will likely produce `<bare>:Q::handle` since `::Q` is
+    // an extern-crate reference our analyzer can't resolve).
+    use crate::adapters::analyzers::architecture::call_parity_rule::calls::{
+        collect_canonical_calls, FnContext,
+    };
+    use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::FileScope;
+    use crate::adapters::analyzers::architecture::call_parity_rule::signature_params::{
+        item_canonical_generics, ParamInfo,
+    };
+    use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::{
+        collect_crate_root_modules, collect_local_symbols,
+    };
+    use crate::adapters::shared::use_tree::gather_alias_map;
+
+    let fix = fixture(&[(
+        "src/ports/handler.rs",
+        r#"
+        pub trait Handler { fn handle(&self); }
+        "#,
+    )]);
+    let borrowed_files = borrowed(&fix);
+    let workspace_index = {
+        let cfg_test = &HashSet::new();
+        let roots = &crate_roots(&["src/ports/handler.rs"]);
+        let wraps = &HashSet::new();
+        let workspace_files = build_workspace_files_map(WorkspaceFilesInputs {
+            files: &borrowed_files,
+            cfg_test_files: cfg_test,
+            aliases_per_file: &fix.aliases,
+            aliases_scoped_per_file: &fix.aliases_scoped,
+            local_symbols_per_file: &fix.local_symbols,
+            crate_root_modules: roots,
+            workspace_module_paths: None,
+        });
+        build_workspace_type_index(&WorkspaceIndexInputs {
+            files: &borrowed_files,
+            workspace_files: &workspace_files,
+            cfg_test_files: cfg_test,
+            transparent_wrappers: wraps,
+        })
+    };
+    let use_site = parse_file(
+        r#"
+        use crate::ports::handler::Handler;
+        pub fn run<Q: Handler>(q: Q) {
+            // Absolute path — explicitly NOT the generic Q.
+            ::Q::handle(&q);
+        }
+        "#,
+    );
+    let alias_map = gather_alias_map(&use_site);
+    let local_symbols = collect_local_symbols(&use_site);
+    let crate_roots_set = collect_crate_root_modules(&[("src/app/runner.rs", &use_site)]);
+    let file_scope = FileScope {
+        path: "src/app/runner.rs",
+        alias_map: &alias_map,
+        aliases_per_scope: &Default::default(),
+        local_symbols: &local_symbols,
+        local_decl_scopes: &Default::default(),
+        crate_root_modules: &crate_roots_set,
+        workspace_module_paths: None,
+    };
+    let (body, sig) = match &use_site.items[1] {
+        syn::Item::Fn(item_fn) => (&item_fn.block, &item_fn.sig),
+        _ => panic!("expected fn item at index 1 of use_site"),
+    };
+    // Build the canonical generics map so `Q: Handler` is in scope
+    // exactly the way the body collector sees it in production.
+    let generics: std::collections::HashMap<String, ParamInfo> =
+        item_canonical_generics(&sig.generics, &file_scope, &[]);
+    // Sanity: Q must be in the generics map with Handler bound (else
+    // the test is vacuous — without an in-scope Q, no shadowing could
+    // happen even pre-fix).
+    let q_info = generics
+        .get("Q")
+        .expect("fixture invariant: Q must be in generics map");
+    assert!(
+        !q_info.bounds.is_empty(),
+        "fixture invariant: Q must have a resolved Handler bound"
+    );
+    let ctx = FnContext {
+        file: &file_scope,
+        mod_stack: &[],
+        body,
+        signature_params: vec![],
+        generic_params: generics,
+        self_type: None,
+        workspace_index: Some(&workspace_index),
+        workspace_files: None,
+    };
+    let calls = collect_canonical_calls(&ctx);
+    let trait_anchor = "crate::ports::handler::Handler::handle";
+    assert!(
+        !calls.contains(trait_anchor),
+        "`::Q::handle(&q)` (leading_colon set) inside `fn run<Q: Handler>()` \
+         must NOT canonicalise to the trait anchor `{trait_anchor}` — the \
+         leading `::` is the caller's explicit disambiguation away from \
+         the in-scope generic param Q. Got calls: {calls:?}"
+    );
+}
