@@ -356,6 +356,59 @@ fn pub_use_reexport_call_resolves_to_real_definition() {
 }
 
 #[test]
+fn fallback_walker_skips_stale_mod_rs_when_file_rs_is_the_winner() {
+    // Same stale-leftover scenario as the lib.rs-rooted case, but in
+    // the FALLBACK path: a workspace without `src/lib.rs` / `src/main.rs`
+    // (test-fixture shape). `build_module_segs_to_path_map` already
+    // picks `foo.rs` as the winner for `["foo"]`, but
+    // `walk_fallback_roots` iterates the raw `files` slice and treats
+    // BOTH `foo.rs` and `foo/mod.rs` as implicit roots — so the stale
+    // `foo/mod.rs`'s `mod beta;` declaration still landed in
+    // `workspace_module_paths` and `use beta::T;` from `foo.rs` then
+    // false-resolved to `crate::foo::beta::T` via the sibling-submodule
+    // discriminator.
+    //
+    // Fix: the fallback walker must consider only the tie-break
+    // winner as an implicit root, mirroring the precedence
+    // `build_module_segs_to_path_map` already established.
+    let ws = build_workspace(&[
+        (
+            "src/foo.rs",
+            r#"
+            // Live module file. Does NOT declare `mod beta;`. The
+            // legitimate behaviour for `use beta::T;` here is "extern
+            // import" — not a workspace edge.
+            use beta::T;
+            pub fn dispatch() { T::run(); }
+            "#,
+        ),
+        // Stale `mod.rs` from a long-ago refactor. Declares its own
+        // `mod beta;`. The walker must NOT trust this file's
+        // submodule declarations once `foo.rs` is the winner.
+        ("src/foo/mod.rs", "pub mod beta;\n"),
+        (
+            "src/foo/beta.rs",
+            r#"
+            pub struct T;
+            impl T { pub fn run() {} }
+            "#,
+        ),
+    ]);
+    let graph = build_graph_only(&ws, &three_layer(), &empty_cfg_test(), &HashSet::new());
+    let dispatch = "crate::foo::dispatch";
+    let stale_phantom = "crate::foo::beta::T::run";
+    assert!(
+        !graph_contains_edge(&graph, dispatch, stale_phantom),
+        "in the fallback (no `src/lib.rs` / `src/main.rs`) walker, a \
+         stale `src/foo/mod.rs` must NOT register its submodules once \
+         `src/foo.rs` is the tie-break winner — otherwise \
+         `use beta::T;` inside `foo.rs` false-resolves to \
+         `{stale_phantom}`. dispatch callees: {:?}",
+        callees_of(&graph, dispatch),
+    );
+}
+
+#[test]
 fn absolute_use_alias_does_not_re_canonicalise_to_workspace() {
     // `use ::ext::A as Local;` is a Rust 2018+ absolute path. The
     // leading colon says: "this is the extern-crate `ext`, not our

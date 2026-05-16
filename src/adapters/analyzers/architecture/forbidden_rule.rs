@@ -178,6 +178,11 @@ pub(crate) fn file_to_module_segments(path: &str) -> Vec<String> {
 /// form. Workspace-resolution callers (`collect_workspace_module_paths`,
 /// `collect_file_root_visibility`, …) MUST go through this helper so
 /// the precedence is defined in one place.
+///
+/// Empty-segs (crate roots `src/lib.rs` / `src/main.rs`) are
+/// deliberately **not** stored: library and binary crate roots are two
+/// separate module trees, not alternatives for the same module
+/// identity. Callers that need them collect them by name separately.
 /// Operation: linear scan with explicit precedence resolution, no own
 /// calls.
 pub(crate) fn build_module_segs_to_path_map<'a>(
@@ -187,6 +192,9 @@ pub(crate) fn build_module_segs_to_path_map<'a>(
         std::collections::HashMap::with_capacity(files.len());
     for (path, _) in files {
         let segs = file_to_module_segments(path);
+        if segs.is_empty() {
+            continue;
+        }
         match out.get(&segs) {
             Some(existing) if existing.replace('\\', "/").ends_with("/mod.rs") => {
                 out.insert(segs, *path);
@@ -201,6 +209,34 @@ pub(crate) fn build_module_segs_to_path_map<'a>(
         }
     }
     out
+}
+
+// qual:api
+/// True when `path` is the winner (or unique candidate) for its module
+/// identity in `segs_to_path` — i.e. it's the file that
+/// [`build_module_segs_to_path_map`] picked, or there was never a
+/// collision. Files whose `segs` weren't stored (crate roots) also
+/// pass.
+///
+/// Use this gate at every workspace-walker entry point that iterates
+/// the raw `files` slice. Without it, stale `foo/mod.rs` leftovers
+/// re-introduce their submodule declarations / `pub fn` visibility
+/// even after the tie-break helper picked `foo.rs`. Centralised here
+/// so the "what does the loser look like" semantic lives next to the
+/// builder that defines it.
+/// Operation: HashMap lookup + path comparison, no own calls.
+pub(crate) fn is_tie_break_winner(
+    path: &str,
+    segs: &[String],
+    segs_to_path: &std::collections::HashMap<Vec<String>, &str>,
+) -> bool {
+    match segs_to_path.get(segs) {
+        Some(winner) => *winner == path,
+        // No collision recorded: either the segs were unique, or the
+        // builder deliberately skipped them (crate roots). Either way
+        // there's no contender to lose to.
+        None => true,
+    }
 }
 
 /// Synthesise the candidate `src/…` file paths for a segment prefix (the

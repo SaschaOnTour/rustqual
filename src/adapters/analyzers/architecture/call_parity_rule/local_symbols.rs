@@ -216,7 +216,16 @@ fn file_backed_child_ast<'a>(next: &[String], ctx: &ModuleWalkCtx<'a>) -> Option
 /// is treated as its own implicit root. Orphan files whose parent IS
 /// in the workspace but whose ancestor never declares `mod <them>` are
 /// reached only through that ancestor's walker, so missing declarations
-/// keep them out of `out` (bug 9 invariant). Operation.
+/// keep them out of `out` (bug 9 invariant).
+///
+/// Tie-break: when both `src/foo.rs` and `src/foo/mod.rs` are in the
+/// workspace (stale-leftover), they collide on `["foo"]` and
+/// `build_module_segs_to_path_map` already picked one as the winner.
+/// The walker MUST honour that — iterating the raw `files` slice would
+/// let the loser register its own (stale) submodule declarations and
+/// re-introduce the false workspace edges the tie-break was meant to
+/// rule out. So we skip any file whose `segs_to_path[&base]` doesn't
+/// point at our own path. Operation.
 fn walk_fallback_roots(
     files: &[(&str, &syn::File)],
     segs_to_path: &HashMap<Vec<String>, &str>,
@@ -227,6 +236,13 @@ fn walk_fallback_roots(
         let base =
             crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments(path);
         if has_workspace_ancestor(&base, segs_to_path) {
+            continue;
+        }
+        if !crate::adapters::analyzers::architecture::forbidden_rule::is_tie_break_winner(
+            path,
+            &base,
+            segs_to_path,
+        ) {
             continue;
         }
         out.insert(base.clone());

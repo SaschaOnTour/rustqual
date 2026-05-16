@@ -16,6 +16,32 @@ pass. Failing-first regression tests live in
 
 ### Fixed (sibling-resolution + multi-bound)
 
+- **Tie-break walker leaks (sister-site of the `foo.rs` vs
+  `foo/mod.rs` fix).** The shared helper
+  `build_module_segs_to_path_map` picked `foo.rs` as the winner, but
+  two walkers still iterated the raw `files` slice and let the stale
+  `foo/mod.rs` register its own (stale) submodule declarations /
+  visibility — re-introducing the false workspace edges the
+  tie-break was meant to rule out. Fix: new shared gate
+  `forbidden_rule::is_tie_break_winner` that both
+  `local_symbols::walk_fallback_roots` and
+  `file_visibility::collect_file_root_visibility` route through; the
+  loser is skipped (as an implicit fallback root) or marked
+  invisible. Also: `build_module_segs_to_path_map` no longer stores
+  empty-segs entries — `src/lib.rs` and `src/main.rs` are distinct
+  crate roots, not alternatives for the same module identity.
+  Regression test:
+  `fallback_walker_skips_stale_mod_rs_when_file_rs_is_the_winner` in
+  `module_resolution.rs`.
+- **`canonicalise_type_segments_in_scope` docstring claimed "Returns
+  `None` for external crates".** That was already imprecise before
+  the leading-colon fix (the `_ => Some(expanded)` arm returned
+  non-crate paths) and became sharper when the new `absolute_root`
+  branch added a deliberate extern-path return. Tightened the
+  contract to spell out the three return shapes — workspace
+  canonical (`Some(["crate", …])`), extern-rooted as-is
+  (`Some(other)`), and truly unresolvable (`None`) — and noted that
+  workspace-only consumers must filter on `first() == Some("crate")`.
 - **Alias map silently dropped `ItemUse.leading_colon`.**
   `gather_alias_map` / `gather_alias_map_scoped` only passed `u.tree`
   into `collect_alias_entries`, so `use ::ext::Foo as Local;` was

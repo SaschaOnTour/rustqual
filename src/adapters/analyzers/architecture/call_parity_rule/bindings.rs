@@ -158,10 +158,27 @@ pub(crate) fn canonicalise_workspace_path(
     canonicalise_type_segments_in_scope(segments, scope)
 }
 
-/// Resolve a type-path segment list into a canonical `[crate, …]` path
-/// against `scope`. Returns `None` for unresolvable paths (external
-/// crates, unknown idents, or in-file names not declared at the
-/// current `mod_stack`).
+/// Resolve a type-path segment list against `scope`.
+///
+/// **Return shape is not uniform** — callers that expect "workspace
+/// canonical or None" must filter results explicitly:
+/// - `Some(["crate", …])` — the path resolves into the workspace.
+/// - `Some(other)` — the path is recognised but extern-rooted (an
+///   alias whose `use` had a leading `::`, or an unaliased non-crate
+///   first segment). Returned as-is so downstream lookups treat
+///   `ext::Foo::…` as the extern symbol it actually is, not a
+///   `crate::ext::Foo::…` phantom.
+/// - `None` — the segment list is empty, has unknown idents that
+///   don't match any alias / local / crate-root, or its alias chain
+///   couldn't normalise (e.g. unresolved `self::`/`super::`).
+///
+/// In practice the only consumer that meaningfully observes the
+/// extern-rooted `Some(other)` branch is the receiver-type binding
+/// inference (`canonical_from_type`), which uses the returned segments
+/// as a binding's type identity — extern bindings produce no workspace
+/// edge downstream, so the contract works. New callers that need
+/// strict "workspace canonical XOR None" semantics should add a
+/// thin wrapper that filters `result.first() == Some("crate")`.
 ///
 /// **PRIMITIVE — DO NOT CALL FROM USE-SITE CONTEXTS.** This function
 /// has no `leading_colon` awareness; the segment-list interface
