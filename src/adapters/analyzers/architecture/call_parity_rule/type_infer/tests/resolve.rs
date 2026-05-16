@@ -8,7 +8,7 @@ use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::cano
 use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::resolve::{
     resolve_type, ResolveContext,
 };
-use crate::adapters::shared::use_tree::ScopedAliasMap;
+use crate::adapters::shared::use_tree::{AliasTarget, ScopedAliasMap};
 use std::collections::{HashMap, HashSet};
 
 fn parse_type(src: &str) -> syn::Type {
@@ -23,6 +23,7 @@ fn ctx<'a>(file: &'a FileScope<'a>) -> ResolveContext<'a> {
         transparent_wrappers: None,
         workspace_files: None,
         alias_param_subs: None,
+        generic_params: None,
     }
 }
 
@@ -42,6 +43,7 @@ fn test_bare_path_resolves_via_local_symbols() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(
@@ -66,6 +68,7 @@ fn test_reference_type_strips_and_recurses() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(
@@ -90,6 +93,7 @@ fn test_result_wraps_inner() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     match resolved {
@@ -119,6 +123,7 @@ fn test_option_wraps_inner() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert!(matches!(resolved, CanonicalType::Option(_)));
@@ -140,6 +145,7 @@ fn test_arc_is_stripped() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(
@@ -166,6 +172,7 @@ fn test_nested_smart_pointers_strip_to_inner() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(
@@ -192,6 +199,7 @@ fn test_rwlock_is_not_peeled() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(resolved, CanonicalType::Opaque);
@@ -213,6 +221,7 @@ fn test_vec_becomes_slice() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert!(matches!(resolved, CanonicalType::Slice(_)));
@@ -234,6 +243,7 @@ fn test_hashmap_keeps_value_type() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     match resolved {
@@ -260,6 +270,7 @@ fn test_array_becomes_slice() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert!(matches!(resolved, CanonicalType::Slice(_)));
@@ -281,6 +292,7 @@ fn test_slice_type_becomes_slice() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert!(matches!(resolved, CanonicalType::Slice(_)));
@@ -301,6 +313,7 @@ fn test_trait_object_unresolved_is_opaque() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     // Box<dyn T> → strip Box → dyn T — when T isn't resolvable (not in
@@ -324,15 +337,16 @@ fn test_trait_object_resolves_via_local_symbols() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(
         resolved,
-        CanonicalType::TraitBound(vec![
+        CanonicalType::TraitBound(vec![vec![
             "crate".to_string(),
             "app".to_string(),
             "Handler".to_string(),
-        ])
+        ]])
     );
 }
 
@@ -352,6 +366,7 @@ fn test_impl_trait_unresolved_is_opaque() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(resolved, CanonicalType::Opaque);
@@ -375,15 +390,16 @@ fn test_impl_trait_resolves_to_trait_bound() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(
         resolved,
-        CanonicalType::TraitBound(vec![
+        CanonicalType::TraitBound(vec![vec![
             "crate".to_string(),
             "app".to_string(),
             "Handler".to_string(),
-        ])
+        ]])
     );
 }
 
@@ -402,6 +418,7 @@ fn test_unknown_external_path_is_opaque() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(resolved, CanonicalType::Opaque);
@@ -412,12 +429,12 @@ fn test_aliased_path_resolves_via_alias_map() {
     let mut alias_map = HashMap::new();
     alias_map.insert(
         "Session".to_string(),
-        vec![
+        AliasTarget::relative(vec![
             "crate".to_string(),
             "app".to_string(),
             "session".to_string(),
             "Session".to_string(),
-        ],
+        ]),
     );
     let local = HashSet::new();
     let roots = HashSet::new();
@@ -431,6 +448,7 @@ fn test_aliased_path_resolves_via_alias_map() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(
@@ -455,6 +473,7 @@ fn test_future_wraps_output() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert!(matches!(resolved, CanonicalType::Future(_)));
@@ -472,7 +491,11 @@ fn test_impl_trait_local_send_named_trait_resolves_not_skipped() {
     let mut alias_map = HashMap::new();
     alias_map.insert(
         "Send".to_string(),
-        vec!["crate".to_string(), "ports".to_string(), "Send".to_string()],
+        AliasTarget::relative(vec![
+            "crate".to_string(),
+            "ports".to_string(),
+            "Send".to_string(),
+        ]),
     );
     let local = HashSet::new();
     let roots = HashSet::new();
@@ -486,15 +509,16 @@ fn test_impl_trait_local_send_named_trait_resolves_not_skipped() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(
         resolved,
-        CanonicalType::TraitBound(vec![
+        CanonicalType::TraitBound(vec![vec![
             "crate".to_string(),
             "ports".to_string(),
             "Send".to_string(),
-        ]),
+        ]]),
         "workspace `Send`-named trait must resolve to its canonical path, \
          not be discarded as a std marker; got {resolved:?}",
     );
@@ -522,15 +546,16 @@ fn test_impl_trait_bare_std_send_marker_still_skipped() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(
         resolved,
-        CanonicalType::TraitBound(vec![
+        CanonicalType::TraitBound(vec![vec![
             "crate".to_string(),
             "app".to_string(),
             "Handler".to_string(),
-        ]),
+        ]]),
         "bare std-marker `Send` must still be skipped so dispatch picks \
          up the local `Handler`; got {resolved:?}",
     );
@@ -549,7 +574,7 @@ fn test_impl_trait_external_aliased_bound_skipped_workspace_bound_wins() {
     let mut alias_map = HashMap::new();
     alias_map.insert(
         "Serialize".to_string(),
-        vec!["serde".to_string(), "Serialize".to_string()],
+        AliasTarget::relative(vec!["serde".to_string(), "Serialize".to_string()]),
     );
     let mut local = HashSet::new();
     local.insert("Handler".to_string());
@@ -564,15 +589,16 @@ fn test_impl_trait_external_aliased_bound_skipped_workspace_bound_wins() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     assert_eq!(
         resolved,
-        CanonicalType::TraitBound(vec![
+        CanonicalType::TraitBound(vec![vec![
             "crate".to_string(),
             "app".to_string(),
             "Handler".to_string(),
-        ]),
+        ]]),
         "external aliased bound `serde::Serialize` must be skipped so \
          workspace `Handler` is picked; got {resolved:?}",
     );
@@ -589,11 +615,11 @@ fn test_impl_aliased_future_resolves_to_future_with_output() {
     let mut alias_map = HashMap::new();
     alias_map.insert(
         "Fut".to_string(),
-        vec![
+        AliasTarget::relative(vec![
             "std".to_string(),
             "future".to_string(),
             "Future".to_string(),
-        ],
+        ]),
     );
     let mut local = HashSet::new();
     local.insert("Session".to_string());
@@ -608,6 +634,7 @@ fn test_impl_aliased_future_resolves_to_future_with_output() {
             local_symbols: &local,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &roots,
+            workspace_module_paths: None,
         }),
     );
     let expected_output = CanonicalType::path(["crate", "app", "Session"]);
@@ -623,7 +650,7 @@ fn test_impl_aliased_future_resolves_to_future_with_output() {
 /// produces a fresh borrow at call sites.
 struct ScopeInputs {
     path: String,
-    alias_map: HashMap<String, Vec<String>>,
+    alias_map: crate::adapters::shared::use_tree::AliasMap,
     aliases_per_scope: ScopedAliasMap,
     local_symbols: HashSet<String>,
     local_decl_scopes: HashMap<String, Vec<Vec<String>>>,
@@ -648,6 +675,7 @@ impl ScopeInputs {
             alias_map: &self.alias_map,
             aliases_per_scope: &self.aliases_per_scope,
             local_symbols: &self.local_symbols,
+            workspace_module_paths: None,
             local_decl_scopes: &self.local_decl_scopes,
             crate_root_modules: &self.crate_root_modules,
         }
@@ -666,11 +694,11 @@ fn test_alias_generic_arg_resolves_at_use_site() {
     let mut app = ScopeInputs::new("src/app.rs");
     app.alias_map.insert(
         "Wrap".to_string(),
-        vec![
+        AliasTarget::relative(vec![
             "crate".to_string(),
             "domain".to_string(),
             "Wrap".to_string(),
-        ],
+        ]),
     );
     app.local_symbols.insert("Session".to_string());
 
@@ -700,11 +728,113 @@ fn test_alias_generic_arg_resolves_at_use_site() {
             transparent_wrappers: None,
             workspace_files: Some(&workspace_files),
             alias_param_subs: None,
+            generic_params: None,
         },
     );
     assert_eq!(
         resolved,
         CanonicalType::path(["crate", "app", "Session"]),
         "alias generic args must resolve at the use-site, got {resolved:?}"
+    );
+}
+
+#[test]
+fn unbounded_generic_param_shadows_same_named_workspace_symbol() {
+    // `fn f<Q>(...)` with NO bound on Q. Inside the body, a path like
+    // `Q` must resolve to `Opaque` (the fn-scoped param shadows any
+    // workspace symbol of the same name), not to the workspace
+    // canonical for a top-level type named `Q`. Without explicit
+    // shadowing, `resolve_generic_path` would fall through to
+    // `canonicalise_type_segments_in_scope` and resolve `Q` to
+    // `crate::Q`, producing wrong method-dispatch edges.
+    let alias_map = HashMap::new();
+    let mut local = HashSet::new();
+    local.insert("Q".to_string());
+    let roots = HashSet::new();
+    let file_scope = FileScope {
+        path: "src/app/runner.rs",
+        alias_map: &alias_map,
+        aliases_per_scope: &ScopedAliasMap::new(),
+        local_symbols: &local,
+        local_decl_scopes: &HashMap::new(),
+        crate_root_modules: &roots,
+        workspace_module_paths: None,
+    };
+    use crate::adapters::analyzers::architecture::call_parity_rule::signature_params::ParamInfo;
+    let mut generics: HashMap<String, ParamInfo> = HashMap::new();
+    // Unbounded `<Q>` — the param exists, but with no usable bounds.
+    generics.insert(
+        "Q".to_string(),
+        ParamInfo {
+            bounds: vec![],
+            turbofish_index: Some(0),
+        },
+    );
+    let ty = parse_type("Q");
+    let resolved = resolve_type(
+        &ty,
+        &ResolveContext {
+            file: &file_scope,
+            mod_stack: &[],
+            type_aliases: None,
+            transparent_wrappers: None,
+            workspace_files: None,
+            alias_param_subs: None,
+            generic_params: Some(&generics),
+        },
+    );
+    assert_eq!(
+        resolved,
+        CanonicalType::Opaque,
+        "unbounded generic param `Q` must shadow same-named workspace \
+         symbol — falling through to canonicalisation would resolve \
+         to `crate::Q` and produce wrong dispatch edges, got {resolved:?}"
+    );
+}
+
+#[test]
+fn unbounded_generic_param_shadowing_does_not_affect_unrelated_path() {
+    // Sanity: the shadowing fix must not affect a workspace symbol
+    // whose name is NOT in `generic_params`. `Session` still resolves
+    // to the workspace canonical even when `Q` is in the param map.
+    let alias_map = HashMap::new();
+    let mut local = HashSet::new();
+    local.insert("Session".to_string());
+    let roots = HashSet::new();
+    let file_scope = FileScope {
+        path: "src/app/session.rs",
+        alias_map: &alias_map,
+        aliases_per_scope: &ScopedAliasMap::new(),
+        local_symbols: &local,
+        local_decl_scopes: &HashMap::new(),
+        crate_root_modules: &roots,
+        workspace_module_paths: None,
+    };
+    use crate::adapters::analyzers::architecture::call_parity_rule::signature_params::ParamInfo;
+    let mut generics: HashMap<String, ParamInfo> = HashMap::new();
+    generics.insert(
+        "Q".to_string(),
+        ParamInfo {
+            bounds: vec![],
+            turbofish_index: Some(0),
+        },
+    );
+    let ty = parse_type("Session");
+    let resolved = resolve_type(
+        &ty,
+        &ResolveContext {
+            file: &file_scope,
+            mod_stack: &[],
+            type_aliases: None,
+            transparent_wrappers: None,
+            workspace_files: None,
+            alias_param_subs: None,
+            generic_params: Some(&generics),
+        },
+    );
+    assert_eq!(
+        resolved,
+        CanonicalType::path(["crate", "app", "session", "Session"]),
+        "path NOT in generic_params must still resolve normally, got {resolved:?}"
     );
 }

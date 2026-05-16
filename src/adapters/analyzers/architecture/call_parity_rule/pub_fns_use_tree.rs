@@ -4,7 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
+use super::bindings::{canonicalise_workspace_path, CanonScope};
 use super::local_symbols::FileScope;
 use super::pub_fns_alias_chain::chase_alias_chain;
 use super::pub_fns_visibility::canonical_for_decl;
@@ -22,6 +22,12 @@ pub(super) struct UseTreeCtx<'a> {
     /// underlying type stay outside the call-parity surface even
     /// though receiver inference resolves callers to `Hidden`.
     pub alias_chain: &'a HashMap<String, String>,
+    /// `pub use ::ext::Foo;` — Rust 2018+ leading-colon use statement
+    /// resolves through the extern crate root. The whole tree under
+    /// the `ItemUse` shares this bit; storing it in the context lets
+    /// the workspace canonicalisation gate skip any leaf so an extern
+    /// `::ext::Foo` isn't false-routed to a workspace `Foo`.
+    pub leading_colon_set: bool,
 }
 
 /// Recursive walk over a `pub use` tree. For each leaf, register the
@@ -96,7 +102,7 @@ fn resolve_use_source_type(
         file: ctx.file_scope,
         mod_stack: ctx.mod_stack,
     };
-    let Some(canonical) = canonicalise_type_segments_in_scope(segs, &scope) else {
+    let Some(canonical) = canonicalise_workspace_path(segs, ctx.leading_colon_set, &scope) else {
         return false;
     };
     let joined = canonical.join("::");

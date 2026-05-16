@@ -6,7 +6,7 @@
 //! call edges with the rest of the resolver — it's a self-contained
 //! "is this path a wrapper" probe.
 
-use super::super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
+use super::super::bindings::{canonicalise_workspace_path, CanonScope};
 use super::resolve::{is_stdlib_prefixed, is_user_transparent, ResolveContext, WRAPPER_NAMES};
 
 /// Decide the wrapper-arm name for `path`. Returns `Some(name)` when
@@ -44,7 +44,12 @@ pub(super) fn identify_wrapper_name(
         mod_stack: ctx.mod_stack,
     };
     let segs: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
-    if let Some(canonical) = canonicalise_type_segments_in_scope(&segs, &scope) {
+    // Use-site gate: `::std::sync::Arc` skips workspace lookup so a
+    // same-named workspace `Arc` can't masquerade as the stdlib
+    // wrapper.
+    if let Some(canonical) =
+        canonicalise_workspace_path(&segs, path.leading_colon.is_some(), &scope)
+    {
         let last_seg = canonical.last()?;
         let stdlib_match =
             is_stdlib_prefixed(&canonical) && WRAPPER_NAMES.contains(&last_seg.as_str());

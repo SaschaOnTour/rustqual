@@ -25,7 +25,7 @@ use super::signature_params::extract_signature_params;
 use super::workspace_graph::{collect_crate_root_modules, resolve_impl_self_type};
 use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
 use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
-use crate::adapters::shared::use_tree::gather_alias_map_scoped;
+use crate::adapters::shared::use_tree::{gather_alias_map_scoped, AliasMap};
 use std::collections::{HashMap, HashSet};
 use syn::visit::Visit;
 
@@ -57,11 +57,16 @@ pub(crate) struct PubFnInfo<'ast> {
 /// per-file lookup table explicit at the call site.
 pub(crate) struct PubFnInputs<'a, 'ast> {
     pub files: &'a [(&'ast str, &'ast syn::File)],
-    pub aliases_per_file: &'a HashMap<String, HashMap<String, Vec<String>>>,
+    pub aliases_per_file: &'a HashMap<String, AliasMap>,
     pub layers: &'a LayerDefinitions,
-    pub cfg_test_files: &'a HashSet<String>,
     pub transparent_wrappers: &'a HashSet<String>,
     pub promoted_attributes: &'a HashSet<String>,
+    /// Workspace-derived metadata pre-computed once per analysis at
+    /// the call_parity entry point (`mod.rs::collect_findings`) and
+    /// threaded through. Bundles `cfg_test_files` +
+    /// `crate_root_modules` + `workspace_module_paths` so the helper
+    /// stays under the SRP_PARAMS budget.
+    pub workspace: &'a super::local_symbols::WorkspaceLookup<'a>,
 }
 
 /// Group every `pub` / `pub(crate)` / `pub(super)` / `pub(in path)` fn
@@ -75,19 +80,20 @@ pub(crate) struct PubFnInputs<'a, 'ast> {
 pub(crate) fn collect_pub_fns_by_layer<'ast>(
     inputs: PubFnInputs<'_, 'ast>,
 ) -> HashMap<String, Vec<PubFnInfo<'ast>>> {
-    let crate_root_modules = collect_crate_root_modules(inputs.files);
+    let workspace = inputs.workspace;
+    let crate_root_modules = workspace.crate_root_modules;
+    let workspace_module_paths = workspace.workspace_module_paths;
     let file_root_visibility = collect_file_root_visibility(inputs.files);
     let visible_canonicals = collect_visible_type_canonicals_workspace(
         inputs.files,
-        inputs.cfg_test_files,
         inputs.aliases_per_file,
-        &crate_root_modules,
+        workspace,
         inputs.transparent_wrappers,
     );
     let empty_aliases = HashMap::new();
     let mut out: HashMap<String, Vec<PubFnInfo<'ast>>> = HashMap::new();
     for (path, ast) in inputs.files {
-        if inputs.cfg_test_files.contains(*path) {
+        if workspace.cfg_test_files.contains(*path) {
             continue;
         }
         let Some(layer) = inputs.layers.layer_for_file(path) else {
@@ -109,7 +115,8 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
             aliases_per_scope: &aliases_per_scope,
             local_symbols: &flat,
             local_decl_scopes: &by_name,
-            crate_root_modules: &crate_root_modules,
+            crate_root_modules,
+            workspace_module_paths: Some(workspace_module_paths),
         };
         let file_visible = file_root_visibility.get(*path).copied().unwrap_or(true);
         let mut collector = PubFnCollector {
@@ -327,7 +334,7 @@ fn is_impl_for_visible_trait(
     scope: &CanonScope<'_>,
     visible_canonicals: &HashSet<String>,
 ) -> bool {
-    use crate::adapters::analyzers::architecture::call_parity_rule::bindings::canonicalise_type_segments_in_scope;
+    use crate::adapters::analyzers::architecture::call_parity_rule::bindings::canonicalise_workspace_path;
     let Some((_, trait_path, _)) = node.trait_.as_ref() else {
         return false;
     };
@@ -336,7 +343,11 @@ fn is_impl_for_visible_trait(
         .iter()
         .map(|s| s.ident.to_string())
         .collect();
-    let Some(canonical) = canonicalise_type_segments_in_scope(&segs, scope) else {
+    // Use-site gate: `impl ::ext::Trait for X` doesn't refer to a
+    // workspace trait, even if a same-named workspace trait exists.
+    let Some(canonical) =
+        canonicalise_workspace_path(&segs, trait_path.leading_colon.is_some(), scope)
+    else {
         return false;
     };
     visible_canonicals.contains(&canonical.join("::"))

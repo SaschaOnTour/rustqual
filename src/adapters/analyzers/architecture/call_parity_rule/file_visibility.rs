@@ -29,15 +29,22 @@
 
 use std::collections::HashMap;
 
-use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
+use crate::adapters::analyzers::architecture::forbidden_rule::{
+    build_module_segs_to_path_map, file_to_module_segments, is_tie_break_winner,
+};
 
 /// Map every workspace file to whether its file-root contents are
 /// reachable as call-parity public surface.
+///
+/// Tie-break: when `src/foo.rs` and `src/foo/mod.rs` both exist, only
+/// the winner (`foo.rs` per Rust 2018+ convention) is considered live
+/// — the loser is treated as a stale orphan and gets `false`. Without
+/// this gate, the loser would inherit the winner's visibility (or the
+/// fallback's `true` default) and contribute `pub fn`s to downstream
+/// call-parity collection, manufacturing false signals from code Rust
+/// itself would reject as a duplicate-module error.
 pub(crate) fn collect_file_root_visibility(files: &[(&str, &syn::File)]) -> HashMap<String, bool> {
-    let segs_to_path: HashMap<Vec<String>, &str> = files
-        .iter()
-        .map(|(path, _)| (file_to_module_segments(path), *path))
-        .collect();
+    let segs_to_path = build_module_segs_to_path_map(files);
     let ctx = WalkCtx {
         files,
         segs_to_path: &segs_to_path,
@@ -51,10 +58,12 @@ pub(crate) fn collect_file_root_visibility(files: &[(&str, &syn::File)]) -> Hash
         .iter()
         .map(|(path, _)| {
             let segs = file_to_module_segments(path);
-            (
-                (*path).to_string(),
-                visible_for_file(&segs, &crate_roots, &ctx),
-            )
+            let visible = if is_tie_break_winner(path, &segs, &segs_to_path) {
+                visible_for_file(&segs, &crate_roots, &ctx)
+            } else {
+                false
+            };
+            ((*path).to_string(), visible)
         })
         .collect()
 }

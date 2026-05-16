@@ -100,6 +100,7 @@ fn bind_annotated(
             transparent_wrappers: Some(&ctx.workspace.transparent_wrappers),
             workspace_files: ctx.workspace_files,
             alias_param_subs: None,
+            generic_params: ctx.generic_params,
         };
         match ctx.self_type.as_deref() {
             Some(impl_segs) => resolve_type(&substitute_bare_self(ty, impl_segs), &rctx),

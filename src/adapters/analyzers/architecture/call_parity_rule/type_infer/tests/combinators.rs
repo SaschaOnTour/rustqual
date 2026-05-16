@@ -193,7 +193,8 @@ fn test_slice_receiver_is_none() {
 #[test]
 fn test_result_chain_unwrap_then_field() {
     // Verifies that combinator lookup produces a `Path` the next layer
-    // of inference can index. This is the rlm-bug unblocking pattern.
+    // of inference can index — the unblocking pattern for
+    // method-chain-constructor receiver tracing.
     use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::FileScope;
     use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::{
         infer_type, FlatBindings, InferContext, WorkspaceTypeIndex,
@@ -225,8 +226,10 @@ fn test_result_chain_unwrap_then_field() {
             local_symbols: &local_symbols,
             local_decl_scopes: &local_decl_scopes,
             crate_root_modules: &crate_roots,
+            workspace_module_paths: None,
         },
         mod_stack: &[],
+        generic_params: None,
         workspace: &index,
         bindings: &bindings,
         self_type: None,

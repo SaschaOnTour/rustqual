@@ -51,6 +51,12 @@ pub(super) fn expand_alias(
         transparent_wrappers: ctx.transparent_wrappers,
         workspace_files: ctx.workspace_files,
         alias_param_subs: Some(&subs),
+        // Alias bodies live at the type-alias decl-site, NOT inside
+        // the use-site fn — the use-site's generic params don't
+        // bind names in the alias body. Pass None so a name like
+        // `Q` inside the alias body never accidentally hits a
+        // use-site generic-param entry.
+        generic_params: None,
     };
     resolve_type_with_depth(&alias.target, &alias_ctx, depth)
 }

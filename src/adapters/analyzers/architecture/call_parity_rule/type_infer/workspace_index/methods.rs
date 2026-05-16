@@ -15,10 +15,14 @@
 use super::super::canonical::CanonicalType;
 use super::super::resolve::resolve_type;
 use super::super::self_subst::substitute_bare_self;
-use super::{canonical_type_key, resolve_ctx_from_build, BuildContext, WorkspaceTypeIndex};
+use super::{canonical_type_key, resolve_ctx_with_generics, BuildContext, WorkspaceTypeIndex};
 use crate::adapters::analyzers::architecture::call_parity_rule::bindings::CanonScope;
+use crate::adapters::analyzers::architecture::call_parity_rule::signature_params::{
+    impl_block_generics, method_canonical_generics, ParamInfo,
+};
 use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::resolve_impl_self_type;
 use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
+use std::collections::HashMap;
 use syn::visit::Visit;
 
 /// Walk `ast` and populate `index.method_returns`. Integration: delegates
@@ -37,13 +41,19 @@ pub(super) fn collect_from_file(
     collector.visit_file(ast);
 }
 
+/// Per-impl-block frame on the visitor's stack: the resolved self-type
+/// segments and the impl-level generic params. `self_ty` is `None` when
+/// the impl's self-type can't be canonicalised (trait object / tuple
+/// receiver) — methods under such an impl aren't indexed.
+struct ImplFrame {
+    self_ty: Option<Vec<String>>,
+    generics: Vec<(String, Vec<Vec<String>>)>,
+}
+
 struct MethodCollector<'i, 'c> {
     index: &'i mut WorkspaceTypeIndex,
     ctx: &'c BuildContext<'c>,
-    /// Stack of enclosing impl-block canonical self-types. `None` for
-    /// unresolved (trait object, tuple receiver) — methods under those
-    /// impls aren't indexed because the receiver type can't be named.
-    impl_stack: Vec<Option<Vec<String>>>,
+    impl_stack: Vec<ImplFrame>,
     /// Stack of enclosing inline `mod inner { ... }` block names so
     /// methods declared inside them key as
     /// `crate::<file>::inner::Type::method`.
@@ -55,14 +65,17 @@ impl<'ast, 'i, 'c> Visit<'ast> for MethodCollector<'i, 'c> {
         if has_cfg_test(&node.attrs) {
             return;
         }
-        let resolved = resolve_impl_self_type(
+        let self_ty = resolve_impl_self_type(
             &node.self_ty,
             &CanonScope {
                 file: self.ctx.file,
                 mod_stack: &self.mod_stack,
             },
         );
-        self.impl_stack.push(resolved);
+        self.impl_stack.push(ImplFrame {
+            self_ty,
+            generics: impl_block_generics(&node.generics),
+        });
         syn::visit::visit_item_impl(self, node);
         self.impl_stack.pop();
     }
@@ -71,13 +84,10 @@ impl<'ast, 'i, 'c> Visit<'ast> for MethodCollector<'i, 'c> {
         if has_cfg_test(&node.attrs) || has_test_attr(&node.attrs) {
             return;
         }
-        record_method(
-            self.index,
-            self.ctx,
-            &self.impl_stack,
-            &self.mod_stack,
-            node,
-        );
+        let Some(frame) = self.impl_stack.last() else {
+            return;
+        };
+        record_method(self.index, self.ctx, frame, &self.mod_stack, node);
     }
 
     fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
@@ -92,22 +102,25 @@ impl<'ast, 'i, 'c> Visit<'ast> for MethodCollector<'i, 'c> {
 
 /// Record a single method's return type, keyed on the enclosing impl's
 /// canonical self-type. `async fn m() -> T` is treated as returning
-/// `Future<Output = T>` to match rustc's desugaring.
-/// Operation. Own calls hidden in closures.
+/// `Future<Output = T>` to match rustc's desugaring. Impl-level and
+/// method-level generic params are merged and threaded into the
+/// resolve context so a return type spelled `Q` shadows any workspace
+/// symbol named `Q`. Operation. Own calls hidden in closures.
 fn record_method(
     index: &mut WorkspaceTypeIndex,
     ctx: &BuildContext<'_>,
-    impl_stack: &[Option<Vec<String>>],
+    frame: &ImplFrame,
     mod_stack: &[String],
     node: &syn::ImplItemFn,
 ) {
-    let Some(Some(impl_segs)) = impl_stack.last() else {
+    let Some(impl_segs) = frame.self_ty.as_deref() else {
         return;
     };
     let syn::ReturnType::Type(_, ret_ty) = &node.sig.output else {
         return;
     };
-    let inner = resolve_method_return(ret_ty, impl_segs, ctx, mod_stack);
+    let merged = method_canonical_generics(&node.sig, &frame.generics, ctx.file, mod_stack);
+    let inner = resolve_method_return(ret_ty, impl_segs, ctx, mod_stack, &merged);
     if matches!(inner, CanonicalType::Opaque) {
         return;
     }
@@ -122,20 +135,21 @@ fn record_method(
 }
 
 /// Resolve a method's return type, substituting bare `Self` with the
-/// enclosing impl's canonical self-type. The walk is recursive so
-/// wrapper return types (`Result<Self, E>`, `Option<Self>`,
-/// `Vec<Self>`) project the inner `Self` correctly — without it the
-/// resolver yields `Result<Opaque>` and downstream chains like
-/// `Session::open().unwrap().diff()` lose their receiver type.
-/// Multi-segment paths (`Self::Output`, `Self::Inner`) keep the raw
-/// segments and resolve as before — associated-type resolution stays
-/// out of scope.
+/// enclosing impl's canonical self-type. Wrapper return types
+/// (`Result<Self, E>`, `Option<Self>`, `Vec<Self>`) project the inner
+/// `Self` correctly. Multi-segment paths (`Self::Output`,
+/// `Self::Inner`) keep the raw segments and resolve as before —
+/// associated-type resolution stays out of scope.
 fn resolve_method_return(
     ret_ty: &syn::Type,
     impl_segs: &[String],
     ctx: &BuildContext<'_>,
     mod_stack: &[String],
+    generic_params: &HashMap<String, ParamInfo>,
 ) -> CanonicalType {
     let substituted = substitute_bare_self(ret_ty, impl_segs);
-    resolve_type(&substituted, &resolve_ctx_from_build(ctx, mod_stack))
+    resolve_type(
+        &substituted,
+        &resolve_ctx_with_generics(ctx, mod_stack, Some(generic_params)),
+    )
 }

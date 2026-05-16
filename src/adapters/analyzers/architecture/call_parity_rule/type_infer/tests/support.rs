@@ -10,7 +10,7 @@ use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::F
 use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::{
     BindingLookup, FlatBindings, InferContext, WorkspaceTypeIndex,
 };
-use crate::adapters::shared::use_tree::ScopedAliasMap;
+use crate::adapters::shared::use_tree::{AliasMap, ScopedAliasMap};
 use std::collections::{HashMap, HashSet};
 
 /// Parse a Rust pattern source string into `syn::Pat`. Tries `let …`
@@ -49,7 +49,7 @@ fn parse_pat_as_match_arm(src: &str) -> syn::Pat {
 
 pub(super) struct TypeInferFixture {
     pub index: WorkspaceTypeIndex,
-    pub alias_map: HashMap<String, Vec<String>>,
+    pub alias_map: AliasMap,
     pub aliases_per_scope: ScopedAliasMap,
     pub local_symbols: HashSet<String>,
     pub local_decl_scopes: HashMap<String, Vec<Vec<String>>>,
@@ -63,7 +63,7 @@ impl TypeInferFixture {
     pub fn new() -> Self {
         Self {
             index: WorkspaceTypeIndex::new(),
-            alias_map: HashMap::new(),
+            alias_map: AliasMap::new(),
             aliases_per_scope: ScopedAliasMap::new(),
             local_symbols: HashSet::new(),
             local_decl_scopes: HashMap::new(),
@@ -82,6 +82,7 @@ impl TypeInferFixture {
             local_symbols: &self.local_symbols,
             local_decl_scopes: &self.local_decl_scopes,
             crate_root_modules: &self.crate_roots,
+            workspace_module_paths: None,
         }
     }
 
@@ -93,6 +94,7 @@ impl TypeInferFixture {
             bindings: &self.bindings as &dyn BindingLookup,
             self_type: self.self_type.clone(),
             workspace_files: None,
+            generic_params: None,
         }
     }
 }

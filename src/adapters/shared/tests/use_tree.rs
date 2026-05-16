@@ -1,30 +1,36 @@
 //! Tests for `gather_alias_map` — per-file mapping of
-//! import-introduced identifiers to their canonical path segments.
+//! import-introduced identifiers to their canonical path segments
+//! plus the leading-colon (absolute-root) bit.
 
-use crate::adapters::shared::use_tree::gather_alias_map;
+use crate::adapters::shared::use_tree::{gather_alias_map, AliasTarget};
 
 fn parse(src: &str) -> syn::File {
     syn::parse_str(src).expect("parse")
+}
+
+fn relative(segs: &[&str]) -> AliasTarget {
+    AliasTarget::relative(segs.iter().map(|s| s.to_string()).collect())
+}
+
+fn absolute(segs: &[&str]) -> AliasTarget {
+    AliasTarget {
+        segments: segs.iter().map(|s| s.to_string()).collect(),
+        absolute_root: true,
+    }
 }
 
 #[test]
 fn test_alias_map_simple_use() {
     let f = parse("use foo::bar;");
     let map = gather_alias_map(&f);
-    assert_eq!(
-        map.get("bar"),
-        Some(&vec!["foo".to_string(), "bar".to_string()])
-    );
+    assert_eq!(map.get("bar"), Some(&relative(&["foo", "bar"])));
 }
 
 #[test]
 fn test_alias_map_rename() {
     let f = parse("use foo::bar as baz;");
     let map = gather_alias_map(&f);
-    assert_eq!(
-        map.get("baz"),
-        Some(&vec!["foo".to_string(), "bar".to_string()])
-    );
+    assert_eq!(map.get("baz"), Some(&relative(&["foo", "bar"])));
     assert!(
         !map.contains_key("bar"),
         "renamed origin must not leak into the alias map"
@@ -35,14 +41,8 @@ fn test_alias_map_rename() {
 fn test_alias_map_nested_group() {
     let f = parse("use foo::{bar, baz};");
     let map = gather_alias_map(&f);
-    assert_eq!(
-        map.get("bar"),
-        Some(&vec!["foo".to_string(), "bar".to_string()])
-    );
-    assert_eq!(
-        map.get("baz"),
-        Some(&vec!["foo".to_string(), "baz".to_string()])
-    );
+    assert_eq!(map.get("bar"), Some(&relative(&["foo", "bar"])));
+    assert_eq!(map.get("baz"), Some(&relative(&["foo", "baz"])));
 }
 
 #[test]
@@ -56,11 +56,8 @@ fn test_alias_map_glob_skipped() {
 fn test_alias_map_self_in_group() {
     let f = parse("use foo::{self, bar};");
     let map = gather_alias_map(&f);
-    assert_eq!(map.get("foo"), Some(&vec!["foo".to_string()]));
-    assert_eq!(
-        map.get("bar"),
-        Some(&vec!["foo".to_string(), "bar".to_string()])
-    );
+    assert_eq!(map.get("foo"), Some(&relative(&["foo"])));
+    assert_eq!(map.get("bar"), Some(&relative(&["foo", "bar"])));
 }
 
 #[test]
@@ -73,7 +70,7 @@ fn test_alias_map_self_renamed_in_group() {
     let map = gather_alias_map(&f);
     assert_eq!(
         map.get("bar"),
-        Some(&vec!["foo".to_string()]),
+        Some(&relative(&["foo"])),
         "self-rename must canonicalise to the parent prefix"
     );
     assert!(
@@ -88,11 +85,7 @@ fn test_alias_map_crate_prefix() {
     let map = gather_alias_map(&f);
     assert_eq!(
         map.get("RlmSession"),
-        Some(&vec![
-            "crate".to_string(),
-            "app".to_string(),
-            "RlmSession".to_string()
-        ])
+        Some(&relative(&["crate", "app", "RlmSession"]))
     );
 }
 
@@ -103,12 +96,38 @@ fn test_alias_map_multiple_top_level_uses() {
          use bar::B;",
     );
     let map = gather_alias_map(&f);
-    assert_eq!(
-        map.get("A"),
-        Some(&vec!["foo".to_string(), "A".to_string()])
+    assert_eq!(map.get("A"), Some(&relative(&["foo", "A"])));
+    assert_eq!(map.get("B"), Some(&relative(&["bar", "B"])));
+}
+
+#[test]
+fn test_alias_map_absolute_path_preserves_leading_colon() {
+    // `use ::ext::Foo;` is Rust 2018+ extern-root path. The alias map
+    // MUST remember the leading colon — without it, downstream
+    // canonicalisation can silently rewrite `ext::Foo` into
+    // `crate::ext::Foo` when a same-named workspace module exists.
+    let f = parse("use ::ext::Foo;");
+    let map = gather_alias_map(&f);
+    assert_eq!(map.get("Foo"), Some(&absolute(&["ext", "Foo"])));
+}
+
+#[test]
+fn test_alias_map_absolute_path_renamed_preserves_leading_colon() {
+    let f = parse("use ::ext::Foo as Local;");
+    let map = gather_alias_map(&f);
+    assert_eq!(map.get("Local"), Some(&absolute(&["ext", "Foo"])));
+    assert!(!map.contains_key("Foo"));
+}
+
+#[test]
+fn test_alias_map_mixed_absolute_and_relative() {
+    // Two consecutive `use` items: one relative, one absolute. Each
+    // entry must carry its OWN absolute-root bit.
+    let f = parse(
+        "use foo::A;\n\
+         use ::bar::B;",
     );
-    assert_eq!(
-        map.get("B"),
-        Some(&vec!["bar".to_string(), "B".to_string()])
-    );
+    let map = gather_alias_map(&f);
+    assert_eq!(map.get("A"), Some(&relative(&["foo", "A"])));
+    assert_eq!(map.get("B"), Some(&absolute(&["bar", "B"])));
 }

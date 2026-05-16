@@ -5,7 +5,8 @@
 //! target-layer pub-fn. Suppression is covered end-to-end in Task 5.
 
 use super::support::{
-    build_workspace, empty_cfg_test, four_layer, globset, ports_app_cli_mcp, run_check_b,
+    build_workspace, cli_mcp_config, empty_cfg_test, four_layer, globset, ports_app_cli_mcp,
+    run_check_b, three_layer,
 };
 use crate::adapters::analyzers::architecture::compiled::CompiledCallParity;
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
@@ -26,6 +27,41 @@ fn make_config(
         promoted_attributes: HashSet::new(),
         single_touchpoint: crate::config::architecture::SingleTouchpointMode::default(),
     }
+}
+
+/// `missing_adapters` list for a specific `target_fn` — `None` when
+/// no CallParityMissingAdapter finding exists for that target.
+fn missing_adapters_for(findings: &[MatchLocation], target_fn: &str) -> Option<Vec<String>> {
+    findings.iter().find_map(|f| match &f.kind {
+        ViolationKind::CallParityMissingAdapter {
+            target_fn: tf,
+            missing_adapters,
+            ..
+        } if tf == target_fn => Some(missing_adapters.clone()),
+        _ => None,
+    })
+}
+
+/// Hint text for the missing-adapter finding on `target_fn`, if any.
+/// Returns `None` if there's no finding or the finding has hint=None.
+fn hint_for(findings: &[MatchLocation], target_fn: &str) -> Option<String> {
+    findings.iter().find_map(|f| match &f.kind {
+        ViolationKind::CallParityMissingAdapter {
+            target_fn: tf,
+            hint,
+            ..
+        } if tf == target_fn => hint.clone(),
+        _ => None,
+    })
+}
+
+/// Three-layer `cli + mcp + application` config with `application` as
+/// target and an empty exclude_targets — the shared shape for the
+/// hint/cascade/promoted-attribute tests further down.
+fn cli_mcp_config_full() -> CompiledCallParity {
+    let mut cp = cli_mcp_config(3);
+    cp.exclude_targets = globset(&[]);
+    cp
 }
 
 /// Extract the `(target_fn, missing_adapters)` pair from a
@@ -1202,20 +1238,27 @@ fn check_b_anchor_inspected_even_when_target_layer_absent_from_pub_fns_map() {
     let cp = ports_cp();
     let cfg_test = empty_cfg_test();
     let borrowed = borrowed_files(&ws);
+    let crate_root_modules = HashSet::new();
+    let workspace_module_paths = HashSet::new();
+    let workspace = crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+        cfg_test_files: &cfg_test,
+        crate_root_modules: &crate_root_modules,
+        workspace_module_paths: &workspace_module_paths,
+    };
     let mut pub_fns = collect_pub_fns_by_layer(PubFnInputs {
         files: &borrowed,
         aliases_per_file: &ws.aliases_per_file,
         layers: &layers,
-        cfg_test_files: &cfg_test,
         transparent_wrappers: &cp.transparent_wrappers,
         promoted_attributes: &cp.promoted_attributes,
+        workspace: &workspace,
     });
     let graph = build_call_graph(
         &borrowed,
         &ws.aliases_per_file,
-        &cfg_test,
         &layers,
         &cp.transparent_wrappers,
+        &workspace,
     );
     let touchpoints = build_handler_touchpoints(&pub_fns, &graph, &cp);
     pub_fns.remove("application");
@@ -1229,5 +1272,528 @@ fn check_b_anchor_inspected_even_when_target_layer_absent_from_pub_fns_map() {
     assert!(
         pairs.iter().any(|(target, _)| target == anchor),
         "with target layer absent from pub_fns_by_layer, anchor enumeration must still run; got {pairs:?}"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Cascade clearance — when an adapter reaches a generic dispatcher
+// that resolves to a trait-anchor edge, downstream callees of the
+// impl method must be cleared from missing-adapter findings via the
+// forward BFS through target-internal edges.
+// ─────────────────────────────────────────────────────────────────────
+
+#[test]
+fn check_b_cascade_clears_when_target_reached_via_generic_trait_dispatch() {
+    // An adapter reaches a generic runner that dispatches via
+    // `Q::execute(...)` to a trait impl. The impl body calls another
+    // application helper. With the trait-anchor edge in place, the
+    // helper must NOT show up as missing — the BFS from the boundary
+    // touchpoints follows the anchor to the impl, then onwards.
+    let ws = build_workspace(&[
+        (
+            "src/application/symbol.rs",
+            r#"
+            pub trait SymbolQuery {
+                fn execute(&self);
+            }
+            pub struct DepsQuery;
+            impl SymbolQuery for DepsQuery {
+                fn execute(&self) {
+                    collect_callees();
+                }
+            }
+            pub fn collect_callees() {}
+            "#,
+        ),
+        (
+            "src/application/runner.rs",
+            r#"
+            use crate::application::symbol::SymbolQuery;
+
+            pub fn run<Q: SymbolQuery>(q: Q) {
+                Q::execute(&q);
+            }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::runner::run;
+            use crate::application::symbol::DepsQuery;
+
+            pub fn cmd_deps() {
+                run(DepsQuery);
+            }
+            "#,
+        ),
+        (
+            "src/mcp/handlers.rs",
+            r#"
+            use crate::application::runner::run;
+            use crate::application::symbol::DepsQuery;
+
+            pub fn handle_deps() {
+                run(DepsQuery);
+            }
+            "#,
+        ),
+    ]);
+    let findings = run_check_b(
+        &ws,
+        &three_layer(),
+        &cli_mcp_config_full(),
+        &empty_cfg_test(),
+    );
+
+    let collect_canonical = "crate::application::symbol::collect_callees";
+    let missing = missing_adapters_for(&findings, collect_canonical);
+
+    assert!(
+        missing.is_none(),
+        "`collect_callees` flagged as not-reached even though it's \
+         called by an impl method that an adapter reaches via the \
+         generic runner.\n\
+         missing adapters for collect_callees: {missing:?}\n\
+         all findings: {:?}",
+        findings
+            .iter()
+            .filter_map(|f| match &f.kind {
+                ViolationKind::CallParityMissingAdapter { target_fn, .. } =>
+                    Some(target_fn.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Promoted-attribute support — a private attributed fn (e.g.
+// `#[tool] async fn ...`) inside an adapter impl block must be
+// treated as a handler entry point when configured via
+// `promoted_attributes`, so its body's calls count toward coverage.
+// ─────────────────────────────────────────────────────────────────────
+
+#[test]
+fn check_b_promoted_attribute_lifts_private_fn_onto_handler_surface() {
+    // Pattern: `async fn search` without a `pub` modifier inside an
+    // inherent impl block — a proc-macro is expected to generate the
+    // public dispatch wrapper at expansion time. Without
+    // `promoted_attributes` configured, the private fn is filtered
+    // out of the adapter's handler set and the call is invisible.
+    // With `promoted_attributes = ["tool"]`, the fn is promoted onto
+    // the surface and its body's calls satisfy coverage.
+    let ws = build_workspace(&[
+        (
+            "src/application/session.rs",
+            r#"
+            pub struct Session;
+            pub struct MyErr;
+            impl Session {
+                pub fn open(_p: &str) -> Result<Self, MyErr> { todo!() }
+            }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::session::Session;
+            pub fn cmd_search() {
+                let _ = Session::open("/p");
+            }
+            "#,
+        ),
+        (
+            "src/mcp/server.rs",
+            r#"
+            use crate::application::session::{Session, MyErr};
+
+            #[derive(Clone)]
+            pub struct Server {
+                pub(super) project_root: std::path::PathBuf,
+            }
+
+            pub struct Parameters<T>(pub T);
+            pub struct SearchParams;
+            pub struct CallToolResult;
+
+            #[tool_router(vis = "pub(super)")]
+            impl Server {
+                #[tool(description = "search")]
+                async fn search(
+                    &self,
+                    _params: Parameters<SearchParams>,
+                ) -> Result<CallToolResult, MyErr> {
+                    let _session = Session::open("/p");
+                    todo!()
+                }
+            }
+            "#,
+        ),
+    ]);
+    let mut cp = cli_mcp_config_full();
+    cp.promoted_attributes.insert("tool".to_string());
+    let findings = run_check_b(&ws, &three_layer(), &cp, &empty_cfg_test());
+
+    let open = "crate::application::session::Session::open";
+    let missing = missing_adapters_for(&findings, open);
+
+    assert!(
+        missing
+            .as_ref()
+            .is_none_or(|m| !m.contains(&"mcp".to_string())),
+        "with promoted_attributes=[\"tool\"], Session::open is still \
+         flagged as not reached from mcp. The promotion in \
+         pub_fns.rs::visit_impl_item_fn isn't picking up the #[tool] \
+         attribute on the private async fn.\n\
+         missing adapters for Session::open: {missing:?}\n\
+         all findings: {:?}",
+        findings
+            .iter()
+            .filter_map(|f| match &f.kind {
+                ViolationKind::CallParityMissingAdapter { target_fn, .. } =>
+                    Some(target_fn.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Hint surfacing — when a missing adapter has a private fn carrying
+// a custom attribute (`#[tool]`, etc.) that would resolve the finding
+// after promotion, the finding's `hint` field must name it.
+// Negative cases ensure spurious suggestions don't fire.
+// ─────────────────────────────────────────────────────────────────────
+
+#[test]
+fn check_b_hint_suggests_private_attributed_fn_when_it_reaches_target() {
+    // Positive case: missing adapter mcp has a private `#[tool]` fn
+    // that transitively reaches the unreached target. Hint must name
+    // file + fn + attribute so the author can immediately add
+    // `promoted_attributes = ["tool"]`.
+    let ws = build_workspace(&[
+        (
+            "src/application/session.rs",
+            r#"
+            pub struct Session;
+            pub struct MyErr;
+            impl Session {
+                pub fn open(_p: &str) -> Result<Self, MyErr> { todo!() }
+            }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::session::Session;
+            pub fn cmd_search() {
+                let _ = Session::open("/p");
+            }
+            "#,
+        ),
+        (
+            "src/mcp/server.rs",
+            r#"
+            use crate::application::session::{Session, MyErr};
+            pub struct Server;
+            impl Server {
+                #[tool(description = "search")]
+                async fn search(&self) -> Result<(), MyErr> {
+                    let _ = Session::open("/p");
+                    Ok(())
+                }
+            }
+            "#,
+        ),
+    ]);
+    let cp = cli_mcp_config_full();
+    let findings = run_check_b(&ws, &three_layer(), &cp, &empty_cfg_test());
+
+    let open = "crate::application::session::Session::open";
+    let hint = hint_for(&findings, open).expect("expected hint on missing-adapter finding");
+    assert!(
+        hint.contains("search") && hint.contains("tool") && hint.contains("mcp"),
+        "hint must name candidate fn `search`, its attribute `tool`, and \
+         adapter `mcp`. Got:\n{hint}"
+    );
+    assert!(
+        hint.contains("promoted_attributes"),
+        "hint must point the author at the `promoted_attributes` config knob. Got:\n{hint}"
+    );
+}
+
+#[test]
+fn check_b_no_hint_when_no_private_attributed_fn_in_missing_adapter() {
+    // Missing adapter mcp has NO private fn carrying any attribute
+    // that reaches the target. Finding still fires but hint is None.
+    let ws = build_workspace(&[
+        (
+            "src/application/session.rs",
+            r#"
+            pub struct Session;
+            impl Session {
+                pub fn open(_p: &str) {}
+            }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::session::Session;
+            pub fn cmd_search() { Session::open("/p"); }
+            "#,
+        ),
+        (
+            "src/mcp/server.rs",
+            r#"
+            pub fn handle_other() {}
+            "#,
+        ),
+    ]);
+    let cp = cli_mcp_config_full();
+    let findings = run_check_b(&ws, &three_layer(), &cp, &empty_cfg_test());
+
+    let open = "crate::application::session::Session::open";
+    let missing =
+        missing_adapters_for(&findings, open).expect("expected open to be missing from mcp");
+    assert!(missing.contains(&"mcp".to_string()));
+    assert!(
+        hint_for(&findings, open).is_none(),
+        "no private attributed candidate in mcp → no hint expected"
+    );
+}
+
+#[test]
+fn check_b_no_hint_when_only_stdlib_attribute_on_candidate() {
+    // Private fn carries only stdlib attributes (`#[allow]`,
+    // `#[deprecated]`, etc.) — those are noise, not framework-handler
+    // markers, so they must not trigger the hint.
+    let ws = build_workspace(&[
+        (
+            "src/application/session.rs",
+            r#"
+            pub struct Session;
+            impl Session {
+                pub fn open(_p: &str) {}
+            }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::session::Session;
+            pub fn cmd_search() { Session::open("/p"); }
+            "#,
+        ),
+        (
+            "src/mcp/server.rs",
+            r#"
+            use crate::application::session::Session;
+            pub struct Server;
+            impl Server {
+                #[allow(dead_code)]
+                fn search_internal(&self) {
+                    Session::open("/p");
+                }
+            }
+            "#,
+        ),
+    ]);
+    let cp = cli_mcp_config_full();
+    let findings = run_check_b(&ws, &three_layer(), &cp, &empty_cfg_test());
+
+    let open = "crate::application::session::Session::open";
+    assert!(
+        hint_for(&findings, open).is_none(),
+        "stdlib attribute (#[allow]) must not qualify the fn as a promotion candidate"
+    );
+}
+
+#[test]
+fn check_b_no_hint_when_candidate_body_does_not_reach_target() {
+    // Private + attributed fn exists in the missing adapter but its
+    // body doesn't reach the unreached target. Promoting it wouldn't
+    // resolve the finding, so no hint.
+    let ws = build_workspace(&[
+        (
+            "src/application/session.rs",
+            r#"
+            pub struct Session;
+            impl Session {
+                pub fn open(_p: &str) {}
+                pub fn other(&self) {}
+            }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::session::Session;
+            pub fn cmd_search() { Session::open("/p"); }
+            "#,
+        ),
+        (
+            "src/mcp/server.rs",
+            r#"
+            pub struct Server;
+            impl Server {
+                #[tool(description = "unrelated")]
+                async fn unrelated(&self) {
+                    // Doesn't call Session::open — calls nothing.
+                }
+            }
+            "#,
+        ),
+    ]);
+    let cp = cli_mcp_config_full();
+    let findings = run_check_b(&ws, &three_layer(), &cp, &empty_cfg_test());
+
+    let open = "crate::application::session::Session::open";
+    assert!(
+        hint_for(&findings, open).is_none(),
+        "the #[tool] fn `unrelated` doesn't reach Session::open → no hint expected"
+    );
+}
+
+#[test]
+fn check_b_hint_excludes_adapters_already_covering_target() {
+    // cli reaches target, mcp doesn't. The hint must mention only
+    // mcp's candidate (if any), never cli's — cli already covers the
+    // target, so promoting a cli candidate is irrelevant.
+    let ws = build_workspace(&[
+        (
+            "src/application/session.rs",
+            r#"
+            pub struct Session;
+            impl Session {
+                pub fn stats(&self) {}
+            }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::session::Session;
+            pub struct CliCmds;
+            impl CliCmds {
+                #[tool(description = "diagnostic")]
+                fn diagnostic_stats(s: &Session) { s.stats(); }
+            }
+            pub fn cmd_stats(s: &Session) { s.stats(); }
+            "#,
+        ),
+        (
+            "src/mcp/server.rs",
+            r#"
+            pub fn handle_other() {}
+            "#,
+        ),
+    ]);
+    let cp = cli_mcp_config_full();
+    let findings = run_check_b(&ws, &three_layer(), &cp, &empty_cfg_test());
+
+    let stats = "crate::application::session::Session::stats";
+    let missing = missing_adapters_for(&findings, stats).expect("stats must be missing from mcp");
+    assert_eq!(missing, vec!["mcp".to_string()]);
+    // cli has a candidate but cli isn't a missing adapter → no hint.
+    assert!(
+        hint_for(&findings, stats).is_none(),
+        "candidate in cli (already covering) must not surface in the hint when only mcp is missing"
+    );
+}
+
+#[test]
+fn check_b_no_hint_when_candidate_path_exceeds_call_depth() {
+    // A private #[tool] fn whose body chain reaches the target only
+    // via depth > call_depth must NOT produce a hint — promotion
+    // wouldn't help because compute_touchpoints stops at call_depth.
+    //
+    // call_depth = 1: handler (depth 0) → first callee (depth 1,
+    // boundary). With this fixture, `tool_a` reaches `Session::open`
+    // only via 2 hops, so even after promotion the walker stops at
+    // `helper1` and never sees `open`.
+    let ws = build_workspace(&[
+        (
+            "src/application/session.rs",
+            r#"
+            pub struct Session;
+            impl Session { pub fn open() {} }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::session::Session;
+            pub fn cmd_open() { Session::open(); }
+            "#,
+        ),
+        (
+            "src/mcp/server.rs",
+            r#"
+            use crate::application::session::Session;
+            pub struct Server;
+            impl Server {
+                #[tool(description = "deep")]
+                fn tool_a(&self) { helper1(); }
+            }
+            fn helper1() { Session::open(); }
+            "#,
+        ),
+    ]);
+    let mut cp = cli_mcp_config_full();
+    cp.call_depth = 1;
+    let findings = run_check_b(&ws, &three_layer(), &cp, &empty_cfg_test());
+    let open = "crate::application::session::Session::open";
+    assert!(
+        hint_for(&findings, open).is_none(),
+        "tool_a → helper1 → open is depth 2, exceeds call_depth=1 — \
+         walker would not accept tool_a as touchpoint after promotion, \
+         so no hint expected. Got: {:?}",
+        hint_for(&findings, open),
+    );
+}
+
+#[test]
+fn check_b_no_hint_when_candidate_reaches_target_only_via_peer_adapter() {
+    // A candidate in adapter A whose only path to the target goes
+    // through adapter B's code must NOT produce a hint — touchpoint
+    // computation from A stops at peer-adapter boundaries, so
+    // promotion wouldn't add the target to A's coverage.
+    let ws = build_workspace(&[
+        (
+            "src/application/session.rs",
+            r#"
+            pub struct Session;
+            impl Session { pub fn open() {} }
+            "#,
+        ),
+        (
+            "src/cli/handlers.rs",
+            r#"
+            use crate::application::session::Session;
+            pub fn cli_helper() { Session::open(); }
+            pub fn cmd_open() { Session::open(); }
+            "#,
+        ),
+        (
+            "src/mcp/server.rs",
+            r#"
+            pub struct Server;
+            impl Server {
+                #[tool(description = "via peer")]
+                fn tool_a(&self) { crate::cli::handlers::cli_helper(); }
+            }
+            "#,
+        ),
+    ]);
+    let cp = cli_mcp_config_full();
+    let findings = run_check_b(&ws, &three_layer(), &cp, &empty_cfg_test());
+    let open = "crate::application::session::Session::open";
+    assert!(
+        hint_for(&findings, open).is_none(),
+        "tool_a reaches open only via cli (peer adapter from mcp) — \
+         walker would not traverse past cli boundary after promotion, \
+         so no hint expected. Got: {:?}",
+        hint_for(&findings, open),
     );
 }

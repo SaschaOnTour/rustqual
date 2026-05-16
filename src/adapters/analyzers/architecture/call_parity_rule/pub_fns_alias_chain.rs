@@ -7,11 +7,11 @@
 //! `pub type Public = Inner; type Inner = private::Hidden;` reach
 //! the source type even when intermediate aliases are private.
 
-use super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
+use super::bindings::{canonicalise_workspace_path, CanonScope};
 use super::local_symbols::{collect_local_symbols_scoped, FileScope, LocalSymbols};
 use super::pub_fns_visibility::{canonical_for_decl, peel_to_inner_path};
 use crate::adapters::shared::cfg_test::has_cfg_test;
-use crate::adapters::shared::use_tree::gather_alias_map_scoped;
+use crate::adapters::shared::use_tree::{gather_alias_map_scoped, AliasMap};
 use std::collections::{HashMap, HashSet};
 
 /// Collect every type-item canonical (struct/enum/union/trait/type) in
@@ -74,15 +74,16 @@ fn walk_type_canonicals(
 /// unconditional walker. Operation.
 pub(super) fn collect_alias_chain(
     files: &[(&str, &syn::File)],
-    cfg_test_files: &HashSet<String>,
-    aliases_per_file: &HashMap<String, HashMap<String, Vec<String>>>,
-    crate_root_modules: &HashSet<String>,
+    aliases_per_file: &HashMap<String, AliasMap>,
+    workspace: &super::local_symbols::WorkspaceLookup<'_>,
     transparent_wrappers: &HashSet<String>,
 ) -> HashMap<String, String> {
     let mut chain = HashMap::new();
     let empty_aliases = HashMap::new();
+    let crate_root_modules = workspace.crate_root_modules;
+    let workspace_module_paths = workspace.workspace_module_paths;
     for (path, ast) in files {
-        if cfg_test_files.contains(*path) {
+        if workspace.cfg_test_files.contains(*path) {
             continue;
         }
         let alias_map = aliases_per_file.get(*path).unwrap_or(&empty_aliases);
@@ -95,6 +96,7 @@ pub(super) fn collect_alias_chain(
             local_symbols: &flat,
             local_decl_scopes: &by_name,
             crate_root_modules,
+            workspace_module_paths: Some(workspace_module_paths),
         };
         walk_alias_chain(
             &ast.items,
@@ -177,7 +179,9 @@ pub(super) fn resolve_alias_target_canonical(
         file: file_scope,
         mod_stack,
     };
-    canonicalise_type_segments_in_scope(&segs, &scope).map(|c| c.join("::"))
+    // Use-site gate: `type Repo = ::ext::Store;` alias targets that
+    // are extern-rooted don't expose a workspace canonical.
+    canonicalise_workspace_path(&segs, p.path.leading_colon.is_some(), &scope).map(|c| c.join("::"))
 }
 
 /// Follow an alias chain from `start` through `alias_chain` until a

@@ -26,13 +26,12 @@ pub(crate) use edge_rewrite::apply_edge_rewrite;
 use super::anchor_index::{
     build_anchor_info, is_anchor_target_capability, AnchorInfo, TraitAnchorMeta,
 };
-use super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
+use super::bindings::{canonicalise_workspace_path, CanonScope};
 use super::file_fn_collector::FileFnCollector;
 use super::type_infer::{build_workspace_type_index, WorkspaceIndexInputs, WorkspaceTypeIndex};
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
 use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
-use crate::adapters::shared::use_tree::gather_alias_map_scoped;
-use crate::adapters::shared::use_tree::ScopedAliasMap;
+use crate::adapters::shared::use_tree::{gather_alias_map_scoped, AliasMap, ScopedAliasMap};
 use std::collections::{HashMap, HashSet, VecDeque};
 use syn::visit::Visit;
 
@@ -249,7 +248,13 @@ pub(crate) fn resolve_impl_self_type(
     scope: &CanonScope<'_>,
 ) -> Option<Vec<String>> {
     let raw = impl_self_ty_segments(self_ty)?;
-    Some(canonicalise_type_segments_in_scope(&raw, scope).unwrap_or(raw))
+    let leading_colon = matches!(self_ty, syn::Type::Path(p) if p.path.leading_colon.is_some());
+    // Use-site gate: `impl ::ext::Foo { ... }` doesn't canonicalise
+    // against the workspace. On extern paths we still keep `raw` as
+    // the bare-segment identity so the impl-stack frame at least
+    // tracks the syntactic self-type — but the workspace lookup is
+    // skipped to avoid false `crate::...::Foo` matches.
+    Some(canonicalise_workspace_path(&raw, leading_colon, scope).unwrap_or(raw))
 }
 
 /// Flatten a `syn::Type::Path` to its segment identifiers — the shape
@@ -311,12 +316,14 @@ impl WalkState {
 /// Integration: walks files + delegates per-fn canonical-call collection.
 pub(crate) fn build_call_graph<'ast>(
     files: &[(&'ast str, &'ast syn::File)],
-    aliases_per_file: &HashMap<String, HashMap<String, Vec<String>>>,
-    cfg_test_files: &HashSet<String>,
+    aliases_per_file: &HashMap<String, AliasMap>,
     layers: &LayerDefinitions,
     transparent_wrappers: &HashSet<String>,
+    workspace: &super::local_symbols::WorkspaceLookup<'_>,
 ) -> CallGraph {
-    let crate_root_modules = collect_crate_root_modules(files);
+    let cfg_test_files = workspace.cfg_test_files;
+    let crate_root_modules = workspace.crate_root_modules;
+    let workspace_module_paths = workspace.workspace_module_paths;
     // Pre-compute `LocalSymbols` + per-mod alias maps per file once and
     // reuse across the type-index passes + the graph collector.
     let local_symbols_per_file: HashMap<String, LocalSymbols> = files
@@ -335,7 +342,8 @@ pub(crate) fn build_call_graph<'ast>(
         aliases_per_file,
         aliases_scoped_per_file: &aliases_scoped_per_file,
         local_symbols_per_file: &local_symbols_per_file,
-        crate_root_modules: &crate_root_modules,
+        crate_root_modules,
+        workspace_module_paths: Some(workspace_module_paths),
     });
     let type_index = build_workspace_type_index(&WorkspaceIndexInputs {
         files,
@@ -350,9 +358,8 @@ pub(crate) fn build_call_graph<'ast>(
     edge_rewrite::rewrite_phantom_inherited_default_edges(&mut graph, &type_index);
     let visible_canonicals = super::pub_fns_visibility::collect_visible_type_canonicals_workspace(
         files,
-        cfg_test_files,
         aliases_per_file,
-        &crate_root_modules,
+        workspace,
         transparent_wrappers,
     );
     populate_anchor_index(&mut graph, &type_index, layers, &visible_canonicals);

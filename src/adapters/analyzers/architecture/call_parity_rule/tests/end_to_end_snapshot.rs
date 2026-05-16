@@ -1,28 +1,29 @@
-//! End-to-end rlm-shape snapshot — the external acceptance gate for the
-//! Task 1.6 inference wiring.
+//! End-to-end session/handler snapshot — the acceptance gate for the
+//! receiver-type inference wiring.
 //!
-//! Sets up a mini multi-file workspace that mirrors rlm's session /
-//! handler pattern (the one the original bug report called out), runs
-//! the full call-parity pipeline (Checks A/B/C/D), and asserts the exact set of
-//! surviving findings. The fixture is deliberately small (3 files,
-//! ~50 lines of rlm-shaped source) but covers every `call_parity_rule`
-//! code path the rlm bug exercised:
+//! Sets up a mini multi-file workspace mirroring a session / handler
+//! shape (CLI cmd → `Session::open_cwd().map_err(f)?` → `session.method()`,
+//! MCP handler with `session: &Session` parameter), runs the full
+//! call-parity pipeline (Checks A/B/C/D), and asserts the exact set
+//! of surviving findings. The fixture is deliberately small (3 files,
+//! ~50 lines) but covers every `call_parity_rule` code path the
+//! receiver-inference work exercised:
 //!
-//! - CLI handlers that do `let session = RlmSession::open_cwd().map_err(f)?;
+//! - CLI handlers that do `let session = Session::open_cwd().map_err(f)?;
 //!   session.method(...)` — the method-chain constructor pattern
-//! - MCP handlers with `session: &RlmSession` parameter — the
+//! - MCP handlers with `session: &Session` parameter — the
 //!   signature-param fast path
 //! - Asymmetric coverage (method called from only one adapter) —
 //!   legitimate findings the rule should still emit
 //! - Genuinely unreached methods — real dead code
 //!
-//! If Stage 2 trait-dispatch or Stage 3 config-based wrappers add new
-//! resolution paths, this snapshot's expected-findings list moves
-//! downward — adjust the assertions when that happens.
+//! If trait-dispatch or config-based wrappers add new resolution
+//! paths, this snapshot's expected-findings list moves downward —
+//! adjust the assertions when that happens.
 
-use super::support::{build_workspace, empty_cfg_test, globset, run_check_a, run_check_b};
-use crate::adapters::analyzers::architecture::compiled::CompiledCallParity;
-use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
+use super::support::{
+    build_workspace, cli_mcp_config, empty_cfg_test, run_check_a, run_check_b, three_layer,
+};
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use std::collections::HashSet;
 
@@ -30,18 +31,18 @@ use std::collections::HashSet;
 /// - `src/application/**` → application (target)
 /// - `src/cli/**` → cli adapter
 /// - `src/mcp/**` → mcp adapter
-fn rlm_fixture() -> Vec<(&'static str, &'static str)> {
+fn session_handler_fixture() -> Vec<(&'static str, &'static str)> {
     vec![
         (
             "src/application/session.rs",
             r#"
-            pub struct RlmSession;
+            pub struct Session;
             pub struct Response;
             pub struct Error;
 
-            impl RlmSession {
-                pub fn open_cwd() -> Result<RlmSession, Error> { todo!() }
-                pub fn open(path: &str) -> Result<RlmSession, Error> { todo!() }
+            impl Session {
+                pub fn open_cwd() -> Result<Session, Error> { todo!() }
+                pub fn open(path: &str) -> Result<Session, Error> { todo!() }
                 pub fn diff(&self, path: &str) -> Result<Response, Error> { todo!() }
                 pub fn files(&self) -> Result<Response, Error> { todo!() }
                 pub fn insert(&self, content: &str) -> Result<Response, Error> { todo!() }
@@ -53,23 +54,23 @@ fn rlm_fixture() -> Vec<(&'static str, &'static str)> {
         (
             "src/cli/handlers.rs",
             r#"
-            use crate::application::session::RlmSession;
+            use crate::application::session::Session;
 
             pub struct CliError;
             fn map_err(_e: crate::application::session::Error) -> CliError { CliError }
 
             pub fn cmd_diff(path: &str) -> Result<(), CliError> {
-                let session = RlmSession::open_cwd().map_err(map_err)?;
+                let session = Session::open_cwd().map_err(map_err)?;
                 let _ = session.diff(path).map_err(map_err)?;
                 Ok(())
             }
             pub fn cmd_files() -> Result<(), CliError> {
-                let session = RlmSession::open_cwd().map_err(map_err)?;
+                let session = Session::open_cwd().map_err(map_err)?;
                 let _ = session.files().map_err(map_err)?;
                 Ok(())
             }
             pub fn cmd_stats() -> Result<(), CliError> {
-                let session = RlmSession::open_cwd().map_err(map_err)?;
+                let session = Session::open_cwd().map_err(map_err)?;
                 let _ = session.stats();
                 Ok(())
             }
@@ -78,51 +79,23 @@ fn rlm_fixture() -> Vec<(&'static str, &'static str)> {
         (
             "src/mcp/handlers.rs",
             r#"
-            use crate::application::session::RlmSession;
+            use crate::application::session::Session;
 
-            pub fn handle_diff(session: &RlmSession, path: &str) -> String {
+            pub fn handle_diff(session: &Session, path: &str) -> String {
                 let _ = session.diff(path);
                 String::new()
             }
-            pub fn handle_files(session: &RlmSession) -> String {
+            pub fn handle_files(session: &Session) -> String {
                 let _ = session.files();
                 String::new()
             }
-            pub fn handle_insert(session: &RlmSession, content: &str) -> String {
+            pub fn handle_insert(session: &Session, content: &str) -> String {
                 let _ = session.insert(content);
                 String::new()
             }
             "#,
         ),
     ]
-}
-
-fn rlm_layers() -> LayerDefinitions {
-    LayerDefinitions::new(
-        vec![
-            "application".to_string(),
-            "cli".to_string(),
-            "mcp".to_string(),
-        ],
-        vec![
-            ("application".to_string(), globset(&["src/application/**"])),
-            ("cli".to_string(), globset(&["src/cli/**"])),
-            ("mcp".to_string(), globset(&["src/mcp/**"])),
-        ],
-    )
-}
-
-fn rlm_config() -> CompiledCallParity {
-    CompiledCallParity {
-        adapters: vec!["cli".to_string(), "mcp".to_string()],
-        target: "application".to_string(),
-        call_depth: 3,
-        exclude_targets: globset(&[]),
-        transparent_wrappers: HashSet::new(),
-        transparent_macros: HashSet::new(),
-        promoted_attributes: HashSet::new(),
-        single_touchpoint: crate::config::architecture::SingleTouchpointMode::default(),
-    }
 }
 
 fn missing_adapters_for(findings: &[MatchLocation], target_fn: &str) -> Option<Vec<String>> {
@@ -141,15 +114,15 @@ fn missing_adapters_for(findings: &[MatchLocation], target_fn: &str) -> Option<V
 // ═══════════════════════════════════════════════════════════════════
 
 #[test]
-fn rlm_snapshot_check_a_no_spurious_findings() {
-    // After Task 1.6, every cli / mcp handler in the fixture reaches an
-    // application-layer fn via inference. So Check A has no findings at
-    // all — this is the primary rlm-bug regression guard.
-    let ws = build_workspace(&rlm_fixture());
-    let findings = run_check_a(&ws, &rlm_layers(), &rlm_config(), &empty_cfg_test());
+fn check_a_clean_on_session_handler_fixture() {
+    // Every cli / mcp handler in the fixture reaches an application-
+    // layer fn via inference, so Check A has no findings at all —
+    // this is the primary receiver-inference regression guard.
+    let ws = build_workspace(&session_handler_fixture());
+    let findings = run_check_a(&ws, &three_layer(), &cli_mcp_config(3), &empty_cfg_test());
     assert!(
         findings.is_empty(),
-        "Check A should be clean on rlm-shape fixture, got {} findings: {:?}",
+        "Check A should be clean on the session/handler fixture, got {} findings: {:?}",
         findings.len(),
         findings
             .iter()
@@ -163,53 +136,52 @@ fn rlm_snapshot_check_a_no_spurious_findings() {
 // ═══════════════════════════════════════════════════════════════════
 
 #[test]
-fn rlm_snapshot_check_b_diff_reached_from_both_adapters() {
+fn check_b_diff_reached_from_both_adapters() {
     // The hero case: Session::diff is called from both cli (via chain
     // inference) and mcp (via signature-param). Both adapters cover it
     // → no finding.
-    let ws = build_workspace(&rlm_fixture());
-    let findings = run_check_b(&ws, &rlm_layers(), &rlm_config(), &empty_cfg_test());
-    let missing = missing_adapters_for(&findings, "crate::application::session::RlmSession::diff");
+    let ws = build_workspace(&session_handler_fixture());
+    let findings = run_check_b(&ws, &three_layer(), &cli_mcp_config(3), &empty_cfg_test());
+    let missing = missing_adapters_for(&findings, "crate::application::session::Session::diff");
     assert!(
         missing.is_none(),
-        "RlmSession::diff should be reached from both adapters, got missing={:?}",
+        "Session::diff should be reached from both adapters, got missing={:?}",
         missing
     );
 }
 
 #[test]
-fn rlm_snapshot_check_b_files_reached_from_both_adapters() {
-    let ws = build_workspace(&rlm_fixture());
-    let findings = run_check_b(&ws, &rlm_layers(), &rlm_config(), &empty_cfg_test());
-    let missing = missing_adapters_for(&findings, "crate::application::session::RlmSession::files");
-    assert!(missing.is_none(), "RlmSession::files should be reached");
+fn check_b_files_reached_from_both_adapters() {
+    let ws = build_workspace(&session_handler_fixture());
+    let findings = run_check_b(&ws, &three_layer(), &cli_mcp_config(3), &empty_cfg_test());
+    let missing = missing_adapters_for(&findings, "crate::application::session::Session::files");
+    assert!(missing.is_none(), "Session::files should be reached");
 }
 
 #[test]
-fn rlm_snapshot_check_b_asymmetric_coverage_flagged() {
+fn check_b_asymmetric_coverage_is_flagged() {
     // `stats` is only called from cli (cmd_stats). mcp doesn't cover
     // it — legitimate Check B finding.
-    let ws = build_workspace(&rlm_fixture());
-    let findings = run_check_b(&ws, &rlm_layers(), &rlm_config(), &empty_cfg_test());
-    let missing = missing_adapters_for(&findings, "crate::application::session::RlmSession::stats")
+    let ws = build_workspace(&session_handler_fixture());
+    let findings = run_check_b(&ws, &three_layer(), &cli_mcp_config(3), &empty_cfg_test());
+    let missing = missing_adapters_for(&findings, "crate::application::session::Session::stats")
         .expect("stats should be missing from some adapter");
     assert_eq!(missing, vec!["mcp".to_string()]);
 
     // `insert` is only called from mcp — missing from cli.
-    let missing =
-        missing_adapters_for(&findings, "crate::application::session::RlmSession::insert")
-            .expect("insert should be missing from some adapter");
+    let missing = missing_adapters_for(&findings, "crate::application::session::Session::insert")
+        .expect("insert should be missing from some adapter");
     assert_eq!(missing, vec!["cli".to_string()]);
 }
 
 #[test]
-fn rlm_snapshot_check_b_unreached_pub_fn_is_flagged() {
+fn check_b_unreached_pub_fn_is_flagged() {
     // `genuinely_unused` has no callers → missing from all adapters.
-    let ws = build_workspace(&rlm_fixture());
-    let findings = run_check_b(&ws, &rlm_layers(), &rlm_config(), &empty_cfg_test());
+    let ws = build_workspace(&session_handler_fixture());
+    let findings = run_check_b(&ws, &three_layer(), &cli_mcp_config(3), &empty_cfg_test());
     let missing = missing_adapters_for(
         &findings,
-        "crate::application::session::RlmSession::genuinely_unused",
+        "crate::application::session::Session::genuinely_unused",
     )
     .expect("genuinely_unused must be flagged");
     let set: HashSet<String> = missing.into_iter().collect();
@@ -222,7 +194,7 @@ fn rlm_snapshot_check_b_unreached_pub_fn_is_flagged() {
 // ═══════════════════════════════════════════════════════════════════
 
 #[test]
-fn rlm_snapshot_total_findings_budget() {
+fn total_findings_budget_on_session_handler_fixture() {
     // The fixture has 7 application pub fns. Under the configured
     // `application` layer:
     //   - open:             reached from nobody       → missing [cli, mcp]
@@ -237,9 +209,9 @@ fn rlm_snapshot_total_findings_budget() {
     // If this budget ticks upward, inspect the new findings before
     // adjusting the number — the Stage 1 implementation should not
     // regress this count.
-    let ws = build_workspace(&rlm_fixture());
-    let layers = rlm_layers();
-    let cp = rlm_config();
+    let ws = build_workspace(&session_handler_fixture());
+    let layers = three_layer();
+    let cp = cli_mcp_config(3);
     let check_a = run_check_a(&ws, &layers, &cp, &empty_cfg_test());
     let check_b = run_check_b(&ws, &layers, &cp, &empty_cfg_test());
     assert_eq!(check_a.len(), 0, "Check A: {:?}", check_a);

@@ -9,7 +9,7 @@ use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::F
 use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::{
     collect_crate_root_modules, collect_local_symbols,
 };
-use crate::adapters::shared::use_tree::{gather_alias_map, ScopedAliasMap};
+use crate::adapters::shared::use_tree::{gather_alias_map, AliasMap, ScopedAliasMap};
 use std::collections::{HashMap, HashSet};
 
 fn parse_file(src: &str) -> syn::File {
@@ -25,7 +25,7 @@ fn parse_type(src: &str) -> syn::Type {
 /// automatically.
 struct FileCtx {
     file: syn::File,
-    alias_map: HashMap<String, Vec<String>>,
+    alias_map: AliasMap,
     aliases_per_scope: ScopedAliasMap,
     local_symbols: HashSet<String>,
     local_decl_scopes: HashMap<String, Vec<Vec<String>>>,
@@ -41,6 +41,7 @@ impl FileCtx {
             local_symbols: &self.local_symbols,
             local_decl_scopes: &self.local_decl_scopes,
             crate_root_modules: &self.crate_root_modules,
+            workspace_module_paths: None,
         }
     }
 }
@@ -142,7 +143,7 @@ fn ctx_for_fn<'a>(
         mod_stack: &[],
         body: &f.block,
         signature_params: sig_params(&f.sig),
-        generic_params: vec![],
+        generic_params: std::collections::HashMap::new(),
         self_type: None,
         workspace_index: None,
         workspace_files: None,
@@ -295,8 +296,8 @@ fn test_collect_turbofish_stripped() {
 fn test_collect_turbofish_call_resolves_via_use() {
     // `record_symbol_query::<RefsQuery>(args)` with a `use` import in
     // scope → the call must canonicalise to the absolute path of the
-    // imported function, not `<bare>:`. This is the bug rlm hit:
-    // turbofish call sites were dropped from the call graph.
+    // imported function, not `<bare>:`. Pre-fix, turbofish call sites
+    // were dropped from the call graph.
     let fctx = load(
         r#"
         use crate::middleware::record_symbol_query;
@@ -338,9 +339,9 @@ fn test_collect_inferred_generic_call_resolves_via_use() {
 
 #[test]
 fn test_turbofish_in_impl_method_body_resolves() {
-    // The actual rlm case: turbofish call lives inside an impl method,
-    // not a free fn. The impl block's self_ty has its own scope; the
-    // use must still be visible in the body.
+    // Turbofish call lives inside an impl method, not a free fn. The
+    // impl block's self_ty has its own scope; the `use` must still be
+    // visible in the body.
     let fctx = load(
         r#"
         use crate::middleware::record_symbol_query;
@@ -359,7 +360,7 @@ fn test_turbofish_in_impl_method_body_resolves() {
         mod_stack: &[],
         body: &f.1.block,
         signature_params: sig_params(&f.1.sig),
-        generic_params: vec![],
+        generic_params: std::collections::HashMap::new(),
         self_type: canonical_of_impl_self(f.0),
         workspace_index: None,
         workspace_files: None,
@@ -394,9 +395,9 @@ fn test_turbofish_via_child_module_qualified_path_resolves() {
 
 #[test]
 fn test_multiple_turbofish_calls_to_same_fn_resolve_to_one_canonical() {
-    // rlm's exact pattern — three turbofish call sites, three different
-    // generic args. The collector must dedupe to a single canonical
-    // entry (the call set is a HashSet<String>).
+    // Three turbofish call sites, three different generic args.
+    // The collector must dedupe to a single canonical entry (the call
+    // set is a HashSet<String>).
     let fctx = load(
         r#"
         use crate::middleware::record_symbol_query;
@@ -417,7 +418,7 @@ fn test_multiple_turbofish_calls_to_same_fn_resolve_to_one_canonical() {
         mod_stack: &[],
         body: &f.1.block,
         signature_params: sig_params(&f.1.sig),
-        generic_params: vec![],
+        generic_params: std::collections::HashMap::new(),
         self_type: canonical_of_impl_self(f.0),
         workspace_index: None,
         workspace_files: None,
@@ -505,11 +506,12 @@ fn test_collect_self_dispatch_in_impl() {
             local_symbols: &fctx.local_symbols,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &fctx.crate_root_modules,
+            workspace_module_paths: None,
         },
         mod_stack: &[],
         body: &f.block,
         signature_params: sig_params(&f.sig),
-        generic_params: vec![],
+        generic_params: std::collections::HashMap::new(),
         self_type: self_ty,
         workspace_index: None,
         workspace_files: None,
@@ -988,11 +990,12 @@ fn test_qualified_impl_path_does_not_double_crate() {
             local_symbols: &fctx.local_symbols,
             local_decl_scopes: &HashMap::new(),
             crate_root_modules: &fctx.crate_root_modules,
+            workspace_module_paths: None,
         },
         mod_stack: &[],
         body: &f.block,
         signature_params: sig_params(&f.sig),
-        generic_params: vec![],
+        generic_params: std::collections::HashMap::new(),
         self_type: self_ty,
         workspace_index: None,
         workspace_files: None,
@@ -1023,7 +1026,7 @@ fn ctx_with_index<'a>(
         mod_stack: &[],
         body: &f.block,
         signature_params: sig_params(&f.sig),
-        generic_params: vec![],
+        generic_params: std::collections::HashMap::new(),
         self_type: None,
         workspace_index: Some(index),
         workspace_files: None,
@@ -1031,10 +1034,10 @@ fn ctx_with_index<'a>(
 }
 
 #[test]
-fn test_inference_fallback_resolves_rlm_pattern() {
-    // The exact pattern that motivated Task 1.6: method chain on a
-    // constructor + `?` unwrap. Legacy extract_let_binding can't see
-    // through the MethodCall; inference walks the chain and ends at T.
+fn test_inference_fallback_resolves_method_chain_ctor_pattern() {
+    // The pattern that motivated this inference work: method chain
+    // on a constructor + `?` unwrap. Legacy extract_let_binding can't
+    // see through the MethodCall; inference walks the chain and ends at T.
     use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::{
         CanonicalType, WorkspaceTypeIndex,
     };

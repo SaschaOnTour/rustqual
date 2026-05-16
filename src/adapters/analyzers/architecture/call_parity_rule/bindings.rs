@@ -11,7 +11,7 @@ use super::local_symbols::{scope_for_local, FileScope};
 use crate::adapters::analyzers::architecture::forbidden_rule::{
     file_to_module_segments, resolve_to_crate_absolute, resolve_to_crate_absolute_in,
 };
-use crate::adapters::shared::use_tree::ScopedAliasMap;
+use crate::adapters::shared::use_tree::{AliasMap, AliasTarget, ScopedAliasMap};
 use std::collections::{HashMap, HashSet};
 
 /// Infer a canonical type-path from a `syn::Type`, stripping common
@@ -20,7 +20,7 @@ use std::collections::{HashMap, HashSet};
 /// external types without alias).
 pub(super) fn canonical_from_type(
     ty: &syn::Type,
-    alias_map: &HashMap<String, Vec<String>>,
+    alias_map: &AliasMap,
     local_symbols: &HashSet<String>,
     crate_root_modules: &HashSet<String>,
     importing_file: &str,
@@ -34,6 +34,12 @@ pub(super) fn canonical_from_type(
                 .iter()
                 .map(|s| s.ident.to_string())
                 .collect();
+            // Use-site gate: extern-root `::ext::Foo` doesn't match
+            // workspace symbols, so short-circuit before the
+            // workspace canonicaliser.
+            if tp.path.leading_colon.is_some() {
+                return None;
+            }
             canonicalise_type_segments(
                 &segments,
                 alias_map,
@@ -83,13 +89,16 @@ pub(crate) struct CanonScope<'a> {
     pub mod_stack: &'a [String],
 }
 
-/// Legacy helper for callers that have only the flat per-file maps
-/// (unit-test fixtures, the `canonical_from_type` adapter). Builds an
-/// empty `ScopedAliasMap` / `local_decl_scopes` overlay so the
-/// scope-aware path falls back to flat behaviour automatically.
+/// Legacy helper for callers without a full `FileScope` (unit-test
+/// fixtures, the `canonical_from_type` adapter). Builds an empty
+/// `ScopedAliasMap` / `local_decl_scopes` overlay so the scope-aware
+/// primitive falls back to flat behaviour automatically. Callers
+/// dealing with user-written `syn::Path` must check
+/// `path.leading_colon.is_some()` themselves BEFORE invoking this
+/// helper — the flat-map shape doesn't carry the leading-colon bit.
 pub(super) fn canonicalise_type_segments(
     segments: &[String],
-    alias_map: &HashMap<String, Vec<String>>,
+    alias_map: &AliasMap,
     local_symbols: &HashSet<String>,
     crate_root_modules: &HashSet<String>,
     importing_file: &str,
@@ -103,6 +112,7 @@ pub(super) fn canonicalise_type_segments(
         local_symbols,
         local_decl_scopes: &empty_decls,
         crate_root_modules,
+        workspace_module_paths: None,
     };
     canonicalise_type_segments_in_scope(
         segments,
@@ -113,10 +123,90 @@ pub(super) fn canonicalise_type_segments(
     )
 }
 
-/// Resolve a type-path segment list into a canonical `[crate, …]` path
-/// against `scope`. Returns `None` for unresolvable paths (external
-/// crates, unknown idents, or in-file names not declared at the
-/// current `mod_stack`).
+// qual:api
+/// Path canonicalisation gate: resolve a path's segments to a
+/// workspace canonical, respecting Rust 2018+ `::Foo` extern-root
+/// semantics. THE single gate for "user-written `syn::Path` →
+/// workspace canonical" — every site that observes a path written by
+/// the user MUST route through this helper, NOT call
+/// `canonicalise_type_segments_in_scope` directly.
+///
+/// The rule applies to both expression-side AND declaration-side
+/// paths. Originally we treated declarations as exempt ("internal
+/// code never writes leading-colon paths"), but in practice
+/// declaration sites routinely carry `::ext` prefixes too:
+/// `use ::ext::Foo;`, `pub use ::ext::Bar;`,
+/// `impl ::ext::Trait for X { … }`, `fn f<Q: ::ext::Bound>(...)`,
+/// `impl X { } where Self: ::ext::Marker`. Each is a declaration that
+/// must NOT promote `ext` to a workspace canonical when a same-named
+/// workspace module exists. The call sites that consume these
+/// declarations (`pub_fns_visibility::is_visible`,
+/// `pub_fns_alias_chain::resolve_alias_target_canonical`,
+/// `workspace_index::traits::resolve_trait_path`,
+/// `workspace_graph::resolve_impl_self_type`, etc.) all read
+/// `path.leading_colon.is_some()` and pass it here.
+///
+/// `leading_colon_set` short-circuits the workspace lookup: an
+/// absolute path (`::Foo::bar`) is explicit extern-crate syntax (we
+/// don't model extern crates as workspace symbols) and must NOT
+/// match a same-named workspace `Foo`. The primitive
+/// `canonicalise_type_segments_in_scope` (which this wraps) can't
+/// see the leading colon — segment lists carry no `::` info — so
+/// without this gate, `::Foo::bar` mis-resolves to
+/// `crate::...::Foo::bar` when a workspace `Foo` exists.
+///
+/// The few remaining direct callers of the primitive
+/// `canonicalise_type_segments_in_scope` (the legacy flat-map
+/// adapter `canonicalise_type_segments`, and
+/// `signature_params::canonicalise_bounds`) are themselves gated
+/// upstream: they receive segment lists from helpers that have
+/// already filtered out leading-colon paths inline. New code MUST
+/// NOT bypass the gate.
+/// Operation: leading-colon gate + delegate.
+pub(crate) fn canonicalise_workspace_path(
+    segments: &[String],
+    leading_colon_set: bool,
+    scope: &CanonScope<'_>,
+) -> Option<Vec<String>> {
+    if leading_colon_set {
+        return None;
+    }
+    canonicalise_type_segments_in_scope(segments, scope)
+}
+
+/// Resolve a type-path segment list against `scope`.
+///
+/// **Return shape is not uniform** — callers that expect "workspace
+/// canonical or None" must filter results explicitly:
+/// - `Some(["crate", …])` — the path resolves into the workspace.
+/// - `Some(other)` — the path is recognised but extern-rooted (an
+///   alias whose `use` had a leading `::`, or an unaliased non-crate
+///   first segment). Returned as-is so downstream lookups treat
+///   `ext::Foo::…` as the extern symbol it actually is, not a
+///   `crate::ext::Foo::…` phantom.
+/// - `None` — the segment list is empty, has unknown idents that
+///   don't match any alias / local / crate-root, or its alias chain
+///   couldn't normalise (e.g. unresolved `self::`/`super::`).
+///
+/// In practice the only consumer that meaningfully observes the
+/// extern-rooted `Some(other)` branch is the receiver-type binding
+/// inference (`canonical_from_type`), which uses the returned segments
+/// as a binding's type identity — extern bindings produce no workspace
+/// edge downstream, so the contract works. New callers that need
+/// strict "workspace canonical XOR None" semantics should add a
+/// thin wrapper that filters `result.first() == Some("crate")`.
+///
+/// **PRIMITIVE — DO NOT CALL FROM USE-SITE CONTEXTS.** This function
+/// has no `leading_colon` awareness; the segment-list interface
+/// cannot carry the `::` prefix. Callers handling a `syn::Path` from
+/// user code (call expressions, type references in fn bodies, trait
+/// bounds, `let`-binding annotations, `impl Trait for X` paths,
+/// `pub use` targets, etc.) MUST go through
+/// `canonicalise_workspace_path`, passing `path.leading_colon.is_some()`
+/// so an explicit absolute path (`::ext::Foo`) doesn't false-match a
+/// same-named workspace symbol. The only remaining direct caller is
+/// the legacy flat-map adapter `canonicalise_type_segments`, whose
+/// own callers gate `leading_colon` inline before invoking it.
 pub(crate) fn canonicalise_type_segments_in_scope(
     segments: &[String],
     scope: &CanonScope<'_>,
@@ -132,9 +222,9 @@ pub(crate) fn canonicalise_type_segments_in_scope(
         return Some(full);
     }
     if let Some(alias) = lookup_alias(scope, &segments[0]) {
-        let mut full = alias.to_vec();
+        let mut full = alias.segments.to_vec();
         full.extend_from_slice(&segments[1..]);
-        return normalize_after_alias(full, file.path, scope.mod_stack, file.crate_root_modules);
+        return normalize_after_alias(full, alias.absolute_root, scope);
     }
     if file.local_symbols.contains(&segments[0]) {
         if let Some(mod_path) =
@@ -160,32 +250,62 @@ pub(crate) fn canonicalise_type_segments_in_scope(
 /// inherit parents — so this looks up only at the current scope. When
 /// the scoped overlay has no entry for `mod_stack` (legacy / unit-test
 /// callers), falls back to the flat `alias_map`.
-fn lookup_alias<'a>(scope: &'a CanonScope<'a>, name: &str) -> Option<&'a [String]> {
+fn lookup_alias<'a>(scope: &'a CanonScope<'a>, name: &str) -> Option<&'a AliasTarget> {
     if let Some(map) = scope.file.aliases_per_scope.get(scope.mod_stack) {
-        return map.get(name).map(Vec::as_slice);
+        return map.get(name);
     }
-    scope.file.alias_map.get(name).map(Vec::as_slice)
+    scope.file.alias_map.get(name)
 }
 
 /// After alias-map substitution, re-run `self` / `super` normalisation
 /// (relative to `mod_stack` inside `importing_file`, so an alias
 /// declared inside an inline mod resolves its `self`/`super` against
 /// that mod) and prepend `crate` for Rust 2018+ absolute imports.
+///
+/// `absolute_root` is the leading-colon bit of the originating `use`
+/// item: `use ::ext::Foo as Local;` carries `absolute_root=true` and
+/// means "this is an extern path, NOT the workspace's `ext`." On that
+/// flag we MUST NOT apply workspace canonicalisation (sibling-submodule
+/// promotion, crate-root prepending) — that's the exact bug the
+/// in-tree alias-map leading-colon drift caused before v1.2.4.
 fn normalize_after_alias(
     expanded: Vec<String>,
-    importing_file: &str,
-    mod_stack: &[String],
-    crate_root_modules: &HashSet<String>,
+    absolute_root: bool,
+    scope: &CanonScope<'_>,
 ) -> Option<Vec<String>> {
+    if absolute_root {
+        // Extern-rooted alias (`use ::ext::Foo as Local;`). The path
+        // is intentionally NOT a workspace canonical — return it as-is
+        // so downstream lookups treat `ext::Foo::…` as the extern
+        // symbol it actually is, not a `crate::ext::Foo::…` phantom.
+        return Some(expanded);
+    }
+    let file = scope.file;
+    let mod_stack = scope.mod_stack;
     match expanded.first().map(|s| s.as_str()) {
         Some("self") | Some("super") => {
-            let resolved = resolve_to_crate_absolute_in(importing_file, mod_stack, &expanded)?;
+            let resolved = resolve_to_crate_absolute_in(file.path, mod_stack, &expanded)?;
             let mut full = vec!["crate".to_string()];
             full.extend(resolved);
             Some(full)
         }
         Some("crate") => Some(expanded),
-        Some(first) if crate_root_modules.contains(first) => {
+        // Rust 2018+ resolution priority: local sibling submodule wins
+        // over crate-root module of the same name. `use foo::bar` inside
+        // `crate::application` resolves to `crate::application::foo::bar`
+        // when that submodule exists, even if `crate::foo` also exists.
+        // Reversing this order misroutes valid local imports.
+        Some(first)
+            if is_workspace_submodule(file.workspace_module_paths, file.path, mod_stack, first) =>
+        {
+            let mut with_self = vec!["self".to_string()];
+            with_self.extend(expanded);
+            let resolved = resolve_to_crate_absolute_in(file.path, mod_stack, &with_self)?;
+            let mut full = vec!["crate".to_string()];
+            full.extend(resolved);
+            Some(full)
+        }
+        Some(first) if file.crate_root_modules.contains(first) => {
             let mut full = vec!["crate".to_string()];
             full.extend(expanded);
             Some(full)
@@ -194,13 +314,36 @@ fn normalize_after_alias(
     }
 }
 
-pub(super) fn normalize_alias_expansion(
-    expanded: Vec<String>,
+/// True when `[importing_file's mod path, mod_stack…, first]` is a
+/// known module path in the workspace — i.e. `first` names a real
+/// sibling submodule of the current module rather than an extern
+/// crate. Returns `false` when no workspace_module_paths is available
+/// (test fixtures without full workspace setup) so legacy behaviour
+/// is preserved.
+fn is_workspace_submodule(
+    workspace_module_paths: Option<&HashSet<Vec<String>>>,
     importing_file: &str,
     mod_stack: &[String],
-    crate_root_modules: &HashSet<String>,
+    first: &str,
+) -> bool {
+    let Some(paths) = workspace_module_paths else {
+        return false;
+    };
+    let mut candidate =
+        crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments(
+            importing_file,
+        );
+    candidate.extend_from_slice(mod_stack);
+    candidate.push(first.to_string());
+    paths.contains(&candidate)
+}
+
+pub(super) fn normalize_alias_expansion(
+    expanded: Vec<String>,
+    absolute_root: bool,
+    scope: &CanonScope<'_>,
 ) -> Option<Vec<String>> {
-    normalize_after_alias(expanded, importing_file, mod_stack, crate_root_modules)
+    normalize_after_alias(expanded, absolute_root, scope)
 }
 
 /// Extract a `(name, canonical_type_path)` pair from a `let` statement.
@@ -208,7 +351,7 @@ pub(super) fn normalize_alias_expansion(
 /// inference from the initializer (`let s = T::new()`).
 pub(super) fn extract_let_binding(
     local: &syn::Local,
-    alias_map: &HashMap<String, Vec<String>>,
+    alias_map: &AliasMap,
     local_symbols: &HashSet<String>,
     crate_root_modules: &HashSet<String>,
     importing_file: &str,
@@ -259,7 +402,7 @@ fn extract_pat_name_and_type(pat: &syn::Pat) -> Option<(String, Option<&syn::Typ
 /// prefix to a canonical path via alias_map / resolve_to_crate_absolute.
 fn binding_type_from_init(
     expr: &syn::Expr,
-    alias_map: &HashMap<String, Vec<String>>,
+    alias_map: &AliasMap,
     local_symbols: &HashSet<String>,
     crate_root_modules: &HashSet<String>,
     importing_file: &str,
@@ -286,6 +429,11 @@ fn binding_type_from_init(
         return None;
     }
     let type_segments = &segments[..segments.len() - 1];
+    // Use-site gate: `let x = ::ext::Foo::ctor()` extern-root path
+    // must not false-match a workspace `Foo`.
+    if path.leading_colon.is_some() {
+        return None;
+    }
     canonicalise_type_segments(
         type_segments,
         alias_map,

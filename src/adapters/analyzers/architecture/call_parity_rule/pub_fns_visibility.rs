@@ -7,7 +7,7 @@
 //! distinct types sharing a short ident don't collide and re-exports /
 //! type-aliases bridge to their source canonicals.
 
-use super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
+use super::bindings::{canonicalise_workspace_path, CanonScope};
 use super::local_symbols::{collect_local_symbols_scoped, FileScope, LocalSymbols};
 use super::pub_fns_alias_chain::{
     chase_alias_chain, collect_alias_chain, collect_workspace_type_canonicals,
@@ -16,7 +16,7 @@ use super::pub_fns_alias_chain::{
 use super::type_infer::resolve::is_stdlib_prefixed;
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
 use crate::adapters::shared::cfg_test::has_cfg_test;
-use crate::adapters::shared::use_tree::gather_alias_map_scoped;
+use crate::adapters::shared::use_tree::{gather_alias_map_scoped, AliasMap};
 use std::collections::{HashMap, HashSet};
 use syn::Visibility;
 
@@ -60,19 +60,12 @@ struct WalkCtx<'a> {
 /// collector.
 pub(super) fn collect_visible_type_canonicals_workspace(
     files: &[(&str, &syn::File)],
-    cfg_test_files: &HashSet<String>,
-    aliases_per_file: &HashMap<String, HashMap<String, Vec<String>>>,
-    crate_root_modules: &HashSet<String>,
+    aliases_per_file: &HashMap<String, AliasMap>,
+    workspace: &super::local_symbols::WorkspaceLookup<'_>,
     transparent_wrappers: &HashSet<String>,
 ) -> HashSet<String> {
-    let alias_chain = collect_alias_chain(
-        files,
-        cfg_test_files,
-        aliases_per_file,
-        crate_root_modules,
-        transparent_wrappers,
-    );
-    let type_canonicals = collect_workspace_type_canonicals(files, cfg_test_files);
+    let alias_chain = collect_alias_chain(files, aliases_per_file, workspace, transparent_wrappers);
+    let type_canonicals = collect_workspace_type_canonicals(files, workspace.cfg_test_files);
     let file_root_visibility = super::file_visibility::collect_file_root_visibility(files);
     let ctx = WalkCtx {
         transparent_wrappers,
@@ -80,26 +73,20 @@ pub(super) fn collect_visible_type_canonicals_workspace(
         type_canonicals: &type_canonicals,
     };
     let mut out = HashSet::new();
-    for_each_file_scope(
-        files,
-        cfg_test_files,
-        aliases_per_file,
-        crate_root_modules,
-        |file_scope, ast| {
-            // File-backed private modules (`mod internal;` without
-            // `pub` in the parent) keep their items out of the public
-            // surface — skip them entirely so a `pub fn helper()`
-            // inside `internal.rs` doesn't enter the visible-type set.
-            if !file_root_visibility
-                .get(file_scope.path)
-                .copied()
-                .unwrap_or(true)
-            {
-                return;
-            }
-            collect_in_items(&ast.items, &[], file_scope, &ctx, &mut out);
-        },
-    );
+    for_each_file_scope(files, aliases_per_file, workspace, |file_scope, ast| {
+        // File-backed private modules (`mod internal;` without
+        // `pub` in the parent) keep their items out of the public
+        // surface — skip them entirely so a `pub fn helper()`
+        // inside `internal.rs` doesn't enter the visible-type set.
+        if !file_root_visibility
+            .get(file_scope.path)
+            .copied()
+            .unwrap_or(true)
+        {
+            return;
+        }
+        collect_in_items(&ast.items, &[], file_scope, &ctx, &mut out);
+    });
     out
 }
 
@@ -109,16 +96,17 @@ pub(super) fn collect_visible_type_canonicals_workspace(
 /// the alias-chain pre-pass share. Operation.
 fn for_each_file_scope<F>(
     files: &[(&str, &syn::File)],
-    cfg_test_files: &HashSet<String>,
-    aliases_per_file: &HashMap<String, HashMap<String, Vec<String>>>,
-    crate_root_modules: &HashSet<String>,
+    aliases_per_file: &HashMap<String, AliasMap>,
+    workspace: &super::local_symbols::WorkspaceLookup<'_>,
     mut body: F,
 ) where
     F: FnMut(&FileScope<'_>, &syn::File),
 {
     let empty_aliases = HashMap::new();
+    let crate_root_modules = workspace.crate_root_modules;
+    let workspace_module_paths = workspace.workspace_module_paths;
     for (path, ast) in files {
-        if cfg_test_files.contains(*path) {
+        if workspace.cfg_test_files.contains(*path) {
             continue;
         }
         let alias_map = aliases_per_file.get(*path).unwrap_or(&empty_aliases);
@@ -131,6 +119,7 @@ fn for_each_file_scope<F>(
             local_symbols: &flat,
             local_decl_scopes: &by_name,
             crate_root_modules,
+            workspace_module_paths: Some(workspace_module_paths),
         };
         body(&file_scope, ast);
     }
@@ -162,14 +151,15 @@ fn collect_in_items(
             &ident.to_string(),
         ));
     };
-    let collect_use = |tree: &syn::UseTree, out: &mut HashSet<String>| {
+    let collect_use = |item_use: &syn::ItemUse, out: &mut HashSet<String>| {
         let use_ctx = super::pub_fns_use_tree::UseTreeCtx {
             file_scope,
             mod_stack,
             type_canonicals: ctx.type_canonicals,
             alias_chain: ctx.alias_chain,
+            leading_colon_set: item_use.leading_colon.is_some(),
         };
-        super::pub_fns_use_tree::walk_use_tree(tree, &mut Vec::new(), &use_ctx, out);
+        super::pub_fns_use_tree::walk_use_tree(&item_use.tree, &mut Vec::new(), &use_ctx, out);
     };
     let add_alias_target = |ty: &syn::Type, out: &mut HashSet<String>| {
         register_alias_target(ty, file_scope, mod_stack, ctx, out);
@@ -184,7 +174,7 @@ fn collect_in_items(
                 add_decl(&t.ident, out);
                 add_alias_target(&t.ty, out);
             }
-            syn::Item::Use(u) if is_visible(&u.vis) => collect_use(&u.tree, out),
+            syn::Item::Use(u) if is_visible(&u.vis) => collect_use(u, out),
             syn::Item::Mod(m) if is_visible(&m.vis) && !has_cfg_test(&m.attrs) => {
                 if let Some((_, inner)) = m.content.as_ref() {
                     let mut next = mod_stack.to_vec();
@@ -303,7 +293,11 @@ fn is_transparent_wrapper(
         mod_stack,
     };
     let segs: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
-    if let Some(canonical) = canonicalise_type_segments_in_scope(&segs, &scope) {
+    // Use-site gate: `::ext::Box`-style attribute paths don't refer
+    // to the workspace.
+    if let Some(canonical) =
+        canonicalise_workspace_path(&segs, path.leading_colon.is_some(), &scope)
+    {
         let Some(last_seg) = canonical.last() else {
             return false;
         };

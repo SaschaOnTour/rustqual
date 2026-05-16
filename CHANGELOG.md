@@ -5,13 +5,449 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.3] - in development
+## [1.2.4] - in development
 
-Patch release: **rlm v1.2.2 audit fixes** — closes five gaps surfaced
+Patch release: **call-parity audit follow-up + post-review
+sharpening** — closes the two remaining call-parity gaps surfaced by
+re-running the external audit against rustqual 1.2.3, plus four
+sibling-resolution / multi-bound findings from the post-1.2.3 review
+pass. Failing-first regression tests live in
+`call_parity_rule/tests/{module_resolution,target_anchors,type_infer/tests/resolve}.rs`.
+
+### Fixed (sibling-resolution + multi-bound)
+
+- **Tie-break walker leaks (sister-site of the `foo.rs` vs
+  `foo/mod.rs` fix).** The shared helper
+  `build_module_segs_to_path_map` picked `foo.rs` as the winner, but
+  two walkers still iterated the raw `files` slice and let the stale
+  `foo/mod.rs` register its own (stale) submodule declarations /
+  visibility — re-introducing the false workspace edges the
+  tie-break was meant to rule out. Fix: new shared gate
+  `forbidden_rule::is_tie_break_winner` that both
+  `local_symbols::walk_fallback_roots` and
+  `file_visibility::collect_file_root_visibility` route through; the
+  loser is skipped (as an implicit fallback root) or marked
+  invisible. Also: `build_module_segs_to_path_map` no longer stores
+  empty-segs entries — `src/lib.rs` and `src/main.rs` are distinct
+  crate roots, not alternatives for the same module identity.
+  Regression test:
+  `fallback_walker_skips_stale_mod_rs_when_file_rs_is_the_winner` in
+  `module_resolution.rs`.
+- **`canonicalise_type_segments_in_scope` docstring claimed "Returns
+  `None` for external crates".** That was already imprecise before
+  the leading-colon fix (the `_ => Some(expanded)` arm returned
+  non-crate paths) and became sharper when the new `absolute_root`
+  branch added a deliberate extern-path return. Tightened the
+  contract to spell out the three return shapes — workspace
+  canonical (`Some(["crate", …])`), extern-rooted as-is
+  (`Some(other)`), and truly unresolvable (`None`) — and noted that
+  workspace-only consumers must filter on `first() == Some("crate")`.
+- **Alias map silently dropped `ItemUse.leading_colon`.**
+  `gather_alias_map` / `gather_alias_map_scoped` only passed `u.tree`
+  into `collect_alias_entries`, so `use ::ext::Foo as Local;` was
+  stored byte-equivalent to `use ext::Foo as Local;`. At the use site
+  `Local::method()`, `normalize_after_alias` then happily prepended
+  `crate::` once `ext` matched a workspace top-level module, creating
+  a false workspace edge to a symbol the program never addressed.
+  Fix: `AliasMap` value is now `AliasTarget { segments,
+  absolute_root: bool }` — `collect_alias_entries` reads the parent
+  `ItemUse.leading_colon` once and stamps every entry; the new gate
+  short-circuits in `normalize_after_alias`. Single ownership of the
+  flag end-to-end so future drift between extraction and use-site is
+  compiler-prevented. Regression test:
+  `absolute_use_alias_does_not_re_canonicalise_to_workspace` in
+  `module_resolution.rs`.
+- **`src/foo.rs` and `src/foo/mod.rs` collision was order-dependent.**
+  `collect_workspace_module_paths` and `collect_file_root_visibility`
+  both built a `module-segments → file-path` index via
+  `.collect()` into a HashMap. When both files exist (stale-leftover
+  refactor), `file_to_module_segments` mapped them to the same key
+  `["foo"]` and whichever entry landed last in iteration order
+  silently overwrote the other — the walker then descended into the
+  wrong AST, producing non-deterministic `workspace_module_paths`
+  and missed call edges. Fix: new shared helper
+  `forbidden_rule::build_module_segs_to_path_map` applies Rust's
+  modern precedence rule (prefer `foo.rs` over `foo/mod.rs`); both
+  collectors route through it so the tie-break lives in one place.
+  Regression test:
+  `file_rs_wins_over_dir_mod_rs_when_both_back_the_same_module_path`
+  in `module_resolution.rs`.
+- **Sibling submodule loses to crate-root with same name.**
+  `normalize_after_alias` checked `crate_root_modules` before the
+  sibling-submodule branch, mis-routing `use foo::X` inside
+  `crate::application` (where both `crate::application::foo` and
+  `crate::foo` exist) to the crate-root module. Fix: reorder the
+  match arms — local sibling check fires first, matching Rust 2018+
+  resolution priority. Regression test:
+  `sibling_submodule_wins_over_crate_root_with_same_leaf_name` in
+  `module_resolution.rs`.
+- **Inline mods invisible to sibling discriminator.**
+  `collect_workspace_module_paths` collected only file-backed paths,
+  leaving inline `mod foo { mod bar { ... } use bar::X }` patterns
+  with no entry for `[foo, bar]`. Fix: walk each file's AST for
+  `Item::Mod` blocks (cfg-test skipped) and add their paths.
+  Regression test: `inline_mod_sibling_import_traces_edge` in
+  `module_resolution.rs`.
+- **Multi-bound generic receiver drops later bounds.**
+  `q.method()` where `q: &Q` and `Q: T1 + T2`: the receiver path
+  returned only the first bound, so if the method lived on `T2`,
+  `trait_dispatch_edges` filtered the first bound out and never
+  tried the second. Fix: `CanonicalType::TraitBound` payload
+  extended from `Vec<String>` to `Vec<Vec<String>>` (one entry per
+  bound). All three multi-bound TRAIT spellings (`dyn T1 + T2`,
+  `impl T1 + T2`, `<Q: T1 + T2>`) now collect every resolvable
+  trait bound; `canonical_edges_for_method` fans out one edge per
+  bound; `lookup_trait_method_return` finds the first bound that
+  defines the method. UFCS and receiver paths are now symmetric
+  for trait-bound dispatch. **Remaining limit:** a `Future<Output =
+  T>` bound still short-circuits to `CanonicalType::Future` and
+  drops any peer trait bounds — `CanonicalType` can't carry both a
+  Future and a TraitBound simultaneously, so
+  `impl Future<Output = T> + Handler` is still resolved as `Future`
+  only. Regression test:
+  `multi_bound_generic_receiver_method_call_emits_anchor_for_defining_bound`
+  in `target_anchors.rs`.
+- **Orphan files faked as sibling submodules.**
+  `collect_workspace_module_paths` derived its set from raw file
+  paths plus inline `mod` blocks, with no check that the parent
+  module actually declared the file. A stale file like
+  `src/application/orphan.rs` (no `pub mod orphan;` in
+  `application/mod.rs`) would still contribute
+  `["application", "orphan"]` to the lookup, making
+  `use orphan::T` from a sibling look like a local sibling import
+  and fabricating an edge to `crate::application::orphan::T` — a
+  canonical that isn't in the call graph. Fix: only files
+  reachable from a crate root via declared `mod` edges contribute
+  paths. Orphan files are unreachable in that walk and so stay
+  out of the lookup. cfg-test mods are skipped uniformly across
+  file-backed and inline declarations. Regression test:
+  `orphan_file_does_not_act_as_sibling_submodule` in
+  `module_resolution.rs`. (The initial 1.2.4 fix wired the lookup
+  through `file_root_visibility`; the private-mod fix below replaced
+  that with a declared-edge walk that handles both invariants in
+  one pass — the description here reflects the final shape.)
+- **Private `mod foo;` dropped from sibling-submodule lookup when
+  ancestor chain was hidden.**
+  The initial orphan-file fix wired `collect_workspace_module_paths`
+  through `file_root_visibility`, which is the right filter for
+  public-surface decisions but too narrow for module membership.
+  Inside a subtree hidden by a non-root private `mod hidden;`,
+  every child file inherited `visibility=false` and its own
+  `mod response;` declarations stopped contributing paths — even
+  though, from code INSIDE the hidden subtree, `use response::T`
+  must still resolve to `crate::…::hidden::response::T`. Fix:
+  drop the visibility filter for module-membership collection.
+  Walk from crate roots through every declared `mod X` (file-
+  backed and inline, any visibility), skipping cfg-test mods.
+  Orphan exclusion (the prior invariant) is preserved because
+  unreachable files are never visited by the walker. Regression
+  test:
+  `private_mod_sibling_import_resolves_even_when_ancestor_chain_is_hidden`
+  in `module_resolution.rs`.
+- **Unbounded generic param could collide with same-named workspace
+  symbol.** `resolve_generic_path` short-circuited to a trait bound
+  only when the fn-scoped generic param had at least one non-empty
+  bound; an unbounded `<Q>` fell through to normal canonicalisation,
+  which could resolve `Q` to a workspace type/module of the same
+  name and produce wrong method-dispatch edges. Fix: extracted a
+  `generic_param_shadow` helper that classifies the match into three
+  states (bounded → `GenericParamBound` carrying the canonical
+  bounds, unbounded → `Opaque` shadow, not-a-param → fall through)
+  so an unbounded match shadows the workspace lookup with `Opaque`.
+  Regression test:
+  `unbounded_generic_param_shadows_same_named_workspace_symbol` in
+  `type_infer/tests/resolve.rs`. (Initially introduced as the new
+  variant `TraitBound`; later split into a dedicated
+  `GenericParamBound` variant when the same-named conflation with
+  `impl Trait` / `dyn Trait` returns surfaced — see "Split
+  `CanonicalType::TraitBound`" below.)
+- **Workspace type index ignored fn / method / impl / struct
+  generics.** The shadowing fix above only fires when
+  `ResolveContext.generic_params` is populated, but the
+  `workspace_index/{functions,methods,fields}.rs` collectors all
+  constructed their `ResolveContext` via a helper that hard-coded
+  `generic_params: None`. So `pub struct Q;` plus any of
+  `pub fn get<Q>() -> Q`,
+  `impl<Q> Service<Q> { fn first(&self) -> Q }`, or
+  `pub struct Container<Q> { item: Q }` would index the return / field
+  as the workspace struct `Q`, poisoning later inference — e.g.
+  `get::<Session>().diff()` could short-circuit on the wrong concrete
+  return instead of using the turbofish. Fix: threaded the fn's,
+  impl's, and struct's canonical generics (via the unified
+  `signature_params::item_canonical_generics` /
+  `method_canonical_generics` helpers — see "Unified generics-
+  canonicalisation pipeline" below) into the per-collector resolve
+  context across all three indexing surfaces.
+  Audit covered every `ResolveContext` construction in the crate;
+  the alias-body case in `resolve_alias::expand_alias` correctly
+  keeps `generic_params: None` because alias bodies live at the
+  alias decl-site, not the use-site fn. Regression tests:
+  `fn_generic_param_return_does_not_collide_with_same_named_workspace_type`,
+  `method_generic_param_return_does_not_collide_with_same_named_workspace_type`,
+  `impl_level_generic_param_return_does_not_collide_with_same_named_workspace_type`,
+  `struct_generic_param_field_does_not_collide_with_same_named_workspace_type`
+  in `type_infer/tests/workspace_index.rs`.
+- **Workspace-index generic bounds were not canonicalised.** The
+  first version of the workspace-index generics threading (above)
+  stored raw bound segments (e.g. `[["Handler"]]`) —
+  `generic_param_shadow` in `resolve.rs` then wrapped those into the
+  bound variant literally, so downstream `trait_has_method` /
+  anchor-index lookups (keyed on
+  `crate::ports::handler::Handler`) silently missed and trait
+  dispatch on a `Q: Handler` return dropped valid edges. The body
+  collector already had a canonicaliser; it has been lifted from
+  `calls.rs` into `signature_params.rs`, and the workspace-index
+  collectors now route their generics through it before constructing
+  the resolve context. (Subsequently folded into the unified
+  `item_canonical_generics` / `method_canonical_generics` helpers —
+  see "Unified generics-canonicalisation pipeline" below.) Regression
+  test:
+  `bounded_fn_generic_param_return_carries_canonicalised_trait_bound`.
+- **Bounded generic-param return blocked turbofish inference.**
+  Once `fn get<Q: Handler>() -> Q` could be indexed with the bound
+  available, `infer_call` (which tried `fn_returns` before any
+  turbofish fallback) used the bound and never reached the
+  turbofish — so `get::<Session>().diff()` lost the inherent
+  `Session::diff` edge. Fix: when the index returns a
+  `GenericParamBound` AND the call site carries an explicit
+  turbofish, the turbofish wins (it's strictly more specific than
+  the param's bound). Plain bare-call sites still get the bound so
+  trait-anchor dispatch on the return value keeps working.
+  Regression test:
+  `bounded_fn_generic_param_return_does_not_block_turbofish_inference`.
+- **Method-return indexing missed method-level where-bounds on
+  impl-level generics.** `methods.rs` used a method-only generics
+  extractor that ignored `where Q: T` when `Q` was an impl-level
+  (not method-level) generic. The body collector had already needed
+  to thread outer names through the method's where clause for this
+  exact shape (`impl<Q> Service<Q> { fn current(&self) -> Q where
+  Q: Handler }`). `methods.rs` now goes through the unified
+  `method_canonical_generics(sig, impl_generics, …)` helper which
+  handles the outer-name-extending pass. Regression test:
+  `method_generic_param_return_canonicalises_where_bound_on_impl_generic`.
+
+### Changed (architectural)
+
+- **Unified generics-canonicalisation pipeline.** The body collector
+  (`file_fn_collector.rs` / `calls.rs`) and the three workspace-index
+  collectors (`workspace_index/{functions,methods,fields}.rs`) all
+  composed the same three-step pipeline (extract → merge →
+  canonicalise) manually. That duplication was the root cause of
+  the three findings above — each site missed a different
+  intermediate step. The pipeline now lives behind two public
+  helpers in `signature_params.rs`:
+  - `item_canonical_generics(generics, file, mod_stack)` — for free
+    fns, structs, impl blocks (no outer scope).
+  - `method_canonical_generics(sig, impl_generics, file, mod_stack)` —
+    for methods inside `impl` blocks (merges impl-level + method-
+    level + canonicalises).
+  The atomic helpers (`extract_*`, `canonicalise_bounds`) are private
+  to `signature_params.rs`. External callers can no longer compose
+  them incorrectly; the only way to construct a canonical generics
+  map is via one of the two public entry points.
+  `FnContext.generic_params` type changed from
+  `Vec<(String, Vec<Vec<String>>)>` (raw) to
+  `HashMap<String, ParamInfo>` (canonical + turbofish-position
+  tagged) — callers MUST
+  build it via the helpers.
+- **Unified turbofish-override across path-call and method-call.**
+  The "turbofish wins over a bounded-generic-param return" rule lived
+  inline in `infer_call` but not in `infer_method_call` — an
+  asymmetry that would have silently dropped
+  `s.method::<Session>().diff()` edges when method-call turbofish
+  meets a generic-param method return. Both call shapes now share
+  `turbofish_substitute(inferred, turbofish, ctx)` in
+  `infer/generics.rs`. The free-fn-only `turbofish_fallback(...)`
+  remains separate by design: an unindexed method on an Opaque
+  receiver gives no signal that the turbofish substitution is
+  meaningful, so method calls would otherwise synthesise false
+  `Session::method()` edges whenever the receiver type is unknown.
+  Regression tests:
+  `method_call_turbofish_overrides_bounded_generic_param_return`,
+  `free_fn_impl_trait_return_turbofish_does_not_substitute_return`,
+  `method_call_impl_trait_return_turbofish_does_not_substitute_return`.
+- **Split `CanonicalType::TraitBound` into two variants.**
+  The previous single `TraitBound` variant conflated two semantically
+  distinct return shapes that look the same in the index: (a) bare
+  fn-generic-param ident return (`fn f<Q: T>() -> Q` where `Q` IS
+  the return) — turbofish substitution at the call site CAN replace
+  it; (b) `impl Trait` / `dyn Trait` return — the return type is
+  opaque even when bounds are known; turbofish on OTHER generic
+  params doesn't substitute it. `turbofish_substitute` fired on both
+  and produced false `Session::diff` edges for
+  `fn make<T>() -> impl Handler` + `make::<Session>().diff()`. Fix:
+  new `CanonicalType::GenericParamBound` variant produced exclusively
+  by `generic_param_shadow` (case a); `TraitBound` stays for case b.
+  Both variants dispatch identically through the trait-anchor index
+  (every consumer that used to match `TraitBound` now goes through
+  `CanonicalType::as_trait_bounds()` which handles both). Only
+  `turbofish_substitute` distinguishes them — fires only for
+  `GenericParamBound`.
+- **Turbofish substitution lost which generic param position is
+  returned, and didn't recurse through wrapper returns.**
+  `turbofish_substitute` always picked the FIRST turbofish arg, so
+  `fn get<A, Q: Handler>() -> Q` called as `get::<Audit, Session>()`
+  would substitute `Audit` (position 0) instead of `Session`
+  (Q's position 1). And the substitution only fired when the WHOLE
+  inferred return was `GenericParamBound` — wrapper returns like
+  `fn get<Q: Handler>() -> Result<Q, E>` left the inner `Q`
+  un-substituted, so `get::<Session>().unwrap().diff()` lost the
+  Session::diff edge after `.unwrap()` peeled the Result. Fix:
+  `GenericParamBound` now carries `turbofish_index: Option<usize>`,
+  populated at index-build time by
+  `signature_params::item_canonical_generics` /
+  `method_canonical_generics` based on the param's position in the
+  callee's substitutable generics list (method-own params for
+  methods, fn-own params for free fns; impl-level params get `None`
+  because they're determined by the receiver type, not the method-
+  call turbofish). `turbofish_substitute` now uses the index to pick
+  the correct turbofish arg AND recurses through `Result` /
+  `Option` / `Future` wrappers so the inner `Q` substitutes before
+  combinator-unwrap peels the wrapper. The atomic
+  `signature_params::ParamInfo { bounds, turbofish_index }` struct
+  replaces the old `Vec<Vec<String>>` value type in
+  `FnContext.generic_params` / `ResolveContext.generic_params` /
+  `InferContext.generic_params`. Regression tests:
+  `multi_generic_fn_turbofish_picks_correct_arg_for_returned_param`,
+  `wrapper_around_generic_param_return_substitutes_inner_via_turbofish`,
+  `method_call_wrapper_around_generic_param_return_substitutes_inner`.
+- **Turbofish substitution missed `Vec<Q>` / `HashMap<_, Q>` wrappers
+  and shadowed explicit absolute paths.** Two sister gaps from the
+  same review pass:
+  - `turbofish_substitute` recursed through `Result` / `Option` /
+    `Future` but not through `Slice` (`Vec<Q>` → `Slice(Q)` in the
+    resolver) or `Map` (`HashMap<K, Q>` → `Map(Q)`). So
+    `for s in get::<Session>() { s.diff(); }` for
+    `fn get<Q: Handler>() -> Vec<Q>` left the inner Q un-substituted
+    and the iterator binding's `s` stayed as `GenericParamBound`,
+    losing the `Session::diff` edge. Fix: added `Slice` / `Map` arms
+    to the recursion. Regression test:
+    `vec_around_generic_param_return_substitutes_inner_via_turbofish`.
+  - `generic_param_shadow` matched purely on segment text, so an
+    explicit absolute path `::Q::method()` (Rust 2018+ extern-crate
+    root) was mis-shadowed by an in-scope generic param named `Q`.
+    Initial fix targeted only the type resolver (`resolve_generic_path`).
+    The CALL collector (`visit_expr_call` →
+    `canonicalise_generic_param_path` in `calls.rs`) had a parallel
+    generic-param lookup that ALSO ignored `leading_colon`. Unified
+    via `signature_params::matched_generic_param(segments,
+    leading_colon_set, generic_params)` as the single gate. Both
+    `generic_param_shadow` (type path) and
+    `canonicalise_generic_param_path` (call path) route through it.
+    Direct `generic_params.get(name)` lookups in any new code now
+    bypass the gate — code review / D-sweep grep for that pattern
+    catches new drift candidates. Regression tests:
+    `absolute_leading_colon_path_is_not_shadowed_by_in_scope_generic`,
+    `absolute_leading_colon_call_path_does_not_shadow_to_trait_anchor`.
+  - Even after the generic-param gate, both fallback paths still
+    dropped `leading_colon` when consulting the workspace
+    canonicalisation primitive — `::Q` with a workspace-local `Q`
+    would resolve to `crate::...::Q` (false workspace edge). Added
+    `bindings::canonicalise_workspace_path(segments, leading_colon_set,
+    scope)` as the central use-site canonicalisation gate (wraps
+    `canonicalise_type_segments_in_scope` with the leading-colon
+    short-circuit). `resolve_generic_path` (type) and
+    `canonicalise_call_path` in `infer/call.rs` (inference) both
+    route through it. The call collector's `canonicalise_path`
+    (which doesn't go through the primitive) gets an inline
+    early-return at the top — same gate semantic, locally enforced.
+    Regression tests:
+    `absolute_leading_colon_type_path_does_not_route_to_same_named_workspace_type`,
+    `absolute_leading_colon_call_path_does_not_route_to_same_named_workspace_fn`.
+  - Trait bounds had the same leak through TWO additional sites:
+    `signature_params::trait_bound_paths` stripped `leading_colon`
+    at extraction time (so `<Q: ::ext::Trait>` stored bare segments
+    that then canonicalised to a same-named workspace trait), and
+    `type_infer::resolve_bound_list` (for `dyn Trait` / `impl Trait`
+    types) called `canonicalise_type_segments_in_scope` directly
+    without `leading_colon`. Fix: `trait_bound_paths` filters out
+    leading-colon bounds at extraction; `resolve_bound_list` routes
+    per-bound through `canonicalise_workspace_path`. Regression
+    tests:
+    `generic_param_bound_with_leading_colon_does_not_route_to_workspace_trait`,
+    `dyn_trait_with_leading_colon_does_not_route_to_workspace_trait_anchor`.
+  - Final sweep — all other direct callers of
+    `canonicalise_type_segments_in_scope` that take a `syn::Path`
+    were converted to `canonicalise_workspace_path`:
+    `binding_type_from_init` (let-binding ctors),
+    `canonical_from_type` (legacy type-annotation resolver),
+    `workspace_index/traits::resolve_trait_path` (`impl Trait for X`
+    self-types), `is_impl_for_visible_trait` (pub-surface visibility),
+    `is_transparent_wrapper_path` (pub-fn-visibility marker check),
+    `resolve_alias_target_canonical` (alias-chain follow-through),
+    `resolve_use_source_type` + `register_pub_use_leaves` (`use` /
+    `pub use` resolution — `leading_colon` threaded via `UseTreeCtx`
+    and an extra param on the leaf registrar),
+    `workspace_graph::resolve_impl_self_type` (impl self-types),
+    `is_marker_trait` + `identify_wrapper_name` (stdlib markers /
+    wrappers — extern-rooted paths no longer mis-match same-named
+    workspace traits). The only remaining direct callers of the
+    primitive are the wrapper itself, the legacy flat-map adapter
+    (which gates inline), and `canonicalise_bounds` (whose inputs
+    are filtered by `trait_bound_paths` at extraction).
+
+### Performance
+
+- `local_symbols::has_workspace_ancestor` no longer allocates a
+  fresh `Vec<String>` per prefix probe (`base[..len].to_vec()` →
+  `&base[..len] as &[String]`). The `Vec<T>: Borrow<[T]>` impl lets
+  `HashMap::contains_key` take the slice directly. Hot path on
+  large workspaces; flamegraph surfaced the transient allocation.
+
+### Fixed
+
+- **Class 1 (call-parity / receiver-position trait dispatch)** —
+  `query.execute(args)` where `query: &Q` and `Q: Trait` now emits
+  the trait-method anchor edge, matching the UFCS form
+  (`Q::execute(args)`) shipped in 1.2.3. Round-4's
+  `canonicalise_generic_param_path` only fired for `Expr::Call`
+  with `Expr::Path`, missing the `Expr::MethodCall` path entirely
+  — 5th spelling overlooked in the cross-product enumeration. Fix
+  is upstream in `resolve_type` itself: a new optional
+  `generic_params` field on `ResolveContext` + `InferContext` lets
+  the path resolver recognise a single-segment ident that names a
+  fn-scoped generic param and return `CanonicalType::TraitBound`
+  for it. The existing TraitBound → `trait_dispatch_edges` →
+  anchor pipeline picks up the seeded binding without any
+  parallel logic. Every downstream consumer of `resolve_type`
+  (signature seeding, let-binding inference, return-type chasing,
+  closure-arg seeding) benefits at one stroke. Regression tests:
+  `method_call_on_generic_receiver_emits_trait_anchor_edge`,
+  `method_call_on_where_clause_bound_generic_emits_trait_anchor_edge`,
+  `method_call_on_impl_level_generic_emits_trait_anchor_edge`
+  in `target_anchors.rs`.
+- **Class 2 (call-parity / sibling-submodule UFCS)** —
+  `Type::new(args)` where `Type` is imported via
+  `use submodule::Type;` (relative sibling-submodule) now traces
+  correctly. Pre-existing latent gap (1.2.2 reproduces same
+  finding); newly visible in 1.2.3 because the Bug-2 `pub use`
+  fix made the enclosing generic dispatcher reachable, surfacing
+  the inner gap. Root cause: `normalize_after_alias` returned
+  relative paths (`["response", "Type", "new"]`) as-is when the
+  first segment wasn't in `crate_root_modules`, while the
+  recorded node canonical was absolute
+  (`["crate", "application", "response", "Type", "new"]`). Edge
+  pointed at a phantom node → no graph edge. Fix adds a new
+  `workspace_module_paths: HashSet<Vec<String>>` set on
+  `FileScope`, derived from every workspace file's
+  `file_to_module_segments`. The `_` arm of `normalize_after_alias`
+  now distinguishes sibling-submodule imports from extern-crate
+  imports by checking whether the would-be-absolute prefix
+  matches a known workspace module path — sibling submodules get
+  the implicit-self relative resolution (Rust 2018+ language
+  rule); extern crates preserve their absolute extern-path shape
+  so `is_stdlib_prefixed` and `resolve_bound_list`'s "first ==
+  'crate'" gate keep their existing behaviour. Regression test:
+  `concrete_ufcs_via_sibling_submodule_import_traces_edge` in
+  `call_parity_rule/tests/module_resolution.rs`.
+
+## [1.2.3] - 2026-05-14
+
+Patch release: **call_parity audit fixes** — closes five gaps surfaced
 by an external rmcp-based project's call-parity audit. Each fix is
 reproduced by a failing-first regression test in
-`call_parity_rule/tests/rlm_v122_eval.rs`; all 1637 tests + self-
-analysis stay 100% green after the fixes land.
+`call_parity_rule/tests/{receiver_tracing,module_resolution,target_anchors,check_b}.rs`;
+all tests + self-analysis stay 100% green after the fixes land.
 
 - **Bug 1 (call-parity / rmcp `#[tool_router]`)** — proc-macros
   generate the public dispatch surface at expansion time around a
@@ -1182,15 +1618,17 @@ fallback markers rather than fabricate edges:
   `// qual:allow(architecture)` on the enclosing fn.
 
 ### Infrastructure
-- **`tests/rlm_snapshot.rs`** — end-to-end regression snapshot with a
-  3-file rlm-shape fixture (application/session, cli/handlers,
-  mcp/handlers). Asserts a budget of **0 Check A findings + 5 Check B
-  findings** (the 5 legitimate asymmetries / dead-code items). Any
-  drift in this count is a clear regression signal.
-- **`tests/regressions.rs`** — unit-level tests covering every rlm
-  Group-2 / Group-3 pattern plus Stage-2 trait-dispatch /
-  turbofish cases and Stage-3 type-alias / user-wrapper cases.
-  Negative tests pin documented limits in place.
+- **`tests/end_to_end_snapshot.rs`** — end-to-end regression snapshot
+  with a 3-file session/handler fixture (application/session,
+  cli/handlers, mcp/handlers). Asserts a budget of **0 Check A
+  findings + 5 Check B findings** (the 5 legitimate asymmetries /
+  dead-code items). Any drift in this count is a clear regression
+  signal. (Renamed from `tests/rlm_snapshot.rs` in v1.2.4.)
+- **`tests/regressions.rs`** — unit-level tests covering every
+  method-chain-constructor and cascading-struct-field-access pattern,
+  plus Stage-2 trait-dispatch / turbofish cases and Stage-3
+  type-alias / user-wrapper cases. Negative tests pin documented
+  limits in place.
 - **~160 new unit tests** across `type_infer/tests/` covering
   `CanonicalType`, `resolve_type`, workspace-index building, inference
   dispatch, pattern binding, the stdlib-combinator table, trait
