@@ -123,6 +123,78 @@ pass. Failing-first regression tests live in
   `impl_level_generic_param_return_does_not_collide_with_same_named_workspace_type`,
   `struct_generic_param_field_does_not_collide_with_same_named_workspace_type`
   in `type_infer/tests/workspace_index.rs`.
+- **Workspace-index generic bounds were not canonicalised.** The
+  first version of the workspace-index generics threading (above)
+  stored raw bound segments (e.g. `[["Handler"]]`) —
+  `generic_param_shadow` in `resolve.rs` then wrapped those into
+  `TraitBound` literally, so downstream `trait_has_method` /
+  anchor-index lookups (keyed on
+  `crate::ports::handler::Handler`) silently missed and trait
+  dispatch on a `Q: Handler` return dropped valid edges. The body
+  collector already had a canonicaliser
+  (`resolve_generic_param_bounds`); it has been lifted from
+  `calls.rs` into `signature_params.rs`, and the three workspace-
+  index collectors (`functions.rs`, `methods.rs`, `fields.rs`) now
+  route their `extract_generics` output through it before
+  constructing the resolve context. Regression test:
+  `bounded_fn_generic_param_return_carries_canonicalised_trait_bound`.
+- **Bounded generic-param return blocked turbofish inference.**
+  Once `fn get<Q: Handler>() -> Q` could be indexed as
+  `TraitBound([Handler])`, `infer_call` (which tried `fn_returns`
+  before `turbofish_return_type`) used the bound and never reached
+  the turbofish — so `get::<Session>().diff()` lost the inherent
+  `Session::diff` edge. Fix: when the index returns a `TraitBound`
+  AND the call site carries an explicit turbofish, the turbofish
+  wins (it's strictly more specific than the param's bound). Plain
+  bare-call sites still get the bound so trait-anchor dispatch on
+  the return value keeps working. Regression test:
+  `bounded_fn_generic_param_return_does_not_block_turbofish_inference`.
+- **Method-return indexing missed method-level where-bounds on
+  impl-level generics.** `methods.rs` used
+  `extract_generics(&sig.generics)` which ignores
+  `where Q: T` when `Q` is an impl-level (not method-level) generic.
+  The body collector had already needed
+  `extract_method_generic_params(sig, outer_names)` for this exact
+  shape (`impl<Q> Service<Q> { fn current(&self) -> Q where Q: Handler }`).
+  `methods.rs` now uses the same helper. Regression test:
+  `method_generic_param_return_canonicalises_where_bound_on_impl_generic`.
+
+### Changed (architectural)
+
+- **Unified generics-canonicalisation pipeline.** The body collector
+  (`file_fn_collector.rs` / `calls.rs`) and the three workspace-index
+  collectors (`workspace_index/{functions,methods,fields}.rs`) all
+  composed the same three-step pipeline (extract → merge →
+  canonicalise) manually. That duplication was the root cause of
+  the three findings above — each site missed a different
+  intermediate step. The pipeline now lives behind two public
+  helpers in `signature_params.rs`:
+  - `item_canonical_generics(generics, file, mod_stack)` — for free
+    fns, structs, impl blocks (no outer scope).
+  - `method_canonical_generics(sig, impl_generics, file, mod_stack)` —
+    for methods inside `impl` blocks (merges impl-level + method-
+    level + canonicalises).
+  The atomic helpers (`extract_*`, `merge_generic_params`,
+  `resolve_generic_param_bounds`) are now private to
+  `signature_params.rs`. External callers can no longer compose them
+  incorrectly; the only way to construct a canonical generics map
+  is via one of the two public entry points. `FnContext.generic_params`
+  type changed from `Vec<(String, Vec<Vec<String>>)>` (raw) to
+  `HashMap<String, Vec<Vec<String>>>` (canonical) — callers MUST
+  build it via the helpers.
+- **Unified turbofish-override across path-call and method-call.**
+  The "turbofish wins over a bounded-generic-param return" rule lived
+  inline in `infer_call` but not in `infer_method_call` — an
+  asymmetry that would have silently dropped
+  `s.method::<Session>().diff()` edges when method-call turbofish
+  meets a `TraitBound` method return. Both call shapes now route
+  through `resolve_with_turbofish_override(inferred, turbofish, ctx)`
+  in `infer/generics.rs`, parameterised by an
+  `Option<&AngleBracketedGenericArguments>`. Free-fn calls extract
+  the args via `path_turbofish_args` (preserves the single-segment
+  guard against `Vec::<u32>::new()`-style over-approximation);
+  method calls pass `ExprMethodCall.turbofish` directly. Regression
+  test: `method_call_turbofish_overrides_bounded_generic_param_return`.
 
 ### Fixed
 

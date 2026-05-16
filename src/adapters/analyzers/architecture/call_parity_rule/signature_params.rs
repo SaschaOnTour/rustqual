@@ -4,6 +4,10 @@
 //! (graph-build) — both need the same `(name, &Type)` pairs that the
 //! `CanonicalCallCollector` seeds into its binding scope.
 
+use super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
+use super::local_symbols::FileScope;
+use std::collections::HashMap;
+
 /// Extract `(name, &Type)` pairs for every typed positional parameter
 /// of a fn signature. Framework-extractor patterns like
 /// `fn h(State(db): State<Db>)` contribute `("db", State<Db>)` — the
@@ -22,18 +26,58 @@ pub(crate) fn extract_signature_params(sig: &syn::Signature) -> Vec<(String, &sy
         .collect()
 }
 
-/// Extract `(name, [trait_bound_path_segs, ...])` for every type
-/// parameter declared in a fn signature, plus any method-level
-/// `where`-clause bounds that target an `outer_names` entry — i.e.
-/// an impl-level generic referenced from the method's where clause:
-/// `impl<Q> Runner<Q> { fn run(&self) where Q: Handler { Q::handle() } }`.
-/// Without the outer-name pass, that `where Q: Handler` would be
-/// silently dropped (Q is not in the method's own `params`), so
-/// `Q::handle()` would fail to canonicalise to `Handler::handle`.
-/// Lifetime / const generics are skipped; each trait bound is
-/// returned as its raw path segments — the call collector resolves
-/// them against the file scope.
-pub(crate) fn extract_method_generic_params(
+// qual:api
+/// Canonical generic-param map for a free fn / struct / impl-block —
+/// any item whose generics aren't merged with an outer scope. Returns
+/// `{name → canonicalised trait-bound paths}`; entries with empty
+/// bound lists are kept so `generic_param_shadow` still recognises
+/// the param as a generic (shadows same-named workspace symbols).
+/// Integration: one helper owns the whole pipeline so call sites
+/// can't compose the atomic steps incorrectly.
+pub(crate) fn item_canonical_generics(
+    generics: &syn::Generics,
+    file: &FileScope<'_>,
+    mod_stack: &[String],
+) -> HashMap<String, Vec<Vec<String>>> {
+    resolve_generic_param_bounds(&extract_item_generics(generics), file, mod_stack)
+}
+
+// qual:api
+/// Canonical generic-param map for a method inside an `impl` block.
+/// Merges impl-level generics with method-level inline + where bounds
+/// (the where bounds on impl-level generic names get picked up via
+/// `extract_method_with_outer`), then canonicalises against the file
+/// scope. Integration: the only correct way to assemble the
+/// generic-params map for a method.
+pub(crate) fn method_canonical_generics(
+    sig: &syn::Signature,
+    impl_generics: &[(String, Vec<Vec<String>>)],
+    file: &FileScope<'_>,
+    mod_stack: &[String],
+) -> HashMap<String, Vec<Vec<String>>> {
+    let outer_names: Vec<&str> = impl_generics.iter().map(|(n, _)| n.as_str()).collect();
+    let method_raw = extract_method_with_outer(sig, &outer_names);
+    let merged = merge_generic_params(impl_generics.to_vec(), method_raw);
+    resolve_generic_param_bounds(&merged, file, mod_stack)
+}
+
+// qual:api
+/// Raw impl-level generic-params for use as `outer_names` /
+/// `impl_generics` input to `method_canonical_generics`. Visitor
+/// frames hold this so children can refer to the impl's params.
+/// `extract_*` variants are private; this exposes only the visitor-
+/// stack form that callers actually need.
+pub(crate) fn impl_block_generics(generics: &syn::Generics) -> Vec<(String, Vec<Vec<String>>)> {
+    extract_item_generics(generics)
+}
+
+/// Method-only extractor: inline bounds + where-bounds (extending if
+/// the bound targets an `outer_names` entry, i.e. an impl-level
+/// generic referenced from the method's where clause). Without this
+/// extending pass, `impl<Q> R<Q> { fn f(&self) where Q: Handler }`
+/// would lose `Handler`. Private: only `method_canonical_generics`
+/// composes this with the canonicaliser.
+fn extract_method_with_outer(
     sig: &syn::Signature,
     outer_names: &[&str],
 ) -> Vec<(String, Vec<Vec<String>>)> {
@@ -44,14 +88,11 @@ pub(crate) fn extract_method_generic_params(
     bounds_by_name
 }
 
-/// Same shape as `extract_method_generic_params` but reads from any
-/// `syn::Generics` — used to capture impl-level bounds
-/// (`impl<Q: Trait> Foo<Q> { ... }`) which apply to every method's
-/// body. Callers merge impl-level + method-level via
-/// `merge_generic_params` so a `Q::method()` call inside the body
-/// resolves regardless of whether `Q: Trait` is on the impl or the
-/// method signature.
-pub(crate) fn extract_generics(generics: &syn::Generics) -> Vec<(String, Vec<Vec<String>>)> {
+/// Item-level extractor: inline bounds + where-bounds (only for names
+/// already declared as inline params — no extending). Used by free
+/// fns, structs, and impl blocks. Private: composed by
+/// `item_canonical_generics` and `impl_block_generics`.
+fn extract_item_generics(generics: &syn::Generics) -> Vec<(String, Vec<Vec<String>>)> {
     let mut bounds_by_name = collect_inline_bounds(generics);
     if let Some(where_clause) = generics.where_clause.as_ref() {
         merge_where_bounds(&mut bounds_by_name, where_clause);
@@ -79,12 +120,13 @@ fn collect_inline_bounds(generics: &syn::Generics) -> Vec<(String, Vec<Vec<Strin
 /// "the name `Q` is already used for a generic parameter in this
 /// item's generic parameters"), so the only way a name appears in
 /// both lists is when method-level `where`-clauses ADD bounds to an
-/// impl-level param via `extract_method_generic_params` (which
-/// extends `bounds_by_name` with an outer-name entry when the
-/// method's where clause references an impl-level generic).
-/// Concatenation is therefore correct: it accumulates the full
-/// bound set for a param that was introduced once at the impl level.
-pub(crate) fn merge_generic_params(
+/// impl-level param via `extract_method_with_outer` (which extends
+/// `bounds_by_name` with an outer-name entry when the method's where
+/// clause references an impl-level generic). Concatenation is
+/// therefore correct: it accumulates the full bound set for a param
+/// that was introduced once at the impl level. Private: only
+/// `method_canonical_generics` composes this with the canonicaliser.
+fn merge_generic_params(
     outer: Vec<(String, Vec<Vec<String>>)>,
     inner: Vec<(String, Vec<Vec<String>>)>,
 ) -> Vec<(String, Vec<Vec<String>>)> {
@@ -195,4 +237,29 @@ fn param_name_from_pat(pat: &syn::Pat) -> Option<String> {
         }
         _ => None,
     }
+}
+
+/// Canonicalise each raw trait-bound segment list against `file`'s
+/// scope. Bounds that resolve become anchor prefixes; unresolvable
+/// bounds (external trait, typo) are dropped — the param entry stays
+/// in the map (so `generic_param_shadow` still recognises `Q` as a
+/// generic) but with an empty bound list, producing zero anchor
+/// edges. Private: composed by `item_canonical_generics` /
+/// `method_canonical_generics`; external callers must use those.
+fn resolve_generic_param_bounds(
+    raw: &[(String, Vec<Vec<String>>)],
+    file: &FileScope<'_>,
+    mod_stack: &[String],
+) -> HashMap<String, Vec<Vec<String>>> {
+    let mut out = HashMap::new();
+    let scope = CanonScope { file, mod_stack };
+    for (name, bounds) in raw {
+        let resolved: Vec<Vec<String>> = bounds
+            .iter()
+            .filter_map(|b| canonicalise_type_segments_in_scope(b, &scope))
+            .filter(|c| c.first().map(String::as_str) == Some("crate"))
+            .collect();
+        out.insert(name.clone(), resolved);
+    }
+    out
 }

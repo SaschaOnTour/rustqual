@@ -11,7 +11,7 @@ use super::bindings::CanonScope;
 use super::calls::{collect_canonical_calls, FnContext};
 use super::local_symbols::FileScope;
 use super::signature_params::{
-    extract_generics, extract_method_generic_params, extract_signature_params, merge_generic_params,
+    extract_signature_params, impl_block_generics, method_canonical_generics,
 };
 use super::type_infer::WorkspaceTypeIndex;
 use super::workspace_graph::{canonical_fn_name, resolve_impl_self_type, CallGraph};
@@ -20,10 +20,12 @@ use std::collections::HashMap;
 use syn::visit::Visit;
 
 /// One enclosing impl block: resolved self-type plus the impl-level
-/// generic params (`impl<Q: Trait> Foo<Q> { ... }`). The latter
-/// applies to every method in the block — `Q::method()` inside a
-/// method body has to see the impl bound to resolve to a trait
-/// anchor.
+/// generic params (`impl<Q: Trait> Foo<Q> { ... }`) in RAW form,
+/// because the method-side canonicaliser
+/// (`method_canonical_generics`) needs to merge them with method-
+/// level where bounds (`fn f(&self) where Q: T`) before
+/// canonicalisation — the merge happens on raw segments so unknown
+/// outer names can be discriminated.
 pub(super) struct ImplFrame {
     pub self_type: Option<Vec<String>>,
     pub generic_params: Vec<(String, Vec<Vec<String>>)>,
@@ -71,14 +73,17 @@ impl<'a> FileFnCollector<'a> {
             &self.mod_stack,
             fn_name,
         );
-        let outer_names: Vec<&str> = impl_generics.iter().map(|(n, _)| n.as_str()).collect();
-        let method_generics = extract_method_generic_params(sig, &outer_names);
         let ctx = FnContext {
             file: self.file,
             mod_stack: &self.mod_stack,
             body,
             signature_params: extract_signature_params(sig),
-            generic_params: merge_generic_params(impl_generics, method_generics),
+            generic_params: method_canonical_generics(
+                sig,
+                &impl_generics,
+                self.file,
+                &self.mod_stack,
+            ),
             self_type,
             workspace_index: Some(self.type_index),
             workspace_files: Some(self.workspace_files),
@@ -128,7 +133,7 @@ impl<'a, 'ast> Visit<'ast> for FileFnCollector<'a> {
         );
         self.impl_type_stack.push(ImplFrame {
             self_type: resolved,
-            generic_params: extract_generics(&node.generics),
+            generic_params: impl_block_generics(&node.generics),
         });
         syn::visit::visit_item_impl(self, node);
         self.impl_type_stack.pop();

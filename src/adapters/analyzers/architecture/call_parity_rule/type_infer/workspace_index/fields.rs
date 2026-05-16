@@ -8,10 +8,9 @@
 use super::super::canonical::CanonicalType;
 use super::super::resolve::resolve_type;
 use super::{resolve_ctx_with_generics, BuildContext, WorkspaceTypeIndex};
-use crate::adapters::analyzers::architecture::call_parity_rule::signature_params::extract_generics;
+use crate::adapters::analyzers::architecture::call_parity_rule::signature_params::item_canonical_generics;
 use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
 use crate::adapters::shared::cfg_test::has_cfg_test;
-use std::collections::HashMap;
 use syn::visit::Visit;
 
 /// Walk `ast` and populate `index.struct_fields`. Uses `syn::visit::Visit`
@@ -75,8 +74,7 @@ fn record_struct(
     let syn::Fields::Named(named) = &item.fields else {
         return;
     };
-    let generics: HashMap<String, Vec<Vec<String>>> =
-        extract_generics(&item.generics).into_iter().collect();
+    let generics = item_canonical_generics(&item.generics, ctx.file, mod_stack);
     let rctx = resolve_ctx_with_generics(ctx, mod_stack, Some(&generics));
     for field in &named.named {
         record_field(index, &canonical, &rctx, field);

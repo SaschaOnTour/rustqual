@@ -52,10 +52,12 @@ pub struct FnContext<'a> {
     pub body: &'a syn::Block,
     /// Named signature parameters with their declared types.
     pub signature_params: Vec<(String, &'a syn::Type)>,
-    /// Generic type parameters with their raw trait-bound segment lists.
-    /// Resolved into canonicals on collector construction; see
-    /// `resolve_generic_param_bounds`.
-    pub generic_params: Vec<(String, Vec<Vec<String>>)>,
+    /// Canonical generic-param map: `name → canonicalised trait-bound
+    /// paths`. Callers MUST build this via
+    /// `signature_params::item_canonical_generics` or
+    /// `method_canonical_generics`; constructing it ad-hoc bypasses
+    /// the canonicaliser and leaves `Q::method()` dispatch broken.
+    pub generic_params: HashMap<String, Vec<Vec<String>>>,
     /// Type-path of the enclosing `impl` block, if any.
     pub self_type: Option<Vec<String>>,
     /// Workspace type-index for shallow inference fallback. `None` for
@@ -121,14 +123,12 @@ impl<'a> CanonicalCallCollector<'a> {
             full.extend_from_slice(segs);
             full
         });
-        let generic_params =
-            resolve_generic_param_bounds(&ctx.generic_params, ctx.file, ctx.mod_stack);
         Self {
             file: ctx.file,
             mod_stack: ctx.mod_stack,
             self_type_canonical,
             signature_params: ctx.signature_params.clone(),
-            generic_params,
+            generic_params: ctx.generic_params.clone(),
             bindings: vec![HashMap::new()],
             non_path_bindings: vec![HashMap::new()],
             calls: HashSet::new(),
@@ -1009,28 +1009,4 @@ impl<'a, 'ast> Visit<'ast> for CanonicalCallCollector<'a> {
         self.visit_expr(&c.body);
         self.exit_scope();
     }
-}
-
-/// Canonicalise each raw trait-bound segment list against `file`'s
-/// scope. Bounds that resolve become anchor prefixes; unresolvable
-/// bounds (external trait, typo) are dropped — the param entry stays
-/// in the map (so the canonicalise step still recognises `Q` as a
-/// generic) but with an empty bound list, producing zero anchor
-/// edges. Operation: per-bound canonicalisation.
-fn resolve_generic_param_bounds(
-    raw: &[(String, Vec<Vec<String>>)],
-    file: &FileScope<'_>,
-    mod_stack: &[String],
-) -> HashMap<String, Vec<Vec<String>>> {
-    let mut out = HashMap::new();
-    let scope = CanonScope { file, mod_stack };
-    for (name, bounds) in raw {
-        let resolved: Vec<Vec<String>> = bounds
-            .iter()
-            .filter_map(|b| canonicalise_type_segments_in_scope(b, &scope))
-            .filter(|c| c.first().map(String::as_str) == Some("crate"))
-            .collect();
-        out.insert(name.clone(), resolved);
-    }
-    out
 }

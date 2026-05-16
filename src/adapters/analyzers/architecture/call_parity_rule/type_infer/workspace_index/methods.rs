@@ -18,7 +18,7 @@ use super::super::self_subst::substitute_bare_self;
 use super::{canonical_type_key, resolve_ctx_with_generics, BuildContext, WorkspaceTypeIndex};
 use crate::adapters::analyzers::architecture::call_parity_rule::bindings::CanonScope;
 use crate::adapters::analyzers::architecture::call_parity_rule::signature_params::{
-    extract_generics, merge_generic_params,
+    impl_block_generics, method_canonical_generics,
 };
 use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::resolve_impl_self_type;
 use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
@@ -74,7 +74,7 @@ impl<'ast, 'i, 'c> Visit<'ast> for MethodCollector<'i, 'c> {
         );
         self.impl_stack.push(ImplFrame {
             self_ty,
-            generics: extract_generics(&node.generics),
+            generics: impl_block_generics(&node.generics),
         });
         syn::visit::visit_item_impl(self, node);
         self.impl_stack.pop();
@@ -119,10 +119,7 @@ fn record_method(
     let syn::ReturnType::Type(_, ret_ty) = &node.sig.output else {
         return;
     };
-    let merged: HashMap<String, Vec<Vec<String>>> =
-        merge_generic_params(frame.generics.clone(), extract_generics(&node.sig.generics))
-            .into_iter()
-            .collect();
+    let merged = method_canonical_generics(&node.sig, &frame.generics, ctx.file, mod_stack);
     let inner = resolve_method_return(ret_ty, impl_segs, ctx, mod_stack, &merged);
     if matches!(inner, CanonicalType::Opaque) {
         return;

@@ -49,13 +49,13 @@ pub(crate) struct ResolveContext<'a> {
     /// resolves naked `T` against the alias's decl-site, which can't
     /// see the use-site's symbols. `None` outside alias expansion.
     pub alias_param_subs: Option<&'a HashMap<String, CanonicalType>>,
-    /// Fn-scoped generic params with their trait bounds — populated
-    /// by `extract_method_generic_params` and threaded through the
-    /// collector so `resolve_path` can return `TraitBound(...)` for
-    /// a bare-ident path that names a generic type parameter
+    /// Fn-scoped generic params with their canonicalised trait bounds
+    /// — built via `signature_params::item_canonical_generics` or
+    /// `method_canonical_generics` and threaded through the collector
+    /// so `resolve_path` can return `TraitBound(...)` for a bare-ident
+    /// path that names a generic type parameter
     /// (`Q` in `fn f<Q: Trait>(q: &Q) { q.method() }`). `None` for
-    /// workspace-pass-1 / alias-body / test contexts that have no
-    /// fn-level generic info.
+    /// alias-body / test contexts that have no fn-level generic info.
     pub generic_params: Option<&'a HashMap<String, Vec<Vec<String>>>>,
 }
 
