@@ -11,9 +11,10 @@ use syn::spanned::Spanned;
 use syn::UseTree;
 
 // qual:api
-/// Canonical target an in-scope alias resolves to, plus the bit that
-/// distinguishes Rust 2018+ absolute paths (`use ::ext::Foo as Bar;`)
-/// from relative ones (`use ext::Foo as Bar;`).
+/// The canonical target that an in-scope alias resolves to, paired
+/// with the bit that distinguishes Rust 2018+ absolute paths
+/// (`use ::ext::Foo as Bar;`) from relative ones
+/// (`use ext::Foo as Bar;`).
 ///
 /// The absolute-root bit must propagate end-to-end: a leading-colon
 /// import names the extern crate `ext`, NOT the workspace's

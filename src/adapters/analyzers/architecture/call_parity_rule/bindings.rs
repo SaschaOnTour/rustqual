@@ -124,13 +124,27 @@ pub(super) fn canonicalise_type_segments(
 }
 
 // qual:api
-/// Use-site path canonicalisation: resolve a path's segments to a
+/// Path canonicalisation gate: resolve a path's segments to a
 /// workspace canonical, respecting Rust 2018+ `::Foo` extern-root
-/// semantics. THE single gate for "user-written path (call
-/// expression, type reference in fn body, turbofish target, …) →
-/// workspace canonical" — every site that takes a `syn::Path` from
-/// user code MUST route through this helper, NOT call
+/// semantics. THE single gate for "user-written `syn::Path` →
+/// workspace canonical" — every site that observes a path written by
+/// the user MUST route through this helper, NOT call
 /// `canonicalise_type_segments_in_scope` directly.
+///
+/// The rule applies to both expression-side AND declaration-side
+/// paths. Originally we treated declarations as exempt ("internal
+/// code never writes leading-colon paths"), but in practice
+/// declaration sites routinely carry `::ext` prefixes too:
+/// `use ::ext::Foo;`, `pub use ::ext::Bar;`,
+/// `impl ::ext::Trait for X { … }`, `fn f<Q: ::ext::Bound>(...)`,
+/// `impl X { } where Self: ::ext::Marker`. Each is a declaration that
+/// must NOT promote `ext` to a workspace canonical when a same-named
+/// workspace module exists. The call sites that consume these
+/// declarations (`pub_fns_visibility::is_visible`,
+/// `pub_fns_alias_chain::resolve_alias_target_canonical`,
+/// `workspace_index::traits::resolve_trait_path`,
+/// `workspace_graph::resolve_impl_self_type`, etc.) all read
+/// `path.leading_colon.is_some()` and pass it here.
 ///
 /// `leading_colon_set` short-circuits the workspace lookup: an
 /// absolute path (`::Foo::bar`) is explicit extern-crate syntax (we
@@ -141,11 +155,13 @@ pub(super) fn canonicalise_type_segments(
 /// without this gate, `::Foo::bar` mis-resolves to
 /// `crate::...::Foo::bar` when a workspace `Foo` exists.
 ///
-/// Declaration-side canonicalisation (e.g. resolving alias targets
-/// in `use foo::Bar`, sig-param types from declarations, trait-impl
-/// self-types) can continue calling
-/// `canonicalise_type_segments_in_scope` directly: declarations
-/// don't carry leading-colon paths in workspace-internal code.
+/// The few remaining direct callers of the primitive
+/// `canonicalise_type_segments_in_scope` (the legacy flat-map
+/// adapter `canonicalise_type_segments`, and
+/// `signature_params::canonicalise_bounds`) are themselves gated
+/// upstream: they receive segment lists from helpers that have
+/// already filtered out leading-colon paths inline. New code MUST
+/// NOT bypass the gate.
 /// Operation: leading-colon gate + delegate.
 pub(crate) fn canonicalise_workspace_path(
     segments: &[String],
