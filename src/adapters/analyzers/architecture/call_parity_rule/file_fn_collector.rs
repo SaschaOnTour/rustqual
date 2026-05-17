@@ -36,6 +36,11 @@ pub(super) struct FileFnCollector<'a> {
     pub file: &'a FileScope<'a>,
     pub workspace_files: &'a HashMap<String, FileScope<'a>>,
     pub type_index: &'a WorkspaceTypeIndex,
+    /// Workspace-wide `pub use` re-export map. `Some(&…)` when the
+    /// build pipeline threaded it through; `None` for legacy / test
+    /// contexts. Propagated into every `CanonScope` so the gate
+    /// substitutes re-exported prefixes back to DECL canonicals.
+    pub reexports: Option<&'a super::reexports::ReexportMap>,
     /// Stack of enclosing impl blocks. `self_type=None` marks an
     /// unresolved self-type (trait object, `&T`, tuple) whose methods
     /// we must not record.
@@ -78,8 +83,12 @@ impl<'a> FileFnCollector<'a> {
         // coupling free-fn generics handling to method-specific logic:
         // free fns have no outer scope, methods inherit the impl's.
         let generic_params = match impl_generics {
-            Some(outer) => method_canonical_generics(sig, outer, self.file, &self.mod_stack),
-            None => item_canonical_generics(&sig.generics, self.file, &self.mod_stack),
+            Some(outer) => {
+                method_canonical_generics(sig, outer, self.file, &self.mod_stack, self.reexports)
+            }
+            None => {
+                item_canonical_generics(&sig.generics, self.file, &self.mod_stack, self.reexports)
+            }
         };
         let ctx = FnContext {
             file: self.file,
@@ -90,6 +99,7 @@ impl<'a> FileFnCollector<'a> {
             self_type,
             workspace_index: Some(self.type_index),
             workspace_files: Some(self.workspace_files),
+            reexports: self.reexports,
         };
         let calls = collect_canonical_calls(&ctx);
         self.graph.add_node(&canonical);
@@ -132,6 +142,7 @@ impl<'a, 'ast> Visit<'ast> for FileFnCollector<'a> {
             &CanonScope {
                 file: self.file,
                 mod_stack: &self.mod_stack,
+                reexports: self.reexports,
             },
         );
         self.impl_type_stack.push(ImplFrame {

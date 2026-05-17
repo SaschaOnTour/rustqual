@@ -71,7 +71,7 @@ fn record_fn(
     mod_stack: &[String],
     node: &syn::ItemFn,
 ) {
-    let generics = item_canonical_generics(&node.sig.generics, ctx.file, mod_stack);
+    let generics = item_canonical_generics(&node.sig.generics, ctx.file, mod_stack, ctx.reexports);
     let resolve = |ty: &syn::Type| {
         resolve_type(
             ty,

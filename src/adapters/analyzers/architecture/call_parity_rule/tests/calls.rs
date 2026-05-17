@@ -147,6 +147,7 @@ fn ctx_for_fn<'a>(
         self_type: None,
         workspace_index: None,
         workspace_files: None,
+        reexports: None,
     }
 }
 
@@ -364,6 +365,7 @@ fn test_turbofish_in_impl_method_body_resolves() {
         self_type: canonical_of_impl_self(f.0),
         workspace_index: None,
         workspace_files: None,
+        reexports: None,
     };
     let calls = collect_canonical_calls(&ctx);
     assert!(
@@ -422,6 +424,7 @@ fn test_multiple_turbofish_calls_to_same_fn_resolve_to_one_canonical() {
         self_type: canonical_of_impl_self(f.0),
         workspace_index: None,
         workspace_files: None,
+        reexports: None,
     };
     let calls = collect_canonical_calls(&ctx);
     assert!(
@@ -515,6 +518,7 @@ fn test_collect_self_dispatch_in_impl() {
         self_type: self_ty,
         workspace_index: None,
         workspace_files: None,
+        reexports: None,
     };
     let calls = collect_canonical_calls(&ctx);
     assert!(
@@ -999,6 +1003,7 @@ fn test_qualified_impl_path_does_not_double_crate() {
         self_type: self_ty,
         workspace_index: None,
         workspace_files: None,
+        reexports: None,
     };
     let calls = collect_canonical_calls(&ctx);
     assert!(
@@ -1030,6 +1035,7 @@ fn ctx_with_index<'a>(
         self_type: None,
         workspace_index: Some(index),
         workspace_files: None,
+        reexports: None,
     }
 }
 

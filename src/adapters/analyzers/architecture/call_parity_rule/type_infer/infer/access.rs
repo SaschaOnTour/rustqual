@@ -66,6 +66,7 @@ pub(super) fn infer_cast(c: &syn::ExprCast, ctx: &InferContext<'_>) -> Option<Ca
         workspace_files: ctx.workspace_files,
         alias_param_subs: None,
         generic_params: ctx.generic_params,
+        reexports: None,
     };
     let ty = match ctx.self_type.as_deref() {
         Some(impl_segs) => resolve_type(&substitute_bare_self(&c.ty, impl_segs), &rctx),

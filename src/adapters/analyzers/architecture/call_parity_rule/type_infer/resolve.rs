@@ -18,9 +18,7 @@
 //! — both turn `syn::Type`s into `CanonicalType`s with identical
 //! semantics.
 
-use super::super::bindings::{
-    canonicalise_type_segments_in_scope, canonicalise_workspace_path, CanonScope,
-};
+use super::super::bindings::{canonicalise_workspace_path, CanonScope};
 use super::super::local_symbols::FileScope;
 use super::canonical::CanonicalType;
 use super::resolve_alias::{expand_alias, lookup_alias_param};
@@ -62,6 +60,12 @@ pub(crate) struct ResolveContext<'a> {
     /// shadows same-named workspace symbol). `None` for alias-body /
     /// test contexts that have no fn-level generic info.
     pub generic_params: Option<&'a HashMap<String, super::super::signature_params::ParamInfo>>,
+    /// Workspace-wide `pub use` re-export map. When `Some(&…)`, the
+    /// canonicalisation gate (`canonicalise_workspace_path`)
+    /// substitutes any re-exported prefix back to its declaration
+    /// canonical as the final resolution step. `None` for legacy
+    /// adapters / unit-test contexts.
+    pub reexports: Option<&'a super::super::reexports::ReexportMap>,
 }
 
 /// Hard recursion cap for `resolve_type_with_depth`. Guards against
@@ -76,6 +80,7 @@ fn canon_scope<'a>(ctx: &'a ResolveContext<'a>) -> CanonScope<'a> {
     CanonScope {
         file: ctx.file,
         mod_stack: ctx.mod_stack,
+        reexports: ctx.reexports,
     }
 }
 

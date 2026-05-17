@@ -345,15 +345,29 @@ pub(crate) fn build_call_graph<'ast>(
         crate_root_modules,
         workspace_module_paths: Some(workspace_module_paths),
     });
+    // Collect the workspace `pub use` re-export map BEFORE the type
+    // index so trait-impl keys (and every other gate-routed
+    // canonicalisation) resolve through the re-export back to DECL
+    // canonicals. The downstream `rewrite_reexport_edges` post-pass
+    // stays as defense-in-depth — every gate-routed canonical is
+    // already DECL-rooted by the time it lands in `graph.forward`,
+    // but the post-pass catches any edge that bypassed the gate.
+    let reexports = super::reexports::collect_reexport_map(files, &workspace_files);
     let type_index = build_workspace_type_index(&WorkspaceIndexInputs {
         files,
         workspace_files: &workspace_files,
         cfg_test_files,
         transparent_wrappers,
+        reexports: Some(&reexports),
     });
     let mut graph = CallGraph::new();
-    walk_files_into_graph(files, &workspace_files, &type_index, &mut graph);
-    let reexports = super::reexports::collect_reexport_map(files, &workspace_files);
+    walk_files_into_graph(
+        files,
+        &workspace_files,
+        &type_index,
+        Some(&reexports),
+        &mut graph,
+    );
     super::reexports::rewrite_reexport_edges(&mut graph, &reexports);
     edge_rewrite::rewrite_phantom_inherited_default_edges(&mut graph, &type_index);
     let visible_canonicals = super::pub_fns_visibility::collect_visible_type_canonicals_workspace(
@@ -374,6 +388,7 @@ fn walk_files_into_graph<'ast>(
     files: &[(&'ast str, &'ast syn::File)],
     workspace_files: &HashMap<String, FileScope<'ast>>,
     type_index: &WorkspaceTypeIndex,
+    reexports: Option<&super::reexports::ReexportMap>,
     graph: &mut CallGraph,
 ) {
     for (path, ast) in files {
@@ -384,6 +399,7 @@ fn walk_files_into_graph<'ast>(
             file,
             workspace_files,
             type_index,
+            reexports,
             impl_type_stack: Vec::new(),
             mod_stack: Vec::new(),
             graph,

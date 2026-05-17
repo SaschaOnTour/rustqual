@@ -84,6 +84,10 @@ pub struct InferContext<'a> {
     /// symbol) instead of falling through to a workspace lookup.
     /// `None` for unit-test fixtures.
     pub generic_params: Option<&'a HashMap<String, super::super::signature_params::ParamInfo>>,
+    /// Workspace-wide `pub use` re-export map. `Some(&…)` enables
+    /// gate-level normalisation of re-exported prefixes during type
+    /// inference; `None` falls back to legacy unit-test behaviour.
+    pub reexports: Option<&'a super::super::reexports::ReexportMap>,
 }
 
 // qual:api

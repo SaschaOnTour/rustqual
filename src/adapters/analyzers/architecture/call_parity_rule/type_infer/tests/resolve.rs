@@ -24,6 +24,7 @@ fn ctx<'a>(file: &'a FileScope<'a>) -> ResolveContext<'a> {
         workspace_files: None,
         alias_param_subs: None,
         generic_params: None,
+        reexports: None,
     }
 }
 
@@ -729,6 +730,7 @@ fn test_alias_generic_arg_resolves_at_use_site() {
             workspace_files: Some(&workspace_files),
             alias_param_subs: None,
             generic_params: None,
+            reexports: None,
         },
     );
     assert_eq!(
@@ -781,6 +783,7 @@ fn unbounded_generic_param_shadows_same_named_workspace_symbol() {
             workspace_files: None,
             alias_param_subs: None,
             generic_params: Some(&generics),
+            reexports: None,
         },
     );
     assert_eq!(
@@ -830,6 +833,7 @@ fn unbounded_generic_param_shadowing_does_not_affect_unrelated_path() {
             workspace_files: None,
             alias_param_subs: None,
             generic_params: Some(&generics),
+            reexports: None,
         },
     );
     assert_eq!(

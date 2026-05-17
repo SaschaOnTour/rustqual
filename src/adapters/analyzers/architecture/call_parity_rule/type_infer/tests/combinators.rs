@@ -234,6 +234,7 @@ fn test_result_chain_unwrap_then_field() {
         bindings: &bindings,
         self_type: None,
         workspace_files: None,
+        reexports: None,
     };
     let expr: syn::Expr = syn::parse_str("res.unwrap().id").expect("parse");
     let t = infer_type(&expr, &ctx).expect("chain resolved");

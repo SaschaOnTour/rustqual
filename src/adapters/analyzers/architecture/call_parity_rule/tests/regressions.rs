@@ -163,6 +163,7 @@ fn run_with_self(
         self_type,
         workspace_index: Some(index),
         workspace_files: None,
+        reexports: None,
     };
     collect_canonical_calls(&ctx)
 }
@@ -726,6 +727,7 @@ fn aliased_stdlib_wrapper_inside_inline_mod_peels_to_inner() {
         self_type: None,
         workspace_index: Some(&sample_session_index()),
         workspace_files: None,
+        reexports: None,
     };
     let calls = collect_canonical_calls(&ctx);
     assert!(

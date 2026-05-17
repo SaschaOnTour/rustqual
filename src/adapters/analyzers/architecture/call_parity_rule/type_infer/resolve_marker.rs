@@ -32,6 +32,7 @@ pub(super) fn is_marker_trait(path: &syn::Path, ctx: &ResolveContext<'_>) -> boo
     let scope = CanonScope {
         file: ctx.file,
         mod_stack: ctx.mod_stack,
+        reexports: ctx.reexports,
     };
     // Use-site gate: an explicit `::Send` extern-root path skips
     // workspace canonicalisation, falls through to the conservative

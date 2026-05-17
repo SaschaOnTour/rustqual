@@ -95,6 +95,7 @@ impl TypeInferFixture {
             self_type: self.self_type.clone(),
             workspace_files: None,
             generic_params: None,
+            reexports: None,
         }
     }
 }

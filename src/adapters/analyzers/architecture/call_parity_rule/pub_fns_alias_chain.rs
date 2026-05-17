@@ -178,6 +178,7 @@ pub(super) fn resolve_alias_target_canonical(
     let scope = CanonScope {
         file: file_scope,
         mod_stack,
+        reexports: None,
     };
     // Use-site gate: `type Repo = ::ext::Store;` alias targets that
     // are extern-rooted don't expose a workspace canonical.

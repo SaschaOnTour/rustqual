@@ -5,6 +5,106 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.5] - in development
+
+Patch release: **`pub use` re-export resolution gate** — closes a
+double-mismatch in trait dispatch and inherent-impl associated-fn
+routing where re-exported paths produced graph edges and type-index
+keys on the re-export-rooted canonical while the anchor index was
+keyed on the declaration canonical. Failing-first regression tests
+live in `call_parity_rule/tests/reexport_resolution.rs`.
+
+### Fixed (`pub use` resolution)
+
+- **`pub_fns` sister-site of the gate-threading fix (Codex P2 round 2).**
+  The graph collector resolves impl-self-types through the reexport
+  map (gate sees `Hidden → private::Hidden`), but the pub-fn surface
+  collector was constructing its `CanonScope` with `reexports: None`,
+  so it landed on the REEXPORT canonical while the graph produced
+  DECL. Check B/D enumerate REEXPORT canonicals against DECL-keyed
+  graph reachability → phantom missing-adapter findings on
+  `impl crate::application::Hidden { pub fn op() }`-style absolute
+  paths against re-exported types. Fix: thread the workspace re-export
+  map into `PubFnCollector` via a `Some(&ReexportMap)` field; build
+  it inline in `collect_pub_fns_by_layer` via a new
+  `build_reexports_for_pub_fns` helper that mirrors the graph-side
+  setup. Regression test:
+  `pub_fns_impl_self_type_resolves_through_reexport` in
+  `tests/reexport_resolution.rs`.
+- **Composite `<reexport_canonical>::<method>` callees + REEXPORT-keyed
+  `trait_impls` map mismatched DECL-keyed anchor index.** Four sites
+  let re-export-rooted canonicals through: `record_trait_impl` (keyed
+  `trait_impls` on REEXPORT), `canonicalise_bounds` (built bounds via
+  the primitive, bypassing the gate), `is_impl_for_visible_trait`
+  (compared REEXPORT vs. DECL), and dispatch edges via
+  `canonicalise_generic_param_path` (REEXPORT-rooted). The v1.2.4
+  post-pass `rewrite_reexport_edges` only did exact-string-match on
+  graph callees, so composite `<x>::<y>` shapes and HashMap keys
+  outside `graph.forward` stayed un-normalised.
+  Fix: `canonicalise_workspace_path` gains a final re-export-substitution
+  step via new `reexports::canonicalise_reexport_path` (longest-prefix
+  match) + `apply_reexport_substitution`. `CanonScope`/`ResolveContext`/
+  `InferContext`/`FnContext`/`BuildContext`/`WorkspaceIndexInputs` get
+  `reexports: Option<&ReexportMap>` propagated from
+  `workspace_graph::build_call_graph` (build-order reshuffle:
+  `collect_reexport_map` now runs BEFORE `build_workspace_type_index`).
+  `signature_params::canonicalise_bounds` switched from
+  `canonicalise_type_segments_in_scope` (primitive) to
+  `canonicalise_workspace_path` (gate) — closes the last production
+  bypass. `reexports::collect_reexport_rewrites` upgraded to
+  prefix-aware via `canonicalise_reexport_path` as defense-in-depth.
+  Regression tests in `tests/reexport_resolution.rs` cover all four
+  external repro shapes
+  (`/mnt/d/KI/rustqual-repros/0{1,2,3,4}-*`).
+  **Validates** end-to-end against rlm (13 → 0 architecture findings,
+  no rlm-side changes).
+
+### Known limitations (documented, not in v1.2.5 scope)
+
+- **Same-name type+value `pub use` collisions can misresolve
+  (Codex P2, deferred to WorkspaceCanonical migration).** Valid Rust
+  permits `pub use trait_mod::Handler;` (TYPE) and `pub use
+  value_mod::Handler;` (VALUE) to coexist — namespaces are separate.
+  rustqual collapses both into the same string key in two
+  namespace-blind HashMaps:
+  1. file-level `AliasMap = HashMap<String, AliasTarget>` (last-write
+     wins, so source order determines which entry survives).
+  2. workspace `ReexportMap = HashMap<String, String>` (same).
+  A trait bound `Q: Handler` can therefore canonicalise to the VALUE
+  path and lose its trait-anchor dispatch.
+  Codex P2 reproducer kept as `#[ignore]`d regression test
+  (`value_reexport_does_not_hijack_trait_bound`); full fix bundled
+  into the planned `WorkspaceCanonical { path, namespace }` newtype
+  migration where the gate becomes the sole constructor and produces
+  canonicals carrying their namespace at the type level.
+  See `docs/plan-workspace-canonical-newtype.md` Phase 1.
+- **Module re-exports `pub use module_a;`** — `pub use` of a *module*
+  (rather than an item) is registered as a leaf-fn re-export in
+  `build_reexport_canonical`. A `consumer::module_a::function()` call
+  doesn't match the reexport key. Workaround: direct paths. Tracked
+  for a follow-up.
+- **Glob re-exports `pub use foo::*;`** — explicit known limitation in
+  `collect_pub_use_leaves`. Affected users must use direct paths.
+  Sketch follow-up plan in `docs/plan-glob-reexport-resolution.md`.
+- **`#[path = "..."]` attribute** — `file_to_module_segments` reads
+  filesystem path, ignoring `#[path]`. Practical impact null in
+  observed projects (cfg-test only). Not in any follow-up plan.
+
+### Future work
+
+- **`WorkspaceCanonical { path, namespace }` newtype migration**
+  (`docs/plan-workspace-canonical-newtype.md`) — ~200 sites to
+  migrate. Eliminates two drift classes via Rust's type system:
+  (a) raw `String` canonicals across HashMaps without explicit
+  gate-resolution; (b) namespace-blind `HashMap<String, _>` keys
+  silently collapsing same-name type+value entries. Both classes
+  surfaced repeatedly in v1.2.4 + v1.2.5 review rounds (leading-colon,
+  foo.rs/mod.rs, pub-use composite keys, value/type namespace
+  collision). One coherent refactor instead of two separate ones
+  because the namespace-marker is a natural field on the newtype.
+  ~3-4 weeks incremental work; replaces the reviewer-discipline
+  invariant with a compile-time-enforced one.
+
 ## [1.2.4] - in development
 
 Patch release: **call-parity audit follow-up + post-review

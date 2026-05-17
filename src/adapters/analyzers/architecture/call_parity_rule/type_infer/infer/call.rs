@@ -184,6 +184,7 @@ fn canonicalise_call_path(
         &CanonScope {
             file: ctx.file,
             mod_stack: ctx.mod_stack,
+            reexports: ctx.reexports,
         },
     )
 }

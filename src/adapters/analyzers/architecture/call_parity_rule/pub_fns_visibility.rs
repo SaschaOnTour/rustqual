@@ -291,6 +291,7 @@ fn is_transparent_wrapper(
     let scope = CanonScope {
         file: file_scope,
         mod_stack,
+        reexports: None,
     };
     let segs: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
     // Use-site gate: `::ext::Box`-style attribute paths don't refer

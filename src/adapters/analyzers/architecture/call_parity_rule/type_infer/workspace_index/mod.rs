@@ -34,6 +34,12 @@ pub(super) struct BuildContext<'a> {
     /// Type aliases already collected across the workspace. `None` in
     /// pass 1 (the alias collector itself); `Some(&…)` in pass 2.
     pub type_aliases: Option<&'a HashMap<String, AliasDef>>,
+    /// Workspace-wide `pub use` re-export map. Threaded through every
+    /// `CanonScope` constructed in collectors so the gate normalises
+    /// re-export-rooted paths back to their declaration canonical at
+    /// the trait-impl key building site (the original bug source).
+    /// `None` for legacy / unit-test contexts.
+    pub reexports: Option<&'a super::super::reexports::ReexportMap>,
 }
 
 /// Source location of a recorded type-index entry (currently used for
@@ -109,6 +115,7 @@ pub(super) fn resolve_ctx_with_generics<'a>(
         workspace_files: Some(ctx.workspace_files),
         alias_param_subs: None,
         generic_params,
+        reexports: ctx.reexports,
     }
 }
 
@@ -327,6 +334,10 @@ pub struct WorkspaceIndexInputs<'a> {
     pub workspace_files: &'a HashMap<String, FileScope<'a>>,
     pub cfg_test_files: &'a HashSet<String>,
     pub transparent_wrappers: &'a HashSet<String>,
+    /// Workspace-wide `pub use` re-export map. Collected before type
+    /// index construction (build-order reshuffle) so trait-impl keys
+    /// resolve through the gate to DECL canonicals.
+    pub reexports: Option<&'a super::super::reexports::ReexportMap>,
 }
 
 // qual:api
@@ -349,6 +360,7 @@ pub fn build_workspace_type_index(inputs: &WorkspaceIndexInputs<'_>) -> Workspac
         transparent_wrappers: inputs.transparent_wrappers,
         workspace_files: inputs.workspace_files,
         type_aliases,
+        reexports: inputs.reexports,
     };
     // Pass 1: aliases across all files (no alias map yet).
     walk_files(&shared(None), &mut index, |index, ctx, ast| {
@@ -379,6 +391,7 @@ struct WalkInputs<'a> {
     cfg_test_files: &'a HashSet<String>,
     transparent_wrappers: &'a HashSet<String>,
     type_aliases: Option<&'a HashMap<String, AliasDef>>,
+    reexports: Option<&'a super::super::reexports::ReexportMap>,
 }
 
 /// Shared file-walk scaffold for both index build passes. Reuses the
@@ -399,6 +412,7 @@ where
             workspace_files: inputs.workspace_files,
             transparent_wrappers: inputs.transparent_wrappers,
             type_aliases: inputs.type_aliases,
+            reexports: inputs.reexports,
         };
         visit(index, &ctx, ast);
     }

@@ -4,7 +4,7 @@
 //! (graph-build) — both need the same `(name, &Type)` pairs that the
 //! `CanonicalCallCollector` seeds into its binding scope.
 
-use super::bindings::{canonicalise_type_segments_in_scope, CanonScope};
+use super::bindings::{canonicalise_workspace_path, CanonScope};
 use super::local_symbols::FileScope;
 use std::collections::HashMap;
 
@@ -84,6 +84,7 @@ pub(crate) fn item_canonical_generics(
     generics: &syn::Generics,
     file: &FileScope<'_>,
     mod_stack: &[String],
+    reexports: Option<&super::reexports::ReexportMap>,
 ) -> HashMap<String, ParamInfo> {
     let raw = extract_item_generics(generics);
     let mut out = HashMap::new();
@@ -91,7 +92,7 @@ pub(crate) fn item_canonical_generics(
         out.insert(
             name,
             ParamInfo {
-                bounds: canonicalise_bounds(&bounds, file, mod_stack),
+                bounds: canonicalise_bounds(&bounds, file, mod_stack, reexports),
                 turbofish_index: Some(idx),
             },
         );
@@ -120,6 +121,7 @@ pub(crate) fn method_canonical_generics(
     impl_generics: &[(String, Vec<Vec<String>>)],
     file: &FileScope<'_>,
     mod_stack: &[String],
+    reexports: Option<&super::reexports::ReexportMap>,
 ) -> HashMap<String, ParamInfo> {
     let outer_names: Vec<&str> = impl_generics.iter().map(|(n, _)| n.as_str()).collect();
     let method_raw = extract_method_with_outer(sig, &outer_names);
@@ -140,7 +142,7 @@ pub(crate) fn method_canonical_generics(
         out.insert(
             name.clone(),
             ParamInfo {
-                bounds: canonicalise_bounds(bounds, file, mod_stack),
+                bounds: canonicalise_bounds(bounds, file, mod_stack, reexports),
                 turbofish_index: None,
             },
         );
@@ -149,7 +151,7 @@ pub(crate) fn method_canonical_generics(
     // impl-level entries (preserving their None index), or insert fresh
     // entries with the method's own position.
     for (name, bounds) in method_raw {
-        let canonical = canonicalise_bounds(&bounds, file, mod_stack);
+        let canonical = canonicalise_bounds(&bounds, file, mod_stack, reexports);
         match out.get_mut(&name) {
             Some(existing) => existing.bounds.extend(canonical),
             None => {
@@ -342,11 +344,24 @@ fn canonicalise_bounds(
     bounds: &[Vec<String>],
     file: &FileScope<'_>,
     mod_stack: &[String],
+    reexports: Option<&super::reexports::ReexportMap>,
 ) -> Vec<Vec<String>> {
-    let scope = CanonScope { file, mod_stack };
+    let scope = CanonScope {
+        file,
+        mod_stack,
+        reexports,
+    };
+    // Route through the gate (not the primitive) so any
+    // `pub use ReexportedTrait;` bound gets normalised to its DECL
+    // canonical. This closes the last production-side bypass of the
+    // gate identified in the v1.2.5 root-cause analysis — without it,
+    // `canonicalise_generic_param_path` would emit dispatch edges on
+    // re-export-rooted bounds while the anchor index keys on DECL.
+    // The bounds reach this site already segment-only (leading_colon
+    // filtered upstream by `trait_bound_paths`), so `false` is safe.
     bounds
         .iter()
-        .filter_map(|b| canonicalise_type_segments_in_scope(b, &scope))
+        .filter_map(|b| canonicalise_workspace_path(b, false, &scope))
         .filter(|c| c.first().map(String::as_str) == Some("crate"))
         .collect()
 }

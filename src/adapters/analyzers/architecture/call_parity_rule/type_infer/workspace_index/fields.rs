@@ -74,7 +74,7 @@ fn record_struct(
     let syn::Fields::Named(named) = &item.fields else {
         return;
     };
-    let generics = item_canonical_generics(&item.generics, ctx.file, mod_stack);
+    let generics = item_canonical_generics(&item.generics, ctx.file, mod_stack, ctx.reexports);
     let rctx = resolve_ctx_with_generics(ctx, mod_stack, Some(&generics));
     for field in &named.named {
         record_field(index, &canonical, &rctx, field);
