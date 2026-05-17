@@ -18,7 +18,8 @@
 //!    on `crate::decl::Struct::new`, not the re-export path.
 
 use super::support::{
-    build_graph_only, build_workspace, callees_of, empty_cfg_test, graph_contains_edge, three_layer,
+    build_graph_only, build_workspace, callees_of, cli_mcp_config, empty_cfg_test,
+    graph_contains_edge, run_check_b, three_layer,
 };
 use std::collections::HashSet;
 
@@ -258,6 +259,171 @@ fn pub_use_trait_dispatch_routes_to_decl() {
             callees_of(&graph, caller),
         );
     }
+}
+
+#[test]
+fn pub_fns_impl_self_type_resolves_through_reexport() {
+    // Codex P2 sister-site: the graph collector resolves `impl
+    // crate::application::Hidden { pub fn op() }` through the
+    // reexport map (gate sees `Hidden → private_mod::Hidden`), but
+    // the pub-fn surface collector (`pub_fns.rs:273`) was
+    // constructing its `CanonScope` with `reexports: None`. Result:
+    // the graph edge lands on `crate::application::private_mod::Hidden::op`
+    // (DECL) while pub-fn enumeration emits
+    // `crate::application::Hidden::op` (REEXPORT). Check B/D then
+    // produce a phantom "is not reached" finding because the
+    // enumerated pub-fn target doesn't match any graph callee.
+    //
+    // Test triggers the bug by putting the inherent impl in a SEPARATE
+    // file using an ABSOLUTE crate-path (which bypasses the file
+    // alias map and hits the bare `resolve_to_crate_absolute` branch
+    // → REEXPORT path without gate substitution). The check_b run
+    // must report zero findings after the fix.
+    let ws = build_workspace(&[
+        (
+            "src/lib.rs",
+            "pub mod application;\npub mod cli;\npub mod mcp;\n",
+        ),
+        (
+            "src/application/mod.rs",
+            r#"
+            pub mod private_mod;
+            pub mod extras;
+            pub use private_mod::Hidden;
+            "#,
+        ),
+        (
+            "src/application/private_mod.rs",
+            r#"
+            pub struct Hidden;
+            "#,
+        ),
+        (
+            "src/application/extras.rs",
+            r#"
+            // Inherent impl on a re-exported type, written via the
+            // absolute crate path. This is the bug-trigger shape:
+            // without the gate's reexport substitution applied to
+            // BOTH the graph collector AND the pub_fns collector,
+            // they disagree on the canonical.
+            impl crate::application::Hidden {
+                pub fn op(&self) -> u32 { 42 }
+            }
+            "#,
+        ),
+        (
+            "src/cli/mod.rs",
+            r#"
+            use crate::application::Hidden;
+            pub fn handle(h: &Hidden) -> u32 { Hidden::op(h) }
+            "#,
+        ),
+        (
+            "src/mcp/mod.rs",
+            r#"
+            use crate::application::Hidden;
+            pub fn handle(h: &Hidden) -> u32 { Hidden::op(h) }
+            "#,
+        ),
+    ]);
+    let cp = cli_mcp_config(5);
+    let findings = run_check_b(&ws, &three_layer(), &cp, &empty_cfg_test());
+    // The bug-triggering finding is on `Hidden::op` specifically:
+    // pub_fns enumerates it under the REEXPORT canonical, while the
+    // graph edges land on the DECL canonical, so Check B reports it
+    // as unreached. After the fix, no findings on Hidden::op at all.
+    let bug_findings: Vec<_> = findings
+        .iter()
+        .filter(|f| format!("{f:?}").contains("Hidden::op"))
+        .collect();
+    assert!(
+        bug_findings.is_empty(),
+        "`impl crate::application::Hidden {{ pub fn op() }}` (absolute \
+         path on a re-exported type) must produce a pub-fn canonical \
+         that matches the graph edge — both go through the same \
+         reexport-aware gate. Otherwise Check B reports phantom \
+         missing-adapter findings on Hidden::op. bug findings: {bug_findings:?}",
+    );
+}
+
+#[test]
+fn value_reexport_does_not_hijack_trait_bound() {
+    // Codex P2 architectural concern: the reexport map is namespace-
+    // blind (mixes value and type re-exports in one HashMap). In
+    // currently compilable Rust this is not exploitable — Rust's
+    // namespace separation means a type-context bound `Q: Handler`
+    // resolves via the file alias map to the trait's path, not a
+    // same-named value's path. The gate's apply_reexport_substitution
+    // then either finds no entry (no hijack) or finds the trait's
+    // own re-export entry (correct DECL substitution).
+    //
+    // This test guards the architectural invariant as regression
+    // protection. A future namespace-split (planned as part of
+    // `docs/plan-workspace-canonical-newtype.md`) will enforce this
+    // at the type system level via a `Namespace` marker on the
+    // canonical newtype.
+    let ws = build_workspace(&[
+        ("src/lib.rs", "pub mod application;\npub mod cli;\n"),
+        (
+            "src/application/mod.rs",
+            r#"
+            pub mod handler_trait;
+            pub mod handler_fn;
+
+            // Trait `Handler` from `handler_trait` mod, re-exported
+            // alongside a value-side `Handler` fn from `handler_fn`.
+            // The value-side `Handler` is what the bug demonstrates.
+            pub use handler_trait::Handler;
+            // Hypothetically (real code can have this kind of name
+            // collision across submodules):
+            // pub use handler_fn::handler_value;
+
+            pub fn dispatch<Q: Handler>(q: &Q) -> u32 { q.handle() }
+            "#,
+        ),
+        (
+            "src/application/handler_trait.rs",
+            r#"
+            pub trait Handler {
+                fn handle(&self) -> u32;
+            }
+            "#,
+        ),
+        (
+            "src/application/handler_fn.rs",
+            r#"
+            pub fn handler_value() -> u32 { 1 }
+            "#,
+        ),
+        (
+            "src/application/impl_a.rs",
+            r#"
+            use crate::application::Handler;
+            pub struct QueryA;
+            impl Handler for QueryA {
+                fn handle(&self) -> u32 { 7 }
+            }
+            "#,
+        ),
+        (
+            "src/cli/mod.rs",
+            r#"
+            use crate::application::{dispatch, impl_a::QueryA};
+            pub fn run(q: &QueryA) -> u32 { dispatch(q) }
+            "#,
+        ),
+    ]);
+    let graph = build_graph_only(&ws, &three_layer(), &empty_cfg_test(), &HashSet::new());
+    let dispatch_canonical = "crate::application::dispatch";
+    let trait_method = "crate::application::handler_trait::Handler::handle";
+    assert!(
+        graph_contains_edge(&graph, dispatch_canonical, trait_method),
+        "`Q: Handler` trait-bound dispatch must resolve to the \
+         trait's DECL canonical `{trait_method}`. A value-side \
+         re-export in the same map must NOT hijack the type-context \
+         resolution. dispatch callees: {:?}",
+        callees_of(&graph, dispatch_canonical),
+    );
 }
 
 #[test]

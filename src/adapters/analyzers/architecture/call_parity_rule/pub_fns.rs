@@ -80,20 +80,11 @@ pub(crate) struct PubFnInputs<'a, 'ast> {
 pub(crate) fn collect_pub_fns_by_layer<'ast>(
     inputs: PubFnInputs<'_, 'ast>,
 ) -> HashMap<String, Vec<PubFnInfo<'ast>>> {
-    let workspace = inputs.workspace;
-    let crate_root_modules = workspace.crate_root_modules;
-    let workspace_module_paths = workspace.workspace_module_paths;
-    let file_root_visibility = collect_file_root_visibility(inputs.files);
-    let visible_canonicals = collect_visible_type_canonicals_workspace(
-        inputs.files,
-        inputs.aliases_per_file,
-        workspace,
-        inputs.transparent_wrappers,
-    );
+    let setup = WorkspaceSetup::build(&inputs);
     let empty_aliases = HashMap::new();
     let mut out: HashMap<String, Vec<PubFnInfo<'ast>>> = HashMap::new();
     for (path, ast) in inputs.files {
-        if workspace.cfg_test_files.contains(*path) {
+        if inputs.workspace.cfg_test_files.contains(*path) {
             continue;
         }
         let Some(layer) = inputs.layers.layer_for_file(path) else {
@@ -102,10 +93,7 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
         let layer = layer.to_string();
         // Share the call-parity entrypoint's `aliases_per_file` map so
         // we don't re-walk the UseTree per file (each walk is a full
-        // `gather_alias_map`). Fall back to an empty map for files not
-        // in the pre-computed set — those files won't have resolvable
-        // impl self-types via `use` anyway, and the local-symbol /
-        // crate-root fallbacks still work.
+        // `gather_alias_map`).
         let alias_map = inputs.aliases_per_file.get(*path).unwrap_or(&empty_aliases);
         let LocalSymbols { flat, by_name } = collect_local_symbols_scoped(ast);
         let aliases_per_scope = gather_alias_map_scoped(ast);
@@ -115,16 +103,17 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
             aliases_per_scope: &aliases_per_scope,
             local_symbols: &flat,
             local_decl_scopes: &by_name,
-            crate_root_modules,
-            workspace_module_paths: Some(workspace_module_paths),
+            crate_root_modules: inputs.workspace.crate_root_modules,
+            workspace_module_paths: Some(inputs.workspace.workspace_module_paths),
         };
-        let file_visible = file_root_visibility.get(*path).copied().unwrap_or(true);
+        let file_visible = setup.file_root_visibility.get(*path).copied().unwrap_or(true);
         let mut collector = PubFnCollector {
             file_path: path.to_string(),
             file: &file,
             found: Vec::new(),
-            visible_canonicals: &visible_canonicals,
+            visible_canonicals: &setup.visible_canonicals,
             promoted_attributes: inputs.promoted_attributes,
+            reexports: Some(&setup.reexports),
             impl_stack: Vec::new(),
             mod_stack: Vec::new(),
             enclosing_mod_visible: file_visible,
@@ -133,6 +122,80 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
         out.entry(layer).or_default().extend(collector.found);
     }
     out
+}
+
+/// Workspace-wide precomputed lookups bundled together. Built once at
+/// the top of `collect_pub_fns_by_layer` so the per-file loop stays
+/// under the LONG_FN budget.
+struct WorkspaceSetup {
+    file_root_visibility: HashMap<String, bool>,
+    visible_canonicals: HashSet<String>,
+    reexports: super::reexports::ReexportMap,
+}
+
+impl WorkspaceSetup {
+    fn build(inputs: &PubFnInputs<'_, '_>) -> Self {
+        Self {
+            file_root_visibility: collect_file_root_visibility(inputs.files),
+            visible_canonicals: collect_visible_type_canonicals_workspace(
+                inputs.files,
+                inputs.aliases_per_file,
+                inputs.workspace,
+                inputs.transparent_wrappers,
+            ),
+            reexports: build_reexports_for_pub_fns(
+                inputs.files,
+                inputs.aliases_per_file,
+                inputs.workspace,
+            ),
+        }
+    }
+}
+
+/// Build a workspace-wide `pub use` re-export map for the pub-fn
+/// collector. Mirrors the build inside `workspace_graph::build_call_graph`
+/// so the two passes agree on the DECL canonical for every re-exported
+/// type/trait — without this duplicate setup, `pub_fns` and the graph
+/// produce different impl-self canonicals on re-exported types and
+/// Check B/D fires phantom missing-adapter findings.
+///
+/// Mild redundancy with the graph builder is accepted as the
+/// architecturally correct trade-off: both passes need workspace
+/// `FileScope`s + the resulting reexport map, but the build order of
+/// `collect_findings` runs `pub_fns` before `build_call_graph`. A
+/// future v1.2.6 refactor can hoist this into a shared `WorkspaceSetup`
+/// owned by `collect_findings` and threaded into both passes.
+fn build_reexports_for_pub_fns(
+    files: &[(&str, &syn::File)],
+    aliases_per_file: &HashMap<String, AliasMap>,
+    workspace: &super::local_symbols::WorkspaceLookup<'_>,
+) -> super::reexports::ReexportMap {
+    let cfg_test_files = workspace.cfg_test_files;
+    let local_symbols_per_file: HashMap<String, LocalSymbols> = files
+        .iter()
+        .filter(|(p, _)| !cfg_test_files.contains(*p))
+        .map(|(path, ast)| (path.to_string(), collect_local_symbols_scoped(ast)))
+        .collect();
+    let aliases_scoped_per_file: HashMap<
+        String,
+        crate::adapters::shared::use_tree::ScopedAliasMap,
+    > = files
+        .iter()
+        .filter(|(p, _)| !cfg_test_files.contains(*p))
+        .map(|(path, ast)| (path.to_string(), gather_alias_map_scoped(ast)))
+        .collect();
+    let workspace_files = super::local_symbols::build_workspace_files_map(
+        super::local_symbols::WorkspaceFilesInputs {
+            files,
+            cfg_test_files,
+            aliases_per_file,
+            aliases_scoped_per_file: &aliases_scoped_per_file,
+            local_symbols_per_file: &local_symbols_per_file,
+            crate_root_modules: workspace.crate_root_modules,
+            workspace_module_paths: Some(workspace.workspace_module_paths),
+        },
+    );
+    super::reexports::collect_reexport_map(files, &workspace_files)
 }
 
 /// Workspace-walker — visits items, tracks impl-type visibility
@@ -155,6 +218,13 @@ struct PubFnCollector<'ast, 'vis> {
     /// writes `#[tool] async fn search(&self, ...)` (no `pub`) and
     /// the macro generates the public wrapper at expansion time.
     promoted_attributes: &'vis HashSet<String>,
+    /// Workspace-wide `pub use` re-export map. `Some(&…)` ensures the
+    /// per-impl `CanonScope` constructed in `visit_item_impl` routes
+    /// through the same reexport-aware gate as the graph collector,
+    /// so impl-self-type canonicals match the graph edges. Without
+    /// this, the two sides drift on re-exported types and Check B/D
+    /// reports phantom missing-adapter findings.
+    reexports: Option<&'vis super::reexports::ReexportMap>,
     /// Stack of enclosing `impl` blocks: `(self-type segments, is-visible)`.
     /// Each entry: `(self_type_segments, self_type_visible,
     /// is_visible_trait_impl)`. The third flag is `true` iff this
@@ -273,7 +343,7 @@ impl<'ast, 'vis> Visit<'ast> for PubFnCollector<'ast, 'vis> {
         let scope = CanonScope {
             file: self.file,
             mod_stack: &self.mod_stack,
-            reexports: None,
+            reexports: self.reexports,
         };
         let canonical_segs = resolve_impl_self_type(&node.self_ty, &scope).unwrap_or_default();
         let visible = !canonical_segs.is_empty()

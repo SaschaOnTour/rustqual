@@ -16,6 +16,21 @@ live in `call_parity_rule/tests/reexport_resolution.rs`.
 
 ### Fixed (`pub use` resolution)
 
+- **`pub_fns` sister-site of the gate-threading fix (Codex P2 round 2).**
+  The graph collector resolves impl-self-types through the reexport
+  map (gate sees `Hidden → private::Hidden`), but the pub-fn surface
+  collector was constructing its `CanonScope` with `reexports: None`,
+  so it landed on the REEXPORT canonical while the graph produced
+  DECL. Check B/D enumerate REEXPORT canonicals against DECL-keyed
+  graph reachability → phantom missing-adapter findings on
+  `impl crate::application::Hidden { pub fn op() }`-style absolute
+  paths against re-exported types. Fix: thread the workspace re-export
+  map into `PubFnCollector` via a `Some(&ReexportMap)` field; build
+  it inline in `collect_pub_fns_by_layer` via a new
+  `build_reexports_for_pub_fns` helper that mirrors the graph-side
+  setup. Regression test:
+  `pub_fns_impl_self_type_resolves_through_reexport` in
+  `tests/reexport_resolution.rs`.
 - **Composite `<reexport_canonical>::<method>` callees + REEXPORT-keyed
   `trait_impls` map mismatched DECL-keyed anchor index.** Four sites
   let re-export-rooted canonicals through: `record_trait_impl` (keyed
@@ -46,6 +61,16 @@ live in `call_parity_rule/tests/reexport_resolution.rs`.
 
 ### Known limitations (documented, not in v1.2.5 scope)
 
+- **Reexport-map is namespace-blind (Codex P2 architectural concern).**
+  `collect_reexport_map` mixes value re-exports and type re-exports
+  in one HashMap. In currently compilable Rust this isn't exploitable
+  — namespace separation means a type-context bound `Q: Handler`
+  resolves the type's path, not a same-named value's path. But the
+  architectural invariant isn't compile-time enforced. Regression
+  test `value_reexport_does_not_hijack_trait_bound` guards the
+  observed behaviour. Full fix planned as part of
+  `docs/plan-workspace-canonical-newtype.md` via a `Namespace` marker
+  on the canonical newtype.
 - **Module re-exports `pub use module_a;`** — `pub use` of a *module*
   (rather than an item) is registered as a leaf-fn re-export in
   `build_reexport_canonical`. A `consumer::module_a::function()` call
