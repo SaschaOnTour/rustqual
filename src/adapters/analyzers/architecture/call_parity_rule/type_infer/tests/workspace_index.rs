@@ -90,6 +90,7 @@ fn test_empty_workspace_produces_empty_index() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     assert!(index.struct_fields.is_empty());
@@ -130,6 +131,7 @@ fn test_struct_with_named_field_is_indexed() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     let field = index.struct_field("crate::app::session::Session", "id");
@@ -167,6 +169,7 @@ fn test_struct_field_with_arc_is_stripped() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     let field = index.struct_field("crate::app::context::Ctx", "inner");
@@ -198,6 +201,7 @@ fn test_tuple_struct_is_not_indexed() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     assert!(index.struct_fields.is_empty());
@@ -230,6 +234,7 @@ fn test_struct_field_with_opaque_type_is_skipped() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     assert!(index.struct_fields.is_empty());
@@ -268,6 +273,7 @@ fn test_inherent_method_with_concrete_return() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     let ret = index.method_return("crate::app::session::Session", "diff");
@@ -311,6 +317,7 @@ fn test_method_returning_result_wraps() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     let ret = index
@@ -361,6 +368,7 @@ fn test_method_returning_result_self_substitutes_inner() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     let ret = index
@@ -402,6 +410,7 @@ fn test_method_with_unit_return_is_not_indexed() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     assert!(index.method_returns.is_empty());
@@ -435,6 +444,7 @@ fn test_method_with_impl_trait_return_is_not_indexed() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     assert!(index.method_returns.is_empty());
@@ -470,6 +480,7 @@ fn test_trait_impl_method_is_indexed_by_receiver_type() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     // Keyed by the concrete receiver type S, NOT by the trait.
@@ -510,6 +521,7 @@ fn test_free_fn_return_is_indexed() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     let ret = index.fn_return("crate::app::make::make_session");
@@ -546,6 +558,7 @@ fn test_generic_return_type_is_opaque_and_not_indexed() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     // Generic T has no alias/local-symbol entry → Opaque → skipped.
@@ -592,6 +605,7 @@ fn fn_generic_param_return_does_not_collide_with_same_named_workspace_type() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     assert_eq!(
@@ -639,6 +653,7 @@ fn method_generic_param_return_does_not_collide_with_same_named_workspace_type()
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     assert_eq!(
@@ -693,6 +708,7 @@ fn bounded_fn_generic_param_return_carries_canonicalised_trait_bound() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     // Acceptable outcomes: either skipped entirely (Opaque) or stored
@@ -792,6 +808,7 @@ fn bounded_fn_generic_param_return_does_not_block_turbofish_inference() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
 
@@ -832,6 +849,7 @@ fn bounded_fn_generic_param_return_does_not_block_turbofish_inference() {
         self_type: None,
         workspace_index: Some(&workspace_index),
         workspace_files: None,
+        reexports: None,
     };
     let calls = collect_canonical_calls(&ctx);
     let session_diff = "crate::app::session::Session::diff";
@@ -889,6 +907,7 @@ fn method_generic_param_return_canonicalises_where_bound_on_impl_generic() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     // Strict: the method's where-clause bound on the impl-level
@@ -963,6 +982,7 @@ fn struct_generic_param_field_does_not_collide_with_same_named_workspace_type() 
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     assert_eq!(
@@ -1009,6 +1029,7 @@ fn impl_level_generic_param_return_does_not_collide_with_same_named_workspace_ty
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     assert_eq!(
@@ -1051,6 +1072,7 @@ fn test_fn_inside_inline_mod_keys_include_mod_name() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     // With inline-mod tracking the key is `crate::app::inner::make_session`,
@@ -1094,6 +1116,7 @@ fn test_fn_inside_inline_mod_resolves_inner_return_type() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     // Pre-fix: `Session` was looked up against the file's top-level
@@ -1138,6 +1161,7 @@ fn test_struct_field_inside_inline_mod_keys_include_mod_name() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     assert!(
@@ -1171,6 +1195,7 @@ fn test_fn_with_unit_return_is_not_indexed() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     assert!(index.fn_returns.is_empty());
@@ -1209,6 +1234,7 @@ fn test_cfg_test_file_is_skipped() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     assert!(index.struct_fields.is_empty());
@@ -1250,6 +1276,7 @@ fn test_trait_declaration_methods_are_indexed() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     assert!(index.trait_has_method("crate::app::ports::Handler", "handle"));
@@ -1286,6 +1313,7 @@ fn test_trait_impl_is_indexed() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     let impls = index.impls_of_trait("crate::app::foo::Handler");
@@ -1325,6 +1353,7 @@ fn test_multiple_impls_of_same_trait_all_indexed() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     let impls = index.impls_of_trait("crate::app::foo::Handler");
@@ -1359,6 +1388,7 @@ fn test_inherent_impl_does_not_populate_trait_impls() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     // Inherent impl has no trait reference, so trait_impls stays empty.
@@ -1400,6 +1430,7 @@ fn test_trait_in_one_file_impl_in_another() {
             workspace_files: &workspace_files,
             cfg_test_files: &cfg_test,
             transparent_wrappers: &wraps,
+            reexports: None,
         })
     };
     // Trait resolved via import alias.
@@ -1446,6 +1477,7 @@ fn test_struct_in_one_file_impl_in_another() {
             workspace_files: &workspace_files,
             cfg_test_files: &cfg_test,
             transparent_wrappers: &wraps,
+            reexports: None,
         })
     };
     // Struct indexed from its declaration file.
@@ -1490,6 +1522,7 @@ fn record_trait_methods_captures_method_span() {
         workspace_files: &workspace_files,
         cfg_test_files: &cfg_test,
         transparent_wrappers: &wraps,
+        reexports: None,
     });
     let loc = index
         .trait_method_location("crate::ports::handler::Handler", "handle")
@@ -1567,6 +1600,7 @@ fn method_call_turbofish_overrides_bounded_generic_param_return() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     // `s: &Service` typed via sig param so the binding installs as
@@ -1610,6 +1644,7 @@ fn method_call_turbofish_overrides_bounded_generic_param_return() {
         self_type: None,
         workspace_index: Some(&workspace_index),
         workspace_files: None,
+        reexports: None,
     };
     let calls = collect_canonical_calls(&ctx);
     let session_diff = "crate::app::session::Session::diff";
@@ -1695,6 +1730,7 @@ fn free_fn_impl_trait_return_turbofish_does_not_substitute_return() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     let use_site = parse_file(
@@ -1731,6 +1767,7 @@ fn free_fn_impl_trait_return_turbofish_does_not_substitute_return() {
         self_type: None,
         workspace_index: Some(&workspace_index),
         workspace_files: None,
+        reexports: None,
     };
     let calls = collect_canonical_calls(&ctx);
     let phantom_session_diff = "crate::app::session::Session::diff";
@@ -1805,6 +1842,7 @@ fn method_call_impl_trait_return_turbofish_does_not_substitute_return() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     let use_site = parse_file(
@@ -1842,6 +1880,7 @@ fn method_call_impl_trait_return_turbofish_does_not_substitute_return() {
         self_type: None,
         workspace_index: Some(&workspace_index),
         workspace_files: None,
+        reexports: None,
     };
     let calls = collect_canonical_calls(&ctx);
     let phantom_session_diff = "crate::app::session::Session::diff";
@@ -1929,6 +1968,7 @@ fn multi_generic_fn_turbofish_picks_correct_arg_for_returned_param() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     let use_site = parse_file(
@@ -1966,6 +2006,7 @@ fn multi_generic_fn_turbofish_picks_correct_arg_for_returned_param() {
         self_type: None,
         workspace_index: Some(&workspace_index),
         workspace_files: None,
+        reexports: None,
     };
     let calls = collect_canonical_calls(&ctx);
     let session_diff = "crate::app::session::Session::diff";
@@ -2049,6 +2090,7 @@ fn wrapper_around_generic_param_return_substitutes_inner_via_turbofish() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     let use_site = parse_file(
@@ -2085,6 +2127,7 @@ fn wrapper_around_generic_param_return_substitutes_inner_via_turbofish() {
         self_type: None,
         workspace_index: Some(&workspace_index),
         workspace_files: None,
+        reexports: None,
     };
     let calls = collect_canonical_calls(&ctx);
     let session_diff = "crate::app::session::Session::diff";
@@ -2162,6 +2205,7 @@ fn method_call_wrapper_around_generic_param_return_substitutes_inner() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     let use_site = parse_file(
@@ -2198,6 +2242,7 @@ fn method_call_wrapper_around_generic_param_return_substitutes_inner() {
         self_type: None,
         workspace_index: Some(&workspace_index),
         workspace_files: None,
+        reexports: None,
     };
     let calls = collect_canonical_calls(&ctx);
     let session_diff = "crate::app::session::Session::diff";
@@ -2277,6 +2322,7 @@ fn vec_around_generic_param_return_substitutes_inner_via_turbofish() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     let use_site = parse_file(
@@ -2315,6 +2361,7 @@ fn vec_around_generic_param_return_substitutes_inner_via_turbofish() {
         self_type: None,
         workspace_index: Some(&workspace_index),
         workspace_files: None,
+        reexports: None,
     };
     let calls = collect_canonical_calls(&ctx);
     let session_diff = "crate::app::session::Session::diff";
@@ -2386,6 +2433,7 @@ fn absolute_leading_colon_path_is_not_shadowed_by_in_scope_generic() {
             workspace_files: None,
             alias_param_subs: None,
             generic_params: Some(&generics),
+            reexports: None,
         },
     );
     assert!(
@@ -2451,6 +2499,7 @@ fn absolute_leading_colon_call_path_does_not_shadow_to_trait_anchor() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     let use_site = parse_file(
@@ -2481,7 +2530,7 @@ fn absolute_leading_colon_call_path_does_not_shadow_to_trait_anchor() {
     // Build the canonical generics map so `Q: Handler` is in scope
     // exactly the way the body collector sees it in production.
     let generics: std::collections::HashMap<String, ParamInfo> =
-        item_canonical_generics(&sig.generics, &file_scope, &[]);
+        item_canonical_generics(&sig.generics, &file_scope, &[], None);
     // Sanity: Q must be in the generics map with Handler bound (else
     // the test is vacuous — without an in-scope Q, no shadowing could
     // happen even pre-fix).
@@ -2501,6 +2550,7 @@ fn absolute_leading_colon_call_path_does_not_shadow_to_trait_anchor() {
         self_type: None,
         workspace_index: Some(&workspace_index),
         workspace_files: None,
+        reexports: None,
     };
     let calls = collect_canonical_calls(&ctx);
     let trait_anchor = "crate::ports::handler::Handler::handle";
@@ -2559,6 +2609,7 @@ fn absolute_leading_colon_type_path_does_not_route_to_same_named_workspace_type(
             workspace_files: None,
             alias_param_subs: None,
             generic_params: None, // No generic in scope — purely a workspace-Q test
+            reexports: None,
         },
     );
     // Must NOT be Path(crate::app::runner::Q) — the absolute leading
@@ -2616,6 +2667,7 @@ fn absolute_leading_colon_call_path_does_not_route_to_same_named_workspace_fn() 
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     // Use site: `Q` is in the crate root via the `q` module (local
@@ -2656,6 +2708,7 @@ fn absolute_leading_colon_call_path_does_not_route_to_same_named_workspace_fn() 
         self_type: None,
         workspace_index: Some(&workspace_index),
         workspace_files: None,
+        reexports: None,
     };
     let calls = collect_canonical_calls(&ctx);
     // Must NOT produce a workspace edge — the leading colon means
@@ -2715,6 +2768,7 @@ fn generic_param_bound_with_leading_colon_does_not_route_to_workspace_trait() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     let use_site = parse_file(
@@ -2746,7 +2800,7 @@ fn generic_param_bound_with_leading_colon_does_not_route_to_workspace_trait() {
         syn::Item::Fn(item_fn) => (&item_fn.block, &item_fn.sig),
         _ => panic!("expected fn item at index 0 of use_site"),
     };
-    let generics = item_canonical_generics(&sig.generics, &file_scope, &[]);
+    let generics = item_canonical_generics(&sig.generics, &file_scope, &[], None);
     let ctx = FnContext {
         file: &file_scope,
         mod_stack: &[],
@@ -2756,6 +2810,7 @@ fn generic_param_bound_with_leading_colon_does_not_route_to_workspace_trait() {
         self_type: None,
         workspace_index: Some(&workspace_index),
         workspace_files: None,
+        reexports: None,
     };
     let calls = collect_canonical_calls(&ctx);
     let phantom_anchor = "crate::ports::handler::Handler::handle";
@@ -2810,6 +2865,7 @@ fn dyn_trait_with_leading_colon_does_not_route_to_workspace_trait_anchor() {
             workspace_files: &workspace_files,
             cfg_test_files: cfg_test,
             transparent_wrappers: wraps,
+            reexports: None,
         })
     };
     let use_site = parse_file(
@@ -2850,6 +2906,7 @@ fn dyn_trait_with_leading_colon_does_not_route_to_workspace_trait_anchor() {
         self_type: None,
         workspace_index: Some(&workspace_index),
         workspace_files: None,
+        reexports: None,
     };
     let calls = collect_canonical_calls(&ctx);
     let phantom_anchor = "crate::ports::handler::Handler::handle";

@@ -82,11 +82,15 @@ fn strip_wrappers(ty: &syn::Type) -> &syn::Type {
     }
 }
 
-/// Bundled inputs for canonical-type-path resolution. Per-file lookup
-/// tables live in `file: &FileScope`; `mod_stack` is per-call-site.
+/// Bundled inputs for canonical-type-path resolution. `file` carries
+/// per-file lookup tables; `mod_stack` is per-call-site; `reexports`
+/// is workspace-global — when `Some`, the gate substitutes
+/// re-exported prefixes back to DECL canonicals. `None` falls back
+/// to legacy v1.2.4 file-alias-only behaviour for test fixtures.
 pub(crate) struct CanonScope<'a> {
     pub file: &'a FileScope<'a>,
     pub mod_stack: &'a [String],
+    pub reexports: Option<&'a super::reexports::ReexportMap>,
 }
 
 /// Legacy helper for callers without a full `FileScope` (unit-test
@@ -119,6 +123,7 @@ pub(super) fn canonicalise_type_segments(
         &CanonScope {
             file: &file,
             mod_stack: &[],
+            reexports: None,
         },
     )
 }
@@ -171,7 +176,11 @@ pub(crate) fn canonicalise_workspace_path(
     if leading_colon_set {
         return None;
     }
-    canonicalise_type_segments_in_scope(segments, scope)
+    let resolved = canonicalise_type_segments_in_scope(segments, scope)?;
+    Some(super::reexports::apply_reexport_substitution(
+        resolved,
+        scope.reexports,
+    ))
 }
 
 /// Resolve a type-path segment list against `scope`.

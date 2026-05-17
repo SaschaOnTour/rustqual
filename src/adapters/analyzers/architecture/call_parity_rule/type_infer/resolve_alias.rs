@@ -57,6 +57,7 @@ pub(super) fn expand_alias(
         // `Q` inside the alias body never accidentally hits a
         // use-site generic-param entry.
         generic_params: None,
+        reexports: ctx.reexports,
     };
     resolve_type_with_depth(&alias.target, &alias_ctx, depth)
 }

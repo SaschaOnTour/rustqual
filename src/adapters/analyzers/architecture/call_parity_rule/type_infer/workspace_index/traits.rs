@@ -156,6 +156,7 @@ fn record_trait_impl(
     let scope = CanonScope {
         file: ctx.file,
         mod_stack,
+        reexports: ctx.reexports,
     };
     let Some(impl_segs) = resolve_impl_self_type(&node.self_ty, &scope) else {
         return;
@@ -211,6 +212,7 @@ fn resolve_trait_path(
         &CanonScope {
             file: ctx.file,
             mod_stack,
+            reexports: ctx.reexports,
         },
     )?;
     Some(resolved.join("::"))

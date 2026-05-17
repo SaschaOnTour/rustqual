@@ -67,6 +67,11 @@ pub struct FnContext<'a> {
     /// All workspace `FileScope`s. Lets alias expansion switch into
     /// the alias's declaring scope. `None` for unit-test fixtures.
     pub workspace_files: Option<&'a HashMap<String, FileScope<'a>>>,
+    /// Workspace-wide `pub use` re-export map. `Some(&…)` enables the
+    /// gate's reexport-substitution step at every `canonicalise_workspace_path`
+    /// invocation inside the body walk. `None` for legacy / unit-test
+    /// fixtures.
+    pub reexports: Option<&'a super::reexports::ReexportMap>,
 }
 
 // qual:api
@@ -108,6 +113,10 @@ struct CanonicalCallCollector<'a> {
     workspace_index: Option<&'a WorkspaceTypeIndex>,
     /// Workspace `FileScope` map for alias decl-site resolution.
     workspace_files: Option<&'a HashMap<String, FileScope<'a>>>,
+    /// Workspace-wide `pub use` re-export map. Threaded into every
+    /// `CanonScope` / `ResolveContext` / `InferContext` built during
+    /// the body walk so the gate substitutes re-exported prefixes.
+    reexports: Option<&'a super::reexports::ReexportMap>,
 }
 
 impl<'a> CanonicalCallCollector<'a> {
@@ -135,6 +144,7 @@ impl<'a> CanonicalCallCollector<'a> {
             calls: HashSet::new(),
             workspace_index: ctx.workspace_index,
             workspace_files: ctx.workspace_files,
+            reexports: ctx.reexports,
         }
     }
 
@@ -200,6 +210,7 @@ impl<'a> CanonicalCallCollector<'a> {
             workspace_files: self.workspace_files,
             alias_param_subs: None,
             generic_params: Some(&self.generic_params),
+            reexports: self.reexports,
         };
         match self.self_type_canonical.as_deref() {
             Some(impl_segs) => resolve_type(&substitute_bare_self(ty, impl_segs), &rctx),
@@ -395,6 +406,7 @@ impl<'a> CanonicalCallCollector<'a> {
         let scope = CanonScope {
             file: self.file,
             mod_stack: self.mod_stack,
+            reexports: self.reexports,
         };
         let normalized = normalize_alias_expansion(full, alias.absolute_root, &scope)?;
         Some(normalized.join("::"))
@@ -508,6 +520,7 @@ impl<'a> CanonicalCallCollector<'a> {
             self_type: self.self_type_canonical.clone(),
             workspace_files: self.workspace_files,
             generic_params: Some(&self.generic_params),
+            reexports: self.reexports,
         };
         infer_type(expr, &ctx)
     }
@@ -543,6 +556,7 @@ impl<'a> CanonicalCallCollector<'a> {
             workspace_files: self.workspace_files,
             alias_param_subs: None,
             generic_params: Some(&self.generic_params),
+            reexports: self.reexports,
         };
         let name = pi.ident.to_string();
         let resolved = match self.self_type_canonical.as_deref() {
@@ -639,6 +653,7 @@ impl<'a> CanonicalCallCollector<'a> {
             self_type: self.self_type_canonical.clone(),
             workspace_files: self.workspace_files,
             generic_params: Some(&self.generic_params),
+            reexports: self.reexports,
         };
         match kind {
             PatKind::Value => extract_bindings(pat, matched, &ictx),

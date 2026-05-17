@@ -70,6 +70,7 @@ impl<'ast, 'i, 'c> Visit<'ast> for MethodCollector<'i, 'c> {
             &CanonScope {
                 file: self.ctx.file,
                 mod_stack: &self.mod_stack,
+                reexports: self.ctx.reexports,
             },
         );
         self.impl_stack.push(ImplFrame {
@@ -119,7 +120,13 @@ fn record_method(
     let syn::ReturnType::Type(_, ret_ty) = &node.sig.output else {
         return;
     };
-    let merged = method_canonical_generics(&node.sig, &frame.generics, ctx.file, mod_stack);
+    let merged = method_canonical_generics(
+        &node.sig,
+        &frame.generics,
+        ctx.file,
+        mod_stack,
+        ctx.reexports,
+    );
     let inner = resolve_method_return(ret_ty, impl_segs, ctx, mod_stack, &merged);
     if matches!(inner, CanonicalType::Opaque) {
         return;

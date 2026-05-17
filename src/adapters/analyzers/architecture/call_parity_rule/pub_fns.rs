@@ -273,6 +273,7 @@ impl<'ast, 'vis> Visit<'ast> for PubFnCollector<'ast, 'vis> {
         let scope = CanonScope {
             file: self.file,
             mod_stack: &self.mod_stack,
+            reexports: None,
         };
         let canonical_segs = resolve_impl_self_type(&node.self_ty, &scope).unwrap_or_default();
         let visible = !canonical_segs.is_empty()

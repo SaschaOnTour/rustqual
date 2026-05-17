@@ -146,6 +146,7 @@ fn resolve_type_arg_at(
         workspace_files: ctx.workspace_files,
         alias_param_subs: None,
         generic_params: ctx.generic_params,
+        reexports: ctx.reexports,
     };
     let resolved = match ctx.self_type.as_deref() {
         Some(impl_segs) => resolve_type(&substitute_bare_self(type_arg, impl_segs), &rctx),

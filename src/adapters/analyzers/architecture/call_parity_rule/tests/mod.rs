@@ -8,6 +8,7 @@ mod end_to_end_snapshot;
 mod module_resolution;
 mod pub_fns;
 mod receiver_tracing;
+mod reexport_resolution;
 mod regressions;
 mod support;
 mod target_anchors;

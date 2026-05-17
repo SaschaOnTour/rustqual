@@ -42,6 +42,7 @@ pub(super) fn identify_wrapper_name(
     let scope = CanonScope {
         file: ctx.file,
         mod_stack: ctx.mod_stack,
+        reexports: None,
     };
     let segs: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
     // Use-site gate: `::std::sync::Arc` skips workspace lookup so a

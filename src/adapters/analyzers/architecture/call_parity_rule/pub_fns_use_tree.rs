@@ -101,6 +101,7 @@ fn resolve_use_source_type(
     let scope = CanonScope {
         file: ctx.file_scope,
         mod_stack: ctx.mod_stack,
+        reexports: None,
     };
     let Some(canonical) = canonicalise_workspace_path(segs, ctx.leading_colon_set, &scope) else {
         return false;

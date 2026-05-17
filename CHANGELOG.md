@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.5] - in development
+
+Patch release: **`pub use` re-export resolution gate** — closes a
+double-mismatch in trait dispatch and inherent-impl associated-fn
+routing where re-exported paths produced graph edges and type-index
+keys on the re-export-rooted canonical while the anchor index was
+keyed on the declaration canonical. Failing-first regression tests
+live in `call_parity_rule/tests/reexport_resolution.rs`.
+
+### Fixed (`pub use` resolution)
+
+- **Composite `<reexport_canonical>::<method>` callees + REEXPORT-keyed
+  `trait_impls` map mismatched DECL-keyed anchor index.** Four sites
+  let re-export-rooted canonicals through: `record_trait_impl` (keyed
+  `trait_impls` on REEXPORT), `canonicalise_bounds` (built bounds via
+  the primitive, bypassing the gate), `is_impl_for_visible_trait`
+  (compared REEXPORT vs. DECL), and dispatch edges via
+  `canonicalise_generic_param_path` (REEXPORT-rooted). The v1.2.4
+  post-pass `rewrite_reexport_edges` only did exact-string-match on
+  graph callees, so composite `<x>::<y>` shapes and HashMap keys
+  outside `graph.forward` stayed un-normalised.
+  Fix: `canonicalise_workspace_path` gains a final re-export-substitution
+  step via new `reexports::canonicalise_reexport_path` (longest-prefix
+  match) + `apply_reexport_substitution`. `CanonScope`/`ResolveContext`/
+  `InferContext`/`FnContext`/`BuildContext`/`WorkspaceIndexInputs` get
+  `reexports: Option<&ReexportMap>` propagated from
+  `workspace_graph::build_call_graph` (build-order reshuffle:
+  `collect_reexport_map` now runs BEFORE `build_workspace_type_index`).
+  `signature_params::canonicalise_bounds` switched from
+  `canonicalise_type_segments_in_scope` (primitive) to
+  `canonicalise_workspace_path` (gate) — closes the last production
+  bypass. `reexports::collect_reexport_rewrites` upgraded to
+  prefix-aware via `canonicalise_reexport_path` as defense-in-depth.
+  Regression tests in `tests/reexport_resolution.rs` cover all four
+  external repro shapes
+  (`/mnt/d/KI/rustqual-repros/0{1,2,3,4}-*`).
+  **Validates** end-to-end against rlm (13 → 0 architecture findings,
+  no rlm-side changes).
+
+### Known limitations (documented, not in v1.2.5 scope)
+
+- **Module re-exports `pub use module_a;`** — `pub use` of a *module*
+  (rather than an item) is registered as a leaf-fn re-export in
+  `build_reexport_canonical`. A `consumer::module_a::function()` call
+  doesn't match the reexport key. Workaround: direct paths. Tracked
+  for a follow-up.
+- **Glob re-exports `pub use foo::*;`** — explicit known limitation in
+  `collect_pub_use_leaves`. Affected users must use direct paths.
+  Sketch follow-up plan in `docs/plan-glob-reexport-resolution.md`.
+- **`#[path = "..."]` attribute** — `file_to_module_segments` reads
+  filesystem path, ignoring `#[path]`. Practical impact null in
+  observed projects (cfg-test only). Not in any follow-up plan.
+
+### Future work
+
+- **`WorkspaceCanonical(String)` newtype migration** (`docs/plan-
+  workspace-canonical-newtype.md`) — ~200 sites to migrate, would
+  eliminate the whole class of canonical-string-comparison drift bugs
+  via Rust's type system instead of reviewer discipline. ~2-4 weeks
+  incremental work, deferred from v1.2.5 to keep the patch focused.
+
 ## [1.2.4] - in development
 
 Patch release: **call-parity audit follow-up + post-review

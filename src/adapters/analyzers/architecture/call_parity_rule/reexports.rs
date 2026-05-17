@@ -30,16 +30,22 @@ use std::collections::HashMap;
 /// detector mustn't loop). Real-world chains bottom out under 4.
 const MAX_REEXPORT_CHAIN_DEPTH: usize = 16;
 
+/// `reexport_canonical → target_canonical` map across the workspace.
+/// Built once by `collect_reexport_map` and read both by the
+/// canonicalisation gate (`bindings::canonicalise_workspace_path`)
+/// and by the defense-in-depth post-pass `rewrite_reexport_edges`.
+pub(crate) type ReexportMap = HashMap<String, String>;
+
 // qual:api
 /// Walk every `pub use` (and `pub(crate)`/`pub(super)`/`pub(in path)`
 /// use) leaf across the workspace and produce a map from
 /// reexport-site canonical → original-definition canonical. Chained
 /// re-exports are flattened iteratively.
-pub(super) fn collect_reexport_map(
+pub(crate) fn collect_reexport_map(
     files: &[(&str, &syn::File)],
     workspace_files: &HashMap<String, FileScope<'_>>,
-) -> HashMap<String, String> {
-    let mut map: HashMap<String, String> = HashMap::new();
+) -> ReexportMap {
+    let mut map: ReexportMap = HashMap::new();
     for (path, ast) in files {
         let Some(file) = workspace_files.get(*path) else {
             continue;
@@ -51,10 +57,78 @@ pub(super) fn collect_reexport_map(
 }
 
 // qual:api
+/// Normalise a fully-resolved workspace canonical through the
+/// re-export map: if the canonical (or a strict `::`-bounded prefix
+/// of it) is registered as a re-export, substitute the prefix with the
+/// re-export's target and return the new canonical.
+///
+/// **THE single splice point** for re-export substitution. Both the
+/// canonicalisation gate (`bindings::canonicalise_workspace_path`)
+/// AND the defense-in-depth post-pass (`collect_reexport_rewrites`)
+/// route through this helper, so any future site that needs to flip
+/// a re-exported canonical back to its declaration follows the same
+/// longest-prefix-match semantics.
+///
+/// Returns `Some(new_canonical)` when a rewrite applies, `None`
+/// otherwise. Caller-side: if `None`, keep the input as-is.
+///
+/// Examples (input → output):
+/// - `crate::application::Trait` (in map) → `crate::application::trait_mod::Trait`
+/// - `crate::application::Trait::method` (prefix in map) →
+///   `crate::application::trait_mod::Trait::method`
+/// - `crate::application::Struct::new` (prefix in map) →
+///   `crate::application::module::Struct::new`
+/// - `std::sync::Arc` (no match) → `None`
+///
+/// Operation: longest-prefix-walk, no own calls.
+pub(crate) fn canonicalise_reexport_path(canonical: &str, map: &ReexportMap) -> Option<String> {
+    if let Some(target) = map.get(canonical) {
+        return Some(target.clone());
+    }
+    let mut idx = canonical.len();
+    while let Some(sep) = canonical[..idx].rfind("::") {
+        let prefix = &canonical[..sep];
+        if let Some(target) = map.get(prefix) {
+            return Some(format!("{target}{}", &canonical[sep..]));
+        }
+        idx = sep;
+    }
+    None
+}
+
+/// Single substitution point for the workspace re-export map, called
+/// as the final step of `canonicalise_workspace_path`. Only fires on
+/// `crate::`-rooted resolutions (extern paths pass through), so every
+/// gate-routed site automatically gets DECL canonicals.
+pub(crate) fn apply_reexport_substitution(
+    resolved: Vec<String>,
+    reexports: Option<&ReexportMap>,
+) -> Vec<String> {
+    let Some(map) = reexports else {
+        return resolved;
+    };
+    if resolved.first().map(String::as_str) != Some("crate") {
+        return resolved;
+    }
+    let joined = resolved.join("::");
+    match canonicalise_reexport_path(&joined, map) {
+        Some(rewritten) => rewritten.split("::").map(String::from).collect(),
+        None => resolved,
+    }
+}
+
+// qual:api
 /// Apply the re-export map to every callee canonical in the graph,
 /// rewriting both `forward` and `reverse`. Edges whose callee isn't
 /// in the map are left alone.
-pub(super) fn rewrite_reexport_edges(graph: &mut CallGraph, reexports: &HashMap<String, String>) {
+///
+/// Defense-in-depth: the canonicalisation gate
+/// (`bindings::canonicalise_workspace_path`) routes every user-written
+/// path through `canonicalise_reexport_path` before insertion, so in
+/// principle no graph edge should still carry a re-export-rooted
+/// callee by the time this post-pass runs. The post-pass survives as
+/// a safety net for any future emission site that bypasses the gate.
+pub(super) fn rewrite_reexport_edges(graph: &mut CallGraph, reexports: &ReexportMap) {
     if reexports.is_empty() {
         return;
     }
@@ -73,12 +147,11 @@ fn walk_pub_uses(
     items: &[syn::Item],
     mod_stack: &mut Vec<String>,
     file: &FileScope<'_>,
-    map: &mut HashMap<String, String>,
+    map: &mut ReexportMap,
 ) {
-    let recurse =
-        |inner: &[syn::Item], stack: &mut Vec<String>, map: &mut HashMap<String, String>| {
-            walk_pub_uses(inner, stack, file, map);
-        };
+    let recurse = |inner: &[syn::Item], stack: &mut Vec<String>, map: &mut ReexportMap| {
+        walk_pub_uses(inner, stack, file, map);
+    };
     for item in items {
         if let syn::Item::Use(u) = item {
             if !is_pub_use(&u.vis) {
@@ -111,13 +184,17 @@ fn register_pub_use_leaves(
     leading_colon_set: bool,
     file: &FileScope<'_>,
     mod_stack: &[String],
-    map: &mut HashMap<String, String>,
+    map: &mut ReexportMap,
 ) {
     for (path_segs, name) in leaves {
         let Some(target) = canonicalise_workspace_path(
             path_segs,
             leading_colon_set,
-            &CanonScope { file, mod_stack },
+            &CanonScope {
+                file,
+                mod_stack,
+                reexports: None,
+            },
         ) else {
             continue;
         };
@@ -207,7 +284,7 @@ fn collect_pub_use_leaves(
 /// re-export key, replace with its target. Bounded by
 /// `MAX_REEXPORT_CHAIN_DEPTH` so a malformed cyclic input can't
 /// hang. Operation.
-fn flatten_chains(map: &mut HashMap<String, String>) {
+fn flatten_chains(map: &mut ReexportMap) {
     let keys: Vec<String> = map.keys().cloned().collect();
     for key in keys {
         let mut current = map.get(&key).cloned().unwrap_or_default();
@@ -225,17 +302,21 @@ fn flatten_chains(map: &mut HashMap<String, String>) {
     }
 }
 
-/// Collect rewrites for every edge whose callee is in `reexports`.
+/// Collect rewrites for every edge whose callee canonical (or a
+/// strict `::`-bounded prefix thereof) matches a re-export key. Routes
+/// through `canonicalise_reexport_path` so composite
+/// `<reexport_canonical>::<method>` shapes (synthetic anchor /
+/// associated-fn keys) are caught alongside plain free-fn callees.
 /// Operation.
 fn collect_reexport_rewrites(
     graph: &CallGraph,
-    reexports: &HashMap<String, String>,
+    reexports: &ReexportMap,
 ) -> Vec<(String, String, String)> {
     let mut rewrites: Vec<(String, String, String)> = Vec::new();
     for (caller, callees) in &graph.forward {
         for callee in callees {
-            if let Some(target) = reexports.get(callee) {
-                rewrites.push((caller.clone(), callee.clone(), target.clone()));
+            if let Some(target) = canonicalise_reexport_path(callee, reexports) {
+                rewrites.push((caller.clone(), callee.clone(), target));
             }
         }
     }
