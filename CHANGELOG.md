@@ -61,16 +61,23 @@ live in `call_parity_rule/tests/reexport_resolution.rs`.
 
 ### Known limitations (documented, not in v1.2.5 scope)
 
-- **Reexport-map is namespace-blind (Codex P2 architectural concern).**
-  `collect_reexport_map` mixes value re-exports and type re-exports
-  in one HashMap. In currently compilable Rust this isn't exploitable
-  — namespace separation means a type-context bound `Q: Handler`
-  resolves the type's path, not a same-named value's path. But the
-  architectural invariant isn't compile-time enforced. Regression
-  test `value_reexport_does_not_hijack_trait_bound` guards the
-  observed behaviour. Full fix planned as part of
-  `docs/plan-workspace-canonical-newtype.md` via a `Namespace` marker
-  on the canonical newtype.
+- **Same-name type+value `pub use` collisions can misresolve
+  (Codex P2, deferred to WorkspaceCanonical migration).** Valid Rust
+  permits `pub use trait_mod::Handler;` (TYPE) and `pub use
+  value_mod::Handler;` (VALUE) to coexist — namespaces are separate.
+  rustqual collapses both into the same string key in two
+  namespace-blind HashMaps:
+  1. file-level `AliasMap = HashMap<String, AliasTarget>` (last-write
+     wins, so source order determines which entry survives).
+  2. workspace `ReexportMap = HashMap<String, String>` (same).
+  A trait bound `Q: Handler` can therefore canonicalise to the VALUE
+  path and lose its trait-anchor dispatch.
+  Codex P2 reproducer kept as `#[ignore]`d regression test
+  (`value_reexport_does_not_hijack_trait_bound`); full fix bundled
+  into the planned `WorkspaceCanonical { path, namespace }` newtype
+  migration where the gate becomes the sole constructor and produces
+  canonicals carrying their namespace at the type level.
+  See `docs/plan-workspace-canonical-newtype.md` Phase 1.
 - **Module re-exports `pub use module_a;`** — `pub use` of a *module*
   (rather than an item) is registered as a leaf-fn re-export in
   `build_reexport_canonical`. A `consumer::module_a::function()` call
@@ -85,11 +92,18 @@ live in `call_parity_rule/tests/reexport_resolution.rs`.
 
 ### Future work
 
-- **`WorkspaceCanonical(String)` newtype migration** (`docs/plan-
-  workspace-canonical-newtype.md`) — ~200 sites to migrate, would
-  eliminate the whole class of canonical-string-comparison drift bugs
-  via Rust's type system instead of reviewer discipline. ~2-4 weeks
-  incremental work, deferred from v1.2.5 to keep the patch focused.
+- **`WorkspaceCanonical { path, namespace }` newtype migration**
+  (`docs/plan-workspace-canonical-newtype.md`) — ~200 sites to
+  migrate. Eliminates two drift classes via Rust's type system:
+  (a) raw `String` canonicals across HashMaps without explicit
+  gate-resolution; (b) namespace-blind `HashMap<String, _>` keys
+  silently collapsing same-name type+value entries. Both classes
+  surfaced repeatedly in v1.2.4 + v1.2.5 review rounds (leading-colon,
+  foo.rs/mod.rs, pub-use composite keys, value/type namespace
+  collision). One coherent refactor instead of two separate ones
+  because the namespace-marker is a natural field on the newtype.
+  ~3-4 weeks incremental work; replaces the reviewer-discipline
+  invariant with a compile-time-enforced one.
 
 ## [1.2.4] - in development
 

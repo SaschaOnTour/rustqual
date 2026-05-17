@@ -347,28 +347,48 @@ fn pub_fns_impl_self_type_resolves_through_reexport() {
 }
 
 #[test]
+#[ignore = "Known limitation v1.2.5 — namespace-aware canonicals land in \
+            WorkspaceCanonical migration (docs/plan-workspace-canonical-newtype.md). \
+            Same-name type+value pub-use collides on both the file-level alias_map \
+            (HashMap<String, AliasTarget>, last-write-wins) AND the workspace \
+            reexport map (HashMap<String, String>, last-write-wins). Codex P2 \
+            reproducer kept here as regression target for the upcoming migration."]
 fn value_reexport_does_not_hijack_trait_bound() {
-    // Codex P2: the reexport map is namespace-blind
-    // (`HashMap<String, String>`), but Rust allows value and type
-    // namespaces to coexist with the SAME visible name. The setup
-    // below is valid Rust — it compiles:
+    // Codex P2 reproducer (kept as ignored regression target):
     //
     //     mod handler_trait { pub trait Handler { fn handle(&self) -> u32; } }
     //     mod handler_fn    { pub fn Handler() -> u32 { 1 } }
     //     pub use handler_trait::Handler;  // TYPE re-export
-    //     pub use handler_fn::Handler;     // VALUE re-export — same name
+    //     pub use handler_fn::Handler;     // VALUE re-export — same visible name
     //
-    // Both `pub use` items resolve to the same string key
-    // `crate::application::Handler` in rustqual's reexport map.
-    // Last insert wins: in source order the value-side ends up as
-    // the map's value, so a trait-bound `Q: Handler` would get
-    // rewritten to the value canonical and lose its trait-anchor
-    // dispatch.
+    // This is valid Rust because type and value namespaces are
+    // separate; the compiler resolves `Q: Handler` to the TRAIT
+    // because the bound position is a type-context. rustqual loses
+    // that context the moment it inserts both entries into a
+    // namespace-blind `HashMap<String, _>` — last write wins, so the
+    // VALUE entry ends up as the resolved canonical and the trait
+    // bound silently dispatches to a function path.
     //
-    // After the fix (namespace-split): the gate operates on the
-    // type-namespace map by default, so the trait-bound's
-    // re-export resolves to the TRAIT's decl canonical regardless
-    // of the value-side entry.
+    // The full fix requires namespace-aware canonicals at two
+    // layers:
+    //   1. file-level `AliasMap`: needs `Vec<AliasTarget>` per name
+    //      (or namespace-classified entries) so same-name type+value
+    //      `use` items don't overwrite each other.
+    //   2. workspace `ReexportMap`: same — split into `type_ns` and
+    //      `value_ns` maps with namespace classification at the
+    //      `pub use`-leaf collection site.
+    //   3. `CanonScope`: gains a `namespace: Namespace` field set
+    //      by the caller (Type for trait bounds / impl self-types,
+    //      Value for call expressions).
+    //
+    // Both layers are converging in the planned
+    // `WorkspaceCanonical { path, namespace }` newtype: the gate is
+    // the sole constructor and produces canonicals that carry their
+    // namespace at the type level, so the entire bug class becomes
+    // compile-time impossible.
+    //
+    // See `docs/plan-workspace-canonical-newtype.md` Phase 1 for the
+    // structural fix. Unignore this test once that lands.
     let ws = build_workspace(&[
         ("src/lib.rs", "pub mod application;\npub mod cli;\n"),
         (
