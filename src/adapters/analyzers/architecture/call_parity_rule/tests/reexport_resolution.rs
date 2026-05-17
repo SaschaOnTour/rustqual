@@ -348,20 +348,27 @@ fn pub_fns_impl_self_type_resolves_through_reexport() {
 
 #[test]
 fn value_reexport_does_not_hijack_trait_bound() {
-    // Codex P2 architectural concern: the reexport map is namespace-
-    // blind (mixes value and type re-exports in one HashMap). In
-    // currently compilable Rust this is not exploitable — Rust's
-    // namespace separation means a type-context bound `Q: Handler`
-    // resolves via the file alias map to the trait's path, not a
-    // same-named value's path. The gate's apply_reexport_substitution
-    // then either finds no entry (no hijack) or finds the trait's
-    // own re-export entry (correct DECL substitution).
+    // Codex P2: the reexport map is namespace-blind
+    // (`HashMap<String, String>`), but Rust allows value and type
+    // namespaces to coexist with the SAME visible name. The setup
+    // below is valid Rust — it compiles:
     //
-    // This test guards the architectural invariant as regression
-    // protection. A future namespace-split (planned as part of
-    // `docs/plan-workspace-canonical-newtype.md`) will enforce this
-    // at the type system level via a `Namespace` marker on the
-    // canonical newtype.
+    //     mod handler_trait { pub trait Handler { fn handle(&self) -> u32; } }
+    //     mod handler_fn    { pub fn Handler() -> u32 { 1 } }
+    //     pub use handler_trait::Handler;  // TYPE re-export
+    //     pub use handler_fn::Handler;     // VALUE re-export — same name
+    //
+    // Both `pub use` items resolve to the same string key
+    // `crate::application::Handler` in rustqual's reexport map.
+    // Last insert wins: in source order the value-side ends up as
+    // the map's value, so a trait-bound `Q: Handler` would get
+    // rewritten to the value canonical and lose its trait-anchor
+    // dispatch.
+    //
+    // After the fix (namespace-split): the gate operates on the
+    // type-namespace map by default, so the trait-bound's
+    // re-export resolves to the TRAIT's decl canonical regardless
+    // of the value-side entry.
     let ws = build_workspace(&[
         ("src/lib.rs", "pub mod application;\npub mod cli;\n"),
         (
@@ -369,14 +376,13 @@ fn value_reexport_does_not_hijack_trait_bound() {
             r#"
             pub mod handler_trait;
             pub mod handler_fn;
+            pub mod impl_a;
 
-            // Trait `Handler` from `handler_trait` mod, re-exported
-            // alongside a value-side `Handler` fn from `handler_fn`.
-            // The value-side `Handler` is what the bug demonstrates.
+            // Codex's reproducer: two `pub use ... Handler` items
+            // collide on the same string key but live in different
+            // Rust namespaces (TYPE + VALUE).
             pub use handler_trait::Handler;
-            // Hypothetically (real code can have this kind of name
-            // collision across submodules):
-            // pub use handler_fn::handler_value;
+            pub use handler_fn::Handler;
 
             pub fn dispatch<Q: Handler>(q: &Q) -> u32 { q.handle() }
             "#,
@@ -392,7 +398,8 @@ fn value_reexport_does_not_hijack_trait_bound() {
         (
             "src/application/handler_fn.rs",
             r#"
-            pub fn handler_value() -> u32 { 1 }
+            #[allow(non_snake_case)]
+            pub fn Handler() -> u32 { 1 }
             "#,
         ),
         (

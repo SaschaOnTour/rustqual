@@ -106,7 +106,11 @@ pub(crate) fn collect_pub_fns_by_layer<'ast>(
             crate_root_modules: inputs.workspace.crate_root_modules,
             workspace_module_paths: Some(inputs.workspace.workspace_module_paths),
         };
-        let file_visible = setup.file_root_visibility.get(*path).copied().unwrap_or(true);
+        let file_visible = setup
+            .file_root_visibility
+            .get(*path)
+            .copied()
+            .unwrap_or(true);
         let mut collector = PubFnCollector {
             file_path: path.to_string(),
             file: &file,
