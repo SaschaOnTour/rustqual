@@ -13,7 +13,7 @@ lifetime-generic methods. Streaming-trait patterns like
 `fn stream<'a>(&'a self) -> Box<dyn Iterator + 'a>` (and the
 analogous LlmEngine `BoxStream<'a, _>` shape) are dyn-safe per Rust's
 actual rule but were rejected by rustqual. Failing-first regression
-test in `tests/trait_contract.rs`.
+test in `src/adapters/analyzers/architecture/tests/trait_contract.rs`.
 
 ### Fixed (object-safety check)
 
