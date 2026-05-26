@@ -5,7 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.5] - in development
+## [1.2.6] - 2026-05-27
+
+Patch release: **dyn-compatibility precision in `must_be_object_safe`** —
+the conservative object-safety check used to false-flag legitimate
+lifetime-generic methods. Streaming-trait patterns like
+`fn stream<'a>(&'a self) -> Box<dyn Iterator + 'a>` (and the
+analogous LlmEngine `BoxStream<'a, _>` shape) are dyn-safe per Rust's
+actual rule but were rejected by rustqual. Failing-first regression
+test in `src/adapters/analyzers/architecture/tests/trait_contract.rs`.
+
+### Fixed (object-safety check)
+
+- **`must_be_object_safe` no longer false-flags lifetime-generic
+  methods.** The conservative check in
+  `trait_contract_rule/checks.rs::check_object_safety` used
+  `!generics.params.is_empty()` to flag method-level generics as
+  object-unsafe — but Rust's actual dyn-compatibility rule treats
+  lifetime parameters as object-safe (they're compile-time-only and
+  erased at codegen; only type and const generics need vtable slots
+  the compiler can't synthesise). Affected idiom:
+  `fn stream<'a>(&'a self) -> Box<dyn Iterator + 'a>` and any
+  streaming-engine trait that ties a returned `BoxStream<'a, …>` to
+  `&'a self`. Fix: filter to `GenericParam::Type | GenericParam::Const`
+  only via new `has_object_unsafe_generic` helper. Finding message
+  sharpened to "has type/const method-level generics". Regression
+  tests: `must_be_object_safe_allows_method_level_lifetime` (passes
+  for `<'a>`) and `must_be_object_safe_flags_const_generic_method`
+  (defensive — locks in that `<const N>` is still flagged).
+
+## [1.2.5] - 2026-05-17
 
 Patch release: **`pub use` re-export resolution gate** — closes a
 double-mismatch in trait dispatch and inherent-impl associated-fn
@@ -105,7 +134,7 @@ live in `call_parity_rule/tests/reexport_resolution.rs`.
   ~3-4 weeks incremental work; replaces the reviewer-discipline
   invariant with a compile-time-enforced one.
 
-## [1.2.4] - in development
+## [1.2.4] - 2026-05-16
 
 Patch release: **call-parity audit follow-up + post-review
 sharpening** — closes the two remaining call-parity gaps surfaced by

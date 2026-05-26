@@ -208,6 +208,45 @@ fn must_be_object_safe_flags_generic_method() {
     assert_eq!(checks(&hits), vec!["object_safety"]);
 }
 
+#[test]
+fn must_be_object_safe_allows_method_level_lifetime() {
+    // Rust's actual dyn-compatibility rule treats lifetime params on
+    // methods as dyn-safe — only type and const generics break
+    // object-safety (the compiler can't synthesise a vtable entry for
+    // unknown `T` or `const N`, but lifetimes are compile-time-only
+    // and erased). Streaming traits routinely tie a returned `Box<dyn
+    // Iterator + 'a>` to `&'a self` via a lifetime param. The check
+    // must not false-flag this idiom.
+    let mut rule = empty();
+    rule.must_be_object_safe = Some(true);
+    let src = r#"
+        pub trait Streamable {
+            fn stream<'a>(&'a self) -> Box<dyn Iterator<Item = u8> + 'a>;
+        }
+    "#;
+    let hits = run("any.rs", src, &rule);
+    assert!(
+        hits.is_empty(),
+        "method-level lifetime params are object-safe; expected no \
+         findings but got {hits:?}",
+    );
+}
+
+#[test]
+fn must_be_object_safe_flags_const_generic_method() {
+    // Defensive: const-generic method params break object-safety
+    // (same vtable-synthesis problem as type generics). Lock in the
+    // current behaviour so the lifetime-fix doesn't accidentally
+    // widen the exemption.
+    let mut rule = empty();
+    rule.must_be_object_safe = Some(true);
+    let src = r#"
+        pub trait A { fn pack<const N: usize>(&self, data: [u8; N]); }
+    "#;
+    let hits = run("any.rs", src, &rule);
+    assert_eq!(checks(&hits), vec!["object_safety"]);
+}
+
 // ── forbidden_error_variant_contains ──────────────────────────────────
 
 #[test]
