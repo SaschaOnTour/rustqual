@@ -142,7 +142,13 @@ pub(super) fn check_supertraits(
         });
 }
 
-/// Conservative object-safety check: flag `Self` return and method-level generics.
+/// Conservative object-safety check: flag `Self` return and method-level
+/// type/const generics. Lifetime parameters on methods are intentionally
+/// permitted — Rust's dyn-compatibility rule treats them as object-safe
+/// because lifetimes are compile-time-only (erased at codegen) and don't
+/// need a vtable slot. Type and const generics, by contrast, break
+/// object-safety: the compiler can't synthesise a vtable entry without
+/// knowing the concrete `T` / `const N` at the call site.
 pub(super) fn check_object_safety(
     site: &TraitSite<'_>,
     rule: &CompiledTraitContract,
@@ -159,15 +165,26 @@ pub(super) fn check_object_safety(
                 "object_safety",
                 format!("{} returns Self", m.sig.ident),
             ));
-        } else if !m.sig.generics.params.is_empty() {
+        } else if has_object_unsafe_generic(&m.sig.generics.params) {
             out.push(hit_method(
                 site,
                 m,
                 "object_safety",
-                format!("{} has method-level generics", m.sig.ident),
+                format!("{} has type/const method-level generics", m.sig.ident),
             ));
         }
     });
+}
+
+/// True iff any generic parameter is a type or const generic — i.e.
+/// would break object-safety. Lifetime-only generics are intentionally
+/// permitted (see `check_object_safety`).
+fn has_object_unsafe_generic(
+    params: &syn::punctuated::Punctuated<syn::GenericParam, syn::Token![,]>,
+) -> bool {
+    params
+        .iter()
+        .any(|p| matches!(p, syn::GenericParam::Type(_) | syn::GenericParam::Const(_)))
 }
 
 /// Flag enum variants of the trait's error return type that match forbidden substrings.
