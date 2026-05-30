@@ -5,11 +5,27 @@ use crate::config::StructuralConfig;
 
 fn detect_from(source: &str) -> Vec<StructuralWarning> {
     let parsed = super::parse_single(source);
-    let meta = collect_metadata(&parsed);
+    let cfg_test_files =
+        crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(&parsed);
+    let meta = collect_metadata(&parsed, &cfg_test_files);
     let config = StructuralConfig::default();
     let mut warnings = Vec::new();
     detect_sit(&mut warnings, &meta, &config);
     warnings
+}
+
+#[test]
+fn single_impl_trait_in_cfg_test_file_excluded() {
+    // SIT must skip test code: a non-pub trait with one impl inside a
+    // `#![cfg(test)]` file is a test mock, not a production over-abstraction.
+    let w = detect_from(
+        "#![cfg(test)]\ntrait Drawable { fn draw(&self); } struct Circle; impl Drawable for Circle { fn draw(&self) {} }",
+    );
+    assert!(
+        w.is_empty(),
+        "single-impl trait in a #![cfg(test)] file must be excluded: {} warning(s)",
+        w.len()
+    );
 }
 
 #[test]
@@ -59,7 +75,7 @@ fn test_disabled_check() {
         syn::parse_file("trait D { fn d(&self); } struct C; impl D for C { fn d(&self) {} }")
             .expect("test source");
     let parsed = vec![("lib.rs".to_string(), String::new(), syntax)];
-    let meta = collect_metadata(&parsed);
+    let meta = collect_metadata(&parsed, &std::collections::HashSet::new());
     let config = StructuralConfig {
         check_sit: false,
         ..StructuralConfig::default()

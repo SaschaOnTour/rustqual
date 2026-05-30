@@ -72,7 +72,7 @@ pub fn assert_in_range(actual: f64, expected: f64, tol: f64) { /* … */ }
 
 `qual:api` and `qual:test_helper` exclude the function from `DRY-002` *and* from `TQ-003` (untested), without counting against `max_suppression_ratio`. Use them on functions that are exported to consumers outside the crate or used only by integration tests.
 
-By default, the dead-code analysis treats workspace-root `tests/**` files as call-sites — so a function used only from integration tests is not dead.
+By default, the dead-code analysis treats a package's `tests/**` files as call-sites — both the analysis-root crate's `tests/**` and each member's `crates/*/tests/**` — so a function used only from integration tests is not dead.
 
 ## Code fragments and repeated matches
 

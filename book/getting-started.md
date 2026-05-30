@@ -89,7 +89,6 @@ This writes a `rustqual.toml` next to `Cargo.toml`, with thresholds calibrated t
 | `--no-fail` | Local exploration; don't exit non-zero |
 | `--verbose` | Show every function, not just findings |
 | `--findings` | One finding per line: `file:line category in fn_name` |
-| `--diff [REF]` | Only analyse files changed vs a git ref |
 | `--coverage <LCOV>` | Include coverage-based test-quality checks |
 | `--init` | Generate a config tailored to your codebase |
 | `--watch` | Re-analyse on file changes |

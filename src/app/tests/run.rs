@@ -334,23 +334,3 @@ fn test_extract_init_metrics_with_complexity() {
     assert_eq!(m.max_nesting_depth, 3);
     assert_eq!(m.max_function_lines, 45);
 }
-
-// ── Diff CLI flag tests ──────────────────────────────────────
-
-#[test]
-fn test_diff_cli_default_ref() {
-    let cli = Cli::parse_from(["test", "--diff"]);
-    assert_eq!(cli.diff.as_deref(), Some("HEAD"));
-}
-
-#[test]
-fn test_diff_cli_custom_ref() {
-    let cli = Cli::parse_from(["test", "--diff", "main"]);
-    assert_eq!(cli.diff.as_deref(), Some("main"));
-}
-
-#[test]
-fn test_diff_cli_not_set() {
-    let cli = Cli::parse_from(["test"]);
-    assert!(cli.diff.is_none());
-}

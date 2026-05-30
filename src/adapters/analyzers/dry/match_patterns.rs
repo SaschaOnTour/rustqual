@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use syn::visit::Visit;
 
@@ -39,6 +39,7 @@ pub(crate) struct CollectedMatch {
 /// AST visitor that collects match expressions for repeated pattern detection.
 struct MatchPatternCollector<'a> {
     config: &'a crate::config::sections::DuplicatesConfig,
+    cfg_test_files: &'a HashSet<String>,
     file: String,
     collected: Vec<CollectedMatch>,
     in_test: bool,
@@ -57,10 +58,13 @@ struct MatchPatternCollector<'a> {
 
 impl FileVisitor for MatchPatternCollector<'_> {
     fn reset_for_file(&mut self, file_path: &str) {
+        // Whole-file test classification from the authoritative cfg-test
+        // set (checked against the raw path, matching its keys). Inline
+        // `#[cfg(test)] mod` is still handled per-item below.
+        self.in_test = self.cfg_test_files.contains(file_path);
         // Normalise separators for deterministic findings across OSes,
         // matching the other DRY collectors (e.g. wildcards.rs).
         self.file = file_path.replace('\\', "/");
-        self.in_test = false;
         self.current_fn = String::new();
         self.current_impl_type = String::new();
         self.module_stack.clear();
@@ -177,8 +181,11 @@ pub fn detect_repeated_matches(
     parsed: &[(String, String, syn::File)],
     config: &crate::config::sections::DuplicatesConfig,
 ) -> Vec<RepeatedMatchGroup> {
+    let cfg_test_files =
+        crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(parsed);
     let mut collector = MatchPatternCollector {
         config,
+        cfg_test_files: &cfg_test_files,
         file: String::new(),
         collected: Vec::new(),
         in_test: false,

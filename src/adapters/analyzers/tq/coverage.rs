@@ -13,7 +13,7 @@ pub(crate) fn detect_uncovered_functions(
 ) -> Vec<TqWarning> {
     all_results
         .iter()
-        .filter(|fa| !fa.suppressed && !is_test_function(&fa.name))
+        .filter(|fa| !fa.suppressed && !fa.is_test)
         .filter_map(|fa| {
             let file_data = lcov_data.get(&fa.file)?;
             let hit_count = file_data.function_hits.get(&fa.name)?;
@@ -40,7 +40,7 @@ pub(crate) fn detect_untested_logic(
 ) -> Vec<TqWarning> {
     all_results
         .iter()
-        .filter(|fa| !fa.suppressed && !is_test_function(&fa.name))
+        .filter(|fa| !fa.suppressed && !fa.is_test)
         .filter_map(|fa| {
             let file_data = lcov_data.get(&fa.file)?;
             let complexity = fa.complexity.as_ref()?;
@@ -74,10 +74,4 @@ pub(crate) fn detect_untested_logic(
             })
         })
         .collect()
-}
-
-/// Check if a function name looks like a test function.
-/// Operation: string prefix check.
-fn is_test_function(name: &str) -> bool {
-    name.starts_with("test_")
 }

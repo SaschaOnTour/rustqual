@@ -5,9 +5,25 @@ use crate::config::StructuralConfig;
 fn detect_in(source: &str) -> Vec<StructuralWarning> {
     let parsed = super::parse_single(source);
     let config = StructuralConfig::default();
+    let cfg_test_files =
+        crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(&parsed);
     let mut warnings = Vec::new();
-    detect_iet(&mut warnings, &parsed, &config);
+    detect_iet(&mut warnings, &parsed, &config, &cfg_test_files);
     warnings
+}
+
+#[test]
+fn inconsistent_error_types_in_cfg_test_file_excluded() {
+    // IET must skip whole test files (here a `#![cfg(test)]` companion),
+    // not only inline `#[cfg(test)] mod`.
+    let w = detect_in(
+        "#![cfg(test)]\npub fn a() -> Result<(), String> { Ok(()) } pub fn b() -> Result<i32, std::io::Error> { todo!() }",
+    );
+    assert!(
+        w.is_empty(),
+        "inconsistent error types in a #![cfg(test)] file must be excluded: {} warning(s)",
+        w.len()
+    );
 }
 
 #[test]
@@ -65,7 +81,12 @@ fn test_disabled_check() {
         ..StructuralConfig::default()
     };
     let mut warnings = Vec::new();
-    detect_iet(&mut warnings, &parsed, &config);
+    detect_iet(
+        &mut warnings,
+        &parsed,
+        &config,
+        &std::collections::HashSet::new(),
+    );
     assert!(warnings.is_empty());
 }
 

@@ -5,9 +5,25 @@ use crate::config::StructuralConfig;
 fn detect_in(source: &str) -> Vec<StructuralWarning> {
     let parsed = super::parse_single(source);
     let config = StructuralConfig::default();
+    let cfg_test_files =
+        crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(&parsed);
     let mut warnings = Vec::new();
-    detect_nms(&mut warnings, &parsed, &config);
+    detect_nms(&mut warnings, &parsed, &config, &cfg_test_files);
     warnings
+}
+
+#[test]
+fn needless_mut_self_in_cfg_test_file_excluded() {
+    // NMS must skip whole test files (here a `#![cfg(test)]` companion),
+    // not only inline `#[cfg(test)] mod`.
+    let w = detect_in(
+        "#![cfg(test)]\nstruct S { x: i32 } impl S { fn foo(&mut self) -> i32 { self.x } }",
+    );
+    assert!(
+        w.is_empty(),
+        "needless &mut self in a #![cfg(test)] file must be excluded: {} warning(s)",
+        w.len()
+    );
 }
 
 #[test]

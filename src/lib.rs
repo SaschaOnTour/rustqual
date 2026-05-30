@@ -79,24 +79,6 @@ pub fn run() -> Result<(), i32> {
     }
 
     let files = adapters::source::filesystem::collect_filtered_files(&cli.path, &config);
-    let files = if let Some(ref git_ref) = cli.diff {
-        match adapters::source::filesystem::get_git_changed_files(&cli.path, git_ref) {
-            Ok(changed) => {
-                let filtered = adapters::source::filesystem::filter_to_changed(files, &changed);
-                eprintln!(
-                    "[diff mode: {} changed file(s) vs {git_ref}]",
-                    filtered.len()
-                );
-                filtered
-            }
-            Err(e) => {
-                eprintln!("Warning: {e}. Analyzing all files.");
-                files
-            }
-        }
-    } else {
-        files
-    };
     if files.is_empty() {
         eprintln!("No Rust source files found in {}", cli.path.display());
         return Ok(());

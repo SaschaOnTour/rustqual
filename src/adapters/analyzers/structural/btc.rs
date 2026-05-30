@@ -1,19 +1,27 @@
+use std::collections::HashSet;
+
 use crate::config::StructuralConfig;
 use crate::findings::Dimension;
 
 use super::{StructuralWarning, StructuralWarningKind};
 
 /// Detect broken trait contracts: impl Trait where methods are only stubs (TQ-like binary check).
+/// Whole test files (in `cfg_test_files`) are skipped; inline
+/// `#[cfg(test)] mod` blocks are already skipped during recursion.
 /// Operation: iterates parsed files, inspects impl blocks, no own calls.
 pub(crate) fn detect_btc(
     warnings: &mut Vec<StructuralWarning>,
     parsed: &[(String, String, syn::File)],
     config: &StructuralConfig,
+    cfg_test_files: &HashSet<String>,
 ) {
     if !config.check_btc {
         return;
     }
     parsed.iter().for_each(|(path, _, syntax)| {
+        if cfg_test_files.contains(path) {
+            return;
+        }
         syntax.items.iter().for_each(|item| {
             check_item(item, path, warnings);
         });

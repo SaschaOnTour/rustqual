@@ -63,10 +63,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo install rustqual cargo-llvm-cov
       - run: cargo llvm-cov --lcov --output-path lcov.info
-      - run: rustqual --diff HEAD~1 --coverage lcov.info --format github
+      - run: rustqual --coverage lcov.info --format github
 ```
 
-`--format github` produces inline annotations on the PR diff — exactly where the issue is, what rule fired, why it matters. `--diff HEAD~1` restricts analysis to the changed files so PRs stay fast even on large codebases.
+`--format github` produces inline annotations on the PR diff — exactly where the issue is, what rule fired, why it matters.
 
 ## Pattern 4: baseline tracking for AI-velocity codebases
 

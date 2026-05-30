@@ -128,11 +128,6 @@ pub(crate) struct Cli {
     #[arg(long)]
     pub sort_by_effort: bool,
 
-    /// Analyze only files changed vs a git ref (default: HEAD).
-    /// Conflicts with --watch.
-    #[arg(long, value_name = "REF", num_args = 0..=1, default_missing_value = "HEAD", conflicts_with = "watch")]
-    pub diff: Option<String>,
-
     /// Path to an LCOV coverage file for test quality analysis (TQ-004, TQ-005).
     #[arg(long, value_name = "LCOV_FILE")]
     pub coverage: Option<PathBuf>,

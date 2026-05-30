@@ -492,6 +492,37 @@ fn test_private_use_does_not_count_as_reexport() {
 }
 
 #[test]
+fn integration_test_entry_point_in_crate_tests_dir_not_dead_code() {
+    // A `#[tokio::test]` entry point under a workspace crate's `tests/`
+    // directory is an integration-test root that cargo compiles and
+    // runs. It has no in-crate callers but must NOT be flagged as dead
+    // code — the same treatment already applied to `#[test]` fns.
+    let code = r#"
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn five_oh_two_twice_then_success_under_default_policy() { let x = 1; }
+    "#;
+    let parsed = vec![(
+        "crates/sv-utility-retry/tests/integration.rs".to_string(),
+        code.to_string(),
+        syn::parse_file(code).expect("parse failed"),
+    )];
+    let config = Config::default();
+    let cfg_test_files =
+        crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(&parsed);
+    let warnings = detect_dead_code(
+        &parsed,
+        &config,
+        &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
+        &cfg_test_files,
+    );
+    assert!(
+        warnings.is_empty(),
+        "integration-test entry point must not be flagged as dead code: {warnings:?}"
+    );
+}
+
+#[test]
 fn test_cfg_test_mod_file_not_flagged() {
     // Parent file declares `#[cfg(test)] mod helpers;` (external module)
     let parent_code = r#"

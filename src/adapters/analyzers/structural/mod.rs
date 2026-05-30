@@ -7,7 +7,7 @@ pub(crate) mod oi;
 pub(crate) mod sit;
 pub(crate) mod slm;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use syn::spanned::Spanned;
 
 use crate::config::StructuralConfig;
@@ -103,9 +103,15 @@ pub(crate) struct TraitInfo {
     pub method_count: usize,
 }
 
-/// Collect structural metadata from all parsed files.
+/// Collect structural metadata from all parsed files. Whole test files
+/// (in `cfg_test_files`) are skipped so OI/SIT — which key off this
+/// metadata — never flag types/traits/impls that live in test code;
+/// inline `#[cfg(test)] mod` blocks are already skipped per-item.
 /// Operation: iterates files and visits AST nodes, no own calls.
-pub(crate) fn collect_metadata(parsed: &[(String, String, syn::File)]) -> StructuralMetadata {
+pub(crate) fn collect_metadata(
+    parsed: &[(String, String, syn::File)],
+    cfg_test_files: &HashSet<String>,
+) -> StructuralMetadata {
     let mut meta = StructuralMetadata {
         enum_defs: HashMap::new(),
         type_defs: HashMap::new(),
@@ -114,6 +120,9 @@ pub(crate) fn collect_metadata(parsed: &[(String, String, syn::File)]) -> Struct
         inherent_impls: Vec::new(),
     };
     parsed.iter().for_each(|(path, _, syntax)| {
+        if cfg_test_files.contains(path) {
+            return;
+        }
         syntax.items.iter().for_each(|item| {
             collect_item_metadata(item, path, &mut meta);
         });
@@ -246,16 +255,18 @@ pub(crate) fn analyze_structural(
     parsed: &[(String, String, syn::File)],
     config: &StructuralConfig,
 ) -> StructuralAnalysis {
-    let meta = collect_metadata(parsed);
+    let cfg_test_files =
+        crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(parsed);
+    let meta = collect_metadata(parsed, &cfg_test_files);
 
     let mut warnings = Vec::new();
-    btc::detect_btc(&mut warnings, parsed, config);
-    slm::detect_slm(&mut warnings, parsed, config);
-    nms::detect_nms(&mut warnings, parsed, config);
-    deh::detect_deh(&mut warnings, parsed, config);
+    btc::detect_btc(&mut warnings, parsed, config, &cfg_test_files);
+    slm::detect_slm(&mut warnings, parsed, config, &cfg_test_files);
+    nms::detect_nms(&mut warnings, parsed, config, &cfg_test_files);
+    deh::detect_deh(&mut warnings, parsed, config, &cfg_test_files);
     oi::detect_oi(&mut warnings, &meta, config);
     sit::detect_sit(&mut warnings, &meta, config);
-    iet::detect_iet(&mut warnings, parsed, config);
+    iet::detect_iet(&mut warnings, parsed, config, &cfg_test_files);
 
     StructuralAnalysis { warnings }
 }

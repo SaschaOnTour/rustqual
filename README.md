@@ -145,7 +145,7 @@ With coverage and PR annotations:
 ```yaml
 - run: cargo install rustqual cargo-llvm-cov
 - run: cargo llvm-cov --lcov --output-path lcov.info
-- run: rustqual --diff origin/main --coverage lcov.info --format github
+- run: rustqual --coverage lcov.info --format github
 ```
 
 For codebases that aren't yet at 100% but want to prevent regression:
