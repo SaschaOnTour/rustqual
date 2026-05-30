@@ -5,11 +5,33 @@ use crate::config::StructuralConfig;
 
 fn detect_multi(sources: &[(&str, &str)]) -> Vec<StructuralWarning> {
     let parsed = super::parse_multi(sources);
-    let meta = collect_metadata(&parsed);
+    let cfg_test_files =
+        crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(&parsed);
+    let meta = collect_metadata(&parsed, &cfg_test_files);
     let config = StructuralConfig::default();
     let mut warnings = Vec::new();
     detect_oi(&mut warnings, &meta, &config);
     warnings
+}
+
+#[test]
+fn orphaned_impl_across_cfg_test_files_excluded() {
+    // OI must skip test code: a type + inherent impl split across
+    // `#![cfg(test)]` companion files are test fixtures, not a production
+    // orphaned impl. (Fixed at the metadata source: test files are not
+    // collected into StructuralMetadata.)
+    let w = detect_multi(&[
+        ("src/a_tests.rs", "#![cfg(test)]\nstruct W;"),
+        (
+            "src/b_tests.rs",
+            "#![cfg(test)]\nimpl W { fn go(&self) {} }",
+        ),
+    ]);
+    assert!(
+        w.is_empty(),
+        "orphaned impl across #![cfg(test)] files must be excluded: {} warning(s)",
+        w.len()
+    );
 }
 
 #[test]
@@ -92,7 +114,7 @@ fn test_disabled_check() {
             syn::parse_file("impl Foo { fn bar() {} }").expect("test"),
         ),
     ];
-    let meta = collect_metadata(&parsed);
+    let meta = collect_metadata(&parsed, &std::collections::HashSet::new());
     let config = StructuralConfig {
         check_oi: false,
         ..StructuralConfig::default()

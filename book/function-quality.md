@@ -81,7 +81,7 @@ allow_expect = false   # set true to permit .expect() but still flag .unwrap()
 
 ### Test-aware
 
-`A20` and `CX-004` skip `#[test]` functions and files under workspace-root `tests/**`. Asserting on `.unwrap()` in a test is fine; it's panicking in production that matters.
+`A20` and `CX-004` skip test functions (`#[test]`, `#[tokio::test]`, `#[rstest]`, `#[test_case]`, any `…::test`) and files in a package's `tests/**` directory — the analysis-root crate's `tests/**` and each member's `crates/*/tests/**` alike. Asserting on `.unwrap()` in a test is fine; it's panicking in production that matters.
 
 ## Method-shape checks
 

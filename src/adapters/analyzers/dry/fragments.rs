@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use syn::spanned::Spanned;
 use syn::visit::Visit;
@@ -75,8 +75,11 @@ fn collect_all_windows(
     parsed: &[(String, String, syn::File)],
     config: &DuplicatesConfig,
 ) -> (Vec<FnInfo>, Vec<WindowEntry>) {
+    let cfg_test_files =
+        crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(parsed);
     let mut collector = FragmentCollector {
         config,
+        cfg_test_files: &cfg_test_files,
         file: String::new(),
         fn_infos: Vec::new(),
         windows: Vec::new(),
@@ -221,6 +224,7 @@ pub(crate) fn merge_into_fragments(
 /// AST visitor that collects statement windows from all function bodies.
 struct FragmentCollector<'a> {
     config: &'a DuplicatesConfig,
+    cfg_test_files: &'a HashSet<String>,
     file: String,
     fn_infos: Vec<FnInfo>,
     windows: Vec<WindowEntry>,
@@ -232,7 +236,9 @@ struct FragmentCollector<'a> {
 impl super::FileVisitor for FragmentCollector<'_> {
     fn reset_for_file(&mut self, file_path: &str) {
         self.file = file_path.to_string();
-        self.in_test = false;
+        // Whole-file test classification from the authoritative cfg-test
+        // set; inline `#[cfg(test)] mod` is still handled per-item below.
+        self.in_test = self.cfg_test_files.contains(file_path);
         self.parent_type = None;
         self.is_trait_impl = false;
     }

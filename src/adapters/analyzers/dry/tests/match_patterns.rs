@@ -19,6 +19,33 @@ fn test_detect_empty() {
 }
 
 #[test]
+fn repeated_matches_in_cfg_test_companion_file_skipped() {
+    // DRY-005 must skip repeated match patterns in test code. A
+    // `#![cfg(test)]` companion file (no `tests/` path segment) is test
+    // code; the collector recognises it via the authoritative cfg-test
+    // file set, not a path heuristic.
+    let code = r#"
+        #![cfg(test)]
+        enum E { A, B, C }
+        fn f1(e: E) -> i32 { match e { E::A => 1, E::B => 2, E::C => 3 } }
+        fn f2(e: E) -> i32 { match e { E::A => 1, E::B => 2, E::C => 3 } }
+        fn f3(e: E) -> i32 { match e { E::A => 1, E::B => 2, E::C => 3 } }
+    "#;
+    let parsed = vec![(
+        "src/foo_tests.rs".to_string(),
+        code.to_string(),
+        syn::parse_file(code).expect("parse failed"),
+    )];
+    let config = DuplicatesConfig::default(); // ignore_tests = true
+    let result = detect_repeated_matches(&parsed, &config);
+    assert!(
+        result.is_empty(),
+        "repeated matches in a #![cfg(test)] file must be skipped: {} group(s)",
+        result.len()
+    );
+}
+
+#[test]
 fn test_detect_single_match_not_flagged() {
     let code = r#"
         enum E { A, B, C }

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use syn::visit::Visit;
 
 use crate::config::StructuralConfig;
@@ -9,11 +11,15 @@ use super::{has_cfg_test_attr, StructuralWarning, StructuralWarningKind};
 const DOWNCAST_METHODS: &[&str] = &["downcast_ref", "downcast_mut", "downcast"];
 
 /// Detect downcast escape hatches: use of Any::downcast_*.
+/// Test code is skipped: a file in `cfg_test_files` (integration-test dir,
+/// `#![cfg(test)]`, or `#[cfg(test)] mod` chain) starts `in_test = true`;
+/// inline `#[cfg(test)] mod` blocks are handled per-item.
 /// Operation: iterates parsed files, walks expressions for downcast calls.
 pub(crate) fn detect_deh(
     warnings: &mut Vec<StructuralWarning>,
     parsed: &[(String, String, syn::File)],
     config: &StructuralConfig,
+    cfg_test_files: &HashSet<String>,
 ) {
     if !config.check_deh {
         return;
@@ -22,7 +28,7 @@ pub(crate) fn detect_deh(
         let mut visitor = DowncastVisitor {
             file: path.clone(),
             warnings,
-            in_test: false,
+            in_test: cfg_test_files.contains(path),
         };
         visitor.visit_file(syntax);
     });

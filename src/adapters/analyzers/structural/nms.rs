@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use syn::visit::Visit;
 
 use crate::config::StructuralConfig;
@@ -6,16 +8,22 @@ use crate::findings::Dimension;
 use super::{StructuralWarning, StructuralWarningKind};
 
 /// Detect needless &mut self: method takes &mut self but never writes to self.
+/// Whole test files (in `cfg_test_files`) are skipped; inline
+/// `#[cfg(test)] mod` blocks are already skipped by `visit_inherent_methods`.
 /// Operation: iterates parsed files via shared visitor, no own calls.
 pub(crate) fn detect_nms(
     warnings: &mut Vec<StructuralWarning>,
     parsed: &[(String, String, syn::File)],
     config: &StructuralConfig,
+    cfg_test_files: &HashSet<String>,
 ) {
     if !config.check_nms {
         return;
     }
     super::visit_inherent_methods(parsed, |method, path| {
+        if cfg_test_files.contains(path) {
+            return;
+        }
         check_method(method, path, warnings);
     });
 }

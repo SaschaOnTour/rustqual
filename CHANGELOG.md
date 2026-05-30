@@ -5,6 +5,109 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-05-29
+
+Minor release (one breaking removal — see below): **test-entry-point
+recognition routed through one authoritative cfg-test file set** —
+framework test attributes and per-crate integration-test directories are
+now recognised everywhere, fixing a `DEAD_CODE` false-positive on
+`tests/**` integration-test entry points. Package roots are identified by their crate-root file
+(`src/lib.rs` / `src/main.rs` / autobinary `src/bin/<name>.rs`) derived
+from the parsed `.rs` set — a `tests/` directory only counts when its
+owning directory is such a root — and the DRY collectors consume the
+shared set instead of their own path strings.
+Failing-first regression tests in `src/adapters/shared/tests/cfg_test.rs`,
+`src/adapters/shared/tests/cfg_test_files.rs`,
+`src/adapters/analyzers/dry/tests/dead_code.rs`,
+`src/adapters/analyzers/dry/tests/functions.rs`, and
+`src/adapters/analyzers/dry/tests/wildcards.rs`.
+
+### Fixed (test detection)
+
+- **`DEAD_CODE` no longer false-flags integration-test entry points
+  under a crate's `tests/` directory.** Two narrow heuristics stacked
+  up: (1) `has_test_attr` only recognised the bare `#[test]`, so
+  `#[tokio::test]` / `#[rstest]` / `#[test_case]` functions were not
+  seen as test roots; (2) the cfg-test file detector classified only
+  workspace-root `tests/**`, missing per-crate
+  `crates/<name>/tests/**` integration binaries. A `#[tokio::test]`
+  entry point in `crates/sv-utility-retry/tests/integration.rs` was
+  reported as dead code while the same function in
+  `src/**/*_tests.rs` was not. Both narrownesses are removed.
+
+### Changed (unified test recognition)
+
+- **`has_test_attr` (`adapters/shared/cfg_test.rs`) now recognises
+  framework test attributes.** Matches any attribute whose path ends in
+  `test` (`#[test]`, `#[tokio::test]`, `#[async_std::test]`,
+  `#[googletest::test]`, …) plus the renamed macros `#[rstest]` and
+  `#[test_case]`. Shared by all seven dimensions, so the broadened
+  recognition applies uniformly (IOSP/complexity/DRY/SRP/coupling/TQ/
+  architecture leniency for test functions).
+- **One authoritative cfg-test file set; the directory rule feeds it and
+  nothing else, and is derived from real package roots.**
+  `cfg_test_files` first computes the package roots present in the parsed
+  tree by their **crate-root file** — `src/lib.rs`, `src/main.rs`, or an
+  autobinary `src/bin/<name>.rs` (`""` for the analysis-root crate). This
+  is Cargo's defining marker of a package, taken from the `.rs` set with
+  no manifest/filesystem access. `cfg_test_files::is_integration_test_path`
+  accepts a `tests/` file when the owner of **any** `tests/` component in
+  its path is one of those roots (so a package nested under a directory
+  literally named `tests`, `fixtures/tests/retry/tests/it.rs`, is matched at
+  its real root). This matches `tests/**` and per-crate
+  `crates/<name>/tests/**`, but NOT a `tests/` directory whose owner has
+  no crate root (`fixtures/tests/**`, `tools/shared/tests/**`, a
+  coincidental `src/`+`tests/` pair) nor one nested under a package's
+  `src/` (`src/foo/tests/bar.rs`, a unit-test submodule reached via
+  `#[cfg(test)] mod`). All four DRY file collectors — `FunctionCollector`
+  (duplicate hashing, DRY-001), `FragmentCollector` (repeated fragments,
+  DRY-004), `MatchPatternCollector` (repeated matches, DRY-005), and
+  `WildcardCollector` (wildcard imports) — no longer apply their own
+  `/tests/` path strings; they consult the shared `cfg_test_files` set
+  (integration dirs + `#![cfg(test)]` + `#[cfg(test)] mod` chains), so a
+  production directory merely *named* `tests` is never blanket-classified
+  as test-only, and `ignore_tests` now skips package integration-test and
+  `#![cfg(test)]` companion files for every DRY check. Addresses review
+  findings: neither `contains("/tests/")` nor a "non-`src` `/tests/`"
+  guard actually identified package roots.
+  *Known limitation:* a crate using a non-default `[lib] path = …` /
+  `[[bin]] path = …` (no file at a conventional `src/` crate-root) is not
+  detected as a package root from paths alone — that would require parsing
+  `Cargo.toml`.
+- **Test Quality coverage checks (TQ-004/TQ-005) key off the
+  analyzer-computed `is_test` flag, not a `test_` name prefix.**
+  `tq::coverage` previously skipped any function *named* `test_*` via
+  an isolated heuristic that both missed framework-attributed tests and
+  wrongly exempted production functions named like tests (e.g.
+  `test_connection`). It now uses `FunctionAnalysis::is_test`,
+  consistent with every other dimension.
+- **All structural detectors (BTC, SLM, NMS, IET, OI, SIT, DEH) skip
+  whole test files.** They previously skipped only inline `#[cfg(test)]
+  mod` blocks (BTC/IET/DEH and the SLM/NMS inherent-method walk) or
+  nothing at all — so a stub mock impl, selfless/needless-`&mut`-self
+  helper, inconsistent error types, orphaned impl, single-impl trait, or
+  `downcast` used in a package integration-test file or `#![cfg(test)]`
+  companion was falsely flagged (SRP/Coupling). The visitor-based
+  detectors now skip files in `cfg_test_files`; OI/SIT are fixed at the
+  source — `collect_metadata` no longer records types/traits/impls from
+  test files. Brings the Structural dimension in line with the rest of
+  the tool's test-aware behaviour.
+
+### Removed (breaking)
+
+- **`--diff [REF]` changed-files mode removed.** It parsed only the
+  git-changed files, so every cross-file analysis ran on a partial set
+  and produced false positives/negatives: dead-code reachability (a fn
+  used only from an unchanged file looked uncalled), cross-file DRY
+  duplicates (one side unchanged → missed), coupling instability (partial
+  module graph), architecture call-parity (missing adapters/targets), and
+  the cfg-test/package-root detection above. The flag's promise of "the
+  same analysis, only reporting changed files" was not what it did — it
+  analysed only changed files. Rather than ship a mode that is unsound for
+  a whole-program analyzer, it is removed along with `get_git_changed_files`
+  / `filter_to_changed`. Run rustqual over the full tree and use
+  `--format github` / `sarif` for PR-scoped annotations.
+
 ## [1.2.6] - 2026-05-27
 
 Patch release: **dyn-compatibility precision in `must_be_object_safe`** —

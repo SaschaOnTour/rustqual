@@ -21,7 +21,6 @@ rustqual [OPTIONS] [PATH]
 | Flag | Description |
 |---|---|
 | `-c`, `--config <FILE>` | Path to config. Default: `rustqual.toml` in the target directory. |
-| `--diff [REF]` | Only analyse files changed vs a git ref (default: `HEAD`). Conflicts with `--watch`. |
 | `--coverage <LCOV>` | Path to LCOV coverage file. Enables TQ-004 / TQ-005. |
 | `--explain <FILE>` | Diagnostic mode: explain architecture-rule classification for one file. |
 | `--watch` | Watch for file changes and re-analyse continuously. |
@@ -90,9 +89,6 @@ rustqual --no-fail --verbose
 
 # CI hard gate with coverage and PR annotations
 rustqual --coverage lcov.info --min-quality-score 90 --fail-on-warnings --format github
-
-# PR-only analysis
-rustqual --diff origin/main --format github
 
 # Baseline-based regression gate
 rustqual --compare baseline.json --fail-on-regression --format github

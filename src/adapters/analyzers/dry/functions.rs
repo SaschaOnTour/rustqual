@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use syn::spanned::Spanned;
 use syn::visit::Visit;
@@ -11,6 +11,7 @@ use crate::config::sections::DuplicatesConfig;
 /// AST visitor that collects function bodies and computes their normalized hashes.
 pub(crate) struct FunctionCollector<'a> {
     pub(crate) config: &'a DuplicatesConfig,
+    pub(crate) cfg_test_files: &'a HashSet<String>,
     pub(crate) file: String,
     pub(crate) entries: Vec<FunctionHashEntry>,
     in_test: bool,
@@ -19,9 +20,10 @@ pub(crate) struct FunctionCollector<'a> {
 }
 
 impl<'a> FunctionCollector<'a> {
-    pub(crate) fn new(config: &'a DuplicatesConfig) -> Self {
+    pub(crate) fn new(config: &'a DuplicatesConfig, cfg_test_files: &'a HashSet<String>) -> Self {
         Self {
             config,
+            cfg_test_files,
             file: String::new(),
             entries: Vec::new(),
             in_test: false,
@@ -34,10 +36,11 @@ impl<'a> FunctionCollector<'a> {
 impl FileVisitor for FunctionCollector<'_> {
     fn reset_for_file(&mut self, file_path: &str) {
         self.file = file_path.to_string();
-        // Files under a `tests/` subdir are test companions loaded via a
-        // parent's `#[cfg(test)] mod tests;` — treat them as test code even
-        // though their AST has no visible #[cfg(test)] attribute.
-        self.in_test = file_path.contains("/tests/");
+        // Whole-file test classification comes from the authoritative
+        // cfg-test file set (integration-test dirs + `#![cfg(test)]` +
+        // `#[cfg(test)] mod` chains), not a path heuristic. Inline
+        // `#[cfg(test)] mod` blocks are still handled per-item below.
+        self.in_test = self.cfg_test_files.contains(file_path);
         self.parent_type = None;
         self.is_trait_impl = false;
     }

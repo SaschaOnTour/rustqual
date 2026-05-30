@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use walkdir::WalkDir;
@@ -85,69 +84,6 @@ pub(crate) fn read_and_parse_files(
                 eprintln!("Warning: Could not parse {path}: {e}");
                 None
             }
-        })
-        .collect()
-}
-
-/// Get Rust files changed vs a git ref.
-/// Operation: shells out to git and parses output.
-pub(crate) fn get_git_changed_files(path: &Path, git_ref: &str) -> Result<Vec<PathBuf>, String> {
-    let dir = if path.is_file() {
-        path.parent().unwrap_or(path)
-    } else {
-        path
-    };
-
-    let root_output = std::process::Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .current_dir(dir)
-        .output()
-        .map_err(|e| format!("Failed to run git: {e}"))?;
-    if !root_output.status.success() {
-        return Err("Not a git repository".into());
-    }
-
-    let git_root = PathBuf::from(String::from_utf8_lossy(&root_output.stdout).trim());
-
-    let output = std::process::Command::new("git")
-        .args([
-            "diff",
-            "--name-only",
-            "--diff-filter=ACMR",
-            git_ref,
-            "--",
-            "*.rs",
-        ])
-        .current_dir(&git_root)
-        .output()
-        .map_err(|e| format!("Failed to run git diff: {e}"))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("git diff failed: {}", stderr.trim()));
-    }
-
-    let files = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .filter(|l| !l.is_empty())
-        .map(|l| git_root.join(l))
-        .collect();
-
-    Ok(files)
-}
-
-/// Filter file list to only those present in the changed set.
-/// Operation: set-intersection logic using canonical paths.
-pub(crate) fn filter_to_changed(all: Vec<PathBuf>, changed: &[PathBuf]) -> Vec<PathBuf> {
-    let changed_canonical: HashSet<PathBuf> = changed
-        .iter()
-        .filter_map(|c| std::fs::canonicalize(c).ok())
-        .collect();
-
-    all.into_iter()
-        .filter(|f| {
-            std::fs::canonicalize(f)
-                .map(|c| changed_canonical.contains(&c))
-                .unwrap_or(false)
         })
         .collect()
 }

@@ -96,6 +96,46 @@ fn test_external_glob_detected() {
 }
 
 #[test]
+fn wildcard_in_cfg_test_companion_file_skipped() {
+    // Wildcard imports in a test file are a common, accepted pattern.
+    // A `#![cfg(test)]` companion file (no `tests/` path segment) is test
+    // code, so its glob imports must be skipped — recognised via the
+    // authoritative cfg-test file set, not a `tests/` path heuristic.
+    let code = r#"
+        #![cfg(test)]
+        use crate::foo::*;
+    "#;
+    let parsed = vec![(
+        "src/bar_tests.rs".to_string(),
+        code.to_string(),
+        syn::parse_file(code).expect("parse failed"),
+    )];
+    let warnings = detect_wildcard_imports(&parsed);
+    assert!(
+        warnings.is_empty(),
+        "wildcard import in a #![cfg(test)] file must be skipped: {warnings:?}"
+    );
+}
+
+#[test]
+fn wildcard_in_production_file_under_nested_tests_dir_still_flagged() {
+    // A `src/**/tests/` file not reached via `#[cfg(test)] mod` is
+    // production code; its wildcard imports must still be flagged.
+    let code = "use crate::foo::*;";
+    let parsed = vec![(
+        "src/database/tests/util.rs".to_string(),
+        code.to_string(),
+        syn::parse_file(code).expect("parse failed"),
+    )];
+    let warnings = detect_wildcard_imports(&parsed);
+    assert_eq!(
+        warnings.len(),
+        1,
+        "wildcard in a non-cfg-test src/**/tests/ file must be flagged: {warnings:?}"
+    );
+}
+
+#[test]
 fn test_multiple_globs_in_file() {
     let code = "use crate::a::*;\nuse crate::b::*;\nuse crate::c::Foo;";
     let parsed = parse(code);

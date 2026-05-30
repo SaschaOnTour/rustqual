@@ -76,15 +76,36 @@ fn test_function_not_in_lcov_no_warning() {
 }
 
 #[test]
-fn test_test_function_excluded() {
-    let results = vec![make_func("test_something", "src/lib.rs", 10)];
+fn test_function_excluded_by_is_test_flag() {
+    // Test entry points are excluded via the analyzer-computed `is_test`
+    // flag (attribute/cfg/path aware), not by a `test_` name prefix —
+    // so a `#[tokio::test]`-style fn with any name is excluded.
+    let mut func = make_func("five_oh_two_twice", "src/lib.rs", 10);
+    func.is_test = true;
+    let results = vec![func];
     let mut lcov = HashMap::new();
     lcov.insert(
         "src/lib.rs".to_string(),
-        make_lcov_data(&[("test_something", 0)], &[]),
+        make_lcov_data(&[("five_oh_two_twice", 0)], &[]),
     );
     let warnings = detect_uncovered_functions(&results, &lcov);
     assert!(warnings.is_empty());
+}
+
+#[test]
+fn production_function_named_like_test_is_still_checked() {
+    // A production function merely *named* `test_*` (no test attribute,
+    // is_test = false) is real production code and must still be
+    // coverage-checked — the old name-prefix heuristic wrongly skipped it.
+    let results = vec![make_func("test_connection", "src/lib.rs", 10)];
+    let mut lcov = HashMap::new();
+    lcov.insert(
+        "src/lib.rs".to_string(),
+        make_lcov_data(&[("test_connection", 0)], &[]),
+    );
+    let warnings = detect_uncovered_functions(&results, &lcov);
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0].kind, TqWarningKind::Uncovered);
 }
 
 #[test]
@@ -102,6 +123,29 @@ fn test_suppressed_function_excluded() {
 }
 
 // ── TQ-005 tests ────────────────────────────────────────
+
+#[test]
+fn untested_logic_in_test_function_excluded() {
+    // TQ-005 must also key off the `is_test` flag: uncovered logic in a
+    // test function is not a coverage gap to report.
+    let mut func = make_func("verifies_retry", "src/lib.rs", 10);
+    func.is_test = true;
+    func.complexity = Some(ComplexityMetrics {
+        logic_occurrences: vec![LogicOccurrence {
+            kind: "if".to_string(),
+            line: 15,
+        }],
+        ..Default::default()
+    });
+    let results = vec![func];
+    let mut lcov = HashMap::new();
+    lcov.insert("src/lib.rs".to_string(), make_lcov_data(&[], &[(15, 0)]));
+    let warnings = detect_untested_logic(&results, &lcov);
+    assert!(
+        warnings.is_empty(),
+        "uncovered logic in a test function must not be flagged: {warnings:?}"
+    );
+}
 
 #[test]
 fn test_untested_logic_detected() {

@@ -152,6 +152,55 @@ fn test_detect_duplicates_test_functions_included() {
 }
 
 #[test]
+fn duplicates_in_cfg_test_companion_file_skipped() {
+    // A `#![cfg(test)]` companion file is test code even though its path
+    // has no `tests/` segment. Duplicate detection must skip it by
+    // consulting the authoritative cfg-test file set, not a `tests/`
+    // path heuristic.
+    let code = r#"
+        #![cfg(test)]
+        fn helper_one() { let x = 1; let y = x + 2; let z = y * x; }
+        fn helper_two() { let a = 1; let b = a + 2; let c = b * a; }
+    "#;
+    let parsed = vec![(
+        "src/foo_tests.rs".to_string(),
+        code.to_string(),
+        syn::parse_file(code).expect("parse failed"),
+    )];
+    let config = low_threshold_config(); // ignore_tests = true
+    let groups = detect_duplicates(&parsed, &config);
+    assert!(
+        groups.is_empty(),
+        "duplicates in a #![cfg(test)] file must be skipped: {groups:?}"
+    );
+}
+
+#[test]
+fn duplicates_in_production_file_under_nested_tests_dir_still_flagged() {
+    // Inverse of the review fix: a `src/**/tests/` directory that is NOT
+    // reached via `#[cfg(test)] mod` is production code and its
+    // duplicates must still be flagged (the old broad path heuristic
+    // wrongly skipped anything containing `/tests/`).
+    let parsed = parse_multi(&[
+        (
+            "src/database/tests/conn_a.rs",
+            "pub fn conn_a() { let x = 1; let y = x + 2; let z = y * x; }",
+        ),
+        (
+            "src/database/tests/conn_b.rs",
+            "pub fn conn_b() { let a = 1; let b = a + 2; let c = b * a; }",
+        ),
+    ]);
+    let config = low_threshold_config();
+    let groups = detect_duplicates(&parsed, &config);
+    assert_eq!(
+        groups.len(),
+        1,
+        "duplicates in a non-cfg-test src/**/tests/ file must be flagged: {groups:?}"
+    );
+}
+
+#[test]
 fn test_detect_duplicates_three_way() {
     let parsed = parse_multi(&[
         (

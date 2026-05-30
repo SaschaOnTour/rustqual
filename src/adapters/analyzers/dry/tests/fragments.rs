@@ -32,6 +32,38 @@ fn low_threshold_config() -> DuplicatesConfig {
 }
 
 #[test]
+fn fragments_in_cfg_test_companion_file_skipped() {
+    // DRY-004 must skip repeated statement windows in test code. A
+    // `#![cfg(test)]` companion file (no `tests/` path segment) is test
+    // code; the fragment collector recognises it via the authoritative
+    // cfg-test file set, not a path heuristic.
+    let code = r#"
+        #![cfg(test)]
+        fn helper_a() {
+            let x = 1;
+            let y = x + 2;
+            let z = y * x;
+        }
+        fn helper_b() {
+            let x = 1;
+            let y = x + 2;
+            let z = y * x;
+        }
+    "#;
+    let parsed = vec![(
+        "src/foo_tests.rs".to_string(),
+        code.to_string(),
+        syn::parse_file(code).expect("parse failed"),
+    )];
+    let config = low_threshold_config(); // ignore_tests = true
+    let groups = detect_fragments(&parsed, &config);
+    assert!(
+        groups.is_empty(),
+        "fragments in a #![cfg(test)] file must be skipped: {groups:?}"
+    );
+}
+
+#[test]
 fn test_detect_fragments_empty() {
     let parsed = parse("");
     let config = low_threshold_config();

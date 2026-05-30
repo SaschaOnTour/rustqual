@@ -6,16 +6,22 @@ use crate::findings::Dimension;
 use super::{StructuralWarning, StructuralWarningKind};
 
 /// Detect inconsistent error types: pub fns in same module return different Result<_, E>.
+/// Whole test files (in `cfg_test_files`) are skipped; inline
+/// `#[cfg(test)] mod` blocks are already skipped during recursion.
 /// Operation: collects return types per file, flags inconsistencies.
 pub(crate) fn detect_iet(
     warnings: &mut Vec<StructuralWarning>,
     parsed: &[(String, String, syn::File)],
     config: &StructuralConfig,
+    cfg_test_files: &HashSet<String>,
 ) {
     if !config.check_iet {
         return;
     }
     parsed.iter().for_each(|(path, _, syntax)| {
+        if cfg_test_files.contains(path) {
+            return;
+        }
         let error_types = collect_pub_error_types(syntax);
         if error_types.len() >= 2 {
             let mut types: Vec<String> = error_types.into_iter().collect();

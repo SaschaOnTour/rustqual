@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use syn::spanned::Spanned;
 use syn::visit::Visit;
 
@@ -21,25 +23,34 @@ pub struct WildcardImportWarning {
 pub fn detect_wildcard_imports(
     parsed: &[(String, String, syn::File)],
 ) -> Vec<WildcardImportWarning> {
+    let cfg_test_files =
+        crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(parsed);
     let mut collector = WildcardCollector {
+        cfg_test_files,
         file: String::new(),
         warnings: Vec::new(),
         in_test: false,
+        file_is_test: false,
     };
     super::visit_all_files(parsed, &mut collector);
     collector.warnings
 }
 
 struct WildcardCollector {
+    cfg_test_files: HashSet<String>,
     file: String,
     warnings: Vec<WildcardImportWarning>,
     in_test: bool,
+    file_is_test: bool,
 }
 
 impl FileVisitor for WildcardCollector {
     fn reset_for_file(&mut self, file_path: &str) {
-        // Normalise separators once so downstream checks (e.g. "/tests/"
-        // companion-file detection) work on Windows paths too.
+        // Whole-file test classification comes from the authoritative
+        // cfg-test file set (checked against the raw path, matching the
+        // set's keys). `self.file` is separately separator-normalised so
+        // the emitted warning path is stable on Windows.
+        self.file_is_test = self.cfg_test_files.contains(file_path);
         self.file = file_path.replace('\\', "/");
         self.in_test = false;
     }
@@ -68,11 +79,11 @@ impl<'ast> Visit<'ast> for WildcardCollector {
                     if self.in_test && prefix.as_slice() == ["super"] {
                         continue;
                     }
-                    // Skip wildcard imports in files under any `tests/`
-                    // directory: companion test subtrees inside `src/**/tests/`
-                    // AND workspace-root `tests/**` integration-test binaries.
-                    // `reset_for_file` already normalised `\` → `/`.
-                    if self.file.starts_with("tests/") || self.file.contains("/tests/") {
+                    // Skip wildcard imports in test files (integration-test
+                    // binaries and `#[cfg(test)]`/companion files alike).
+                    // Classification comes from the authoritative cfg-test
+                    // file set, computed in `detect_wildcard_imports`.
+                    if self.file_is_test {
                         continue;
                     }
                     // Skip any prelude wildcard: matches the bare

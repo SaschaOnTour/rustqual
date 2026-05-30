@@ -40,7 +40,7 @@ For dimension intent and refactor patterns, see the use-case guides linked at th
 | `CX-006` | Unsafe block detected | `detect_unsafe = true` |
 | `A20`    | Error-handling issue (`unwrap`/`expect`/`panic!`/`todo!`) | `detect_error_handling = true` |
 
-`A20` and `CX-004` skip `#[test]` functions and workspace-root `tests/**` files.
+`A20` and `CX-004` skip test functions (`#[test]`, `#[tokio::test]`, `#[rstest]`, `#[test_case]`, any `…::test`) and files in a package's `tests/**` directory (the analysis-root crate and each `crates/*/tests/**`).
 
 ## DRY
 

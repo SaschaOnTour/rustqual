@@ -110,12 +110,6 @@ summary annotation (`::error::Quality analysis: N finding(s)…` or
 of the run. For per-rule filtering in CI, use `--format sarif` and
 upload to Code Scanning instead.
 
-Combine with `--diff origin/main` for PR-only analysis:
-
-```yaml
-- run: rustqual --diff origin/main --format github
-```
-
 ## `sarif`
 
 SARIF v2.1.0. Designed for GitHub Code Scanning, but consumed by Azure DevOps, Sonatype, and any SARIF tool.

@@ -5,9 +5,23 @@ use crate::config::StructuralConfig;
 fn detect_in(source: &str) -> Vec<StructuralWarning> {
     let parsed = super::parse_single(source);
     let config = StructuralConfig::default();
+    let cfg_test_files =
+        crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(&parsed);
     let mut warnings = Vec::new();
-    detect_slm(&mut warnings, &parsed, &config);
+    detect_slm(&mut warnings, &parsed, &config, &cfg_test_files);
     warnings
+}
+
+#[test]
+fn selfless_method_in_cfg_test_file_excluded() {
+    // SLM must skip whole test files (here a `#![cfg(test)]` companion),
+    // not only inline `#[cfg(test)] mod`.
+    let w = detect_in("#![cfg(test)]\nstruct S; impl S { fn foo(&self) -> i32 { 42 } }");
+    assert!(
+        w.is_empty(),
+        "selfless method in a #![cfg(test)] file must be excluded: {} warning(s)",
+        w.len()
+    );
 }
 
 #[test]

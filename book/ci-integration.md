@@ -28,16 +28,6 @@ That's all. If any dimension flags a finding, the job fails.
 
 `--format github` emits `::error::` and `::warning::` annotations that GitHub renders inline on the PR diff. `--min-quality-score 90` enforces a hard floor on the overall quality score.
 
-## GitHub Actions — changed files only
-
-For large codebases, restrict analysis to files changed in the PR:
-
-```yaml
-- run: rustqual --diff origin/main --format github
-```
-
-`--diff <REF>` runs the same analysis but only reports findings in files that differ from `<REF>`. Cuts CI time for large codebases without losing PR-level signal.
-
 ## GitHub Actions — with coverage
 
 The Test Quality dimension can use LCOV coverage data to detect untested logic:
@@ -123,7 +113,6 @@ The flags compose. A typical "production-grade" CI step:
 ```yaml
 - run: |
     rustqual \
-      --diff origin/main \
       --coverage lcov.info \
       --min-quality-score 90 \
       --fail-on-warnings \
@@ -131,7 +120,7 @@ The flags compose. A typical "production-grade" CI step:
 ```
 
 This:
-- analyses only files changed vs `main`,
+- analyses the full source tree,
 - includes coverage-based test-quality checks,
 - requires the overall quality score to be at least 90%,
 - treats suppression-ratio overruns as hard errors,
