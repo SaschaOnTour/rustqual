@@ -31,6 +31,27 @@ fn names_for_layer<'ast>(
         .unwrap_or_default()
 }
 
+/// Collect pub fns by layer for the common test case — empty wrapper,
+/// promoted-attribute, and workspace-lookup sets. Tests that need a
+/// non-empty set call `collect_pub_fns_by_layer` directly.
+fn pub_fns_by_layer<'ast>(
+    files: &[(&'ast str, &'ast syn::File)],
+) -> HashMap<String, Vec<PubFnInfo<'ast>>> {
+    let aliases = aliases_from_files(files);
+    collect_pub_fns_by_layer(PubFnInputs {
+        files,
+        aliases_per_file: &aliases,
+        layers: &three_layer(),
+        transparent_wrappers: &HashSet::new(),
+        promoted_attributes: &HashSet::new(),
+        workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
+            cfg_test_files: &HashSet::new(),
+            crate_root_modules: &HashSet::new(),
+            workspace_module_paths: &HashSet::new(),
+        },
+    })
+}
+
 #[test]
 fn test_collect_pub_fns_in_layer_free_fn() {
     let file = parse(
@@ -39,21 +60,7 @@ fn test_collect_pub_fns_in_layer_free_fn() {
         "#,
     );
     let files = vec![("src/cli/handlers.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     let cli = names_for_layer(&by_layer, "cli");
     assert!(cli.contains("cmd_stats"), "cli = {cli:?}");
 }
@@ -67,21 +74,7 @@ fn test_collect_pub_fns_skips_private_fns() {
         "#,
     );
     let files = vec![("src/cli/handlers.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     let cli = names_for_layer(&by_layer, "cli");
     assert!(cli.contains("cmd_stats"));
     assert!(!cli.contains("helper"), "private fn must be skipped");
@@ -98,21 +91,7 @@ fn test_pub_crate_is_treated_as_public_for_intra_crate_layers() {
         "#,
     );
     let files = vec![("src/cli/handlers.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     let cli = names_for_layer(&by_layer, "cli");
     assert!(cli.contains("cmd_stats"), "pub(crate) must be collected");
 }
@@ -126,21 +105,7 @@ fn test_pub_super_and_pub_in_path_treated_as_public() {
         "#,
     );
     let files = vec![("src/cli/handlers.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     let cli = names_for_layer(&by_layer, "cli");
     assert!(cli.contains("cmd_a"));
     assert!(cli.contains("cmd_b"));
@@ -158,21 +123,7 @@ fn test_collect_pub_fns_collects_pub_impl_methods_for_pub_type() {
         "#,
     );
     let files = vec![("src/application/session.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     let app = names_for_layer(&by_layer, "application");
     assert!(app.contains("search"), "pub impl method must be collected");
     assert!(
@@ -201,21 +152,7 @@ fn test_collect_pub_fns_recognises_impl_across_files() {
         ("src/application/session.rs", &decl_file),
         ("src/application/session_impls.rs", &impl_file),
     ];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     let app = names_for_layer(&by_layer, "application");
     assert!(
         app.contains("search"),
@@ -237,21 +174,7 @@ fn test_collect_pub_fns_skips_impl_methods_on_private_type() {
         "#,
     );
     let files = vec![("src/application/session.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     let app = names_for_layer(&by_layer, "application");
     assert!(
         !app.contains("search"),
@@ -269,21 +192,7 @@ fn test_collect_pub_fns_groups_by_layer() {
         ("src/mcp/handlers.rs", &mcp_file),
         ("src/application/stats.rs", &app_file),
     ];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     assert_eq!(
         names_for_layer(&by_layer, "cli"),
         ["cmd_stats".to_string()].into()
@@ -333,21 +242,7 @@ fn test_collect_pub_fns_skips_test_attr_fns() {
         "#,
     );
     let files = vec![("src/cli/handlers.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     let cli = names_for_layer(&by_layer, "cli");
     assert!(cli.contains("cmd_stats"));
     assert!(!cli.contains("not_a_handler"), "#[test] fn must be skipped");
@@ -359,21 +254,7 @@ fn test_collect_pub_fns_skips_unmatched_files() {
     // call-parity scope (neither as adapter member nor as target).
     let file = parse("pub fn free_floating() {}");
     let files = vec![("src/utils/misc.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     for layer in ["application", "cli", "mcp"] {
         assert!(
             names_for_layer(&by_layer, layer).is_empty(),
@@ -397,21 +278,7 @@ fn test_collect_pub_fns_skips_pub_fn_inside_private_inline_mod() {
         "#,
     );
     let files = vec![("src/cli/handlers.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
         cli.contains("visible_top"),
@@ -434,21 +301,7 @@ fn test_collect_pub_fns_treats_pub_self_as_private() {
         "#,
     );
     let files = vec![("src/cli/handlers.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
         cli.contains("visible"),
@@ -477,21 +330,7 @@ fn test_collect_pub_fns_skips_impl_method_on_type_in_private_inline_mod() {
         "#,
     );
     let files = vec![("src/cli/handlers.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
         !cli.contains("op"),
@@ -518,21 +357,7 @@ fn test_collect_pub_fns_records_impl_in_private_mod_for_public_type() {
         "#,
     );
     let files = vec![("src/application/session.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     let app = names_for_layer(&by_layer, "application");
     assert!(
         app.contains("diff"),
@@ -561,21 +386,7 @@ fn test_collect_pub_fns_records_impl_via_nested_pub_use_export_path() {
         "#,
     );
     let files = vec![("src/cli/handlers.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
         cli.contains("op"),
@@ -602,21 +413,7 @@ fn test_collect_pub_fns_records_impl_via_chained_type_alias() {
         "#,
     );
     let files = vec![("src/cli/handlers.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
         cli.contains("op"),
@@ -643,21 +440,7 @@ fn test_collect_pub_fns_does_not_promote_bare_local_arc() {
         "#,
     );
     let files = vec![("src/cli/handlers.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
         !cli.contains("op"),
@@ -726,21 +509,7 @@ fn test_collect_pub_fns_does_not_promote_qualified_local_arc() {
         "#,
     );
     let files = vec![("src/cli/handlers.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
         !cli.contains("op"),
@@ -769,21 +538,7 @@ fn test_collect_pub_fns_does_not_promote_local_wrapper_alias() {
         "#,
     );
     let files = vec![("src/cli/handlers.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
         !cli.contains("op"),
@@ -810,21 +565,7 @@ fn test_collect_pub_fns_records_impl_via_renamed_stdlib_wrapper() {
         "#,
     );
     let files = vec![("src/cli/handlers.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
         cli.contains("op"),
@@ -893,21 +634,7 @@ fn test_collect_pub_fns_records_impl_via_pub_type_alias_through_wrapper() {
         "#,
     );
     let files = vec![("src/cli/handlers.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
         cli.contains("op"),
@@ -934,21 +661,7 @@ fn test_collect_pub_fns_records_impl_via_pub_type_alias() {
         "#,
     );
     let files = vec![("src/cli/handlers.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
         cli.contains("op"),
@@ -976,21 +689,7 @@ fn test_collect_pub_fns_records_renamed_reexport_impl_methods() {
         "#,
     );
     let files = vec![("src/cli/handlers.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
         cli.contains("op"),
@@ -1019,21 +718,7 @@ fn test_collect_pub_fns_chases_reexported_type_alias_to_target() {
         "#,
     );
     let files = vec![("src/cli/handlers.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
         cli.contains("op"),
@@ -1063,21 +748,7 @@ fn test_collect_pub_fns_records_pub_use_reexport_with_qualified_impl() {
         "#,
     );
     let files = vec![("src/cli/handlers.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
         cli.contains("op"),
@@ -1107,19 +778,7 @@ fn test_collect_pub_fns_skips_trait_impl_method_on_private_self_type() {
         "#,
     );
     let files = vec![("src/application/mod.rs", &file)];
-    let aliases = aliases_from_files(&files);
-    let by_layer = collect_pub_fns_by_layer(PubFnInputs {
-        files: &files,
-        aliases_per_file: &aliases,
-        layers: &three_layer(),
-        transparent_wrappers: &HashSet::new(),
-        promoted_attributes: &HashSet::new(),
-        workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-            cfg_test_files: &HashSet::new(),
-            crate_root_modules: &HashSet::new(),
-            workspace_module_paths: &HashSet::new(),
-        },
-    });
+    let by_layer = pub_fns_by_layer(&files);
     let app = names_for_layer(&by_layer, "application");
     assert!(
         !app.contains("handle"),
@@ -1147,19 +806,7 @@ fn test_collect_pub_fns_records_inherited_trait_impl_methods() {
         "#,
     );
     let files = vec![("src/application/mod.rs", &file)];
-    let aliases = aliases_from_files(&files);
-    let by_layer = collect_pub_fns_by_layer(PubFnInputs {
-        files: &files,
-        aliases_per_file: &aliases,
-        layers: &three_layer(),
-        transparent_wrappers: &HashSet::new(),
-        promoted_attributes: &HashSet::new(),
-        workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-            cfg_test_files: &HashSet::new(),
-            crate_root_modules: &HashSet::new(),
-            workspace_module_paths: &HashSet::new(),
-        },
-    });
+    let by_layer = pub_fns_by_layer(&files);
     let app = names_for_layer(&by_layer, "application");
     assert!(
         app.contains("handle"),
@@ -1181,19 +828,7 @@ fn test_collect_pub_fns_excludes_orphan_file_not_declared_in_crate_root() {
         ("src/cli/mod.rs", &cli),
         ("src/application/mod.rs", &app),
     ];
-    let aliases = aliases_from_files(&files);
-    let by_layer = collect_pub_fns_by_layer(PubFnInputs {
-        files: &files,
-        aliases_per_file: &aliases,
-        layers: &three_layer(),
-        transparent_wrappers: &HashSet::new(),
-        promoted_attributes: &HashSet::new(),
-        workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-            cfg_test_files: &HashSet::new(),
-            crate_root_modules: &HashSet::new(),
-            workspace_module_paths: &HashSet::new(),
-        },
-    });
+    let by_layer = pub_fns_by_layer(&files);
     let app_fns = names_for_layer(&by_layer, "application");
     assert!(
         !app_fns.contains("helper"),
@@ -1218,19 +853,7 @@ fn test_collect_pub_fns_unions_lib_and_main_root_trees() {
         ("src/application/mod.rs", &app),
         ("src/cli/mod.rs", &cli),
     ];
-    let aliases = aliases_from_files(&files);
-    let by_layer = collect_pub_fns_by_layer(PubFnInputs {
-        files: &files,
-        aliases_per_file: &aliases,
-        layers: &three_layer(),
-        transparent_wrappers: &HashSet::new(),
-        promoted_attributes: &HashSet::new(),
-        workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-            cfg_test_files: &HashSet::new(),
-            crate_root_modules: &HashSet::new(),
-            workspace_module_paths: &HashSet::new(),
-        },
-    });
+    let by_layer = pub_fns_by_layer(&files);
     let app_fns = names_for_layer(&by_layer, "application");
     let cli_fns = names_for_layer(&by_layer, "cli");
     assert!(
@@ -1259,19 +882,7 @@ fn test_collect_pub_fns_includes_crate_root_mod_decl_without_pub() {
         ("src/cli/mod.rs", &cli_mod),
         ("src/application/mod.rs", &app_mod),
     ];
-    let aliases = aliases_from_files(&files);
-    let by_layer = collect_pub_fns_by_layer(PubFnInputs {
-        files: &files,
-        aliases_per_file: &aliases,
-        layers: &three_layer(),
-        transparent_wrappers: &HashSet::new(),
-        promoted_attributes: &HashSet::new(),
-        workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-            cfg_test_files: &HashSet::new(),
-            crate_root_modules: &HashSet::new(),
-            workspace_module_paths: &HashSet::new(),
-        },
-    });
+    let by_layer = pub_fns_by_layer(&files);
     let cli = names_for_layer(&by_layer, "cli");
     let app = names_for_layer(&by_layer, "application");
     assert!(
@@ -1297,19 +908,7 @@ fn test_collect_pub_fns_excludes_pub_fn_under_private_ancestor_chain() {
         ("src/application/internal/mod.rs", &internal),
         ("src/application/internal/deep.rs", &deep),
     ];
-    let aliases = aliases_from_files(&files);
-    let by_layer = collect_pub_fns_by_layer(PubFnInputs {
-        files: &files,
-        aliases_per_file: &aliases,
-        layers: &three_layer(),
-        transparent_wrappers: &HashSet::new(),
-        promoted_attributes: &HashSet::new(),
-        workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-            cfg_test_files: &HashSet::new(),
-            crate_root_modules: &HashSet::new(),
-            workspace_module_paths: &HashSet::new(),
-        },
-    });
+    let by_layer = pub_fns_by_layer(&files);
     let app_fns = names_for_layer(&by_layer, "application");
     assert!(
         !app_fns.contains("helper"),
@@ -1329,19 +928,7 @@ fn test_collect_pub_fns_excludes_pub_fn_in_file_backed_private_module() {
         ("src/application/mod.rs", &parent),
         ("src/application/internal.rs", &child),
     ];
-    let aliases = aliases_from_files(&files);
-    let by_layer = collect_pub_fns_by_layer(PubFnInputs {
-        files: &files,
-        aliases_per_file: &aliases,
-        layers: &three_layer(),
-        transparent_wrappers: &HashSet::new(),
-        promoted_attributes: &HashSet::new(),
-        workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-            cfg_test_files: &HashSet::new(),
-            crate_root_modules: &HashSet::new(),
-            workspace_module_paths: &HashSet::new(),
-        },
-    });
+    let by_layer = pub_fns_by_layer(&files);
     let app = names_for_layer(&by_layer, "application");
     assert!(
         !app.contains("helper"),
@@ -1359,19 +946,7 @@ fn test_collect_pub_fns_includes_pub_fn_in_file_backed_public_module() {
         ("src/application/mod.rs", &parent),
         ("src/application/internal.rs", &child),
     ];
-    let aliases = aliases_from_files(&files);
-    let by_layer = collect_pub_fns_by_layer(PubFnInputs {
-        files: &files,
-        aliases_per_file: &aliases,
-        layers: &three_layer(),
-        transparent_wrappers: &HashSet::new(),
-        promoted_attributes: &HashSet::new(),
-        workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-            cfg_test_files: &HashSet::new(),
-            crate_root_modules: &HashSet::new(),
-            workspace_module_paths: &HashSet::new(),
-        },
-    });
+    let by_layer = pub_fns_by_layer(&files);
     let app = names_for_layer(&by_layer, "application");
     assert!(
         app.contains("helper"),
@@ -1405,21 +980,7 @@ fn test_collect_pub_fns_skips_impl_methods_under_short_name_collision() {
         "#,
     );
     let files = vec![("src/cli/handlers.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     let cli = names_for_layer(&by_layer, "cli");
     assert!(
         cli.contains("run"),
@@ -1456,21 +1017,7 @@ fn pub_fn_records_deprecated_attribute_bare() {
         "#,
     );
     let files = vec![("src/cli/handlers.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     let dep = deprecated_for_layer(&by_layer, "cli");
     assert_eq!(dep.get("cmd_old"), Some(&true));
 }
@@ -1484,21 +1031,7 @@ fn pub_fn_records_deprecated_with_message() {
         "#,
     );
     let files = vec![("src/cli/handlers.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     assert_eq!(
         deprecated_for_layer(&by_layer, "cli").get("cmd_old"),
         Some(&true)
@@ -1514,21 +1047,7 @@ fn pub_fn_records_deprecated_with_args() {
         "#,
     );
     let files = vec![("src/cli/handlers.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     assert_eq!(
         deprecated_for_layer(&by_layer, "cli").get("cmd_old"),
         Some(&true)
@@ -1543,21 +1062,7 @@ fn pub_fn_no_attribute_not_deprecated() {
         "#,
     );
     let files = vec![("src/cli/handlers.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     assert_eq!(
         deprecated_for_layer(&by_layer, "cli").get("cmd_active"),
         Some(&false)
@@ -1574,21 +1079,7 @@ fn pub_fn_other_attribute_not_deprecated() {
         "#,
     );
     let files = vec![("src/cli/handlers.rs", &file)];
-    let by_layer = {
-        let aliases = aliases_from_files(&files);
-        collect_pub_fns_by_layer(PubFnInputs {
-            files: &files,
-            aliases_per_file: &aliases,
-            layers: &three_layer(),
-            transparent_wrappers: &HashSet::new(),
-            promoted_attributes: &HashSet::new(),
-            workspace: &crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::WorkspaceLookup {
-                cfg_test_files: &HashSet::new(),
-                crate_root_modules: &HashSet::new(),
-                workspace_module_paths: &HashSet::new(),
-            },
-        })
-    };
+    let by_layer = pub_fns_by_layer(&files);
     assert_eq!(
         deprecated_for_layer(&by_layer, "cli").get("cmd_active"),
         Some(&false)
