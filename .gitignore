@@ -6,6 +6,7 @@
 .claude/
 *.baseline.json
 coverage.lcov
+*.profraw
 CLAUDE.md
 bugs/
 bugs.txt

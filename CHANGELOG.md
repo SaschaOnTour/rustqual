@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2026-06-01
+
+Patch release: **test-recognition bug fix** — `#[quickcheck]` property
+functions are now recognised as test entry points. This continues the
+v1.3.0 work of routing all test forms through the shared `cfg_test`
+predicates; `quickcheck`'s attribute (path segment `quickcheck`, not
+ending in `test`) was the one common framework attribute still missed,
+so a `#[quickcheck]` property fn could be flagged `DEAD_CODE` / uncovered
+when treated as production code.
+
+### Fixed (test detection)
+
+- **`has_test_attr` (`adapters/shared/cfg_test.rs`) now recognises
+  `#[quickcheck]`** alongside `#[test]`, `#[rstest]`, `#[test_case]`, and
+  any attribute whose path ends in `test`. Failing-first regression test
+  added to `framework_test_attributes_recognized` in
+  `src/adapters/shared/tests/cfg_test.rs`.
+
 ## [1.3.0] - 2026-05-29
 
 Minor release (one breaking removal — see below): **test-entry-point

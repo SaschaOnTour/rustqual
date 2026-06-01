@@ -41,6 +41,10 @@ fn framework_test_attributes_recognized() {
         has_test_attr(&fn_attrs("#[test_case(1)] fn t() {}")),
         "#[test_case] must be recognised"
     );
+    assert!(
+        has_test_attr(&fn_attrs("#[quickcheck] fn prop(x: u8) -> bool { true }")),
+        "#[quickcheck] must be recognised"
+    );
 }
 
 #[test]
