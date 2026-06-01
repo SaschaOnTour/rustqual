@@ -198,6 +198,32 @@ impl Default for SrpConfig {
     }
 }
 
+/// Per-test-code threshold overrides.
+///
+/// rustqual applies a curated subset of checks to test code — DRY-001/004/005
+/// (duplicate fns / fragments / repeated matches), LONG_FN (function length),
+/// and SRP size (file/module length, method count). The remaining checks stay
+/// test-exempt: ERROR_HANDLING, MAGIC_NUMBER, IOSP, DRY-002 dead code, DRY-003
+/// wildcard imports, Coupling, and all Structural detectors. **This split is
+/// fixed — only the thresholds below are configurable.**
+///
+/// Each field overrides the matching production threshold *for test code
+/// only*. The default is `None`, meaning the production value is inherited —
+/// so out of the box test code is judged by the same limits as production.
+/// Field names mirror the production sections (`[complexity]`, `[srp]`).
+#[derive(Debug, Deserialize, Clone, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct TestsConfig {
+    /// Overrides `[complexity].max_function_lines` for test fns (LONG_FN).
+    pub max_function_lines: Option<usize>,
+    /// Overrides `[srp].file_length_baseline` for test files.
+    pub file_length_baseline: Option<usize>,
+    /// Overrides `[srp].file_length_ceiling` for test files.
+    pub file_length_ceiling: Option<usize>,
+    /// Overrides `[srp].max_methods` for test impls / inherent blocks.
+    pub max_methods: Option<usize>,
+}
+
 /// Configuration for coupling analysis.
 #[derive(Debug, Deserialize, Clone)]
 #[serde(default, deny_unknown_fields)]

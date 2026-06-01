@@ -91,6 +91,44 @@ fn test_srp_config_deserialize_with_weights() {
     assert!((c.weights[0] - 0.5).abs() < f64::EPSILON);
 }
 
+#[test]
+fn test_tests_config_defaults_inherit_production() {
+    // Every override is None by default → the production threshold is used.
+    let c = TestsConfig::default();
+    assert_eq!(c.max_function_lines, None);
+    assert_eq!(c.file_length_baseline, None);
+    assert_eq!(c.file_length_ceiling, None);
+    assert_eq!(c.max_methods, None);
+}
+
+#[test]
+fn test_tests_config_deserialize_overrides() {
+    let toml_str = r#"
+        max_function_lines = 120
+        file_length_baseline = 500
+        file_length_ceiling = 1200
+        max_methods = 40
+    "#;
+    let c: TestsConfig = toml::from_str(toml_str).unwrap();
+    assert_eq!(c.max_function_lines, Some(120));
+    assert_eq!(c.file_length_baseline, Some(500));
+    assert_eq!(c.file_length_ceiling, Some(1200));
+    assert_eq!(c.max_methods, Some(40));
+}
+
+#[test]
+fn test_tests_config_partial_override_leaves_rest_none() {
+    let c: TestsConfig = toml::from_str("max_function_lines = 90").unwrap();
+    assert_eq!(c.max_function_lines, Some(90));
+    assert_eq!(c.file_length_ceiling, None);
+}
+
+#[test]
+fn test_tests_config_rejects_unknown_field() {
+    let result: Result<TestsConfig, _> = toml::from_str("max_fn_lines = 90");
+    assert!(result.is_err(), "deny_unknown_fields must reject typos");
+}
+
 // qual:allow(test) reason: "verifies production constant, no function/type call needed"
 #[test]
 fn test_quality_weights_sum_to_one() {

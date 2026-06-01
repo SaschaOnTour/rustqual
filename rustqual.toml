@@ -87,6 +87,25 @@ enabled = true
 # Example: extra_assertion_macros = ["verify", "check", "expect_that"]
 # extra_assertion_macros = []
 
+# ── Test-Code Thresholds ───────────────────────────────────────────────
+#
+# rustqual applies a curated subset of checks to test code: DRY-001/004/005,
+# LONG_FN (function length), and SRP size (file/module length, method count).
+# Everything else stays test-exempt (ERROR_HANDLING, MAGIC_NUMBER, IOSP,
+# DRY-002 dead code, DRY-003 wildcards, Coupling, all Structural detectors).
+# This split is fixed; only the thresholds are configurable.
+#
+# Each key overrides the matching production threshold FOR TEST CODE ONLY.
+# An unset key inherits the production value, so by default test code is
+# judged by the same limits as production. Field names mirror [complexity]
+# and [srp].
+
+[tests]
+# max_function_lines   = 60      # overrides [complexity].max_function_lines (LONG_FN)
+# file_length_baseline = 300     # overrides [srp].file_length_baseline
+# file_length_ceiling  = 600     # overrides [srp].file_length_ceiling
+# max_methods          = 20      # overrides [srp].max_methods
+
 # ── Quality Score Weights ──────────────────────────────────────────────
 
 [weights]

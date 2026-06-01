@@ -11,7 +11,7 @@ pub use init::{generate_default_config, generate_tailored_config};
 use sections::DEFAULT_MAX_SUPPRESSION_RATIO;
 pub use sections::{
     BoilerplateConfig, ComplexityConfig, CouplingConfig, DuplicatesConfig, ReportConfig, SrpConfig,
-    StructuralConfig, TestConfig, WeightsConfig,
+    StructuralConfig, TestConfig, TestsConfig, WeightsConfig,
 };
 
 /// Configuration for the rustqual analyzer.
@@ -65,6 +65,10 @@ pub struct Config {
     /// Test quality analysis configuration.
     pub test_quality: TestConfig,
 
+    /// Per-test-code threshold overrides (curated checks applied to test
+    /// code; unset fields inherit the production thresholds).
+    pub tests: TestsConfig,
+
     /// Architecture-Dimension configuration (v1.0).
     pub architecture: ArchitectureConfig,
 
@@ -101,6 +105,7 @@ impl Default for Config {
             coupling: CouplingConfig::default(),
             structural: StructuralConfig::default(),
             test_quality: TestConfig::default(),
+            tests: TestsConfig::default(),
             architecture: ArchitectureConfig::default(),
             weights: WeightsConfig::default(),
             report: ReportConfig::default(),
