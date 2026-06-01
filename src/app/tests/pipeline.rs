@@ -183,7 +183,7 @@ fn test_collect_suppression_multiple() {
 fn test_run_analysis_empty_input() {
     let parsed: Vec<(String, String, syn::File)> = vec![];
     let config = Config::default();
-    let analysis = run_analysis(&parsed, &config);
+    let analysis = run_analysis(parsed, &config);
     assert!(analysis.results.is_empty());
     assert_eq!(analysis.summary.total, 0);
 }
@@ -194,7 +194,7 @@ fn test_run_analysis_trivial_function() {
     let syntax = syn::parse_file(source).unwrap();
     let parsed = vec![("test.rs".to_string(), source.to_string(), syntax)];
     let config = Config::default();
-    let analysis = run_analysis(&parsed, &config);
+    let analysis = run_analysis(parsed, &config);
     assert_eq!(analysis.results.len(), 1);
     assert!(matches!(
         analysis.results[0].classification,
@@ -576,7 +576,7 @@ fn violator(x: i32) {
     let syntax = syn::parse_file(code).unwrap();
     let parsed = vec![("test.rs".to_string(), code.to_string(), syntax)];
     let config = Config::default();
-    let analysis = run_analysis(&parsed, &config);
+    let analysis = run_analysis(parsed, &config);
     assert!(
         analysis
             .results
@@ -631,7 +631,7 @@ fn beta(x: i32, y: i32) -> i32 {
     let syntax = syn::parse_file(source).unwrap();
     let parsed = vec![("test.rs".to_string(), source.to_string(), syntax)];
     let config = Config::default();
-    let analysis = run_analysis(&parsed, &config);
+    let analysis = run_analysis(parsed, &config);
     assert!(
         !analysis.findings.dry.is_empty(),
         "findings.dry empty — duplicate not detected"
@@ -669,7 +669,7 @@ fn measured(x: i32) -> i32 {
     let syntax = syn::parse_file(source).unwrap();
     let parsed = vec![("test.rs".to_string(), source.to_string(), syntax)];
     let config = Config::default();
-    let analysis = run_analysis(&parsed, &config);
+    let analysis = run_analysis(parsed, &config);
     let measured = analysis
         .results
         .iter()
@@ -692,7 +692,7 @@ fn test_run_analysis_findings_architecture_field_present() {
     // `findings.architecture` field must exist and be empty.
     let parsed: Vec<(String, String, syn::File)> = vec![];
     let config = Config::default();
-    let analysis = run_analysis(&parsed, &config);
+    let analysis = run_analysis(parsed, &config);
     assert!(analysis.findings.architecture.is_empty());
     let _len: usize = analysis.findings.architecture.len();
 }

@@ -7,6 +7,7 @@
 pub mod cfg_test;
 pub mod cfg_test_files;
 pub mod file_to_module;
+pub mod macro_expansion;
 pub mod normalize;
 pub mod use_tree;
 

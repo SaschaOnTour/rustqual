@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2] - 2026-06-01
+
+Patch release: **test-recognition bug fix** — test functions declared
+inside `proptest! { … }` and `quickcheck! { … }` macro bodies are now
+visible to every analyzer dimension. `syn` does not expand function-like
+macros, so a `#[test] fn` inside `proptest! { … }` was an opaque
+`Item::Macro` — its body was invisible to test classification, IOSP, DRY,
+complexity, SRP and test-quality alike. A new pre-pass surfaces them.
+
+### Fixed (test detection)
+
+- **`proptest!` / `quickcheck!` bodies are walked.** A new pre-pass
+  (`adapters/shared/macro_expansion.rs`, run once at the top of
+  `run_analysis`) replaces a recognised test-macro invocation with the
+  `fn` items it declares, each marked `#[test]` so it routes through the
+  shared `cfg_test::has_test_attr` recognition. The reconstruction is
+  lenient: `proptest`'s non-Rust `x in <strategy>` parameter grammar is
+  dropped (the body — what length/complexity/DRY measure — is preserved
+  verbatim); a leading `#![proptest_config(…)]` inner attribute is
+  tolerated; anything that fails to parse is kept as the original opaque
+  macro (a blind spot, never a regression). Recognition lives next to
+  `cfg_test` in `adapters/shared` to keep all test-recognition policy in
+  one place. Failing-first regression tests in
+  `src/adapters/shared/tests/macro_expansion.rs`.
+
+### Changed (internal)
+
+- `app::run_analysis` now takes its `parsed` files by value so the
+  expansion pre-pass can rewrite them in place before any dimension runs.
+
 ## [1.3.1] - 2026-06-01
 
 Patch release: **test-recognition bug fix** — `#[quickcheck]` property

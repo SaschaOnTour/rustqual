@@ -74,9 +74,14 @@ fn run_primary_analysis(
 /// Run analysis and apply suppressions, returning all analysis results.
 /// Integration: orchestrates primary + secondary + architecture passes.
 pub(crate) fn run_analysis(
-    parsed: &[(String, String, syn::File)],
+    mut parsed: Vec<(String, String, syn::File)>,
     config: &Config,
 ) -> AnalysisResult {
+    // Surface test fns hidden in test-macro bodies (`proptest!`,
+    // `quickcheck!`) before any dimension runs, so every pass — including
+    // cfg-test classification below — sees them as ordinary `#[test]` fns.
+    crate::adapters::shared::macro_expansion::expand_test_macros(&mut parsed);
+    let parsed = parsed.as_slice();
     // Compute once and thread through both passes — IOSP uses it to mark
     // in-cfg-test functions as test code; DRY dead-code uses it to split
     // prod vs test calls. Previously built twice.
@@ -178,7 +183,7 @@ pub(crate) fn analyze_and_output(
 ) {
     let files = collect_filtered_files(path, config);
     let parsed = read_and_parse_files(&files, path);
-    let analysis = run_analysis(&parsed, config);
+    let analysis = run_analysis(parsed, config);
     output_results(&analysis, output_format, verbose, suggestions, config);
 }
 
