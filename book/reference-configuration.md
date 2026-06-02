@@ -116,10 +116,13 @@ extra_assertion_macros = ["verify", "check_invariant", "expect_that"]
 
 Per-test-code threshold overrides. rustqual applies a **fixed, curated**
 subset of checks to test code — `DRY-001`/`DRY-004`/`DRY-005`, `LONG_FN`
-(function length), and SRP size (file/module length, method count). The rest
-stay test-exempt (`ERROR_HANDLING`, `MAGIC_NUMBER`, IOSP, `DRY-002` dead
-code, `DRY-003` wildcard imports, Coupling, all Structural detectors). Which
-checks apply is **not** configurable; only the thresholds below are.
+(function length), and SRP **file-length** (`SRP_MODULE`). The rest stay
+test-exempt (`ERROR_HANDLING`, `MAGIC_NUMBER`, IOSP, `DRY-002` dead code,
+`DRY-003` wildcard imports, Coupling, all Structural detectors). The SRP
+**cohesion** check (independent function clusters) is also **production-only**:
+a test file's many independent `#[test]` fns are its purpose, not a low-cohesion
+smell — so only file-length is judged on test files. Which checks apply is
+**not** configurable; only the thresholds below are.
 
 Each key overrides the matching production threshold *for test code only*.
 An unset key inherits the production value, so by default test code is judged

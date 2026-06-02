@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-06-02
+
+Minor release: **quality checks now run on test code.** DRY (duplicate-function
+DRY-001, code-fragment DRY-004, repeated-match DRY-005), function-length
+(LONG_FN), and SRP file-length (SRP_MODULE) previously skipped
+`#[cfg(test)]`/test files. They now analyze test code too, so duplicated test
+helpers, copy-pasted arrange/assert blocks, overlong test fns, and oversized
+test files are all flagged — at test-specific thresholds that default to the
+production values.
+
+### Changed
+- **BREAKING (config):** the `[duplicates] ignore_tests` field is **removed**.
+  Because `[duplicates]` uses `deny_unknown_fields`, a `rustqual.toml` that
+  still sets `ignore_tests` will now fail to parse — delete the line. There is
+  no replacement: DRY-001/004/005 always run on tests. `detect_repeated_matches`
+  no longer takes a config argument.
+- DRY-003 (wildcard imports) remains test-exempt by its own logic, unchanged.
+- **LONG_FN now applies to test functions** at the new
+  `[tests].max_function_lines` threshold (an `Option` defaulting to
+  `[complexity].max_function_lines` = production, 60). Large table-driven tests
+  were refactored — case tables hoisted to module-level `const`s so the test
+  body stays small; genuinely-long single-scenario tests carry a
+  `// qual:allow(complexity)` with rationale.
+- **SRP file-length (SRP_MODULE) now applies to test files** at the new
+  `[tests].file_length_baseline` / `[tests].file_length_ceiling` thresholds
+  (`Option`s defaulting to `[srp]` = 300 / 800). Oversized test files were
+  **split along behavioral seams** into focused sub-modules — no suppressions.
+  The SRP **cohesion** (independent-cluster) check stays **production-only**: a
+  test file's many independent `#[test]` fns are its purpose, not a low-cohesion
+  smell.
+- Cognitive/cyclomatic/nesting complexity already ran on tests; magic-number
+  and error-handling checks remain test-exempt; no change there.
+
 ## [1.3.2] - 2026-06-01
 
 Patch release: **test-recognition bug fix** — test functions declared

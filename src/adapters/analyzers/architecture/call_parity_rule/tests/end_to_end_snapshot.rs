@@ -109,6 +109,26 @@ fn missing_adapters_for(findings: &[MatchLocation], target_fn: &str) -> Option<V
     })
 }
 
+/// Run Check A over the session/handler fixture (three-layer, cli+mcp, depth 3).
+fn check_a_on_fixture() -> Vec<MatchLocation> {
+    run_check_a(
+        &build_workspace(&session_handler_fixture()),
+        &three_layer(),
+        &cli_mcp_config(3),
+        &empty_cfg_test(),
+    )
+}
+
+/// Run Check B over the session/handler fixture (three-layer, cli+mcp, depth 3).
+fn check_b_on_fixture() -> Vec<MatchLocation> {
+    run_check_b(
+        &build_workspace(&session_handler_fixture()),
+        &three_layer(),
+        &cli_mcp_config(3),
+        &empty_cfg_test(),
+    )
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // Check A — every adapter pub fn must delegate into application
 // ═══════════════════════════════════════════════════════════════════
@@ -118,8 +138,7 @@ fn check_a_clean_on_session_handler_fixture() {
     // Every cli / mcp handler in the fixture reaches an application-
     // layer fn via inference, so Check A has no findings at all —
     // this is the primary receiver-inference regression guard.
-    let ws = build_workspace(&session_handler_fixture());
-    let findings = run_check_a(&ws, &three_layer(), &cli_mcp_config(3), &empty_cfg_test());
+    let findings = check_a_on_fixture();
     assert!(
         findings.is_empty(),
         "Check A should be clean on the session/handler fixture, got {} findings: {:?}",
@@ -136,34 +155,26 @@ fn check_a_clean_on_session_handler_fixture() {
 // ═══════════════════════════════════════════════════════════════════
 
 #[test]
-fn check_b_diff_reached_from_both_adapters() {
-    // The hero case: Session::diff is called from both cli (via chain
-    // inference) and mcp (via signature-param). Both adapters cover it
-    // → no finding.
-    let ws = build_workspace(&session_handler_fixture());
-    let findings = run_check_b(&ws, &three_layer(), &cli_mcp_config(3), &empty_cfg_test());
-    let missing = missing_adapters_for(&findings, "crate::application::session::Session::diff");
-    assert!(
-        missing.is_none(),
-        "Session::diff should be reached from both adapters, got missing={:?}",
-        missing
-    );
-}
-
-#[test]
-fn check_b_files_reached_from_both_adapters() {
-    let ws = build_workspace(&session_handler_fixture());
-    let findings = run_check_b(&ws, &three_layer(), &cli_mcp_config(3), &empty_cfg_test());
-    let missing = missing_adapters_for(&findings, "crate::application::session::Session::files");
-    assert!(missing.is_none(), "Session::files should be reached");
+fn check_b_targets_reached_from_both_adapters() {
+    // Session::diff (cli via chain inference, mcp via signature-param) and
+    // Session::files are both covered by every configured adapter → no finding.
+    let findings = check_b_on_fixture();
+    for target in [
+        "crate::application::session::Session::diff",
+        "crate::application::session::Session::files",
+    ] {
+        assert!(
+            missing_adapters_for(&findings, target).is_none(),
+            "{target} should be reached from both adapters"
+        );
+    }
 }
 
 #[test]
 fn check_b_asymmetric_coverage_is_flagged() {
     // `stats` is only called from cli (cmd_stats). mcp doesn't cover
     // it — legitimate Check B finding.
-    let ws = build_workspace(&session_handler_fixture());
-    let findings = run_check_b(&ws, &three_layer(), &cli_mcp_config(3), &empty_cfg_test());
+    let findings = check_b_on_fixture();
     let missing = missing_adapters_for(&findings, "crate::application::session::Session::stats")
         .expect("stats should be missing from some adapter");
     assert_eq!(missing, vec!["mcp".to_string()]);
@@ -177,8 +188,7 @@ fn check_b_asymmetric_coverage_is_flagged() {
 #[test]
 fn check_b_unreached_pub_fn_is_flagged() {
     // `genuinely_unused` has no callers → missing from all adapters.
-    let ws = build_workspace(&session_handler_fixture());
-    let findings = run_check_b(&ws, &three_layer(), &cli_mcp_config(3), &empty_cfg_test());
+    let findings = check_b_on_fixture();
     let missing = missing_adapters_for(
         &findings,
         "crate::application::session::Session::genuinely_unused",
@@ -209,11 +219,8 @@ fn total_findings_budget_on_session_handler_fixture() {
     // If this budget ticks upward, inspect the new findings before
     // adjusting the number — the Stage 1 implementation should not
     // regress this count.
-    let ws = build_workspace(&session_handler_fixture());
-    let layers = three_layer();
-    let cp = cli_mcp_config(3);
-    let check_a = run_check_a(&ws, &layers, &cp, &empty_cfg_test());
-    let check_b = run_check_b(&ws, &layers, &cp, &empty_cfg_test());
+    let check_a = check_a_on_fixture();
+    let check_b = check_b_on_fixture();
     assert_eq!(check_a.len(), 0, "Check A: {:?}", check_a);
     assert_eq!(
         check_b.len(),

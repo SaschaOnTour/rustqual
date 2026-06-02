@@ -6,6 +6,26 @@ use crate::adapters::analyzers::iosp::types::{
 use crate::config::Config;
 use syn::ItemImpl;
 
+/// Parse `code`, locate the free fn named `fn_name`, and classify it against a
+/// default config + a scope built from the same file. Collapses the
+/// find-the-fn + classify arrange shared by the control-flow classification
+/// tests.
+fn classify_named_fn(code: &str, fn_name: &str) -> Classification {
+    let syntax = syn::parse_file(code).unwrap();
+    let scope = ProjectScope::from_files(&[("test.rs", &syntax)]);
+    let config = Config::default();
+    let f_fn = syntax
+        .items
+        .iter()
+        .find_map(|item| match item {
+            syn::Item::Fn(f) if f.sig.ident == fn_name => Some(f),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("fn `{fn_name}` not found"));
+    let (class, _, _) = classify_function(&f_fn.block, &config, &scope, fn_name, (None, &f_fn.sig));
+    class
+}
+
 #[test]
 fn test_is_trivial_body_empty() {
     let block: syn::Block = syn::parse_quote!({});
@@ -243,41 +263,28 @@ fn test_extract_type_name_no_path() {
 
 #[test]
 fn test_for_loop_delegation_is_integration() {
-    let code = r#"
+    let class = classify_named_fn(
+        r#"
         fn process(_x: i32) {}
         fn f(items: Vec<i32>) {
             for x in items {
                 process(x);
             }
         }
-    "#;
-    let syntax = syn::parse_file(code).unwrap();
-    let scope = ProjectScope::from_files(&[("test.rs", &syntax)]);
-    let config = Config::default();
-    let f_fn = syntax
-        .items
-        .iter()
-        .find_map(|item| {
-            if let syn::Item::Fn(f) = item {
-                if f.sig.ident == "f" {
-                    return Some(f);
-                }
-            }
-            None
-        })
-        .unwrap();
-    let (class, _, _) = classify_function(&f_fn.block, &config, &scope, "f", (None, &f_fn.sig));
+    "#,
+        "f",
+    );
     assert_eq!(
         class,
         Classification::Integration,
-        "For-loop with delegation-only body should be Integration, got {:?}",
-        class
+        "For-loop with delegation-only body should be Integration, got {class:?}"
     );
 }
 
 #[test]
 fn test_for_loop_with_logic_is_violation() {
-    let code = r#"
+    let class = classify_named_fn(
+        r#"
         fn process(_x: i32) {}
         fn f(items: Vec<i32>) {
             for x in items {
@@ -286,26 +293,11 @@ fn test_for_loop_with_logic_is_violation() {
                 }
             }
         }
-    "#;
-    let syntax = syn::parse_file(code).unwrap();
-    let scope = ProjectScope::from_files(&[("test.rs", &syntax)]);
-    let config = Config::default();
-    let f_fn = syntax
-        .items
-        .iter()
-        .find_map(|item| {
-            if let syn::Item::Fn(f) = item {
-                if f.sig.ident == "f" {
-                    return Some(f);
-                }
-            }
-            None
-        })
-        .unwrap();
-    let (class, _, _) = classify_function(&f_fn.block, &config, &scope, "f", (None, &f_fn.sig));
+    "#,
+        "f",
+    );
     assert!(
         matches!(class, Classification::Violation { .. }),
-        "For-loop with logic should be Violation, got {:?}",
-        class
+        "For-loop with logic should be Violation, got {class:?}"
     );
 }

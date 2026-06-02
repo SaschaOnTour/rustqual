@@ -1,40 +1,36 @@
 use crate::adapters::analyzers::iosp::{
-    compute_severity, CallOccurrence, Classification, FunctionAnalysis, LogicOccurrence,
+    CallOccurrence, Classification, FunctionAnalysis, LogicOccurrence,
 };
+use crate::adapters::report::test_support::{make_result, violation};
 use crate::report::baseline::{create_baseline, print_comparison};
 use crate::report::Summary;
-
-fn make_result(name: &str, classification: Classification) -> FunctionAnalysis {
-    let severity = compute_severity(&classification);
-    FunctionAnalysis {
-        name: name.to_string(),
-        file: "test.rs".to_string(),
-        line: 1,
-        classification,
-        parent_type: None,
-        suppressed: false,
-        complexity: None,
-        qualified_name: name.to_string(),
-        severity,
-        cognitive_warning: false,
-        cyclomatic_warning: false,
-        nesting_depth_warning: false,
-        function_length_warning: false,
-        unsafe_warning: false,
-        error_handling_warning: false,
-        complexity_suppressed: false,
-        own_calls: vec![],
-        parameter_count: 0,
-        is_trait_impl: false,
-        is_test: false,
-        effort_score: None,
-    }
-}
 
 fn make_summary(results: &[FunctionAnalysis]) -> Summary {
     let mut s = Summary::from_results(results);
     s.compute_quality_score(&crate::config::sections::DEFAULT_QUALITY_WEIGHTS);
     s
+}
+
+/// Build a baseline from `results` and parse it back into a JSON `Value`.
+fn baseline_json(results: &[FunctionAnalysis]) -> serde_json::Value {
+    let summary = make_summary(results);
+    serde_json::from_str(&create_baseline(results, &summary)).unwrap()
+}
+
+/// Build a baseline from `old`, then compare `new` against it — returns
+/// whether `new` is a regression.
+fn compare(old: &[FunctionAnalysis], new: &[FunctionAnalysis]) -> bool {
+    let baseline = create_baseline(old, &make_summary(old));
+    print_comparison(&baseline, new, &make_summary(new))
+}
+
+/// `[a: Integration, b: <b_class>]` — the two-function fixture the
+/// comparison tests vary.
+fn ab(b_class: Classification) -> Vec<FunctionAnalysis> {
+    vec![
+        make_result("a", Classification::Integration),
+        make_result("b", b_class),
+    ]
 }
 
 #[test]
@@ -75,19 +71,16 @@ fn test_create_baseline_with_violations() {
 }
 
 #[test]
-fn test_create_baseline_iosp_score() {
-    let results = vec![
-        make_result("a", Classification::Integration),
-        make_result("b", Classification::Operation),
-    ];
-    let summary = make_summary(&results);
-    let json = create_baseline(&results, &summary);
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    let score = parsed["iosp_score"].as_f64().unwrap();
-    assert!(
-        (score - 1.0).abs() < f64::EPSILON,
-        "Score should be 1.0 with no violations"
-    );
+fn test_create_baseline_perfect_scores_are_one() {
+    // With no violations both the IOSP and the overall quality score are 1.0.
+    let parsed = baseline_json(&ab(Classification::Operation));
+    for field in ["iosp_score", "quality_score"] {
+        let score = parsed[field].as_f64().unwrap();
+        assert!(
+            (score - 1.0).abs() < 1e-10,
+            "{field} should be 1.0 with no violations; got {score}"
+        );
+    }
 }
 
 #[test]
@@ -128,76 +121,33 @@ fn test_create_baseline_suppressed_excluded() {
 }
 
 #[test]
-fn test_print_comparison_no_regression() {
-    let results = vec![make_result("a", Classification::Integration)];
-    let summary = make_summary(&results);
-    let baseline = create_baseline(&results, &summary);
-    let regressed = print_comparison(&baseline, &results, &summary);
-    assert!(!regressed, "Same scores should not be a regression");
-}
-
-#[test]
-fn test_print_comparison_improvement() {
-    let old_results = vec![
-        make_result("a", Classification::Integration),
-        make_result(
-            "b",
-            Classification::Violation {
-                has_logic: true,
-                has_own_calls: true,
-                logic_locations: vec![LogicOccurrence {
-                    kind: "if".into(),
-                    line: 1,
-                }],
-                call_locations: vec![CallOccurrence {
-                    name: "x".into(),
-                    line: 2,
-                }],
-            },
+fn test_print_comparison_detects_only_regressions() {
+    // `print_comparison` flags a regression only when the new quality score
+    // is worse than the baseline: identical scores and improvements pass,
+    // a new violation (lower score) regresses. (label, old, new, regressed)
+    let cases: Vec<(&str, Vec<FunctionAnalysis>, Vec<FunctionAnalysis>, bool)> = vec![
+        (
+            "identical scores → no regression",
+            vec![make_result("a", Classification::Integration)],
+            vec![make_result("a", Classification::Integration)],
+            false,
+        ),
+        (
+            "improvement (violation removed) → no regression",
+            ab(violation("if", "x")),
+            ab(Classification::Operation),
+            false,
+        ),
+        (
+            "new violation (lower score) → regression",
+            ab(Classification::Operation),
+            ab(violation("if", "x")),
+            true,
         ),
     ];
-    let old_summary = make_summary(&old_results);
-    let baseline = create_baseline(&old_results, &old_summary);
-
-    let new_results = vec![
-        make_result("a", Classification::Integration),
-        make_result("b", Classification::Operation),
-    ];
-    let new_summary = make_summary(&new_results);
-    let regressed = print_comparison(&baseline, &new_results, &new_summary);
-    assert!(!regressed, "Improvement should not be a regression");
-}
-
-#[test]
-fn test_print_comparison_regression() {
-    let old_results = vec![
-        make_result("a", Classification::Integration),
-        make_result("b", Classification::Operation),
-    ];
-    let old_summary = make_summary(&old_results);
-    let baseline = create_baseline(&old_results, &old_summary);
-
-    let new_results = vec![
-        make_result("a", Classification::Integration),
-        make_result(
-            "b",
-            Classification::Violation {
-                has_logic: true,
-                has_own_calls: true,
-                logic_locations: vec![LogicOccurrence {
-                    kind: "if".into(),
-                    line: 1,
-                }],
-                call_locations: vec![CallOccurrence {
-                    name: "x".into(),
-                    line: 2,
-                }],
-            },
-        ),
-    ];
-    let new_summary = make_summary(&new_results);
-    let regressed = print_comparison(&baseline, &new_results, &new_summary);
-    assert!(regressed, "Score regression should be detected");
+    for (label, old, new, regressed) in cases {
+        assert_eq!(compare(&old, &new), regressed, "case {label}");
+    }
 }
 
 #[test]
@@ -217,22 +167,6 @@ fn test_create_baseline_v2_has_version() {
     let json = create_baseline(&results, &summary);
     let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert_eq!(parsed["version"].as_u64().unwrap(), 2);
-}
-
-#[test]
-fn test_create_baseline_v2_has_quality_score() {
-    let results = vec![
-        make_result("a", Classification::Integration),
-        make_result("b", Classification::Operation),
-    ];
-    let summary = make_summary(&results);
-    let json = create_baseline(&results, &summary);
-    let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-    let q = parsed["quality_score"].as_f64().unwrap();
-    assert!(
-        (q - 1.0).abs() < 1e-10,
-        "quality_score near 1.0 (float tolerance): got {q}"
-    );
 }
 
 #[test]
@@ -265,34 +199,10 @@ fn test_baseline_v1_compat_no_version() {
 
 #[test]
 fn test_baseline_v2_regression_by_quality_score() {
-    // V2 baseline with perfect score
-    let results_old = vec![
-        make_result("a", Classification::Integration),
-        make_result("b", Classification::Operation),
-    ];
-    let summary_old = make_summary(&results_old);
-    let baseline = create_baseline(&results_old, &summary_old);
-
-    // New results: one violation → lower quality score
-    let results_new = vec![
-        make_result("a", Classification::Integration),
-        make_result(
-            "b",
-            Classification::Violation {
-                has_logic: true,
-                has_own_calls: true,
-                logic_locations: vec![LogicOccurrence {
-                    kind: "if".into(),
-                    line: 1,
-                }],
-                call_locations: vec![CallOccurrence {
-                    name: "x".into(),
-                    line: 2,
-                }],
-            },
-        ),
-    ];
-    let summary_new = make_summary(&results_new);
-    let regressed = print_comparison(&baseline, &results_new, &summary_new);
+    // V2 baselines compare by quality_score: a perfect-score baseline that
+    // gains a violation must regress. (Covered structurally by
+    // `test_print_comparison_detects_only_regressions`; this pins the V2
+    // quality-score path explicitly.)
+    let regressed = compare(&ab(Classification::Operation), &ab(violation("if", "x")));
     assert!(regressed, "Quality score regression should be detected");
 }

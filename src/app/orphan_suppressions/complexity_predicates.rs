@@ -17,9 +17,10 @@ pub(super) fn would_trigger(
     f: &FunctionAnalysis,
     c: &ComplexityMetrics,
     cx: &ComplexityConfig,
+    test_max_lines: usize,
 ) -> bool {
     exceeds_basic_thresholds(c, cx)
-        || exceeds_length(f, c, cx)
+        || exceeds_length(f, c, cx, test_max_lines)
         || exceeds_unsafe(c, cx)
         || exceeds_error_handling(f, c, cx)
 }
@@ -32,10 +33,22 @@ fn exceeds_basic_thresholds(c: &ComplexityMetrics, cx: &ComplexityConfig) -> boo
         || c.max_nesting > cx.max_nesting_depth
 }
 
-/// True if the function (production, not test) exceeds the length cap.
-/// Operation: comparison logic.
-fn exceeds_length(f: &FunctionAnalysis, c: &ComplexityMetrics, cx: &ComplexityConfig) -> bool {
-    !f.is_test && c.function_lines > cx.max_function_lines
+/// True if the function exceeds its length cap — test fns use `test_max_lines`
+/// (`[tests].max_function_lines`, defaulting to production), production fns use
+/// `[complexity].max_function_lines`. Mirrors `warnings::is_length_over`.
+/// Operation: threshold selection + comparison.
+fn exceeds_length(
+    f: &FunctionAnalysis,
+    c: &ComplexityMetrics,
+    cx: &ComplexityConfig,
+    test_max_lines: usize,
+) -> bool {
+    let max = if f.is_test {
+        test_max_lines
+    } else {
+        cx.max_function_lines
+    };
+    c.function_lines > max
 }
 
 /// True if unsafe detection is enabled and the function contains at

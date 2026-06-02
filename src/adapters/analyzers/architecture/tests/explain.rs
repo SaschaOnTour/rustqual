@@ -6,7 +6,7 @@
 //! asserted to keep the tests resilient to cosmetic tweaks.
 
 use crate::adapters::analyzers::architecture::compiled::CompiledArchitecture;
-use crate::adapters::analyzers::architecture::explain::{explain_file, ImportKind};
+use crate::adapters::analyzers::architecture::explain::{explain_file, ExplainReport, ImportKind};
 use crate::adapters::analyzers::architecture::forbidden_rule::CompiledForbiddenRule;
 use crate::adapters::analyzers::architecture::layer_rule::{LayerDefinitions, UnmatchedBehavior};
 use globset::{Glob, GlobMatcher, GlobSet, GlobSetBuilder};
@@ -52,6 +52,21 @@ fn minimal_compiled() -> CompiledArchitecture {
 
 fn parse_file(src: &str) -> syn::File {
     syn::parse_str(src).expect("parse")
+}
+
+/// `minimal_compiled()` plus one `src/domain/** → src/adapters/**` forbidden
+/// rule, then explain a domain file that imports an adapter — the fixture
+/// shared by the forbidden-violation tests.
+fn explain_domain_importing_adapter() -> ExplainReport {
+    let mut compiled = minimal_compiled();
+    compiled.forbidden.push(CompiledForbiddenRule {
+        from: matcher("src/domain/**"),
+        to: matcher("src/adapters/**"),
+        except: globset(&[]),
+        reason: "no outward imports".to_string(),
+    });
+    let ast = parse_file("use crate::adapters::X;");
+    explain_file("src/domain/bad.rs", &ast, &compiled)
 }
 
 // ── file layer classification ──────────────────────────────────────────
@@ -155,15 +170,7 @@ fn layer_violation_surfaced() {
 
 #[test]
 fn forbidden_violation_surfaced() {
-    let mut compiled = minimal_compiled();
-    compiled.forbidden.push(CompiledForbiddenRule {
-        from: matcher("src/domain/**"),
-        to: matcher("src/adapters/**"),
-        except: globset(&[]),
-        reason: "no outward imports".to_string(),
-    });
-    let ast = parse_file("use crate::adapters::X;");
-    let report = explain_file("src/domain/bad.rs", &ast, &compiled);
+    let report = explain_domain_importing_adapter();
     assert_eq!(report.forbidden_violations.len(), 1);
 }
 
@@ -188,16 +195,7 @@ fn render_marks_reexport_point() {
 
 #[test]
 fn render_includes_violation_sections() {
-    let mut compiled = minimal_compiled();
-    compiled.forbidden.push(CompiledForbiddenRule {
-        from: matcher("src/domain/**"),
-        to: matcher("src/adapters/**"),
-        except: globset(&[]),
-        reason: "no outward imports".to_string(),
-    });
-    let ast = parse_file("use crate::adapters::X;");
-    let report = explain_file("src/domain/bad.rs", &ast, &compiled);
-    let text = report.render();
+    let text = explain_domain_importing_adapter().render();
     assert!(text.to_lowercase().contains("layer violation"), "{text}");
     assert!(text.to_lowercase().contains("forbidden"), "{text}");
 }

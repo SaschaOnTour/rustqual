@@ -107,14 +107,15 @@ fn test_empty_test_emits_warning() {
 }
 
 #[test]
-fn test_type_constructor_recognized_as_sut() {
+fn test_associated_function_call_recognized_as_sut() {
+    // Any associated-function call on an in-scope type (`Type::assoc()`) counts
+    // as a SUT call — there's no `new`-specific path, so a constructor and a
+    // plain static method exercise the same recognition.
     let declared = vec![make_declared("new", false)];
-    // Build a scope that includes a type named "MyType"
     let scope_source = "struct MyType {} impl MyType { fn new() -> Self { MyType {} } }";
     let scope_syntax = syn::parse_file(scope_source).expect("scope source");
     let scope_refs = vec![("lib.rs", &scope_syntax)];
     let scope = ProjectScope::from_files(&scope_refs);
-    // Test: calling MyType::new() should count as SUT
     let source = r#"
         #[test]
         fn test_constructor() {
@@ -128,29 +129,6 @@ fn test_type_constructor_recognized_as_sut() {
     assert!(
         warnings.is_empty(),
         "MyType::new() should be recognized as SUT call"
-    );
-}
-
-#[test]
-fn test_static_method_recognized_as_sut() {
-    let declared = vec![make_declared("load", false)];
-    let scope_source = "struct Config {} impl Config { fn load() -> Self { Config {} } }";
-    let scope_syntax = syn::parse_file(scope_source).expect("scope source");
-    let scope_refs = vec![("lib.rs", &scope_syntax)];
-    let scope = ProjectScope::from_files(&scope_refs);
-    let source = r#"
-        #[test]
-        fn test_load() {
-            let c = Config::load();
-        }
-    "#;
-    let syntax = syn::parse_file(source).expect("test source");
-    let parsed = vec![("test.rs".to_string(), source.to_string(), syntax)];
-    let reaches_prod = HashSet::new();
-    let warnings = detect_no_sut_tests(&parsed, &scope, &declared, &reaches_prod);
-    assert!(
-        warnings.is_empty(),
-        "Config::load() should be recognized as SUT call"
     );
 }
 

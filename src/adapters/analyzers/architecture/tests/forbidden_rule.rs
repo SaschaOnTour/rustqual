@@ -113,17 +113,7 @@ fn from_matching_file_with_to_matching_import_flagged() {
         "peers isolated",
     )];
     let hits = run(&fx, &rules);
-    assert_eq!(hits.len(), 1, "{hits:?}");
-    match &hits[0].kind {
-        ViolationKind::ForbiddenEdge {
-            reason,
-            imported_path,
-        } => {
-            assert_eq!(reason, "peers isolated");
-            assert!(imported_path.starts_with("crate::adapters::analyzers::srp"));
-        }
-        other => panic!("unexpected kind: {other:?}"),
-    }
+    super::assert_single_forbidden_edge(&hits, "peers isolated", "crate::adapters::analyzers::srp");
     assert_eq!(hits[0].file, "src/adapters/analyzers/iosp/mod.rs");
 }
 

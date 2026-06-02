@@ -1,5 +1,4 @@
 use crate::adapters::analyzers::architecture::matcher::find_macro_calls;
-use crate::adapters::analyzers::architecture::ViolationKind;
 
 fn parse(src: &str) -> syn::File {
     syn::parse_str(src).expect("fixture must parse")
@@ -21,11 +20,7 @@ fn matches_println_expression_macro() {
         }
     "#;
     let hits = find(src, &["println"]);
-    assert_eq!(hits.len(), 1, "expected one hit: {hits:?}");
-    match &hits[0].kind {
-        ViolationKind::MacroCall { name } => assert_eq!(name, "println"),
-        other => panic!("unexpected kind: {other:?}"),
-    }
+    super::assert_one_named(&hits, "println");
 }
 
 #[test]

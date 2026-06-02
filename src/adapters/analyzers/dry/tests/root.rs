@@ -6,138 +6,140 @@ fn parse(code: &str) -> Vec<(String, String, syn::File)> {
     vec![("test.rs".to_string(), code.to_string(), syntax)]
 }
 
-#[test]
-fn test_collect_function_hashes_empty() {
-    let parsed = parse("");
-    let config = DuplicatesConfig::default();
-    let entries = collect_function_hashes(&parsed, &config);
-    assert!(entries.is_empty());
-}
-
-#[test]
-fn test_collect_function_hashes_small_function_excluded() {
-    // A tiny function should be excluded by min_tokens
-    let parsed = parse("fn tiny() { let x = 1; }");
-    let config = DuplicatesConfig::default(); // min_tokens = 30
-    let entries = collect_function_hashes(&parsed, &config);
-    assert!(entries.is_empty(), "Small function should be filtered out");
-}
-
-#[test]
-fn test_collect_function_hashes_large_function_included() {
-    // A larger function with many tokens
-    let code = r#"
-        fn big_fn() {
-            let a = 1;
-            let b = 2;
-            let c = a + b;
-            let d = c * a;
-            let e = d - b;
-            let f = e + c;
-            let g = f * d;
-            let h = g - e;
-            let i = h + f;
-            let j = i * g;
-        }
-    "#;
-    let parsed = parse(code);
+/// Collect function hashes for `code` under a config with the given
+/// thresholds and trait-impl flag. (DRY always runs on test code.)
+fn hashes_of(
+    code: &str,
+    min_tokens: usize,
+    min_lines: usize,
+    ignore_trait_impls: bool,
+) -> Vec<FunctionHashEntry> {
     let config = DuplicatesConfig {
-        min_tokens: 5, // Lower threshold for test
-        min_lines: 1,
+        min_tokens,
+        min_lines,
+        ignore_trait_impls,
         ..DuplicatesConfig::default()
     };
-    let entries = collect_function_hashes(&parsed, &config);
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].name, "big_fn");
+    collect_function_hashes(&parse(code), &config)
 }
 
-#[test]
-fn test_collect_function_hashes_test_excluded() {
-    let code = r#"
-        #[cfg(test)]
-        mod tests {
-            fn helper() {
-                let a = 1; let b = 2; let c = a + b;
-                let d = c * a; let e = d - b; let f = e + c;
+// (label, code, min_tokens, min_lines, ignore_trait_impls, expected_len,
+// expected_qualified)
+type HashCase = (
+    &'static str,
+    &'static str,
+    usize,
+    usize,
+    bool,
+    usize,
+    Option<&'static str>,
+);
+
+const HASH_CASES: &[HashCase] = &[
+    ("empty source", "", 30, 5, true, 0, None),
+    (
+        "tiny fn filtered by default min_tokens",
+        "fn tiny() { let x = 1; }",
+        30,
+        5,
+        true,
+        0,
+        None,
+    ),
+    (
+        "large free fn included",
+        r#"
+            fn big_fn() {
+                let a = 1;
+                let b = 2;
+                let c = a + b;
+                let d = c * a;
+                let e = d - b;
+                let f = e + c;
+                let g = f * d;
+                let h = g - e;
+                let i = h + f;
+                let j = i * g;
             }
-        }
-    "#;
-    let parsed = parse(code);
-    let config = DuplicatesConfig {
-        min_tokens: 5,
-        min_lines: 1,
-        ignore_tests: true,
-        ..DuplicatesConfig::default()
-    };
-    let entries = collect_function_hashes(&parsed, &config);
-    assert!(entries.is_empty(), "Test functions should be excluded");
-}
+            "#,
+        5,
+        1,
+        true,
+        1,
+        Some("big_fn"),
+    ),
+    (
+        "cfg(test) fn included (DRY runs on test code)",
+        r#"
+            #[cfg(test)]
+            mod tests {
+                fn helper() {
+                    let a = 1; let b = 2; let c = a + b;
+                    let d = c * a; let e = d - b; let f = e + c;
+                }
+            }
+            "#,
+        5,
+        1,
+        true,
+        1,
+        None,
+    ),
+    (
+        "impl method included with qualified name",
+        r#"
+            struct Foo;
+            impl Foo {
+                fn method(&self) {
+                    let a = 1; let b = 2; let c = a + b;
+                    let d = c * a; let e = d - b; let f = e + c;
+                }
+            }
+            "#,
+        5,
+        1,
+        true,
+        1,
+        Some("Foo::method"),
+    ),
+    (
+        "trait-impl method excluded when ignore_trait_impls",
+        r#"
+            trait Bar { fn do_thing(&self); }
+            struct Foo;
+            impl Bar for Foo {
+                fn do_thing(&self) {
+                    let a = 1; let b = 2; let c = a + b;
+                    let d = c * a; let e = d - b; let f = e + c;
+                }
+            }
+            "#,
+        5,
+        1,
+        true,
+        0,
+        None,
+    ),
+];
 
 #[test]
-fn test_collect_function_hashes_test_included_when_not_ignored() {
-    let code = r#"
-        #[cfg(test)]
-        mod tests {
-            fn helper() {
-                let a = 1; let b = 2; let c = a + b;
-                let d = c * a; let e = d - b; let f = e + c;
-            }
+fn collect_function_hashes_inclusion() {
+    // `collect_function_hashes` includes a fn only when it clears the token
+    // threshold and isn't filtered out: tiny fns drop (default min_tokens=30);
+    // trait-impl methods drop iff `ignore_trait_impls`. Test code is always
+    // included (the `ignore_tests` toggle was removed in v1.4.0).
+    for (label, code, min_tokens, min_lines, ignore_trait_impls, expected_len, qualified) in
+        HASH_CASES
+    {
+        let entries = hashes_of(code, *min_tokens, *min_lines, *ignore_trait_impls);
+        assert_eq!(entries.len(), *expected_len, "case {label}: len");
+        if let Some(q) = qualified {
+            assert_eq!(
+                &entries[0].qualified_name, q,
+                "case {label}: qualified_name"
+            );
         }
-    "#;
-    let parsed = parse(code);
-    let config = DuplicatesConfig {
-        min_tokens: 5,
-        min_lines: 1,
-        ignore_tests: false,
-        ..DuplicatesConfig::default()
-    };
-    let entries = collect_function_hashes(&parsed, &config);
-    assert_eq!(entries.len(), 1, "Test functions should be included");
-}
-
-#[test]
-fn test_collect_function_hashes_impl_method() {
-    let code = r#"
-        struct Foo;
-        impl Foo {
-            fn method(&self) {
-                let a = 1; let b = 2; let c = a + b;
-                let d = c * a; let e = d - b; let f = e + c;
-            }
-        }
-    "#;
-    let parsed = parse(code);
-    let config = DuplicatesConfig {
-        min_tokens: 5,
-        min_lines: 1,
-        ..DuplicatesConfig::default()
-    };
-    let entries = collect_function_hashes(&parsed, &config);
-    assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].qualified_name, "Foo::method");
-}
-
-#[test]
-fn test_collect_function_hashes_trait_impl_excluded() {
-    let code = r#"
-        trait Bar { fn do_thing(&self); }
-        struct Foo;
-        impl Bar for Foo {
-            fn do_thing(&self) {
-                let a = 1; let b = 2; let c = a + b;
-                let d = c * a; let e = d - b; let f = e + c;
-            }
-        }
-    "#;
-    let parsed = parse(code);
-    let config = DuplicatesConfig {
-        min_tokens: 5,
-        min_lines: 1,
-        ignore_trait_impls: true,
-        ..DuplicatesConfig::default()
-    };
-    let entries = collect_function_hashes(&parsed, &config);
-    assert!(entries.is_empty(), "Trait impl methods should be excluded");
+    }
 }
 
 #[test]
@@ -177,9 +179,21 @@ fn test_collect_declared_functions_basic() {
     assert!(declared.iter().any(|d| d.name == "foo" && !d.is_main));
 }
 
+/// Whether `fn_name` in `code` is a declared test function (`is_test`).
+fn declared_is_test(code: &str, fn_name: &str) -> bool {
+    collect_declared_functions(&parse(code))
+        .into_iter()
+        .find(|d| d.name == fn_name)
+        .unwrap_or_else(|| panic!("fn {fn_name} not found"))
+        .is_test
+}
+
 #[test]
-fn test_collect_declared_functions_test_context() {
-    let code = r#"
+fn declared_function_is_test_classification() {
+    // `collect_declared_functions` marks fns inside `#[cfg(test)] mod` /
+    // `#[cfg(test)] impl` as tests (false for production fns alongside them).
+    // (label, code, fn_name, expected_is_test)
+    const CFG_TEST_MOD: &str = r#"
         fn production() {}
         #[cfg(test)]
         mod tests {
@@ -188,17 +202,50 @@ fn test_collect_declared_functions_test_context() {
             fn test_something() {}
         }
     "#;
-    let parsed = parse(code);
-    let declared = collect_declared_functions(&parsed);
-    let prod = declared.iter().find(|d| d.name == "production").unwrap();
-    assert!(!prod.is_test);
-    let helper = declared.iter().find(|d| d.name == "helper").unwrap();
-    assert!(helper.is_test);
-    let test_fn = declared
-        .iter()
-        .find(|d| d.name == "test_something")
-        .unwrap();
-    assert!(test_fn.is_test);
+    const CFG_TEST_IMPL: &str = r#"
+        pub struct Foo;
+
+        #[cfg(test)]
+        impl Foo {
+            fn test_helper(&self) -> bool { true }
+            pub fn another_helper() -> i32 { 42 }
+        }
+    "#;
+    let cases: &[(&str, &str, &str, bool)] = &[
+        (
+            "production fn outside cfg(test)",
+            CFG_TEST_MOD,
+            "production",
+            false,
+        ),
+        (
+            "plain helper in cfg(test) mod",
+            CFG_TEST_MOD,
+            "helper",
+            true,
+        ),
+        (
+            "#[test] fn in cfg(test) mod",
+            CFG_TEST_MOD,
+            "test_something",
+            true,
+        ),
+        (
+            "method in cfg(test) impl",
+            CFG_TEST_IMPL,
+            "test_helper",
+            true,
+        ),
+        (
+            "pub method in cfg(test) impl",
+            CFG_TEST_IMPL,
+            "another_helper",
+            true,
+        ),
+    ];
+    for (label, code, fn_name, expected) in cases {
+        assert_eq!(declared_is_test(code, fn_name), *expected, "case {label}");
+    }
 }
 
 #[test]
@@ -248,34 +295,4 @@ fn test_collect_declared_functions_allow_list_without_dead_code() {
     let declared = collect_declared_functions(&parsed);
     assert_eq!(declared.len(), 1);
     assert!(!declared[0].has_allow_dead_code);
-}
-
-#[test]
-fn test_cfg_test_impl_methods_are_test() {
-    let code = r#"
-        pub struct Foo;
-
-        #[cfg(test)]
-        impl Foo {
-            fn test_helper(&self) -> bool { true }
-            pub fn another_helper() -> i32 { 42 }
-        }
-    "#;
-    let parsed = parse(code);
-    let declared = collect_declared_functions(&parsed);
-
-    let helper = declared.iter().find(|d| d.name == "test_helper").unwrap();
-    assert!(
-        helper.is_test,
-        "Method inside #[cfg(test)] impl should have is_test=true"
-    );
-
-    let another = declared
-        .iter()
-        .find(|d| d.name == "another_helper")
-        .unwrap();
-    assert!(
-        another.is_test,
-        "Pub method inside #[cfg(test)] impl should have is_test=true"
-    );
 }

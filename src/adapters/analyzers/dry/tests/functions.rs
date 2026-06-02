@@ -113,7 +113,10 @@ fn test_detect_duplicates_below_min_tokens_excluded() {
 }
 
 #[test]
-fn test_detect_duplicates_test_functions_excluded() {
+fn test_detect_duplicates_includes_test_functions() {
+    // Duplicate detection always runs on test code (the `ignore_tests`
+    // toggle was removed in v1.4.0) — duplicate `#[cfg(test)]` helpers are
+    // flagged just like production duplicates.
     let code = r#"
         #[cfg(test)]
         mod tests {
@@ -122,41 +125,15 @@ fn test_detect_duplicates_test_functions_excluded() {
         }
     "#;
     let parsed = parse(code);
-    let mut config = low_threshold_config();
-    config.ignore_tests = true;
-    let groups = detect_duplicates(&parsed, &config);
-    assert!(
-        groups.is_empty(),
-        "Test functions should be excluded when ignore_tests=true"
-    );
+    let groups = detect_duplicates(&parsed, &low_threshold_config());
+    assert_eq!(groups.len(), 1, "test functions must be included");
 }
 
 #[test]
-fn test_detect_duplicates_test_functions_included() {
-    let code = r#"
-        #[cfg(test)]
-        mod tests {
-            fn helper_a() { let x = 1; let y = x + 2; let z = y * x; }
-            fn helper_b() { let a = 1; let b = a + 2; let c = b * a; }
-        }
-    "#;
-    let parsed = parse(code);
-    let mut config = low_threshold_config();
-    config.ignore_tests = false;
-    let groups = detect_duplicates(&parsed, &config);
-    assert_eq!(
-        groups.len(),
-        1,
-        "Test functions should be included when ignore_tests=false"
-    );
-}
-
-#[test]
-fn duplicates_in_cfg_test_companion_file_skipped() {
+fn duplicates_in_cfg_test_companion_file_flagged() {
     // A `#![cfg(test)]` companion file is test code even though its path
-    // has no `tests/` segment. Duplicate detection must skip it by
-    // consulting the authoritative cfg-test file set, not a `tests/`
-    // path heuristic.
+    // has no `tests/` segment. Since v1.4.0 duplicate detection runs on
+    // tests too, so its duplicate helpers ARE flagged.
     let code = r#"
         #![cfg(test)]
         fn helper_one() { let x = 1; let y = x + 2; let z = y * x; }
@@ -167,11 +144,11 @@ fn duplicates_in_cfg_test_companion_file_skipped() {
         code.to_string(),
         syn::parse_file(code).expect("parse failed"),
     )];
-    let config = low_threshold_config(); // ignore_tests = true
-    let groups = detect_duplicates(&parsed, &config);
-    assert!(
-        groups.is_empty(),
-        "duplicates in a #![cfg(test)] file must be skipped: {groups:?}"
+    let groups = detect_duplicates(&parsed, &low_threshold_config());
+    assert_eq!(
+        groups.len(),
+        1,
+        "duplicates in a #![cfg(test)] file must be flagged: {groups:?}"
     );
 }
 
@@ -202,22 +179,8 @@ fn duplicates_in_production_file_under_nested_tests_dir_still_flagged() {
 
 #[test]
 fn test_detect_duplicates_three_way() {
-    let parsed = parse_multi(&[
-        (
-            "a.rs",
-            "fn func_a() { let x = 1; let y = x + 2; let z = y * x; }",
-        ),
-        (
-            "b.rs",
-            "fn func_b() { let a = 1; let b = a + 2; let c = b * a; }",
-        ),
-        (
-            "c.rs",
-            "fn func_c() { let p = 1; let q = p + 2; let r = q * p; }",
-        ),
-    ]);
-    let config = low_threshold_config();
-    let groups = detect_duplicates(&parsed, &config);
+    let parsed = super::three_matching_funcs();
+    let groups = detect_duplicates(&parsed, &low_threshold_config());
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0].entries.len(), 3, "Should detect 3-way duplicate");
 }

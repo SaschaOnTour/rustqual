@@ -4,14 +4,7 @@ use crate::adapters::analyzers::structural::{StructuralWarning, StructuralWarnin
 use crate::config::StructuralConfig;
 
 fn detect_from(source: &str) -> Vec<StructuralWarning> {
-    let parsed = super::parse_single(source);
-    let cfg_test_files =
-        crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(&parsed);
-    let meta = collect_metadata(&parsed, &cfg_test_files);
-    let config = StructuralConfig::default();
-    let mut warnings = Vec::new();
-    detect_sit(&mut warnings, &meta, &config);
-    warnings
+    super::detect_meta(&super::parse_single(source), detect_sit)
 }
 
 #[test]

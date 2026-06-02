@@ -195,7 +195,7 @@ fn test_analyze_srp_empty() {
     let parsed: Vec<(String, String, syn::File)> = vec![];
     let config = SrpConfig::default();
     let call_graph = std::collections::HashMap::new();
-    let analysis = analyze_srp(&parsed, &config, &call_graph);
+    let analysis = analyze_srp(&parsed, &config, &call_graph, (300, 800));
     assert!(analysis.struct_warnings.is_empty());
     assert!(analysis.module_warnings.is_empty());
 }
@@ -214,7 +214,7 @@ fn test_analyze_srp_cohesive_struct() {
     let parsed = vec![("test.rs".to_string(), code.to_string(), syntax)];
     let config = SrpConfig::default();
     let call_graph = std::collections::HashMap::new();
-    let analysis = analyze_srp(&parsed, &config, &call_graph);
+    let analysis = analyze_srp(&parsed, &config, &call_graph, (300, 800));
     // Fully cohesive struct → no warning
     assert!(
         analysis.struct_warnings.is_empty(),
@@ -234,7 +234,7 @@ fn test_analyze_srp_multiple_files() {
     ];
     let config = SrpConfig::default();
     let call_graph = std::collections::HashMap::new();
-    let analysis = analyze_srp(&parsed, &config, &call_graph);
+    let analysis = analyze_srp(&parsed, &config, &call_graph, (300, 800));
     // Both structs are simple → no warnings
     assert!(analysis.struct_warnings.is_empty());
 }
@@ -245,6 +245,6 @@ fn test_analyze_srp_returns_empty_param_warnings() {
     let parsed: Vec<(String, String, syn::File)> = vec![];
     let config = SrpConfig::default();
     let call_graph = std::collections::HashMap::new();
-    let analysis = analyze_srp(&parsed, &config, &call_graph);
+    let analysis = analyze_srp(&parsed, &config, &call_graph, (300, 800));
     assert!(analysis.param_warnings.is_empty());
 }

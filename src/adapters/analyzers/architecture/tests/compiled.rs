@@ -194,23 +194,20 @@ fn compile_call_parity_rejects_duplicate_adapters() {
 }
 
 #[test]
-fn compile_call_parity_rejects_call_depth_zero() {
-    let mut cfg = call_parity_cfg();
-    let mut cp = minimal_call_parity();
-    cp.call_depth = 0;
-    cfg.call_parity = Some(cp);
-    let err = compile_architecture(&cfg).unwrap_err();
-    assert!(err.to_lowercase().contains("call_depth"), "err = {err}");
-}
-
-#[test]
-fn compile_call_parity_rejects_call_depth_too_large() {
-    let mut cfg = call_parity_cfg();
-    let mut cp = minimal_call_parity();
-    cp.call_depth = 11;
-    cfg.call_parity = Some(cp);
-    let err = compile_architecture(&cfg).unwrap_err();
-    assert!(err.to_lowercase().contains("call_depth"), "err = {err}");
+fn compile_call_parity_rejects_out_of_range_call_depth() {
+    // call_depth must be within [1, 10]: both the lower bound (0) and an
+    // above-ceiling value (11) are rejected with a `call_depth` error.
+    for (label, call_depth) in [("zero", 0), ("too large", 11)] {
+        let mut cfg = call_parity_cfg();
+        let mut cp = minimal_call_parity();
+        cp.call_depth = call_depth;
+        cfg.call_parity = Some(cp);
+        let err = compile_architecture(&cfg).unwrap_err();
+        assert!(
+            err.to_lowercase().contains("call_depth"),
+            "case {label}: err = {err}"
+        );
+    }
 }
 
 #[test]

@@ -1,36 +1,9 @@
 use crate::adapters::analyzers::iosp::{
-    compute_severity, CallOccurrence, Classification, ComplexityMetrics, FunctionAnalysis,
-    LogicOccurrence,
+    CallOccurrence, Classification, ComplexityMetrics, FunctionAnalysis, LogicOccurrence,
 };
+use crate::adapters::report::test_support::make_result;
 use crate::report::text::*;
 use crate::report::Summary;
-
-fn make_result(name: &str, classification: Classification) -> FunctionAnalysis {
-    let severity = compute_severity(&classification);
-    FunctionAnalysis {
-        name: name.to_string(),
-        file: "test.rs".to_string(),
-        line: 1,
-        classification,
-        parent_type: None,
-        suppressed: false,
-        complexity: None,
-        qualified_name: name.to_string(),
-        severity,
-        cognitive_warning: false,
-        cyclomatic_warning: false,
-        nesting_depth_warning: false,
-        function_length_warning: false,
-        unsafe_warning: false,
-        error_handling_warning: false,
-        complexity_suppressed: false,
-        own_calls: vec![],
-        parameter_count: 0,
-        is_trait_impl: false,
-        is_test: false,
-        effort_score: None,
-    }
-}
 
 fn render_text(results: &[FunctionAnalysis], verbose: bool) -> String {
     use crate::domain::{AnalysisData, AnalysisFindings};

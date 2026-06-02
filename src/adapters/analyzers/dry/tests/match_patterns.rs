@@ -1,9 +1,4 @@
 use crate::adapters::analyzers::dry::match_patterns::*;
-use crate::adapters::analyzers::dry::FileVisitor;
-use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
-use crate::config::sections::DuplicatesConfig;
-use std::collections::HashMap;
-use syn::visit::Visit;
 
 fn parse(code: &str) -> Vec<(String, String, syn::File)> {
     let syntax = syn::parse_file(code).expect("parse failed");
@@ -13,17 +8,15 @@ fn parse(code: &str) -> Vec<(String, String, syn::File)> {
 #[test]
 fn test_detect_empty() {
     let parsed = parse("");
-    let config = DuplicatesConfig::default();
-    let result = detect_repeated_matches(&parsed, &config);
+    let result = detect_repeated_matches(&parsed);
     assert!(result.is_empty());
 }
 
 #[test]
-fn repeated_matches_in_cfg_test_companion_file_skipped() {
-    // DRY-005 must skip repeated match patterns in test code. A
-    // `#![cfg(test)]` companion file (no `tests/` path segment) is test
-    // code; the collector recognises it via the authoritative cfg-test
-    // file set, not a path heuristic.
+fn repeated_matches_in_cfg_test_companion_file_flagged() {
+    // Since v1.4.0 DRY-005 runs on test code too. A `#![cfg(test)]`
+    // companion file (no `tests/` path segment) is test code, and its
+    // repeated match patterns ARE flagged.
     let code = r#"
         #![cfg(test)]
         enum E { A, B, C }
@@ -36,11 +29,11 @@ fn repeated_matches_in_cfg_test_companion_file_skipped() {
         code.to_string(),
         syn::parse_file(code).expect("parse failed"),
     )];
-    let config = DuplicatesConfig::default(); // ignore_tests = true
-    let result = detect_repeated_matches(&parsed, &config);
-    assert!(
-        result.is_empty(),
-        "repeated matches in a #![cfg(test)] file must be skipped: {} group(s)",
+    let result = detect_repeated_matches(&parsed);
+    assert_eq!(
+        result.len(),
+        1,
+        "repeated matches in a #![cfg(test)] file must be flagged: {} group(s)",
         result.len()
     );
 }
@@ -54,8 +47,7 @@ fn test_detect_single_match_not_flagged() {
         }
     "#;
     let parsed = parse(code);
-    let config = DuplicatesConfig::default();
-    let result = detect_repeated_matches(&parsed, &config);
+    let result = detect_repeated_matches(&parsed);
     assert!(result.is_empty(), "single instance should not be flagged");
 }
 
@@ -74,8 +66,7 @@ fn test_detect_repeated_match_flagged() {
         }
     "#;
     let parsed = parse(code);
-    let config = DuplicatesConfig::default();
-    let result = detect_repeated_matches(&parsed, &config);
+    let result = detect_repeated_matches(&parsed);
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].entries.len(), 3);
     assert_eq!(result[0].enum_name, "E");
@@ -96,15 +87,15 @@ fn test_detect_different_matches_not_grouped() {
         }
     "#;
     let parsed = parse(code);
-    let config = DuplicatesConfig::default();
-    let result = detect_repeated_matches(&parsed, &config);
+    let result = detect_repeated_matches(&parsed);
     // Normalization erases literal values, so these should hash the same
     // because the structure is identical (match on enum with 3 literal returns)
     assert_eq!(result.len(), 1, "same structure matches should be grouped");
 }
 
 #[test]
-fn test_detect_test_code_excluded() {
+fn test_detect_test_code_included() {
+    // Repeated matches inside a `#[cfg(test)] mod` are flagged since v1.4.0.
     let code = r#"
         enum E { A, B, C }
         #[cfg(test)]
@@ -116,12 +107,8 @@ fn test_detect_test_code_excluded() {
         }
     "#;
     let parsed = parse(code);
-    let config = DuplicatesConfig {
-        ignore_tests: true,
-        ..DuplicatesConfig::default()
-    };
-    let result = detect_repeated_matches(&parsed, &config);
-    assert!(result.is_empty(), "test code should be excluded");
+    let result = detect_repeated_matches(&parsed);
+    assert_eq!(result.len(), 1, "test code must be included");
 }
 
 #[test]
@@ -132,8 +119,7 @@ fn test_detect_few_arms_not_flagged() {
         fn f3(b: bool) -> i32 { match b { true => 1, false => 0 } }
     "#;
     let parsed = parse(code);
-    let config = DuplicatesConfig::default();
-    let result = detect_repeated_matches(&parsed, &config);
+    let result = detect_repeated_matches(&parsed);
     assert!(
         result.is_empty(),
         "matches with <3 arms should not be flagged"

@@ -305,10 +305,21 @@ pub(super) fn compute_srp(
     if !config.srp.enabled {
         return None;
     }
+    let test_length_thresholds = (
+        config
+            .tests
+            .file_length_baseline
+            .unwrap_or(config.srp.file_length_baseline),
+        config
+            .tests
+            .file_length_ceiling
+            .unwrap_or(config.srp.file_length_ceiling),
+    );
     Some(crate::adapters::analyzers::srp::analyze_srp(
         parsed,
         &config.srp,
         file_call_graph,
+        test_length_thresholds,
     ))
 }
 

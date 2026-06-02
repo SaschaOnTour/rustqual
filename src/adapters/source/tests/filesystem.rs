@@ -21,47 +21,37 @@ fn test_collect_rust_files_dot_prefix_path() {
     );
 }
 
-#[test]
-fn test_collect_rust_files_hidden_dir_excluded() {
+/// In a fresh tempdir, put a `.rs` file inside `excluded_subdir` and a
+/// visible `.rs` at the root, then collect — returning the found paths.
+fn collect_with_excluded_subdir(excluded_subdir: &str) -> Vec<std::path::PathBuf> {
     let dir = tempfile::Builder::new()
         .prefix("rustqual_test_")
         .tempdir()
         .unwrap();
-    let hidden = dir.path().join(".hidden");
-    std::fs::create_dir_all(&hidden).unwrap();
-    std::fs::write(hidden.join("lib.rs"), "fn foo() {}").unwrap();
-    // Also add a visible file
-    std::fs::write(dir.path().join("main.rs"), "fn main() {}").unwrap();
-
-    let files = collect_rust_files(dir.path());
-    assert!(
-        files
-            .iter()
-            .all(|f| !f.to_string_lossy().contains(".hidden")),
-        "Hidden directories should be excluded"
-    );
-    assert!(!files.is_empty(), "Visible files should still be found");
+    let sub = dir.path().join(excluded_subdir);
+    std::fs::create_dir_all(&sub).unwrap();
+    std::fs::write(sub.join("excluded.rs"), "fn x() {}").unwrap();
+    std::fs::write(dir.path().join("visible.rs"), "fn v() {}").unwrap();
+    collect_rust_files(dir.path())
 }
 
 #[test]
-fn test_collect_rust_files_target_dir_excluded() {
-    let dir = tempfile::Builder::new()
-        .prefix("rustqual_test_")
-        .tempdir()
-        .unwrap();
-    let target = dir.path().join("target");
-    std::fs::create_dir_all(&target).unwrap();
-    std::fs::write(target.join("generated.rs"), "fn gen() {}").unwrap();
-    std::fs::write(dir.path().join("lib.rs"), "fn lib() {}").unwrap();
-
-    let files = collect_rust_files(dir.path());
-    assert!(
-        files
-            .iter()
-            .all(|f| !f.to_string_lossy().contains("target")),
-        "target/ directory should be excluded"
-    );
-    assert!(!files.is_empty());
+fn collect_rust_files_excludes_hidden_and_target_dirs() {
+    // Hidden (`.`-prefixed) and `target/` directories are skipped, but a
+    // visible sibling file is still found. (label, excluded_subdir)
+    for (label, excluded) in [("hidden dir", ".hidden"), ("target dir", "target")] {
+        let files = collect_with_excluded_subdir(excluded);
+        assert!(
+            files
+                .iter()
+                .all(|f| !f.to_string_lossy().contains(excluded)),
+            "case {label}: `{excluded}/` should be excluded"
+        );
+        assert!(
+            !files.is_empty(),
+            "case {label}: the visible sibling file should still be found"
+        );
+    }
 }
 
 #[test]
@@ -111,52 +101,45 @@ fn parsed_single(path: &str, source: &str) -> Vec<(String, String, syn::File)> {
     vec![(path.to_string(), source.to_string(), syntax)]
 }
 
-#[test]
-fn qual_allow_honors_marker_inside_contiguous_comment_block() {
-    // Layout:
-    //   line 1: // qual:allow(srp) — rustqual false-positive LCOM4=2
-    //   line 2: // The struct's methods form one coherent data layer.
-    //   line 3: // See docs/rustqual-bugs.md.
-    //   line 4: #[derive(Default)]
-    //   line 5: pub struct Foo { ... }
-    //
-    // Without the block-end shift, ANNOTATION_WINDOW=3 from line 1
-    // reaches only line 4 — too short to cover the struct on line 5.
-    // With the shift, the effective marker line is 3 (last // of the
-    // contiguous block) and the window 3..=6 covers the struct.
-    let source = "// qual:allow(srp) — rustqual false-positive LCOM4=2\n\
-                  // The struct's methods form one coherent data layer.\n\
-                  // See docs/rustqual-bugs.md.\n\
-                  #[derive(Default)]\n\
-                  pub struct Foo { x: i32, y: i32 }\n";
+/// Parse `source`, collect suppression markers, and return the (single)
+/// suppression's effective line for `test.rs`.
+fn single_suppression_line(source: &str) -> usize {
     let parsed = parsed_single("test.rs", source);
     let map = collect_suppression_lines(&parsed);
     let sups = map.get("test.rs").expect("file recorded");
     assert_eq!(sups.len(), 1, "exactly one suppression");
-    assert_eq!(
-        sups[0].line, 3,
-        "marker should be shifted to last // line of the contiguous block (line 3), got {}",
-        sups[0].line
-    );
+    sups[0].line
 }
 
 #[test]
-fn qual_allow_does_not_reach_across_blank_lines() {
-    // Marker on line 1, blank line on line 2 breaks the block. Marker
-    // line stays at 1; struct on line 4 is outside the 3-line window
-    // from line 1.
-    let source = "// qual:allow(srp)\n\
-                  \n\
-                  #[derive(Default)]\n\
-                  pub struct Foo { x: i32 }\n";
-    let parsed = parsed_single("test.rs", source);
-    let map = collect_suppression_lines(&parsed);
-    let sups = map.get("test.rs").expect("file recorded");
-    assert_eq!(sups.len(), 1, "marker still parsed");
-    assert_eq!(
-        sups[0].line, 1,
-        "blank line breaks the block; marker stays at its original line"
-    );
+fn qual_allow_marker_line_follows_contiguous_comment_block() {
+    // A `qual:allow` marker's effective line shifts to the LAST `//` line of
+    // its contiguous comment block (so ANNOTATION_WINDOW=3 reaches the item a
+    // multi-line rationale would otherwise push out of range); a blank line
+    // breaks the block and the marker stays on its own line. (label, source,
+    // expected_line)
+    let cases: &[(&str, &str, usize)] = &[
+        (
+            "contiguous 3-line block shifts to line 3",
+            "// qual:allow(srp) — rustqual false-positive LCOM4=2\n\
+             // The struct's methods form one coherent data layer.\n\
+             // See docs/rustqual-bugs.md.\n\
+             #[derive(Default)]\n\
+             pub struct Foo { x: i32, y: i32 }\n",
+            3,
+        ),
+        (
+            "blank line breaks the block; marker stays at line 1",
+            "// qual:allow(srp)\n\
+             \n\
+             #[derive(Default)]\n\
+             pub struct Foo { x: i32 }\n",
+            1,
+        ),
+    ];
+    for (label, source, expected) in cases {
+        assert_eq!(single_suppression_line(source), *expected, "case {label}");
+    }
 }
 
 #[test]

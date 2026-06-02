@@ -1,53 +1,70 @@
 use crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths;
 
+// A `(path, code)` workspace and the paths expected present/absent in the
+// resulting cfg-test set.
+type ClassifyCase = (
+    &'static str,
+    &'static [(&'static str, &'static str)],
+    &'static [&'static str],
+    &'static [&'static str],
+);
+
 #[test]
-fn cfg_test_propagates_transitively_through_mod_chain() {
-    // Reproduces the bug where a test-file's own sub-module is not
-    // recognised as cfg-test.
-    //
-    //   src/parent.rs   has `#[cfg(test)] mod tests;`         → cfg-test
-    //   src/parent/tests/mod.rs     has `mod golden;`         → should be cfg-test
-    //   src/parent/tests/golden.rs  has `fn helper() {}`      → should be cfg-test
-    //
-    // Previously only tests/mod.rs was tagged cfg-test; golden.rs was
-    // treated as production code and its helper was reported as
-    // test-only dead code even though it lives in a test-only file.
-    let parent_code = r#"
-        #[cfg(test)]
-        mod tests;
-    "#;
-    let tests_mod_code = r#"
-        mod golden;
-    "#;
-    let golden_code = r#"
-        pub fn helper() -> u32 { 42 }
-    "#;
-    let parsed = vec![
+fn cfg_test_classification_propagates_and_honours_package_roots() {
+    let cases: &[ClassifyCase] = &[
+        // Propagation bug: a test-file's OWN sub-module must inherit cfg-test
+        // status. Previously only tests/mod.rs was tagged; golden.rs was
+        // treated as production and its helper falsely reported as dead code.
         (
-            "src/parent.rs".to_string(),
-            parent_code.to_string(),
-            syn::parse_file(parent_code).unwrap(),
+            "cfg-test status propagates transitively through a mod chain",
+            &[
+                ("src/parent.rs", "#[cfg(test)]\nmod tests;"),
+                ("src/parent/tests/mod.rs", "mod golden;"),
+                (
+                    "src/parent/tests/golden.rs",
+                    "pub fn helper() -> u32 { 42 }",
+                ),
+            ],
+            &["src/parent/tests/mod.rs", "src/parent/tests/golden.rs"],
+            &[],
         ),
+        // Edge case: a real package whose path contains an EARLIER `tests`
+        // segment (`fixtures/tests/retry/`). The owner of its own `tests/` is
+        // the package root; the outer `fixtures/tests/other.rs` (no package
+        // root there) must still NOT be classified.
         (
-            "src/parent/tests/mod.rs".to_string(),
-            tests_mod_code.to_string(),
-            syn::parse_file(tests_mod_code).unwrap(),
-        ),
-        (
-            "src/parent/tests/golden.rs".to_string(),
-            golden_code.to_string(),
-            syn::parse_file(golden_code).unwrap(),
+            "a package nested under an outer `tests` segment classifies its own tests/",
+            &[
+                ("fixtures/tests/retry/src/lib.rs", "pub fn run() {}"),
+                (
+                    "fixtures/tests/retry/tests/integration.rs",
+                    "#[test] fn it() {}",
+                ),
+                ("fixtures/tests/other.rs", "pub fn outer() {}"),
+            ],
+            &["fixtures/tests/retry/tests/integration.rs"],
+            &["fixtures/tests/other.rs"],
         ),
     ];
-    let result = collect_cfg_test_file_paths(&parsed);
-    assert!(
-        result.contains("src/parent/tests/mod.rs"),
-        "direct cfg-test mod target not detected: {result:?}"
-    );
-    assert!(
-        result.contains("src/parent/tests/golden.rs"),
-        "sub-module of cfg-test file must propagate cfg-test status: {result:?}"
-    );
+    for (label, files, present, absent) in cases {
+        let parsed: Vec<(String, String, syn::File)> = files
+            .iter()
+            .map(|(p, c)| (p.to_string(), c.to_string(), syn::parse_file(c).unwrap()))
+            .collect();
+        let result = collect_cfg_test_file_paths(&parsed);
+        for p in *present {
+            assert!(
+                result.contains(*p),
+                "case {label}: {p} must be cfg-test: {result:?}"
+            );
+        }
+        for a in *absent {
+            assert!(
+                !result.contains(*a),
+                "case {label}: {a} must NOT be cfg-test: {result:?}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -185,45 +202,6 @@ fn tests_dir_only_classified_at_a_real_package_root() {
     assert!(
         !result.contains("tools/shared/tests/helpers.rs"),
         "nested non-package-root tests/ must NOT be cfg-test: {result:?}"
-    );
-}
-
-#[test]
-fn package_nested_under_a_tests_dir_recognizes_its_own_tests() {
-    // Edge case: a real package whose path contains an earlier `tests`
-    // segment (`fixtures/tests/retry/`). Its OWN integration tests live at
-    // `fixtures/tests/retry/tests/…`; the owner of *that* `tests/` is the
-    // package root, even though an outer `tests` segment appears first.
-    // The outer `fixtures/tests/other.rs` (no package root there) must
-    // still NOT be classified.
-    let lib = "pub fn run() {}";
-    let it = "#[test] fn it() {}";
-    let outer = "pub fn outer() {}";
-    let parsed = vec![
-        (
-            "fixtures/tests/retry/src/lib.rs".to_string(),
-            lib.to_string(),
-            syn::parse_file(lib).unwrap(),
-        ),
-        (
-            "fixtures/tests/retry/tests/integration.rs".to_string(),
-            it.to_string(),
-            syn::parse_file(it).unwrap(),
-        ),
-        (
-            "fixtures/tests/other.rs".to_string(),
-            outer.to_string(),
-            syn::parse_file(outer).unwrap(),
-        ),
-    ];
-    let result = collect_cfg_test_file_paths(&parsed);
-    assert!(
-        result.contains("fixtures/tests/retry/tests/integration.rs"),
-        "the package's own tests/ (owner = package root) must be cfg-test: {result:?}"
-    );
-    assert!(
-        !result.contains("fixtures/tests/other.rs"),
-        "an outer `tests` dir that is not a package root must NOT be cfg-test: {result:?}"
     );
 }
 

@@ -149,17 +149,29 @@ fn test_call_self_without_self_type_is_none() {
 // ── MethodCall ────────────────────────────────────────────────────
 
 #[test]
-fn test_method_call_with_bound_receiver() {
-    let mut f = TypeInferFixture::new();
-    f.bindings
-        .insert("session", CanonicalType::path(["crate", "app", "Session"]));
-    f.index.insert_method_return(
-        "crate::app::Session",
-        "diff",
-        CanonicalType::path(["crate", "app", "Response"]),
-    );
-    let t = infer(&f, "session.diff()").expect("method resolved");
-    assert_eq!(t, CanonicalType::path(["crate", "app", "Response"]));
+fn method_call_resolves_receiver_type_through_references() {
+    // A method call resolves via the receiver's bound type. A parenthesised
+    // reference receiver `(&s)` must be stripped first, then resolved the same
+    // way as a direct receiver.
+    for (label, var, expr) in [
+        ("direct receiver", "session", "session.diff()"),
+        ("reference receiver is stripped", "s", "(&s).diff()"),
+    ] {
+        let mut f = TypeInferFixture::new();
+        f.bindings
+            .insert(var, CanonicalType::path(["crate", "app", "Session"]));
+        f.index.insert_method_return(
+            "crate::app::Session",
+            "diff",
+            CanonicalType::path(["crate", "app", "Response"]),
+        );
+        let t = infer(&f, expr).unwrap_or_else(|| panic!("case {label}: method resolved"));
+        assert_eq!(
+            t,
+            CanonicalType::path(["crate", "app", "Response"]),
+            "case {label}"
+        );
+    }
 }
 
 #[test]
@@ -216,18 +228,4 @@ fn test_method_call_unknown_method_is_none() {
         .insert("x", CanonicalType::path(["crate", "app", "Session"]));
     // No entry in method_returns for "bogus" on Session.
     assert!(infer(&f, "x.bogus()").is_none());
-}
-
-#[test]
-fn test_method_call_on_reference_strips_and_resolves() {
-    let mut f = TypeInferFixture::new();
-    f.bindings
-        .insert("s", CanonicalType::path(["crate", "app", "Session"]));
-    f.index.insert_method_return(
-        "crate::app::Session",
-        "diff",
-        CanonicalType::path(["crate", "app", "Response"]),
-    );
-    let t = infer(&f, "(&s).diff()").expect("ref receiver resolved");
-    assert_eq!(t, CanonicalType::path(["crate", "app", "Response"]));
 }

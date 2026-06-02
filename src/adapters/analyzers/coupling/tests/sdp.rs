@@ -1,6 +1,40 @@
 use crate::adapters::analyzers::coupling::sdp::*;
 use crate::adapters::analyzers::coupling::{metrics::compute_coupling_metrics, ModuleGraph};
 
+/// A 6-module graph with exactly one SDP violation (stable `a`→`b` where `b`
+/// depends on the more-unstable `x`/`y`). The single `ModuleGraph` literal in
+/// this module (keeping it out of BP-009's struct-update window).
+fn sdp_graph() -> ModuleGraph {
+    ModuleGraph {
+        modules: vec![
+            "a".into(),
+            "b".into(),
+            "x".into(),
+            "y".into(),
+            "p".into(),
+            "q".into(),
+        ],
+        forward: vec![vec![1], vec![4, 5], vec![0], vec![0], vec![], vec![]],
+    }
+}
+
+/// Run SDP on `sdp_graph()`, optionally pre-suppressing the metric at
+/// `suppress_idx`, and report whether the (single) violation is suppressed.
+fn sdp_first_violation_suppressed(suppress_idx: Option<usize>) -> bool {
+    let graph = sdp_graph();
+    let mut metrics = compute_coupling_metrics(&graph);
+    if let Some(i) = suppress_idx {
+        metrics[i].suppressed = true;
+    }
+    let violations = check_sdp(&graph, &metrics);
+    assert_eq!(
+        violations.len(),
+        1,
+        "fixture must have exactly one violation"
+    );
+    violations[0].suppressed
+}
+
 #[test]
 fn test_no_violations_all_same_instability() {
     // A → B, both have same structure → no SDP violation
@@ -164,69 +198,20 @@ fn test_violation_details() {
 }
 
 #[test]
-fn test_sdp_violation_default_not_suppressed() {
-    let graph = ModuleGraph {
-        modules: vec![
-            "a".into(),
-            "b".into(),
-            "x".into(),
-            "y".into(),
-            "p".into(),
-            "q".into(),
-        ],
-        forward: vec![vec![1], vec![4, 5], vec![0], vec![0], vec![], vec![]],
-    };
-    let metrics = compute_coupling_metrics(&graph);
-    let violations = check_sdp(&graph, &metrics);
-    assert_eq!(violations.len(), 1);
-    assert!(
-        !violations[0].suppressed,
-        "SDP violations should default to not suppressed"
-    );
-}
-
-#[test]
-fn test_sdp_violation_suppressed_when_from_module_suppressed() {
-    let graph = ModuleGraph {
-        modules: vec![
-            "a".into(),
-            "b".into(),
-            "x".into(),
-            "y".into(),
-            "p".into(),
-            "q".into(),
-        ],
-        forward: vec![vec![1], vec![4, 5], vec![0], vec![0], vec![], vec![]],
-    };
-    let mut metrics = compute_coupling_metrics(&graph);
-    metrics[0].suppressed = true; // "a" is the from_module
-    let violations = check_sdp(&graph, &metrics);
-    assert_eq!(violations.len(), 1);
-    assert!(
-        violations[0].suppressed,
-        "from_module suppressed → violation created suppressed"
-    );
-}
-
-#[test]
-fn test_sdp_violation_suppressed_when_to_module_suppressed() {
-    let graph = ModuleGraph {
-        modules: vec![
-            "a".into(),
-            "b".into(),
-            "x".into(),
-            "y".into(),
-            "p".into(),
-            "q".into(),
-        ],
-        forward: vec![vec![1], vec![4, 5], vec![0], vec![0], vec![], vec![]],
-    };
-    let mut metrics = compute_coupling_metrics(&graph);
-    metrics[1].suppressed = true; // "b" is the to_module
-    let violations = check_sdp(&graph, &metrics);
-    assert_eq!(violations.len(), 1);
-    assert!(
-        violations[0].suppressed,
-        "to_module suppressed → violation created suppressed"
-    );
+fn sdp_violation_inherits_suppression_from_either_endpoint() {
+    // A violation defaults to not-suppressed, but is created suppressed when
+    // EITHER the from-module (`a`, idx 0) or the to-module (`b`, idx 1) is
+    // suppressed. (label, suppressed_metric_idx, violation_suppressed)
+    let cases: &[(&str, Option<usize>, bool)] = &[
+        ("no module suppressed → not suppressed", None, false),
+        ("from-module (a) suppressed", Some(0), true),
+        ("to-module (b) suppressed", Some(1), true),
+    ];
+    for (label, suppress_idx, expected) in cases {
+        assert_eq!(
+            sdp_first_violation_suppressed(*suppress_idx),
+            *expected,
+            "case {label}"
+        );
+    }
 }

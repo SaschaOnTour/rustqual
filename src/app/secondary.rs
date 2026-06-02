@@ -127,7 +127,7 @@ fn run_dry_pass(
     use crate::adapters::analyzers::dry::match_patterns::detect_repeated_matches;
     let mut repeated_matches = run_guarded_detection(
         ctx.config.duplicates.detect_repeated_matches,
-        |p, c| detect_repeated_matches(p, &c.duplicates),
+        |p, _c| detect_repeated_matches(p),
         ctx.parsed,
         ctx.config,
     );

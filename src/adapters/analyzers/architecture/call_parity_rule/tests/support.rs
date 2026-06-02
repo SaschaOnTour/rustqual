@@ -175,6 +175,23 @@ pub(super) fn build_graph_only(
     )
 }
 
+/// Build a call graph for the common test case: the `ports_app_cli_mcp`
+/// layer layout, no cfg-test files, no transparent wrappers. Tests that
+/// need a different layout / cfg-test set / wrappers call `build_graph_only`
+/// directly.
+pub(super) fn graph_of(
+    ws: &Workspace,
+) -> crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::CallGraph {
+    build_graph_only(ws, &ports_app_cli_mcp(), &empty_cfg_test(), &HashSet::new())
+}
+
+/// Like [`graph_of`] but with the simpler `three_layer` layout.
+pub(super) fn graph_3l(
+    ws: &Workspace,
+) -> crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::CallGraph {
+    build_graph_only(ws, &three_layer(), &empty_cfg_test(), &HashSet::new())
+}
+
 /// Build the workspace's pub-fns map and call graph. Integration:
 /// shared by `run_check` and `compute_touchpoints_for`.
 fn build_pub_fns_and_graph<'ws>(

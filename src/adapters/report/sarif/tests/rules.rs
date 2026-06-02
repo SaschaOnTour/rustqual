@@ -42,20 +42,19 @@ fn make_analysis_for(findings: AnalysisFindings) -> AnalysisResult {
     }
 }
 
-#[test]
-fn every_emitted_rule_id_is_registered_in_rules_table() {
-    // Cover the variants whose rule_id was historically wrong:
-    // boilerplate (BP-007), wildcard (DRY-004), repeated_match (DRY-005),
-    // structural code (BTC), threshold-exceeded coupling (CP-002),
-    // architecture dynamic id (architecture/pattern/forbid_x).
-    let common = |kind: crate::findings::Dimension, rule_id: &str| {
-        let mut f = finding_with_rule_id(rule_id);
-        f.dimension = kind;
-        f
-    };
-    let dry = vec![
+/// A `Finding` for `rule_id` with its dimension set to `kind`.
+fn dim_finding(kind: crate::findings::Dimension, rule_id: &str) -> Finding {
+    let mut f = finding_with_rule_id(rule_id);
+    f.dimension = kind;
+    f
+}
+
+/// The three DRY variants whose rule_ids were historically wrong: boilerplate
+/// (BP-007), wildcard (DRY-004), repeated-match (DRY-005).
+fn registry_dry_findings() -> Vec<DryFinding> {
+    vec![
         DryFinding {
-            common: common(crate::findings::Dimension::Dry, "dry/boilerplate"),
+            common: dim_finding(crate::findings::Dimension::Dry, "dry/boilerplate"),
             kind: DryFindingKind::Boilerplate,
             details: DryFindingDetails::Boilerplate {
                 pattern_id: "BP-007".into(),
@@ -64,23 +63,28 @@ fn every_emitted_rule_id_is_registered_in_rules_table() {
             },
         },
         DryFinding {
-            common: common(crate::findings::Dimension::Dry, "dry/wildcard"),
+            common: dim_finding(crate::findings::Dimension::Dry, "dry/wildcard"),
             kind: DryFindingKind::Wildcard,
             details: DryFindingDetails::Wildcard {
                 module_path: "foo".into(),
             },
         },
         DryFinding {
-            common: common(crate::findings::Dimension::Dry, "dry/repeated_match"),
+            common: dim_finding(crate::findings::Dimension::Dry, "dry/repeated_match"),
             kind: DryFindingKind::RepeatedMatch,
             details: DryFindingDetails::RepeatedMatch {
                 enum_name: "Color".into(),
                 participants: vec![],
             },
         },
-    ];
+    ]
+}
+
+/// One finding per dimension/variant whose rule_id was historically wrong
+/// (BP-007, DRY-004, DRY-005, BTC, CP-002, the dynamic architecture id, IOSP).
+fn registry_coverage_analysis() -> AnalysisResult {
     let srp = vec![SrpFinding {
-        common: common(crate::findings::Dimension::Srp, "srp/structural"),
+        common: dim_finding(crate::findings::Dimension::Srp, "srp/structural"),
         kind: SrpFindingKind::Structural,
         details: SrpFindingDetails::Structural {
             item_name: "Foo".into(),
@@ -89,7 +93,7 @@ fn every_emitted_rule_id_is_registered_in_rules_table() {
         },
     }];
     let coupling = vec![CouplingFinding {
-        common: common(crate::findings::Dimension::Coupling, "coupling/threshold"),
+        common: dim_finding(crate::findings::Dimension::Coupling, "coupling/threshold"),
         kind: CouplingFindingKind::ThresholdExceeded,
         details: CouplingFindingDetails::ThresholdExceeded {
             module_name: "m".into(),
@@ -99,25 +103,30 @@ fn every_emitted_rule_id_is_registered_in_rules_table() {
         },
     }];
     let architecture = vec![ArchitectureFinding {
-        common: common(
+        common: dim_finding(
             crate::findings::Dimension::Architecture,
             "architecture/pattern/forbid_path_prefix",
         ),
     }];
     let iosp = vec![IospFinding {
-        common: common(crate::findings::Dimension::Iosp, "iosp/violation"),
+        common: dim_finding(crate::findings::Dimension::Iosp, "iosp/violation"),
         logic_locations: vec![],
         call_locations: vec![],
         effort_score: None,
     }];
-    let analysis = make_analysis_for(AnalysisFindings {
+    make_analysis_for(AnalysisFindings {
         iosp,
-        dry,
+        dry: registry_dry_findings(),
         srp,
         coupling,
         architecture,
         ..Default::default()
-    });
+    })
+}
+
+#[test]
+fn every_emitted_rule_id_is_registered_in_rules_table() {
+    let analysis = registry_coverage_analysis();
     let value = build_sarif_value(&analysis);
     let registered: HashSet<String> = value["runs"][0]["tool"]["driver"]["rules"]
         .as_array()

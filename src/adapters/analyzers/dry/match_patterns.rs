@@ -1,9 +1,8 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use syn::visit::Visit;
 
 use crate::adapters::analyzers::dry::FileVisitor;
-use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
 
 /// Minimum number of match arms for a match to be considered.
 const MIN_MATCH_ARMS: usize = 3;
@@ -37,12 +36,9 @@ pub(crate) struct CollectedMatch {
 }
 
 /// AST visitor that collects match expressions for repeated pattern detection.
-struct MatchPatternCollector<'a> {
-    config: &'a crate::config::sections::DuplicatesConfig,
-    cfg_test_files: &'a HashSet<String>,
+struct MatchPatternCollector {
     file: String,
     collected: Vec<CollectedMatch>,
-    in_test: bool,
     /// Fully-qualified current-function name (e.g. `outer::Type::method`)
     /// so same-named items in different modules or impls aren't merged
     /// in grouping.
@@ -56,12 +52,8 @@ struct MatchPatternCollector<'a> {
     module_stack: Vec<String>,
 }
 
-impl FileVisitor for MatchPatternCollector<'_> {
+impl FileVisitor for MatchPatternCollector {
     fn reset_for_file(&mut self, file_path: &str) {
-        // Whole-file test classification from the authoritative cfg-test
-        // set (checked against the raw path, matching its keys). Inline
-        // `#[cfg(test)] mod` is still handled per-item below.
-        self.in_test = self.cfg_test_files.contains(file_path);
         // Normalise separators for deterministic findings across OSes,
         // matching the other DRY collectors (e.g. wildcards.rs).
         self.file = file_path.replace('\\', "/");
@@ -81,15 +73,10 @@ fn qualify_with_modules(stack: &[String], tail: &str) -> String {
     }
 }
 
-impl<'ast> Visit<'ast> for MatchPatternCollector<'_> {
+impl<'ast> Visit<'ast> for MatchPatternCollector {
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
         let qualified = qualify_with_modules(&self.module_stack, &node.sig.ident.to_string());
         let prev = std::mem::replace(&mut self.current_fn, qualified);
-        let is_test = has_test_attr(&node.attrs);
-        if self.config.ignore_tests && (self.in_test || is_test) {
-            self.current_fn = prev;
-            return;
-        }
         syn::visit::visit_item_fn(self, node);
         self.current_fn = prev;
     }
@@ -105,11 +92,6 @@ impl<'ast> Visit<'ast> for MatchPatternCollector<'_> {
         };
         let qualified = qualify_with_modules(&self.module_stack, &type_qualified);
         let prev = std::mem::replace(&mut self.current_fn, qualified);
-        let is_test = has_test_attr(&node.attrs);
-        if self.config.ignore_tests && (self.in_test || is_test) {
-            self.current_fn = prev;
-            return;
-        }
         syn::visit::visit_impl_item_fn(self, node);
         self.current_fn = prev;
     }
@@ -131,10 +113,6 @@ impl<'ast> Visit<'ast> for MatchPatternCollector<'_> {
     }
 
     fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
-        let prev_in_test = self.in_test;
-        if has_cfg_test(&node.attrs) {
-            self.in_test = true;
-        }
         // Push the module name only for inline modules — a bare
         // `mod name;` declaration has `content == None` and its body
         // lives in a separate file the outer walk visits separately.
@@ -148,7 +126,6 @@ impl<'ast> Visit<'ast> for MatchPatternCollector<'_> {
         if pushed {
             self.module_stack.pop();
         }
-        self.in_test = prev_in_test;
     }
 
     fn visit_expr_match(&mut self, node: &'ast syn::ExprMatch) {
@@ -177,18 +154,10 @@ impl<'ast> Visit<'ast> for MatchPatternCollector<'_> {
 
 /// Detect repeated match patterns across parsed files.
 /// Integration: creates collector, calls visit_all_files, calls group function.
-pub fn detect_repeated_matches(
-    parsed: &[(String, String, syn::File)],
-    config: &crate::config::sections::DuplicatesConfig,
-) -> Vec<RepeatedMatchGroup> {
-    let cfg_test_files =
-        crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(parsed);
+pub fn detect_repeated_matches(parsed: &[(String, String, syn::File)]) -> Vec<RepeatedMatchGroup> {
     let mut collector = MatchPatternCollector {
-        config,
-        cfg_test_files: &cfg_test_files,
         file: String::new(),
         collected: Vec::new(),
-        in_test: false,
         current_fn: String::new(),
         current_impl_type: String::new(),
         module_stack: Vec::new(),

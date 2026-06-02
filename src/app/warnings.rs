@@ -137,18 +137,18 @@ fn has_error_handling_issue(
             > 0)
 }
 
-/// Check if a function exceeds the length threshold in production code.
-/// Tests are excluded — arrange-act-assert sequences are legitimately long.
-/// Operation: trivial field read.
-fn is_production_length_over(
+/// Check if a function exceeds the LONG_FN length threshold. Test fns use the
+/// `[tests].max_function_lines` override (which defaults to the production
+/// limit); production fns use `[complexity].max_function_lines`.
+/// Operation: threshold selection + comparison.
+fn is_length_over(
     fa: &FunctionAnalysis,
     m: &crate::adapters::analyzers::iosp::ComplexityMetrics,
-    max_lines: usize,
+    prod_max: usize,
+    test_max: usize,
 ) -> bool {
-    if fa.is_test {
-        return false;
-    }
-    m.function_lines > max_lines
+    let max = if fa.is_test { test_max } else { prod_max };
+    m.function_lines > max
 }
 
 /// Check if a function has a `// qual:allow(unsafe)` annotation within the window.
@@ -174,6 +174,7 @@ pub(super) fn apply_extended_warnings(
     }
     let max_nesting = config.complexity.max_nesting_depth;
     let max_lines = config.complexity.max_function_lines;
+    let test_max_lines = config.tests.max_function_lines.unwrap_or(max_lines);
     let check_unsafe = config.complexity.detect_unsafe;
     let check_errors = config.complexity.detect_error_handling;
     let expect_threshold = if config.complexity.allow_expect { 0 } else { 1 };
@@ -190,11 +191,11 @@ pub(super) fn apply_extended_warnings(
         has_error_handling_issue(fa, m, check_errors, expect_threshold)
     };
 
-    // Tests legitimately contain long arrange-act-assert sequences; skip
-    // LONG_FN for them to keep the check focused on production code.
+    // LONG_FN applies to test fns too (at `[tests].max_function_lines`,
+    // defaulting to the production limit).
     let has_length_issue =
         |fa: &FunctionAnalysis, m: &crate::adapters::analyzers::iosp::ComplexityMetrics| {
-            is_production_length_over(fa, m, max_lines)
+            is_length_over(fa, m, max_lines, test_max_lines)
         };
 
     results

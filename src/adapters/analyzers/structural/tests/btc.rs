@@ -3,13 +3,7 @@ use crate::adapters::analyzers::structural::{StructuralWarning, StructuralWarnin
 use crate::config::StructuralConfig;
 
 fn detect_in(source: &str) -> Vec<StructuralWarning> {
-    let parsed = super::parse_single(source);
-    let config = StructuralConfig::default();
-    let cfg_test_files =
-        crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(&parsed);
-    let mut warnings = Vec::new();
-    detect_btc(&mut warnings, &parsed, &config, &cfg_test_files);
-    warnings
+    super::detect_single(source, detect_btc)
 }
 
 #[test]

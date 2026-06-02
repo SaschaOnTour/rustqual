@@ -5,11 +5,19 @@
 //! calls itself instead of wrapping them inside a single application
 //! method. Configurable severity via `single_touchpoint`.
 
-use super::support::{build_workspace, empty_cfg_test, globset, run_check_c, three_layer};
+use super::support::{
+    build_workspace, empty_cfg_test, globset, run_check_c, three_layer, Workspace,
+};
 use crate::adapters::analyzers::architecture::compiled::CompiledCallParity;
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use crate::config::architecture::SingleTouchpointMode;
 use std::collections::HashSet;
+
+/// Run Check C with the three-layer layout and no cfg-test files — the
+/// shared call across the Check-C tests.
+fn run_c(ws: &Workspace, cp: &CompiledCallParity) -> Vec<MatchLocation> {
+    run_check_c(ws, &three_layer(), cp, &empty_cfg_test())
+}
 
 fn make_config(mode: SingleTouchpointMode) -> CompiledCallParity {
     CompiledCallParity {
@@ -53,7 +61,7 @@ fn check_c_single_touchpoint_silent() {
         ),
     ]);
     let cp = make_config(SingleTouchpointMode::Warn);
-    let findings = run_check_c(&ws, &three_layer(), &cp, &empty_cfg_test());
+    let findings = run_c(&ws, &cp);
     assert!(
         extract_c(&findings).is_empty(),
         "single-touchpoint handler should be silent, got {findings:?}"
@@ -91,77 +99,51 @@ fn check_c_silent_for_single_trait_dispatch_with_multiple_impls() {
         ),
     ]);
     let cp = make_config(SingleTouchpointMode::Warn);
-    let findings = run_check_c(&ws, &three_layer(), &cp, &empty_cfg_test());
+    let findings = run_c(&ws, &cp);
     assert!(
         extract_c(&findings).is_empty(),
         "single trait-dispatch call with multiple impls must collapse to one anchor (no Check C fire), got {findings:?}"
     );
 }
 
-// ── Two touchpoints, default severity warn ────────────────────
+// ── Two distinct targets from one handler (sequence or branch) → C fires ──
 
 #[test]
-fn check_c_two_touchpoints_warn_default() {
-    let ws = build_workspace(&[
-        (
-            "src/application/session.rs",
-            r#"
-            pub fn foo() {}
-            pub fn bar() {}
-            "#,
-        ),
-        (
-            "src/cli/handlers.rs",
-            r#"
-            use crate::application::session::{foo, bar};
-            pub fn cmd_orchestrate() { foo(); bar(); }
-            "#,
-        ),
-    ]);
-    let cp = make_config(SingleTouchpointMode::Warn);
-    let findings = run_check_c(&ws, &three_layer(), &cp, &empty_cfg_test());
-    let pairs = extract_c(&findings);
-    assert_eq!(pairs.len(), 1, "got {findings:?}");
-    let mut tps = pairs[0].1.clone();
-    tps.sort();
-    assert_eq!(
-        tps,
-        vec![
-            "crate::application::session::bar".to_string(),
-            "crate::application::session::foo".to_string(),
-        ]
+fn check_c_reports_both_touchpoints_for_sequence_and_branch() {
+    // Two distinct targets reached from a single handler produce one C finding
+    // listing both touchpoints — whether they are called in sequence or split
+    // across the arms of an `if`/`else` (both branches are seen statically).
+    let session = (
+        "src/application/session.rs",
+        r#"
+        pub fn foo() {}
+        pub fn bar() {}
+        "#,
     );
-}
-
-// ── Branch with two distinct targets → C fires ────────────────
-
-#[test]
-fn check_c_branch_two_targets() {
-    let ws = build_workspace(&[
+    let cases: &[(&str, &str)] = &[
+        ("sequence", "pub fn cmd_orchestrate() { foo(); bar(); }"),
         (
-            "src/application/session.rs",
-            r#"
-            pub fn foo() {}
-            pub fn bar() {}
-            "#,
+            "branch",
+            "pub fn cmd_branch(cond: bool) { if cond { foo(); } else { bar(); } }",
         ),
-        (
-            "src/cli/handlers.rs",
-            r#"
-            use crate::application::session::{foo, bar};
-            pub fn cmd_branch(cond: bool) {
-                if cond { foo(); } else { bar(); }
-            }
-            "#,
-        ),
-    ]);
-    let cp = make_config(SingleTouchpointMode::Warn);
-    let findings = run_check_c(&ws, &three_layer(), &cp, &empty_cfg_test());
-    let pairs = extract_c(&findings);
-    assert_eq!(pairs.len(), 1, "got {findings:?}");
-    let mut tps = pairs[0].1.clone();
-    tps.sort();
-    assert_eq!(tps.len(), 2);
+    ];
+    for (label, handler_body) in cases {
+        let handler = format!("use crate::application::session::{{foo, bar}};\n{handler_body}");
+        let ws = build_workspace(&[session, ("src/cli/handlers.rs", handler.as_str())]);
+        let findings = run_c(&ws, &make_config(SingleTouchpointMode::Warn));
+        let pairs = extract_c(&findings);
+        assert_eq!(pairs.len(), 1, "case {label}: got {findings:?}");
+        let mut tps = pairs[0].1.clone();
+        tps.sort();
+        assert_eq!(
+            tps,
+            vec![
+                "crate::application::session::bar".to_string(),
+                "crate::application::session::foo".to_string(),
+            ],
+            "case {label}"
+        );
+    }
 }
 
 // ── single_touchpoint mode dispatch (Off / Warn / Error) ─────────
@@ -187,7 +169,7 @@ fn check_c_severity_off_skips_check() {
         ),
     ]);
     let cp = make_config(SingleTouchpointMode::Off);
-    let findings = run_check_c(&ws, &three_layer(), &cp, &empty_cfg_test());
+    let findings = run_c(&ws, &cp);
     assert!(
         extract_c(&findings).is_empty(),
         "Off mode should skip the check entirely, got {findings:?}"
@@ -215,7 +197,7 @@ fn check_c_severity_error_emits_finding() {
         ),
     ]);
     let cp = make_config(SingleTouchpointMode::Error);
-    let findings = run_check_c(&ws, &three_layer(), &cp, &empty_cfg_test());
+    let findings = run_c(&ws, &cp);
     assert_eq!(extract_c(&findings).len(), 1, "got {findings:?}");
 }
 
@@ -236,7 +218,7 @@ fn check_c_loop_single_target_silent() {
         ),
     ]);
     let cp = make_config(SingleTouchpointMode::Warn);
-    let findings = run_check_c(&ws, &three_layer(), &cp, &empty_cfg_test());
+    let findings = run_c(&ws, &cp);
     assert!(
         extract_c(&findings).is_empty(),
         "single target hit by multiple call sites is one touchpoint, got {findings:?}"
@@ -265,7 +247,7 @@ fn check_c_finding_lists_touchpoints() {
         ),
     ]);
     let cp = make_config(SingleTouchpointMode::Warn);
-    let findings = run_check_c(&ws, &three_layer(), &cp, &empty_cfg_test());
+    let findings = run_c(&ws, &cp);
     let pairs = extract_c(&findings);
     assert_eq!(pairs.len(), 1, "got {findings:?}");
     assert_eq!(pairs[0].1.len(), 3);

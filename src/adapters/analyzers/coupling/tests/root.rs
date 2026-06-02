@@ -20,6 +20,21 @@ fn idx(graph: &ModuleGraph, name: &str) -> usize {
         .unwrap_or_else(|| panic!("module '{name}' not found in graph"))
 }
 
+/// Whether the module graph built from `files` has a forward edge `from → to`.
+fn has_module_edge(files: &[(&str, &str)], from: &str, to: &str) -> bool {
+    let parsed = make_parsed(files.to_vec());
+    let graph = graph::build_module_graph(&parsed);
+    graph.forward[idx(&graph, from)].contains(&idx(&graph, to))
+}
+
+/// `(label, files, from_module, to_module)` for a build-graph edge case.
+type EdgeCase = (
+    &'static str,
+    &'static [(&'static str, &'static str)],
+    &'static str,
+    &'static str,
+);
+
 // `file_to_module` lives in `adapters::shared::file_to_module`; its
 // tests are in `adapters::shared::tests::file_to_module`.
 
@@ -96,43 +111,49 @@ fn test_build_graph_external_dep_ignored() {
 }
 
 #[test]
-fn test_build_graph_multiple_files_same_module() {
-    let parsed = make_parsed(vec![
+fn build_graph_records_use_edges_across_forms() {
+    // A `use crate::X::…` records a `from → X` edge whether it's spread across
+    // files of the same module, a glob import, or a renamed import.
+    // (label, files, from, to)
+    let cases: &[EdgeCase] = &[
         (
-            "config/mod.rs",
-            "use crate::analyzer::Foo; pub mod sections;",
+            "multiple files of the same module",
+            &[
+                (
+                    "config/mod.rs",
+                    "use crate::analyzer::Foo; pub mod sections;",
+                ),
+                ("config/sections.rs", "pub struct Defaults;"),
+                ("analyzer.rs", "pub struct Foo;"),
+            ],
+            "config",
+            "analyzer",
         ),
-        ("config/sections.rs", "pub struct Defaults;"),
-        ("analyzer.rs", "pub struct Foo;"),
-    ]);
-    let graph = graph::build_module_graph(&parsed);
-    let config_idx = idx(&graph, "config");
-    let analyzer_idx = idx(&graph, "analyzer");
-    assert!(graph.forward[config_idx].contains(&analyzer_idx));
-}
-
-#[test]
-fn test_build_graph_glob_use() {
-    let parsed = make_parsed(vec![
-        ("main.rs", "use crate::analyzer::*; fn main() {}"),
-        ("analyzer.rs", "pub fn analyze() {}"),
-    ]);
-    let graph = graph::build_module_graph(&parsed);
-    let main_idx = idx(&graph, "main");
-    let analyzer_idx = idx(&graph, "analyzer");
-    assert!(graph.forward[main_idx].contains(&analyzer_idx));
-}
-
-#[test]
-fn test_build_graph_rename_use() {
-    let parsed = make_parsed(vec![
-        ("main.rs", "use crate::config::Config as Cfg; fn main() {}"),
-        ("config.rs", "pub struct Config;"),
-    ]);
-    let graph = graph::build_module_graph(&parsed);
-    let main_idx = idx(&graph, "main");
-    let config_idx = idx(&graph, "config");
-    assert!(graph.forward[main_idx].contains(&config_idx));
+        (
+            "glob use",
+            &[
+                ("main.rs", "use crate::analyzer::*; fn main() {}"),
+                ("analyzer.rs", "pub fn analyze() {}"),
+            ],
+            "main",
+            "analyzer",
+        ),
+        (
+            "renamed use",
+            &[
+                ("main.rs", "use crate::config::Config as Cfg; fn main() {}"),
+                ("config.rs", "pub struct Config;"),
+            ],
+            "main",
+            "config",
+        ),
+    ];
+    for (label, files, from, to) in cases {
+        assert!(
+            has_module_edge(files, from, to),
+            "case {label}: expected a {from} → {to} edge"
+        );
+    }
 }
 
 // ── compute_coupling_metrics tests ──────────────────────────────

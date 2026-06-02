@@ -1,6 +1,30 @@
 use crate::adapters::config::init::*;
 use crate::config::Config;
 
+/// Build a `ProjectMetrics` carrying just the complexity maxima (file/function
+/// counts fixed at 1 — they only affect the generated comment text, not the
+/// thresholds). Keeps repeated constructions out of `BP-009`'s window.
+fn complexity_metrics(
+    max_cognitive: usize,
+    max_cyclomatic: usize,
+    max_nesting_depth: usize,
+    max_function_lines: usize,
+) -> ProjectMetrics {
+    ProjectMetrics {
+        file_count: 1,
+        function_count: 1,
+        max_cognitive,
+        max_cyclomatic,
+        max_nesting_depth,
+        max_function_lines,
+    }
+}
+
+/// Generate a tailored config for `metrics` and parse it back into a `Config`.
+fn tailored_config(metrics: &ProjectMetrics) -> Config {
+    toml::from_str(&generate_tailored_config(metrics)).expect("tailored config must be valid TOML")
+}
+
 #[test]
 fn test_generate_default_config_is_valid_toml() {
     let content = generate_default_config();
@@ -34,15 +58,7 @@ fn test_generate_default_config_contents() {
 
 #[test]
 fn test_generate_tailored_config_is_valid_toml() {
-    let metrics = ProjectMetrics {
-        file_count: 10,
-        function_count: 50,
-        max_cognitive: 12,
-        max_cyclomatic: 8,
-        max_nesting_depth: 3,
-        max_function_lines: 45,
-    };
-    let content = generate_tailored_config(&metrics);
+    let content = generate_tailored_config(&complexity_metrics(12, 8, 3, 45));
     let result: Result<Config, _> = toml::from_str(&content);
     assert!(
         result.is_ok(),
@@ -52,51 +68,41 @@ fn test_generate_tailored_config_is_valid_toml() {
 }
 
 #[test]
-fn test_generate_tailored_config_uses_headroom() {
-    let metrics = ProjectMetrics {
-        file_count: 5,
-        function_count: 20,
-        max_cognitive: 20,
-        max_cyclomatic: 15,
-        max_nesting_depth: 5,
-        max_function_lines: 80,
+fn tailored_config_complexity_thresholds() {
+    // Thresholds are set to 1.2× the observed maxima, but never below the
+    // built-in defaults (so a tiny project clamps to the defaults).
+    // (label, metrics, expected [cognitive, cyclomatic, nesting, function_lines])
+    use crate::adapters::config::sections::{
+        DEFAULT_MAX_COGNITIVE, DEFAULT_MAX_CYCLOMATIC, DEFAULT_MAX_FUNCTION_LINES,
+        DEFAULT_MAX_NESTING_DEPTH,
     };
-    let content = generate_tailored_config(&metrics);
-    let cfg: Config = toml::from_str(&content).unwrap();
-    assert_eq!(cfg.complexity.max_cognitive, 24);
-    assert_eq!(cfg.complexity.max_cyclomatic, 18);
-    assert_eq!(cfg.complexity.max_nesting_depth, 6);
-    assert_eq!(cfg.complexity.max_function_lines, 96);
-}
-
-#[test]
-fn test_generate_tailored_config_respects_minimums() {
-    let metrics = ProjectMetrics {
-        file_count: 1,
-        function_count: 2,
-        max_cognitive: 3,
-        max_cyclomatic: 2,
-        max_nesting_depth: 1,
-        max_function_lines: 10,
-    };
-    let content = generate_tailored_config(&metrics);
-    let cfg: Config = toml::from_str(&content).unwrap();
-    assert_eq!(
-        cfg.complexity.max_cognitive,
-        crate::adapters::config::sections::DEFAULT_MAX_COGNITIVE
-    );
-    assert_eq!(
-        cfg.complexity.max_cyclomatic,
-        crate::adapters::config::sections::DEFAULT_MAX_CYCLOMATIC
-    );
-    assert_eq!(
-        cfg.complexity.max_nesting_depth,
-        crate::adapters::config::sections::DEFAULT_MAX_NESTING_DEPTH
-    );
-    assert_eq!(
-        cfg.complexity.max_function_lines,
-        crate::adapters::config::sections::DEFAULT_MAX_FUNCTION_LINES
-    );
+    let cases: &[(&str, ProjectMetrics, [usize; 4])] = &[
+        (
+            "1.2× headroom above observed maxima",
+            complexity_metrics(20, 15, 5, 80),
+            [24, 18, 6, 96],
+        ),
+        (
+            "tiny project clamps to the built-in defaults",
+            complexity_metrics(3, 2, 1, 10),
+            [
+                DEFAULT_MAX_COGNITIVE,
+                DEFAULT_MAX_CYCLOMATIC,
+                DEFAULT_MAX_NESTING_DEPTH,
+                DEFAULT_MAX_FUNCTION_LINES,
+            ],
+        ),
+    ];
+    for (label, metrics, [cognitive, cyclomatic, nesting, function_lines]) in cases {
+        let c = tailored_config(metrics).complexity;
+        assert_eq!(c.max_cognitive, *cognitive, "case {label}: cognitive");
+        assert_eq!(c.max_cyclomatic, *cyclomatic, "case {label}: cyclomatic");
+        assert_eq!(c.max_nesting_depth, *nesting, "case {label}: nesting");
+        assert_eq!(
+            c.max_function_lines, *function_lines,
+            "case {label}: function_lines"
+        );
+    }
 }
 
 #[test]

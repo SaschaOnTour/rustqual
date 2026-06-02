@@ -74,9 +74,7 @@ pub(crate) fn collect_function_hashes(
     parsed: &[(String, String, syn::File)],
     config: &crate::config::sections::DuplicatesConfig,
 ) -> Vec<FunctionHashEntry> {
-    let cfg_test_files =
-        crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(parsed);
-    let mut collector = functions::FunctionCollector::new(config, &cfg_test_files);
+    let mut collector = functions::FunctionCollector::new(config);
     visit_all_files(parsed, &mut collector);
     collector.entries
 }

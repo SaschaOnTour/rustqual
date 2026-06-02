@@ -30,30 +30,52 @@ fn test_normalize_let_binding() {
     assert!(tokens.contains(&NormalizedToken::Semi));
 }
 
-#[test]
-fn test_normalize_same_structure_different_names_same_hash() {
-    let body_a = parse_body("let x = a + b;");
-    let body_b = parse_body("let y = p + q;");
-    let hash_a = structural_hash(&normalize_body(&body_a));
-    let hash_b = structural_hash(&normalize_body(&body_b));
-    assert_eq!(hash_a, hash_b);
+/// Structural hash of a function body parsed from `code`.
+fn hash_of(code: &str) -> u64 {
+    structural_hash(&normalize_body(&parse_body(code)))
 }
 
 #[test]
-fn test_normalize_different_structure_different_hash() {
-    let body_a = parse_body("let x = a + b;");
-    let body_b = parse_body("let x = a * b;");
-    let hash_a = structural_hash(&normalize_body(&body_a));
-    let hash_b = structural_hash(&normalize_body(&body_b));
-    assert_ne!(hash_a, hash_b);
-}
-
-#[test]
-fn test_structural_hash_deterministic() {
-    let body = parse_body("let x = foo(a, b);");
-    let hash1 = structural_hash(&normalize_body(&body));
-    let hash2 = structural_hash(&normalize_body(&body));
-    assert_eq!(hash1, hash2);
+fn structural_hash_equality_by_structure() {
+    // The structural hash ignores identifier names (so renamed-but-isomorphic
+    // bodies collide) and is deterministic, but distinguishes operators, bool
+    // literals, and overall shape. (label, code_a, code_b, same_hash)
+    let cases: &[(&str, &str, &str, bool)] = &[
+        (
+            "same structure, different names → same hash",
+            "let x = a + b;",
+            "let y = p + q;",
+            true,
+        ),
+        (
+            "different operator → different hash",
+            "let x = a + b;",
+            "let x = a * b;",
+            false,
+        ),
+        (
+            "deterministic: same body hashes equal",
+            "let x = foo(a, b);",
+            "let x = foo(a, b);",
+            true,
+        ),
+        (
+            "bool true vs false → different hash",
+            "return true;",
+            "return false;",
+            false,
+        ),
+        (
+            "complex isomorphic bodies (renamed) → same hash",
+            "for item in items { if item.is_valid() { results.push(item.name()); } }",
+            "for entry in data { if entry.is_valid() { output.push(entry.name()); } }",
+            true,
+        ),
+    ];
+    for (label, code_a, code_b, same) in cases {
+        let (a, b) = (hash_of(code_a), hash_of(code_b));
+        assert_eq!(a == b, *same, "case {label}: hash_a={a}, hash_b={b}");
+    }
 }
 
 #[test]
@@ -129,15 +151,6 @@ fn test_normalize_field_access_preserves_name() {
 }
 
 #[test]
-fn test_normalize_bool_values_distinct() {
-    let body_true = parse_body("return true;");
-    let body_false = parse_body("return false;");
-    let hash_true = structural_hash(&normalize_body(&body_true));
-    let hash_false = structural_hash(&normalize_body(&body_false));
-    assert_ne!(hash_true, hash_false);
-}
-
-#[test]
 fn test_normalize_stmts_subset() {
     let body = parse_body("let a = 1; let b = 2; let c = 3;");
     // Normalize only the first two statements
@@ -195,16 +208,4 @@ fn test_normalize_macro_call() {
     let body = parse_body("println!(\"hello\");");
     let tokens = normalize_body(&body);
     assert!(tokens.contains(&NormalizedToken::MacroCall("println".to_string())));
-}
-
-#[test]
-fn test_normalize_complex_same_structure() {
-    // Two functions with same structure: iterate, check condition, push to vec
-    let body_a =
-        parse_body("for item in items { if item.is_valid() { results.push(item.name()); } }");
-    let body_b =
-        parse_body("for entry in data { if entry.is_valid() { output.push(entry.name()); } }");
-    let hash_a = structural_hash(&normalize_body(&body_a));
-    let hash_b = structural_hash(&normalize_body(&body_b));
-    assert_eq!(hash_a, hash_b);
 }
