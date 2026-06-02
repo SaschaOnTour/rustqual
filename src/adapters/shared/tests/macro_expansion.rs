@@ -121,16 +121,20 @@ mod tests {
 
 #[test]
 fn non_test_macro_left_untouched() {
+    // The body holds a *parseable* `fn` on purpose: if `is_test_macro` ever
+    // returned `true` for an arbitrary macro, this fn would be surfaced. The
+    // empty-fn assertion is what kills that `-> true` mutant — a body with no
+    // fn (e.g. a `static ref`) would let it survive.
     let file = expand(
         r#"
-lazy_static! {
-    static ref VALUE: u32 = 5;
+define_helpers! {
+    fn generated_helper() -> bool { true }
 }
 "#,
     );
     assert!(
         collect_fns(&file.items).is_empty(),
-        "a non-test macro must not produce any fn"
+        "a non-test macro must not have its inner fn surfaced"
     );
     assert!(
         has_macro_item(&file.items),

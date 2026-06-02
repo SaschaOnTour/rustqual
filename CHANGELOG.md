@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-06-02
+
+Patch release: **test-suite effectiveness, proven by mutation testing** (Phase 2
+of the test-quality effort). No change to how the tool scores user code, except
+the `prop_assert!` recognition fix below.
+
+### Fixed
+- **TQ-001 no longer flags proptest property tests as assertion-free.**
+  `is_assertion_macro` now recognises proptest's `prop_assert!` /
+  `prop_assert_eq!` / `prop_assert_ne!` (the `prop_assert` prefix) in addition
+  to `assert*` / `debug_assert*`. A property test that asserts only via
+  `prop_assert!` is no longer a false TQ_NO_ASSERT.
+
+### Changed
+- **Internal consistency:** the architecture matcher's `has_cfg_test_attr` now
+  delegates to the shared `adapters::shared::cfg_test::has_cfg_test` recogniser
+  instead of a local copy, so `#[cfg(test)]` detection has a single source of
+  truth across all seven dimensions (consistency-audit finding F1).
+
+### Tests
+- **Mutation-proven coverage** (`cargo-mutants`). The test-recognition core
+  (`shared/cfg_test*`) and the structural normalizer (`shared/normalize.rs` +
+  `macro_expansion.rs`) now catch every non-equivalent viable mutant; the only
+  survivors are documented semantic equivalents. New enumeration tests
+  (`normalize_coverage.rs`) pin the exact `NormalizedToken` each operator /
+  expression-kind / pattern-kind emits.
+- **proptest** added as a dev-dependency. A path × test-attribute property /
+  variant matrix on the recognisers guards against the decentralised
+  test-detection bug class that motivated the effort.
+
 ## [1.4.0] - 2026-06-02
 
 Minor release: **quality checks now run on test code.** DRY (duplicate-function

@@ -497,3 +497,69 @@ fn path_attribute_resolves_relative_to_parent_dir() {
         "relative `#[path]` must resolve against the parent file's directory: {result:?}"
     );
 }
+
+#[test]
+fn nested_file_under_src_bin_is_not_an_autobinary_crate_root() {
+    // Only a file DIRECTLY in `src/bin/` is an autobinary crate root; a deeper
+    // `src/bin/<sub>/<name>.rs` is just a module of that binary, not a package
+    // root. So a sibling `tests/` next to such a nested file must NOT be
+    // classified as an integration test. (Kills the `&&` → `||` mutant in
+    // `bin_crate_root_owner`, which would accept the nested file as a root.)
+    let parsed = vec![
+        (
+            "myapp/src/bin/sub/deep.rs".to_string(),
+            "fn main() {}".to_string(),
+            syn::parse_file("fn main() {}").unwrap(),
+        ),
+        (
+            "myapp/tests/it.rs".to_string(),
+            "#[test] fn it() {}".to_string(),
+            syn::parse_file("#[test] fn it() {}").unwrap(),
+        ),
+    ];
+    let result = collect_cfg_test_file_paths(&parsed);
+    assert!(
+        !result.contains("myapp/tests/it.rs"),
+        "tests/ next to a NESTED src/bin file (not a real crate root) must not \
+         be classified as integration: {result:?}"
+    );
+}
+
+#[test]
+fn inline_mod_does_not_propagate_cfg_test_to_same_named_external_file() {
+    // `propagate_cfg_test_through_plain_mods` only follows EXTERNAL `mod foo;`
+    // declarations. An INLINE `mod foo { … }` in a cfg-test file must NOT drag a
+    // coincidentally same-named external file into the cfg-test set. (Kills the
+    // `is_any_ext_mod(m)` → `true` match-guard mutant, which would resolve
+    // inline mods too.)
+    let lib = "#[cfg(test)]\nmod c;\npub fn run() {}";
+    let c = "mod m { pub fn x() -> u32 { 1 } }"; // INLINE mod m
+    let m = "pub fn y() -> u32 { 2 }"; // external file; only reachable as `c::m` if external
+    let parsed = vec![
+        (
+            "pkg/src/lib.rs".to_string(),
+            lib.to_string(),
+            syn::parse_file(lib).unwrap(),
+        ),
+        (
+            "pkg/src/c.rs".to_string(),
+            c.to_string(),
+            syn::parse_file(c).unwrap(),
+        ),
+        (
+            "pkg/src/c/m.rs".to_string(),
+            m.to_string(),
+            syn::parse_file(m).unwrap(),
+        ),
+    ];
+    let result = collect_cfg_test_file_paths(&parsed);
+    assert!(
+        result.contains("pkg/src/c.rs"),
+        "c.rs is reached via `#[cfg(test)] mod c;` and must be cfg-test: {result:?}"
+    );
+    assert!(
+        !result.contains("pkg/src/c/m.rs"),
+        "an INLINE `mod m` must not propagate cfg-test to the external file \
+         `c/m.rs`: {result:?}"
+    );
+}

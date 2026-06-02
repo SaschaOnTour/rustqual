@@ -127,6 +127,27 @@ fn test_debug_assert_no_warning() {
 }
 
 #[test]
+fn test_prop_assert_no_warning() {
+    // proptest's `prop_assert!` / `prop_assert_eq!` are assertions too — a
+    // property test that uses only them must not be flagged TQ_NO_ASSERT.
+    let warnings = parse_and_detect(
+        r#"
+        #[cfg(test)]
+        mod tests {
+            #[test]
+            fn prop_something() {
+                prop_assert_eq!(1, 1);
+            }
+        }
+        "#,
+    );
+    assert!(
+        warnings.is_empty(),
+        "prop_assert_eq! must count as an assertion: {warnings:?}"
+    );
+}
+
+#[test]
 fn test_assert_ne_no_warning() {
     let warnings = parse_and_detect(
         r#"

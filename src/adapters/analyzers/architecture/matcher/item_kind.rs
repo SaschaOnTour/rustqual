@@ -153,21 +153,12 @@ fn top_level_hit(file: &str, entry: TopLevelEntry) -> MatchLocation {
     }
 }
 
-/// Check if any of `attrs` is `#[cfg(test)]`.
-/// Operation: iterator scan over attributes.
+/// Check if any of `attrs` is `#[cfg(test)]`. Delegates to the single shared
+/// `cfg_test::has_cfg_test` so cfg-test recognition stays uniform across all
+/// analyzers (S2.3 consistency-audit finding F1).
+/// Integration: routes to the shared detector.
 fn has_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
-    attrs.iter().any(is_cfg_test)
-}
-
-/// True when an attribute is literally `#[cfg(test)]`.
-/// Operation: pattern-match on Attribute shape.
-fn is_cfg_test(attr: &syn::Attribute) -> bool {
-    if !attr.path().is_ident("cfg") {
-        return false;
-    }
-    attr.parse_args::<syn::Path>()
-        .map(|p| p.is_ident("test"))
-        .unwrap_or(false)
+    crate::adapters::shared::cfg_test::has_cfg_test(attrs)
 }
 
 // ── Recursive visitor (async/unsafe fn, unsafe impl, static mut, extern) ──

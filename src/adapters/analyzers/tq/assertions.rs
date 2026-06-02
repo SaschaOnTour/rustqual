@@ -99,11 +99,14 @@ struct TestAssertionVisitor<'cfg> {
     extra_macros: &'cfg [String],
 }
 
-/// Check if a macro name is an assertion: `assert*` or `debug_assert*` prefix, or in extra list.
+/// Check if a macro name is an assertion: `assert*`, `debug_assert*` or
+/// proptest's `prop_assert*` (`prop_assert!` / `prop_assert_eq!` /
+/// `prop_assert_ne!`) prefix, or in the extra list.
 /// Operation: string prefix + linear search.
 fn is_assertion_macro(name: &str, extra_macros: &[String]) -> bool {
     name.starts_with("assert")
         || name.starts_with("debug_assert")
+        || name.starts_with("prop_assert")
         || extra_macros.iter().any(|m| m == name)
 }
 

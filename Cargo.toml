@@ -1,6 +1,6 @@
 [package]
 name = "rustqual"
-version = "1.4.0"
+version = "1.4.1"
 edition = "2021"
 description = "Comprehensive Rust code quality analyzer — seven dimensions: IOSP, Complexity, DRY, SRP, Coupling, Test Quality, Architecture"
 license = "MIT"
@@ -33,4 +33,5 @@ toon-encode = "0.1"
 thiserror = "2"
 
 [dev-dependencies]
+proptest = "1"
 tempfile = "3"
