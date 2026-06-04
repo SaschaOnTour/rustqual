@@ -89,7 +89,7 @@ fn struct_warnings_for(path: &str, code: &str) -> Vec<SrpWarning> {
         &parsed,
         &SrpConfig::default(),
         &std::collections::HashMap::new(),
-        (300, 800),
+        300,
     )
     .struct_warnings
 }
@@ -209,7 +209,7 @@ fn test_analyze_srp_empty() {
     let parsed: Vec<(String, String, syn::File)> = vec![];
     let config = SrpConfig::default();
     let call_graph = std::collections::HashMap::new();
-    let analysis = analyze_srp(&parsed, &config, &call_graph, (300, 800));
+    let analysis = analyze_srp(&parsed, &config, &call_graph, 300);
     assert!(analysis.struct_warnings.is_empty());
     assert!(analysis.module_warnings.is_empty());
 }
@@ -243,7 +243,7 @@ fn test_analyze_srp_multiple_files() {
     ];
     let config = SrpConfig::default();
     let call_graph = std::collections::HashMap::new();
-    let analysis = analyze_srp(&parsed, &config, &call_graph, (300, 800));
+    let analysis = analyze_srp(&parsed, &config, &call_graph, 300);
     // Both structs are simple → no warnings
     assert!(analysis.struct_warnings.is_empty());
 }
@@ -254,7 +254,7 @@ fn test_analyze_srp_returns_empty_param_warnings() {
     let parsed: Vec<(String, String, syn::File)> = vec![];
     let config = SrpConfig::default();
     let call_graph = std::collections::HashMap::new();
-    let analysis = analyze_srp(&parsed, &config, &call_graph, (300, 800));
+    let analysis = analyze_srp(&parsed, &config, &call_graph, 300);
     assert!(analysis.param_warnings.is_empty());
 }
 

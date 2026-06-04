@@ -161,7 +161,7 @@ fn lcom4_unites_methods_linked_via_debug_assert_macro() {
             ..SrpConfig::default()
         },
         &HashMap::new(),
-        (300, 800),
+        300,
     );
     let w = analysis
         .struct_warnings

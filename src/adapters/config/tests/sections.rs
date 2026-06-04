@@ -40,8 +40,7 @@ fn test_srp_config_defaults() {
     assert!((c.smell_threshold - DEFAULT_SRP_SMELL_THRESHOLD).abs() < f64::EPSILON);
     assert_eq!(c.max_fields, DEFAULT_SRP_MAX_FIELDS);
     assert_eq!(c.max_methods, DEFAULT_SRP_MAX_METHODS);
-    assert_eq!(c.file_length_baseline, DEFAULT_SRP_FILE_LENGTH_BASELINE);
-    assert_eq!(c.file_length_ceiling, DEFAULT_SRP_FILE_LENGTH_CEILING);
+    assert_eq!(c.file_length, DEFAULT_SRP_FILE_LENGTH);
 }
 
 #[test]
@@ -96,28 +95,25 @@ fn test_tests_config_defaults_inherit_production() {
     // Every override is None by default → the production threshold is used.
     let c = TestsConfig::default();
     assert_eq!(c.max_function_lines, None);
-    assert_eq!(c.file_length_baseline, None);
-    assert_eq!(c.file_length_ceiling, None);
+    assert_eq!(c.file_length, None);
 }
 
 #[test]
 fn test_tests_config_deserialize_overrides() {
     let toml_str = r#"
         max_function_lines = 120
-        file_length_baseline = 500
-        file_length_ceiling = 1200
+        file_length = 500
     "#;
     let c: TestsConfig = toml::from_str(toml_str).unwrap();
     assert_eq!(c.max_function_lines, Some(120));
-    assert_eq!(c.file_length_baseline, Some(500));
-    assert_eq!(c.file_length_ceiling, Some(1200));
+    assert_eq!(c.file_length, Some(500));
 }
 
 #[test]
 fn test_tests_config_partial_override_leaves_rest_none() {
     let c: TestsConfig = toml::from_str("max_function_lines = 90").unwrap();
     assert_eq!(c.max_function_lines, Some(90));
-    assert_eq!(c.file_length_ceiling, None);
+    assert_eq!(c.file_length, None);
 }
 
 #[test]

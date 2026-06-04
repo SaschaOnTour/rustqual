@@ -35,8 +35,10 @@ pub const DEFAULT_SRP_MAX_FIELDS: usize = 12;
 pub const DEFAULT_SRP_MAX_METHODS: usize = 20;
 pub const DEFAULT_SRP_MAX_FAN_OUT: usize = 10;
 pub const DEFAULT_SRP_LCOM4_THRESHOLD: usize = 2;
-pub const DEFAULT_SRP_FILE_LENGTH_BASELINE: usize = 300;
-pub const DEFAULT_SRP_FILE_LENGTH_CEILING: usize = 800;
+/// Highest production line count a file may have before SRP_MODULE fires.
+/// A single threshold (no baseline/ceiling ramp): a file is flagged when
+/// its production lines strictly exceed this value.
+pub const DEFAULT_SRP_FILE_LENGTH: usize = 300;
 // Highest cluster count that still passes. A file with more than
 // this many independent function clusters is flagged as having
 // multiple responsibilities. Default `2` means 3+ clusters trigger
@@ -170,8 +172,7 @@ pub struct SrpConfig {
     pub max_fan_out: usize,
     pub lcom4_threshold: usize,
     pub weights: [f64; 4],
-    pub file_length_baseline: usize,
-    pub file_length_ceiling: usize,
+    pub file_length: usize,
     pub max_independent_clusters: usize,
     pub min_cluster_statements: usize,
     pub max_parameters: usize,
@@ -187,8 +188,7 @@ impl Default for SrpConfig {
             max_fan_out: DEFAULT_SRP_MAX_FAN_OUT,
             lcom4_threshold: DEFAULT_SRP_LCOM4_THRESHOLD,
             weights: [0.4, 0.25, 0.15, 0.2],
-            file_length_baseline: DEFAULT_SRP_FILE_LENGTH_BASELINE,
-            file_length_ceiling: DEFAULT_SRP_FILE_LENGTH_CEILING,
+            file_length: DEFAULT_SRP_FILE_LENGTH,
             max_independent_clusters: DEFAULT_SRP_MAX_INDEPENDENT_CLUSTERS,
             min_cluster_statements: DEFAULT_SRP_MIN_CLUSTER_STATEMENTS,
             max_parameters: DEFAULT_SRP_MAX_PARAMETERS,
@@ -218,10 +218,8 @@ impl Default for SrpConfig {
 pub struct TestsConfig {
     /// Overrides `[complexity].max_function_lines` for test fns (LONG_FN).
     pub max_function_lines: Option<usize>,
-    /// Overrides `[srp].file_length_baseline` for test files.
-    pub file_length_baseline: Option<usize>,
-    /// Overrides `[srp].file_length_ceiling` for test files.
-    pub file_length_ceiling: Option<usize>,
+    /// Overrides `[srp].file_length` for test files (SRP_MODULE).
+    pub file_length: Option<usize>,
 }
 
 /// Configuration for coupling analysis.

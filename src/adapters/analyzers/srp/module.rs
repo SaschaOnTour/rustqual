@@ -100,11 +100,12 @@ pub(crate) fn count_independent_clusters(
     (count, cluster_names)
 }
 
-/// Analyze module-level SRP: flag files with excessive production line counts
-/// or too many independent function clusters.
+/// Analyze module-level SRP: flag files whose production line count exceeds
+/// the `file_length` threshold, or that have too many independent function
+/// clusters.
 ///
-/// Test files (per `cfg_test_files`) are length-scored against the
-/// `[tests]`-resolved baseline/ceiling instead of the production ones; the
+/// Test files (per `cfg_test_files`) are length-checked against the
+/// `[tests]`-resolved `file_length` instead of the production one; the
 /// cohesion (independent-cluster) check is **production-only** because a test
 /// file's independent `#[test]` fns are its purpose, not a low-cohesion smell.
 /// Operation: iterates files, computes production lines, length score,
@@ -114,21 +115,21 @@ pub fn analyze_module_srp(
     config: &SrpConfig,
     file_call_graph: &HashMap<String, Vec<(String, Vec<String>)>>,
     cfg_test_files: &std::collections::HashSet<String>,
-    test_length_thresholds: (usize, usize),
+    test_file_length: usize,
 ) -> Vec<ModuleSrpWarning> {
     parsed
         .iter()
         .filter_map(|(path, source, syntax)| {
             let is_test = cfg_test_files.contains(path);
-            // `test_length_thresholds` = `(baseline, ceiling)` resolved from
-            // `[tests]` (defaults to production). Applied to test files only.
-            let (baseline, ceiling) = if is_test {
-                test_length_thresholds
+            // `test_file_length` is resolved from `[tests]` (defaults to
+            // production). Applied to test files only.
+            let threshold = if is_test {
+                test_file_length
             } else {
-                (config.file_length_baseline, config.file_length_ceiling)
+                config.file_length
             };
             let production_lines = count_production_lines(source);
-            let score = compute_file_length_score(production_lines, baseline, ceiling);
+            let score = compute_file_length_score(production_lines, threshold);
 
             // Cohesion is production-only: independent test fns are expected, so
             // a test file contributes no clusters (and the walk is skipped).
@@ -143,7 +144,9 @@ pub fn analyze_module_srp(
                 count_independent_clusters(&free_fns, call_graph, config.min_cluster_statements)
             };
 
-            let has_length_warning = score > 0.0;
+            // Strict `>`: a file exactly at the threshold still passes,
+            // consistent with the other `max_*` thresholds in this crate.
+            let has_length_warning = production_lines > threshold;
             // Use strict `>` for consistency with the other `max_*`
             // thresholds in this crate (max_cognitive, max_fan_in,
             // max_function_lines etc. all treat the configured value
@@ -248,26 +251,16 @@ fn handle_in_comment(
     }
 }
 
-/// Compute file length penalty score.
-/// Returns 0.0 below baseline, 1.0 above ceiling, linear between.
-/// Operation: arithmetic.
-pub(crate) fn compute_file_length_score(
-    production_lines: usize,
-    baseline: usize,
-    ceiling: usize,
-) -> f64 {
-    // Misconfiguration guard: if the thresholds are inverted the
-    // subtraction below would underflow (usize). Handle this first so
-    // the behaviour is consistent regardless of `production_lines`.
-    if ceiling <= baseline {
+/// Severity ratio of a file's production length against the single
+/// `file_length` threshold: `production_lines / threshold`. A value of
+/// 1.0 means exactly at the limit; SRP_MODULE fires strictly above it
+/// (see `analyze_module_srp`). Reported as metadata only — the SRP
+/// dimension score is count-based, not score-weighted.
+/// Operation: arithmetic with a zero-threshold guard.
+pub(crate) fn compute_file_length_score(production_lines: usize, threshold: usize) -> f64 {
+    // Misconfiguration guard: a zero threshold means every file is "over".
+    if threshold == 0 {
         return 1.0;
     }
-    if production_lines <= baseline {
-        return 0.0;
-    }
-    if production_lines >= ceiling {
-        return 1.0;
-    }
-    let range = (ceiling - baseline) as f64;
-    (production_lines - baseline) as f64 / range
+    production_lines as f64 / threshold as f64
 }

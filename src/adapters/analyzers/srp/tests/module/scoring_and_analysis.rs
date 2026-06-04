@@ -1,44 +1,40 @@
 use super::*;
 
 #[test]
-fn test_file_length_score_below_baseline() {
-    let score = compute_file_length_score(100, 300, 800);
-    assert!((score - 0.0).abs() < f64::EPSILON);
-}
-
-#[test]
-fn test_file_length_score_at_baseline() {
-    let score = compute_file_length_score(300, 300, 800);
-    assert!((score - 0.0).abs() < f64::EPSILON);
-}
-
-#[test]
-fn test_file_length_score_above_ceiling() {
-    let score = compute_file_length_score(1000, 300, 800);
-    assert!((score - 1.0).abs() < f64::EPSILON);
-}
-
-#[test]
-fn test_file_length_score_midpoint() {
-    let score = compute_file_length_score(550, 300, 800);
+fn test_file_length_score_below_threshold() {
+    // length_score is now the ratio production_lines / threshold.
+    let score = compute_file_length_score(150, 300);
     assert!((score - 0.5).abs() < f64::EPSILON);
 }
 
 #[test]
-fn test_file_length_score_at_ceiling() {
-    let score = compute_file_length_score(800, 300, 800);
+fn test_file_length_score_at_threshold() {
+    let score = compute_file_length_score(300, 300);
     assert!((score - 1.0).abs() < f64::EPSILON);
 }
 
 #[test]
-fn test_analyze_module_srp_below_baseline() {
+fn test_file_length_score_above_threshold() {
+    let score = compute_file_length_score(600, 300);
+    assert!((score - 2.0).abs() < f64::EPSILON);
+}
+
+#[test]
+fn test_file_length_score_zero_threshold_guard() {
+    // A zero threshold means every file counts as over.
+    let score = compute_file_length_score(100, 0);
+    assert!((score - 1.0).abs() < f64::EPSILON);
+}
+
+#[test]
+fn test_analyze_module_srp_below_threshold() {
     let source = "fn foo() {}\nfn bar() {}\n";
     let syntax = syn::parse_file(source).unwrap();
     let parsed = vec![("test.rs".to_string(), source.to_string(), syntax)];
-    let config = SrpConfig::default(); // baseline=300
+    let config = SrpConfig::default(); // file_length=300
     let call_graph = HashMap::new();
     let cfg_test_files = std::collections::HashSet::new();
-    let warnings = analyze_module_srp(&parsed, &config, &call_graph, &cfg_test_files, (300, 800));
+    let warnings = analyze_module_srp(&parsed, &config, &call_graph, &cfg_test_files, 300);
     assert!(warnings.is_empty());
 }
 
@@ -101,7 +97,7 @@ fn test_analyze_module_srp_length_and_cohesion_by_file_kind() {
             &SrpConfig::default(),
             &HashMap::new(),
             &cfg_test_files,
-            (300, 800),
+            300,
         );
         assert_eq!(
             !warnings.is_empty(),
@@ -124,7 +120,7 @@ fn test_analyze_module_srp_test_lines_excluded() {
     let config = SrpConfig::default();
     let call_graph = HashMap::new();
     let cfg_test_files = std::collections::HashSet::new();
-    let warnings = analyze_module_srp(&parsed, &config, &call_graph, &cfg_test_files, (300, 800));
+    let warnings = analyze_module_srp(&parsed, &config, &call_graph, &cfg_test_files, 300);
     assert!(
         warnings.is_empty(),
         "Test code should not count towards production lines"

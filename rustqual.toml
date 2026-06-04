@@ -104,9 +104,8 @@ enabled = true
 # and [srp].
 
 [tests]
-# max_function_lines   = 60      # overrides [complexity].max_function_lines (LONG_FN)
-# file_length_baseline = 300     # overrides [srp].file_length_baseline
-# file_length_ceiling  = 600     # overrides [srp].file_length_ceiling
+# max_function_lines = 60      # overrides [complexity].max_function_lines (LONG_FN)
+# file_length        = 300     # overrides [srp].file_length (SRP_MODULE)
 
 # ── Quality Score Weights ──────────────────────────────────────────────
 
