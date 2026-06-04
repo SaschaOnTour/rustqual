@@ -189,34 +189,14 @@ fn single_prod_impl_with_cfg_test_attr_double_not_flagged() {
 }
 
 #[test]
-fn unrelated_test_only_trait_with_same_name_does_not_suppress_sit() {
-    // A genuine single-impl production trait must STILL be flagged even when an
-    // unrelated test-only module defines its OWN trait of the same name and
-    // implements it. Test-impl counting keys on the trait name, so a name that
-    // is itself defined in test code is ambiguous — its test impls must not
-    // suppress the same-named production trait.
-    let w = detect_from(
-        "trait Clock { fn now(&self) -> u64; } \
-         struct SystemClock; impl Clock for SystemClock { fn now(&self) -> u64 { 0 } } \
-         #[cfg(test)] mod tests { \
-         trait Clock { fn tick(&self); } struct TestClock; impl Clock for TestClock { fn tick(&self) {} } }",
-    );
-    assert_eq!(
-        w.len(),
-        1,
-        "an unrelated test-only trait of the same name must not suppress the production trait's SIT"
-    );
-    assert_eq!(w[0].name, "Clock");
-}
-
-#[test]
-fn legit_double_not_pruned_by_unrelated_same_named_test_trait() {
-    // Mixed collision: a production trait WITH a legitimate test double in one
-    // test module, AND an unrelated test-only trait of the same name in another
-    // test module. The real double must still count — earlier global
-    // name-pruning dropped every "Clock" count (including the real double),
-    // wrongly re-flagging the production trait. Module-scoped exclusion must
-    // only drop the impl that belongs to the local test-only trait.
+fn real_double_counts_even_with_unrelated_same_named_test_trait() {
+    // The critical no-false-positive guarantee: a production trait WITH a real
+    // test double in one test module is NOT re-flagged even when an unrelated
+    // test-only trait of the same name lives in another test module. Pure
+    // name-based counting tallies BOTH "Clock" impls, so the trait's total
+    // implementor count exceeds 1 and SIT stays silent — a legitimate DI seam is
+    // never re-flagged. (Earlier scope/path heuristics could wrongly drop the
+    // real double here.)
     let w = detect_from(
         "trait Clock { fn now(&self) -> u64; } \
          struct SystemClock; impl Clock for SystemClock { fn now(&self) -> u64 { 0 } } \
@@ -228,6 +208,53 @@ fn legit_double_not_pruned_by_unrelated_same_named_test_trait() {
     assert!(
         w.is_empty(),
         "a real test double must still count even when an unrelated test-only trait shares the name: {} warning(s)",
+        w.len()
+    );
+}
+
+#[test]
+fn real_double_via_super_not_reflagged_with_same_named_nested_test_trait() {
+    // No-false-positive pin for the nested-`super::` case: a nested test module
+    // defines its own `trait Clock` AND impls `super::super::Clock` (a real
+    // double of the production trait). Pure name-based counting tallies that impl
+    // under "Clock", so the production trait is not re-flagged. (A scope/path
+    // heuristic wrongly dropped this double because the nested module defined a
+    // same-named trait — re-introducing the very false positive SIT-with-doubles
+    // exists to avoid.)
+    let w = detect_from(
+        "trait Clock { fn now(&self) -> u64; } \
+         struct SystemClock; impl Clock for SystemClock { fn now(&self) -> u64 { 0 } } \
+         #[cfg(test)] mod tests { mod inner { \
+         trait Clock { fn tick(&self); } struct T; \
+         impl super::super::Clock for T { fn now(&self) -> u64 { 1 } } } }",
+    );
+    assert!(
+        w.is_empty(),
+        "a real super:: double must never be dropped: {} warning(s)",
+        w.len()
+    );
+}
+
+#[test]
+fn name_collision_with_test_only_trait_under_reports_sit() {
+    // KNOWN, DOCUMENTED LIMITATION (deliberately the SAFE direction): counting
+    // is purely name-based, so an unrelated test-only `trait Clock` whose impl
+    // shares the production trait's last-segment name is counted toward it,
+    // making SIT *under-report* a genuinely single-impl production `Clock`. This
+    // is the accepted trade for never producing a false positive (see the two
+    // tests above). Precisely distinguishing the two same-named traits would need
+    // real trait identity, which the name-keyed metadata models on neither side
+    // (the production side has the same collision). Pinned so the trade-off is
+    // explicit and any future change to it is deliberate.
+    let w = detect_from(
+        "trait Clock { fn now(&self) -> u64; } \
+         struct SystemClock; impl Clock for SystemClock { fn now(&self) -> u64 { 0 } } \
+         #[cfg(test)] mod tests { \
+         trait Clock { fn tick(&self); } struct TestClock; impl Clock for TestClock { fn tick(&self) {} } }",
+    );
+    assert!(
+        w.is_empty(),
+        "name-based counting under-reports here (documented limitation), got {} warning(s)",
         w.len()
     );
 }

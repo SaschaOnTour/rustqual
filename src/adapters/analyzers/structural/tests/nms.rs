@@ -20,6 +20,34 @@ fn needless_mut_self_in_cfg_test_file_excluded() {
 }
 
 #[test]
+fn cfg_test_attr_impl_method_excluded() {
+    // An item-level `#[cfg(test)]` impl is test code even in a production file;
+    // its methods must not trip NMS (consistent with whole cfg-test files).
+    let w = detect_in(
+        "struct S { x: i32 } #[cfg(test)] impl S { fn foo(&mut self) -> i32 { self.x } }",
+    );
+    assert!(
+        w.is_empty(),
+        "a #[cfg(test)] impl method must be excluded from NMS: {} warning(s)",
+        w.len()
+    );
+}
+
+#[test]
+fn cfg_test_attr_method_excluded() {
+    // `#[cfg(test)]` directly on an impl METHOD makes that method test code even
+    // in a regular production impl — it must not trip NMS.
+    let w = detect_in(
+        "struct S { x: i32 } impl S { #[cfg(test)] fn foo(&mut self) -> i32 { self.x } }",
+    );
+    assert!(
+        w.is_empty(),
+        "a #[cfg(test)] method must be excluded from NMS: {} warning(s)",
+        w.len()
+    );
+}
+
+#[test]
 fn test_needless_mut_self_flagged() {
     let w = detect_in("struct S { x: i32 } impl S { fn foo(&mut self) -> i32 { self.x } }");
     assert_eq!(w.len(), 1);

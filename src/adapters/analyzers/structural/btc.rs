@@ -35,7 +35,9 @@ fn check_item(item: &syn::Item, path: &str, warnings: &mut Vec<StructuralWarning
         check_impl(imp, p, w);
     };
     match item {
-        syn::Item::Impl(imp) => impl_check(imp, path, warnings),
+        syn::Item::Impl(imp) if !super::has_cfg_test_attr(&imp.attrs) => {
+            impl_check(imp, path, warnings)
+        }
         syn::Item::Mod(m) if !super::has_cfg_test_attr(&m.attrs) => {
             m.content.iter().for_each(|(_, items)| {
                 items.iter().for_each(|i| check_item(i, path, warnings));
@@ -63,7 +65,7 @@ fn check_impl(imp: &syn::ItemImpl, path: &str, warnings: &mut Vec<StructuralWarn
         .items
         .iter()
         .filter_map(|i| match i {
-            syn::ImplItem::Fn(f) => Some(f),
+            syn::ImplItem::Fn(f) if !super::has_cfg_test_attr(&f.attrs) => Some(f),
             _ => None,
         })
         .collect();

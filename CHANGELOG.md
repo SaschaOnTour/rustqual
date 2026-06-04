@@ -7,8 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.4.2] - 2026-06-04
 
-Patch release: a false-positive fix found while applying 1.4.1. No change to
-how production code is scored beyond removing this incorrect finding.
+Patch release: a false-positive fix found while applying 1.4.1. SIT stops
+flagging traits that have `#[cfg(test)]` test doubles. As a deliberate,
+documented trade-off it now counts test impls purely by name, so a rare name
+collision with an unrelated test-only trait can instead make SIT *under-report*
+a genuine single-impl production trait — the safe direction (a missed finding,
+never a wrong one). Details and rationale below.
 
 ### Fixed
 - **SIT (single-impl trait) no longer flags traits with `#[cfg(test)]` test
@@ -20,20 +24,32 @@ how production code is scored beyond removing this incorrect finding.
   they live in a whole test file, an inline `#[cfg(test)] mod`, or carry
   `#[cfg(test)]` directly on the impl item — and SIT fires only when that total
   is `1`. A genuine single-impl trait (one prod impl, no doubles) is still
-  flagged. Counting is name-based (the structural metadata models no trait
-  identity, on either the production or test side), so it is scoped per module:
-  a test impl whose trait is a bare name defined as a test-only trait in the
-  *same* module is attributed to that local trait, not a same-named production
-  trait — so an unrelated test-only `trait Clock` does not suppress the
-  production `Clock`, while a real double in another test module still counts.
-  Known residual limitation: a test impl of an *imported/external* trait that
-  merely shares a production trait's last-segment name still collides (a name
-  collision symmetric with the pre-existing production-side one; resolving it
-  needs real trait identity). Regressed when v1.4.x improved
+  flagged. Counting is deliberately *purely name-based* (the structural metadata
+  models no trait identity, on either the production or test side): it never
+  tries to resolve which trait a same-named impl targets, which guarantees a real
+  test double is never dropped — so a legitimate seam is never re-flagged (no
+  false positive, the original bug class). The accepted, documented trade-off is
+  a safe false *negative*: an unrelated test-only trait that happens to share a
+  production trait's last-segment name is counted toward it and can make SIT
+  under-report that production trait. Resolving that needs real trait identity
+  (the production side has the same name-collision limitation). Regressed when
+  v1.4.x improved
   `#[cfg(test)] mod foo;`-chain test-file recognition (the better classification
   correctly excluded the companion test files, shrinking SIT's denominator). The
   sibling detector OI is unaffected — it matches impl locations, it does not
   count.
+- **`#[cfg(test)]` on impls, methods and fns is now honoured by all structural
+  detectors.** Teaching SIT to count item-level `#[cfg(test)]` impls surfaced an
+  inconsistency: BTC (broken trait contract), SLM (selfless method), NMS
+  (needless `&mut self`), DEH (downcast escape hatch) and IET (inconsistent
+  error types) still treated a `#[cfg(test)] impl …`, a `#[cfg(test)]` method
+  inside a normal impl, or a `#[cfg(test)] pub fn` sitting in a *production* file
+  as production code — so e.g. `#[cfg(test)] impl Foo for Mock { fn m(&self) {
+  todo!() } }`, or `impl S { #[cfg(test)] fn helper(&self) -> i32 { 42 } }`,
+  could still trip BTC / SLM. The detectors now skip `#[cfg(test)]` at every
+  level (impl block, impl method, and free fn), consistent with whole test files
+  and `#[cfg(test)] mod` blocks (OI/SIT already do, via the shared metadata
+  walk).
 
 ## [1.4.1] - 2026-06-02
 

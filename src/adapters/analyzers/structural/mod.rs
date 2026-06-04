@@ -91,9 +91,10 @@ pub(crate) struct StructuralMetadata {
     pub trait_defs: HashMap<String, TraitInfo>,
     /// trait_name → list of (impl_type, file) — production impls only
     pub trait_impls: HashMap<String, Vec<(String, String)>>,
-    /// trait_name → number of impls living in `#[cfg(test)]` code (whole test
-    /// files or inline `#[cfg(test)] mod` blocks). Not in `trait_impls`
-    /// (metadata skips test code), but they count toward a trait's TOTAL
+    /// trait_name → number of impls living in `#[cfg(test)]` code (a whole test
+    /// file, an inline `#[cfg(test)] mod` block, or an item-level `#[cfg(test)]`
+    /// on the impl). Not in `trait_impls` (metadata skips test code), but they
+    /// count toward a trait's TOTAL
     /// implementor count so SIT does not flag a trait whose only extra
     /// implementers are test doubles — the idiomatic DI / test-seam pattern.
     pub cfg_test_trait_impl_counts: HashMap<String, usize>,
@@ -224,60 +225,56 @@ fn collect_cfg_test_trait_impl_counts(
     let mut counts = HashMap::new();
     parsed.iter().for_each(|(path, _, syntax)| {
         let in_test = cfg_test_files.contains(path);
-        collect_test_impls_in_scope(&syntax.items, in_test, &mut counts);
+        syntax
+            .items
+            .iter()
+            .for_each(|item| count_cfg_test_trait_impls(item, in_test, &mut counts));
     });
     counts
 }
 
-/// Tally `#[cfg(test)]` trait impls in one item scope (file or module body),
-/// keyed by trait name, recursing into submodules. A test impl whose trait is a
-/// **single bare segment** naming a trait DEFINED in test code in the *same*
-/// scope is attributed to that local test-only trait — not a same-named
-/// production trait — so it is not counted; this keeps an unrelated test-only
-/// `trait Clock` from suppressing the production `Clock`, while a real double in
-/// a *different* test module (or via a qualified `super::Clock` path) still
-/// counts. NOTE: still name-based — a test impl of an *imported/external* trait
-/// that merely shares a production trait's last-segment name collides; fully
-/// resolving that needs real trait identity, which the name-keyed metadata
-/// models on neither the production nor the test side.
-/// Operation: builds the local test-trait set, then tallies / recurses — own
-/// calls hidden in closures for IOSP.
-fn collect_test_impls_in_scope(
-    items: &[syn::Item],
+/// Recurse one item, counting `#[cfg(test)]` trait impls by last-path-segment
+/// trait name, descending into submodules. "In test" = a whole test file, an
+/// inline `#[cfg(test)] mod`, or an item-level `#[cfg(test)]` on the impl.
+///
+/// Counting is deliberately PURELY name-based: it makes no attempt to resolve
+/// which trait a same-named impl actually targets. That guarantees it never
+/// drops a real test double — so a legitimate DI seam is never re-flagged (no
+/// false positive, the original bug class). The accepted cost is a safe,
+/// documented false NEGATIVE: an unrelated test-only trait that happens to share
+/// a production trait's last-segment name is counted toward it and can make SIT
+/// under-report that production trait. (Earlier attempts to disambiguate by
+/// lexical scope / path form re-introduced false positives — e.g. a nested
+/// `super::Clock` double dropped because the nested module defined its own
+/// `Clock` — because correctly resolving `self::`/`super::`/glob/re-export/
+/// absolute paths IS trait identity, which the name-keyed metadata models on
+/// neither the production nor the test side. The production side has the same
+/// name-collision limitation.)
+/// Operation: match dispatch; own calls hidden in closures for IOSP.
+fn count_cfg_test_trait_impls(
+    item: &syn::Item,
     in_test: bool,
     counts: &mut HashMap<String, usize>,
 ) {
     let cfg_test = |attrs: &[syn::Attribute]| -> bool { has_cfg_test_attr(attrs) };
-    let local_test_traits: HashSet<String> = items
-        .iter()
-        .filter_map(|it| match it {
-            syn::Item::Trait(t) if in_test || cfg_test(&t.attrs) => Some(t.ident.to_string()),
-            _ => None,
-        })
-        .collect();
-    items.iter().for_each(|item| match item {
+    match item {
         syn::Item::Impl(imp) if in_test || cfg_test(&imp.attrs) => {
             if let Some((_, tp, _)) = &imp.trait_ {
-                let bare_local = tp.segments.len() == 1
-                    && tp
-                        .segments
-                        .last()
-                        .is_some_and(|s| local_test_traits.contains(&s.ident.to_string()));
-                if !bare_local {
-                    if let Some(name) = tp.segments.last().map(|s| s.ident.to_string()) {
-                        *counts.entry(name).or_insert(0) += 1;
-                    }
+                if let Some(name) = tp.segments.last().map(|s| s.ident.to_string()) {
+                    *counts.entry(name).or_insert(0) += 1;
                 }
             }
         }
         syn::Item::Mod(m) => {
             let mod_in_test = in_test || cfg_test(&m.attrs);
-            if let Some((_, sub_items)) = &m.content {
-                collect_test_impls_in_scope(sub_items, mod_in_test, counts);
-            }
+            m.content.iter().for_each(|(_, items)| {
+                items
+                    .iter()
+                    .for_each(|i| count_cfg_test_trait_impls(i, mod_in_test, counts));
+            });
         }
         _ => {}
-    });
+    }
 }
 
 /// Visit all inherent (non-trait) impl methods in parsed files, excluding test modules.
@@ -305,13 +302,15 @@ fn visit_item_methods(
     callback: &mut dyn FnMut(&syn::ImplItemFn, &str),
 ) {
     match item {
-        syn::Item::Impl(imp) => {
+        syn::Item::Impl(imp) if !has_cfg_test_attr(&imp.attrs) => {
             if imp.trait_.is_some() {
                 return;
             }
             imp.items.iter().for_each(|i| {
                 if let syn::ImplItem::Fn(method) = i {
-                    callback(method, path);
+                    if !has_cfg_test_attr(&method.attrs) {
+                        callback(method, path);
+                    }
                 }
             });
         }
