@@ -63,6 +63,12 @@ pub fn run() -> Result<(), i32> {
     let config = setup_config(&cli)?;
 
     if let Some(ref target) = cli.explain {
+        // `--explain allow` prints the suppression guide instead of explaining
+        // a file's architecture rules.
+        if target.as_os_str() == "allow" {
+            crate::cli::explain::explain_allow();
+            return Ok(());
+        }
         return crate::cli::explain::handle_explain(target, &config);
     }
 
