@@ -61,9 +61,15 @@ fn run_primary_analysis(
     warnings::apply_recursive_annotations(&mut all_results, &recursive_lines);
     warnings::apply_leaf_reclassification(&mut all_results);
     let mut summary = Summary::from_results(&all_results);
-    apply_complexity_warnings(&mut all_results, config, &mut summary);
+    apply_complexity_warnings(&mut all_results, config, &mut summary, &suppression_lines);
     let unsafe_allow_lines = discovery::collect_unsafe_allow_lines(parsed);
-    apply_extended_warnings(&mut all_results, config, &mut summary, &unsafe_allow_lines);
+    apply_extended_warnings(
+        &mut all_results,
+        config,
+        &mut summary,
+        &unsafe_allow_lines,
+        &suppression_lines,
+    );
     PrimaryResults {
         all_results,
         summary,

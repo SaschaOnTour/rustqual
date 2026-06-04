@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::adapters::analyzers::iosp::{Classification, FunctionAnalysis};
+use crate::app::complexity_suppressions::{bool_warns, metric_warns};
 use crate::config::Config;
 use crate::findings::Suppression;
 use crate::report::Summary;
@@ -79,7 +80,11 @@ pub(super) fn exclude_test_violations(results: &mut [FunctionAnalysis]) {
 /// Operation: checks suppression lines against function line, sets suppressed flags.
 pub(super) fn apply_file_suppressions(fa: &mut FunctionAnalysis, suppressions: &[Suppression]) {
     let covers_iosp = |s: &Suppression| s.covers(crate::findings::Dimension::Iosp);
-    let covers_cx = |s: &Suppression| s.covers(crate::findings::Dimension::Complexity);
+    // Only a BLANKET `allow(complexity)` (no target) silences the whole
+    // dimension; targeted `allow(complexity, <kind>)` forms are handled
+    // per-kind in `apply_complexity_warnings` / `apply_extended_warnings`.
+    let blanket_cx =
+        |s: &Suppression| s.covers(crate::findings::Dimension::Complexity) && s.target.is_none();
     let window = crate::findings::ANNOTATION_WINDOW;
     let is_adjacent = |s: &Suppression| s.line <= fa.line && fa.line - s.line <= window;
 
@@ -88,7 +93,7 @@ pub(super) fn apply_file_suppressions(fa: &mut FunctionAnalysis, suppressions: &
             .iter()
             .any(|s| is_adjacent(s) && covers_iosp(s));
     fa.complexity_suppressed =
-        fa.complexity_suppressed || suppressions.iter().any(|s| is_adjacent(s) && covers_cx(s));
+        fa.complexity_suppressed || suppressions.iter().any(|s| is_adjacent(s) && blanket_cx(s));
 }
 
 /// Set cognitive/cyclomatic complexity and magic number warning flags.
@@ -97,6 +102,7 @@ pub(super) fn apply_complexity_warnings(
     results: &mut [FunctionAnalysis],
     config: &Config,
     summary: &mut Summary,
+    suppression_lines: &HashMap<String, Vec<Suppression>>,
 ) {
     if !config.complexity.enabled {
         return;
@@ -105,19 +111,40 @@ pub(super) fn apply_complexity_warnings(
         if fa.suppressed || fa.complexity_suppressed {
             continue;
         }
-        if let Some(ref m) = fa.complexity {
-            if m.cognitive_complexity > config.complexity.max_cognitive
-                || m.cyclomatic_complexity > config.complexity.max_cyclomatic
-            {
-                fa.cognitive_warning = m.cognitive_complexity > config.complexity.max_cognitive;
-                fa.cyclomatic_warning = m.cyclomatic_complexity > config.complexity.max_cyclomatic;
-                summary.complexity_warnings += 1;
-            }
-            // Magic numbers are expected in tests (assert_eq!(x, 42) etc.),
-            // so skip test functions for this specific check.
-            if !fa.is_test {
-                summary.magic_number_warnings += m.magic_numbers.len();
-            }
+        // Copy the metrics out so the per-kind suppression check (which borrows
+        // `fa`) doesn't overlap the warning-flag writes.
+        let Some((cognitive, cyclomatic, magic_count)) = fa.complexity.as_ref().map(|m| {
+            (
+                m.cognitive_complexity,
+                m.cyclomatic_complexity,
+                m.magic_numbers.len(),
+            )
+        }) else {
+            continue;
+        };
+        let cog = cognitive > config.complexity.max_cognitive;
+        let cyc = cyclomatic > config.complexity.max_cyclomatic;
+        fa.cognitive_warning = metric_warns(
+            suppression_lines,
+            fa,
+            cog,
+            cognitive as f64,
+            "max_cognitive",
+        );
+        fa.cyclomatic_warning = metric_warns(
+            suppression_lines,
+            fa,
+            cyc,
+            cyclomatic as f64,
+            "max_cyclomatic",
+        );
+        if fa.cognitive_warning || fa.cyclomatic_warning {
+            summary.complexity_warnings += 1;
+        }
+        // Magic numbers are expected in tests (assert_eq!(x, 42) etc.), so
+        // skip test functions for this specific check.
+        if bool_warns(suppression_lines, fa, !fa.is_test, "magic_numbers") {
+            summary.magic_number_warnings += magic_count;
         }
     }
 }
@@ -163,66 +190,116 @@ fn is_unsafe_allowed(
         .unwrap_or(false)
 }
 
+/// Config-derived thresholds/toggles for the extended complexity checks.
+struct ExtendedCx {
+    max_nesting: usize,
+    max_lines: usize,
+    test_max_lines: usize,
+    check_unsafe: bool,
+    check_errors: bool,
+    expect_threshold: usize,
+}
+
+impl ExtendedCx {
+    /// Operation: field reads + one ternary, no own calls.
+    fn from(config: &Config) -> Self {
+        let cx = &config.complexity;
+        Self {
+            max_nesting: cx.max_nesting_depth,
+            max_lines: cx.max_function_lines,
+            test_max_lines: config
+                .tests
+                .max_function_lines
+                .unwrap_or(cx.max_function_lines),
+            check_unsafe: cx.detect_unsafe,
+            check_errors: cx.detect_error_handling,
+            expect_threshold: if cx.allow_expect { 0 } else { 1 },
+        }
+    }
+}
+
+/// Integration: filters active fns and applies the extended checks to each.
 pub(super) fn apply_extended_warnings(
     results: &mut [FunctionAnalysis],
     config: &Config,
     summary: &mut Summary,
     unsafe_allow_lines: &HashMap<String, HashSet<usize>>,
+    suppression_lines: &HashMap<String, Vec<Suppression>>,
 ) {
     if !config.complexity.enabled {
         return;
     }
-    let max_nesting = config.complexity.max_nesting_depth;
-    let max_lines = config.complexity.max_function_lines;
-    let test_max_lines = config.tests.max_function_lines.unwrap_or(max_lines);
-    let check_unsafe = config.complexity.detect_unsafe;
-    let check_errors = config.complexity.detect_error_handling;
-    let expect_threshold = if config.complexity.allow_expect { 0 } else { 1 };
-
-    let is_active = |fa: &FunctionAnalysis| !fa.suppressed && !fa.complexity_suppressed;
-
-    let has_unsafe_issue =
-        |fa: &FunctionAnalysis, m: &crate::adapters::analyzers::iosp::ComplexityMetrics| {
-            check_unsafe && m.unsafe_blocks > 0 && !is_unsafe_allowed(fa, unsafe_allow_lines)
-        };
-
-    let check_err = |fa: &FunctionAnalysis,
-                     m: &crate::adapters::analyzers::iosp::ComplexityMetrics| {
-        has_error_handling_issue(fa, m, check_errors, expect_threshold)
-    };
-
-    // LONG_FN applies to test fns too (at `[tests].max_function_lines`,
-    // defaulting to the production limit).
-    let has_length_issue =
-        |fa: &FunctionAnalysis, m: &crate::adapters::analyzers::iosp::ComplexityMetrics| {
-            is_length_over(fa, m, max_lines, test_max_lines)
-        };
-
+    let cx = ExtendedCx::from(config);
     results
         .iter_mut()
-        .filter(|fa| is_active(fa))
+        .filter(|fa| !fa.suppressed && !fa.complexity_suppressed)
         .for_each(|fa| {
-            let m = match fa.complexity {
-                Some(ref m) => m,
-                None => return,
-            };
-            if m.max_nesting > max_nesting {
-                fa.nesting_depth_warning = true;
-                summary.nesting_depth_warnings += 1;
-            }
-            if has_length_issue(fa, m) {
-                fa.function_length_warning = true;
-                summary.function_length_warnings += 1;
-            }
-            if has_unsafe_issue(fa, m) {
-                fa.unsafe_warning = true;
-                summary.unsafe_warnings += 1;
-            }
-            if check_err(fa, m) {
-                fa.error_handling_warning = true;
-                summary.error_handling_warnings += 1;
-            }
+            apply_extended_to_fn(fa, &cx, unsafe_allow_lines, suppression_lines, summary)
         });
+}
+
+/// Apply nesting / length / unsafe / error-handling checks to one function,
+/// each honouring a targeted `allow(complexity, <kind>)`. LONG_FN applies to
+/// test fns too (at `[tests].max_function_lines`, defaulting to production).
+/// Operation: per-kind decisions reaching non-violation helpers.
+fn apply_extended_to_fn(
+    fa: &mut FunctionAnalysis,
+    cx: &ExtendedCx,
+    unsafe_allow_lines: &HashMap<String, HashSet<usize>>,
+    suppression_lines: &HashMap<String, Vec<Suppression>>,
+    summary: &mut Summary,
+) {
+    let Some(m) = fa.complexity.clone() else {
+        return;
+    };
+    let nesting_over = metric_warns(
+        suppression_lines,
+        fa,
+        m.max_nesting > cx.max_nesting,
+        m.max_nesting as f64,
+        "max_nesting_depth",
+    );
+    let length_over = metric_warns(
+        suppression_lines,
+        fa,
+        is_length_over(fa, &m, cx.max_lines, cx.test_max_lines),
+        m.function_lines as f64,
+        "max_function_lines",
+    );
+    let unsafe_present =
+        cx.check_unsafe && m.unsafe_blocks > 0 && !is_unsafe_allowed(fa, unsafe_allow_lines);
+    let unsafe_over = bool_warns(suppression_lines, fa, unsafe_present, "unsafe");
+    let err_present = has_error_handling_issue(fa, &m, cx.check_errors, cx.expect_threshold);
+    let err_over = bool_warns(suppression_lines, fa, err_present, "error_handling");
+    flag_and_count(
+        nesting_over,
+        &mut fa.nesting_depth_warning,
+        &mut summary.nesting_depth_warnings,
+    );
+    flag_and_count(
+        length_over,
+        &mut fa.function_length_warning,
+        &mut summary.function_length_warnings,
+    );
+    flag_and_count(
+        unsafe_over,
+        &mut fa.unsafe_warning,
+        &mut summary.unsafe_warnings,
+    );
+    flag_and_count(
+        err_over,
+        &mut fa.error_handling_warning,
+        &mut summary.error_handling_warnings,
+    );
+}
+
+/// Set a warning flag and bump its counter when `over` is true.
+/// Operation: single conditional.
+fn flag_and_count(over: bool, flag: &mut bool, count: &mut usize) {
+    if over {
+        *flag = true;
+        *count += 1;
+    }
 }
 
 /// Count `#[allow(` attributes in production code, excluding test module attributes.

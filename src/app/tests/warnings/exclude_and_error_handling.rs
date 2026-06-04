@@ -49,7 +49,13 @@ fn test_error_handling_skipped_for_test_fn() {
     });
     fa.is_test = true;
     let mut results = vec![fa];
-    apply_extended_warnings(&mut results, &config, &mut summary, &HashMap::new());
+    apply_extended_warnings(
+        &mut results,
+        &config,
+        &mut summary,
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     assert!(!results[0].error_handling_warning);
     assert_eq!(summary.error_handling_warnings, 0);
 }
@@ -64,7 +70,13 @@ fn test_error_handling_flagged_for_non_test_fn() {
     });
     fa.is_test = false;
     let mut results = vec![fa];
-    apply_extended_warnings(&mut results, &config, &mut summary, &HashMap::new());
+    apply_extended_warnings(
+        &mut results,
+        &config,
+        &mut summary,
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     assert!(results[0].error_handling_warning);
     assert_eq!(summary.error_handling_warnings, 1);
 }
@@ -84,7 +96,13 @@ fn test_error_handling_flagged_for_lone_panic() {
     });
     fa.is_test = false;
     let mut results = vec![fa];
-    apply_extended_warnings(&mut results, &config, &mut summary, &HashMap::new());
+    apply_extended_warnings(
+        &mut results,
+        &config,
+        &mut summary,
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     assert!(results[0].error_handling_warning);
     assert_eq!(summary.error_handling_warnings, 1);
 }
@@ -104,7 +122,13 @@ fn test_unsafe_suppressed_by_allow_annotation() {
     let unsafe_lines: HashMap<String, HashSet<usize>> =
         [("test.rs".to_string(), [4].into_iter().collect())].into();
 
-    apply_extended_warnings(&mut results, &config, &mut summary, &unsafe_lines);
+    apply_extended_warnings(
+        &mut results,
+        &config,
+        &mut summary,
+        &unsafe_lines,
+        &HashMap::new(),
+    );
     assert!(
         !results[0].unsafe_warning,
         "qual:allow(unsafe) should suppress unsafe warning"
@@ -121,7 +145,13 @@ fn test_unsafe_without_allow_still_warned() {
         ..Default::default()
     })];
 
-    apply_extended_warnings(&mut results, &config, &mut summary, &HashMap::new());
+    apply_extended_warnings(
+        &mut results,
+        &config,
+        &mut summary,
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     assert!(
         results[0].unsafe_warning,
         "Without annotation, unsafe should still warn"

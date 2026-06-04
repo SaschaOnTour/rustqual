@@ -14,6 +14,7 @@ pub(super) use crate::report::Summary;
 pub(super) use std::collections::{HashMap, HashSet};
 
 mod complexity_flags;
+mod complexity_targeted;
 mod exclude_and_error_handling;
 mod extended_warnings;
 mod flag_application;
@@ -65,7 +66,13 @@ pub(super) fn apply_warnings(
 ) -> (FunctionAnalysis, Summary) {
     let mut summary = Summary::default();
     let mut results = vec![func];
-    apply_extended_warnings(&mut results, config, &mut summary, unsafe_lines);
+    apply_extended_warnings(
+        &mut results,
+        config,
+        &mut summary,
+        unsafe_lines,
+        &HashMap::new(),
+    );
     (results.into_iter().next().unwrap(), summary)
 }
 

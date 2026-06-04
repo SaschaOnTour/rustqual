@@ -9,6 +9,7 @@
 
 pub mod analyze_codebase;
 mod architecture;
+pub(crate) mod complexity_suppressions;
 pub(crate) mod dry_suppressions;
 pub(crate) mod exit_gates;
 pub(crate) mod metrics;
