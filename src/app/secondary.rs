@@ -13,8 +13,9 @@ use super::dry_suppressions;
 use super::metrics::{
     self, apply_parameter_warnings, build_file_call_graph, compute_coupling, compute_srp,
     count_coupling_warnings, count_dry_findings, count_srp_warnings, mark_coupling_suppressions,
-    mark_srp_suppressions, run_dry_detection, run_guarded_detection,
+    run_dry_detection, run_guarded_detection,
 };
+use super::srp_suppressions::mark_srp_suppressions;
 use super::structural_metrics::{
     compute_structural, count_structural_warnings, mark_structural_suppressions,
 };
@@ -145,7 +146,7 @@ fn run_srp_pass(
     let file_call_graph = build_file_call_graph(ctx.all_results);
     let mut srp = compute_srp(ctx.parsed, ctx.config, &file_call_graph);
     apply_parameter_warnings(ctx.all_results, srp.as_mut(), &ctx.config.srp);
-    mark_srp_suppressions(srp.as_mut(), ctx.suppression_lines);
+    mark_srp_suppressions(srp.as_mut(), ctx.suppression_lines, &ctx.config.srp);
     count_srp_warnings(srp.as_ref(), summary);
     srp
 }

@@ -202,48 +202,6 @@ pub(super) fn count_dry_findings(
         .sum();
 }
 
-/// Mark SRP warnings as suppressed based on `// qual:allow(srp)` comments.
-/// Operation: iteration + suppression matching via closures (no own calls).
-pub(super) fn mark_srp_suppressions(
-    srp: Option<&mut crate::adapters::analyzers::srp::SrpAnalysis>,
-    suppression_lines: &std::collections::HashMap<String, Vec<Suppression>>,
-) {
-    let Some(srp) = srp else { return };
-
-    // Struct suppressions: comment may be several lines above due to #[derive(...)] attributes
-    // Window width shared with the orphan detector, see
-    // `app::suppression_windows::SRP_STRUCT_PARAM`.
-    const SRP_STRUCT_SUPPRESSION_WINDOW: usize = super::suppression_windows::SRP_STRUCT_PARAM;
-    let srp_dim = crate::findings::Dimension::Srp;
-
-    srp.struct_warnings.iter_mut().for_each(|w| {
-        if let Some(sups) = suppression_lines.get(&w.file) {
-            w.suppressed = sups.iter().any(|sup| {
-                let in_window =
-                    sup.line <= w.line && w.line - sup.line <= SRP_STRUCT_SUPPRESSION_WINDOW;
-                in_window && sup.covers(srp_dim)
-            });
-        }
-    });
-
-    srp.module_warnings.iter_mut().for_each(|w| {
-        if let Some(sups) = suppression_lines.get(&w.file) {
-            w.suppressed = sups.iter().any(|sup| sup.covers(srp_dim));
-        }
-    });
-
-    // Param suppressions: proximity-based like struct warnings (attributes above fn)
-    srp.param_warnings.iter_mut().for_each(|w| {
-        if let Some(sups) = suppression_lines.get(&w.file) {
-            w.suppressed = sups.iter().any(|sup| {
-                let in_window =
-                    sup.line <= w.line && w.line - sup.line <= SRP_STRUCT_SUPPRESSION_WINDOW;
-                in_window && sup.covers(srp_dim)
-            });
-        }
-    });
-}
-
 /// Mark wildcard import warnings as suppressed based on `// qual:allow(dry)` comments.
 /// Operation: iteration + suppression check, no own calls.
 pub(super) fn mark_wildcard_suppressions(

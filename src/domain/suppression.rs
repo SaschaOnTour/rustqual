@@ -41,4 +41,25 @@ impl Suppression {
     pub fn covers(&self, dim: Dimension) -> bool {
         self.dimensions.is_empty() || self.dimensions.contains(&dim)
     }
+
+    /// Whether this suppression silences `dim`'s `target_name` finding at the
+    /// given metric `value`. A blanket suppression (no target) silences every
+    /// finding of its dimension. A metric pin silences only while
+    /// `value <= pin` — above the pin it re-fires; a boolean target silences
+    /// by name. `value` is `None` for findings that carry no metric.
+    /// Operation: dimension + target dispatch, no own calls beyond `covers`.
+    pub fn suppresses(&self, dim: Dimension, target_name: &str, value: Option<f64>) -> bool {
+        if !self.covers(dim) {
+            return false;
+        }
+        match &self.target {
+            None => true,
+            Some(t) if t.name == target_name => match (t.pin, value) {
+                (Some(pin), Some(v)) => v <= pin,
+                (None, _) => true,
+                (Some(_), None) => false,
+            },
+            Some(_) => false,
+        }
+    }
 }

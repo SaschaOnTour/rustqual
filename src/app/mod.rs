@@ -17,6 +17,7 @@ pub(crate) mod pipeline;
 pub(crate) mod projection;
 pub(crate) mod secondary;
 pub(crate) mod setup;
+pub(crate) mod srp_suppressions;
 pub(crate) mod structural_metrics;
 pub(crate) mod suppression_windows;
 pub(crate) mod tq_metrics;
