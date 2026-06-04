@@ -74,9 +74,14 @@ pub fn target_kind(dim: Dimension, name: &str) -> Option<TargetKind> {
             "call_parity" | "forbidden" | "layer" | "pattern" | "trait_contract" => Some(Boolean),
             _ => None,
         },
-        // test-quality targets are added in its slice; iosp is single-kind,
-        // so only the bare `allow(iosp)` form exists.
-        D::Iosp | D::TestQuality => None,
+        D::TestQuality => match name {
+            "no_assertion" | "no_sut" | "untested" | "uncovered" | "untested_logic" => {
+                Some(Boolean)
+            }
+            _ => None,
+        },
+        // iosp is single-kind, so only the bare `allow(iosp)` form exists.
+        D::Iosp => None,
     }
 }
 
@@ -116,6 +121,13 @@ pub fn target_names(dim: Dimension) -> &'static [&'static str] {
             "pattern",
             "trait_contract",
         ],
-        D::Iosp | D::TestQuality => &[],
+        D::TestQuality => &[
+            "no_assertion",
+            "no_sut",
+            "untested",
+            "uncovered",
+            "untested_logic",
+        ],
+        D::Iosp => &[],
     }
 }

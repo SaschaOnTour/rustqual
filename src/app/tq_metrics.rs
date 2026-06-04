@@ -52,8 +52,10 @@ pub(super) fn compute_tq(
     Some(crate::adapters::analyzers::tq::analyze_test_quality(&ctx))
 }
 
-/// Mark TQ warnings as suppressed based on `// qual:allow(test)` comments.
-/// Operation: iteration + suppression check, no own calls.
+/// Mark TQ warnings as suppressed based on `// qual:allow(test_quality[, kind])`
+/// comments. A blanket allow silences every TQ kind; a targeted form silences
+/// one (`no_assertion` / `no_sut` / `untested` / `uncovered` / `untested_logic`).
+/// Operation: iteration + per-kind suppression check via closures.
 pub(super) fn mark_tq_suppressions(
     tq: Option<&mut crate::adapters::analyzers::tq::TqAnalysis>,
     suppression_lines: &std::collections::HashMap<String, Vec<Suppression>>,
@@ -65,12 +67,26 @@ pub(super) fn mark_tq_suppressions(
     let window = super::suppression_windows::TQ;
     tq.warnings.iter_mut().for_each(|w| {
         if let Some(sups) = suppression_lines.get(&w.file) {
+            let target = tq_target_name(&w.kind);
             w.suppressed = sups.iter().any(|sup| {
                 let in_window = sup.line <= w.line && w.line - sup.line <= window;
-                in_window && sup.covers(tq_dim)
+                in_window && sup.suppresses(tq_dim, target, None)
             });
         }
     });
+}
+
+/// The `allow(test_quality, <target>)` name for a TQ warning kind.
+/// Operation: enum dispatch, no own calls.
+fn tq_target_name(kind: &crate::adapters::analyzers::tq::TqWarningKind) -> &'static str {
+    use crate::adapters::analyzers::tq::TqWarningKind as K;
+    match kind {
+        K::NoAssertion => "no_assertion",
+        K::NoSut => "no_sut",
+        K::Untested => "untested",
+        K::Uncovered => "uncovered",
+        K::UntestedLogic { .. } => "untested_logic",
+    }
 }
 
 /// Count TQ warnings and update summary, excluding suppressed entries.
