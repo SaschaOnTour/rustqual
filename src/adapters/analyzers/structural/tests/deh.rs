@@ -17,6 +17,35 @@ fn test_downcast_ref_flagged() {
 }
 
 #[test]
+fn downcast_in_cfg_test_attr_impl_excluded() {
+    // A downcast inside a method of an item-level `#[cfg(test)]` impl is test
+    // code even in a production file — DEH must skip it, consistent with the
+    // function-level `#[test]`/`#[cfg(test)]` handling and the SIT metadata.
+    let w = detect_in(
+        "struct M; #[cfg(test)] impl M { fn foo(&self, a: &dyn std::any::Any) { a.downcast_ref::<i32>(); } }",
+    );
+    assert!(
+        w.is_empty(),
+        "a downcast in a #[cfg(test)] impl must be excluded from DEH: {} warning(s)",
+        w.len()
+    );
+}
+
+#[test]
+fn downcast_in_cfg_test_attr_method_excluded() {
+    // `#[cfg(test)]` directly on an impl METHOD makes its body test code even in
+    // a regular production impl — DEH must skip a downcast inside it.
+    let w = detect_in(
+        "struct M; impl M { #[cfg(test)] fn foo(&self, a: &dyn std::any::Any) { a.downcast_ref::<i32>(); } }",
+    );
+    assert!(
+        w.is_empty(),
+        "a downcast in a #[cfg(test)] method must be excluded from DEH: {} warning(s)",
+        w.len()
+    );
+}
+
+#[test]
 fn test_downcast_mut_flagged() {
     let w = detect_in("fn foo(a: &mut dyn std::any::Any) { a.downcast_mut::<i32>(); }");
     assert_eq!(w.len(), 1);

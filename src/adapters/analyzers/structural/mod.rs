@@ -89,8 +89,15 @@ pub(crate) struct StructuralMetadata {
     pub type_defs: HashMap<String, String>,
     /// trait_name → TraitInfo
     pub trait_defs: HashMap<String, TraitInfo>,
-    /// trait_name → list of (impl_type, file)
+    /// trait_name → list of (impl_type, file) — production impls only
     pub trait_impls: HashMap<String, Vec<(String, String)>>,
+    /// trait_name → number of impls living in `#[cfg(test)]` code (a whole test
+    /// file, an inline `#[cfg(test)] mod` block, or an item-level `#[cfg(test)]`
+    /// on the impl). Not in `trait_impls` (metadata skips test code), but they
+    /// count toward a trait's TOTAL
+    /// implementor count so SIT does not flag a trait whose only extra
+    /// implementers are test doubles — the idiomatic DI / test-seam pattern.
+    pub cfg_test_trait_impl_counts: HashMap<String, usize>,
     /// (type_name, impl_file, impl_block_line) for inherent impls
     pub inherent_impls: Vec<(String, String, usize)>,
 }
@@ -117,6 +124,7 @@ pub(crate) fn collect_metadata(
         type_defs: HashMap::new(),
         trait_defs: HashMap::new(),
         trait_impls: HashMap::new(),
+        cfg_test_trait_impl_counts: collect_cfg_test_trait_impl_counts(parsed, cfg_test_files),
         inherent_impls: Vec::new(),
     };
     parsed.iter().for_each(|(path, _, syntax)| {
@@ -162,7 +170,7 @@ fn collect_item_metadata(item: &syn::Item, path: &str, meta: &mut StructuralMeta
                 },
             );
         }
-        syn::Item::Impl(imp) => {
+        syn::Item::Impl(imp) if !cfg_test(&imp.attrs) => {
             if let Some(ref type_name) = impl_type_name(imp) {
                 let line = imp.span().start().line;
                 if let Some((_, ref tp, _)) = imp.trait_ {
@@ -203,6 +211,72 @@ fn extract_impl_type_name(imp: &syn::ItemImpl) -> Option<String> {
 
 use crate::adapters::shared::cfg_test::has_cfg_test as has_cfg_test_attr;
 
+/// Count trait impls living in `#[cfg(test)]` code, keyed by trait name. The
+/// main metadata walk skips test code, so these production-invisible impls
+/// would otherwise vanish from a trait's implementor count — making a test
+/// seam (one prod impl + test doubles) look like a single-impl over-abstraction
+/// to SIT. "Test" means a whole `#![cfg(test)]` / integration-test file, an
+/// inline `#[cfg(test)] mod`, or an item-level `#[cfg(test)]` on the impl.
+/// Operation: iterates files, delegates per-scope collection via a closure.
+fn collect_cfg_test_trait_impl_counts(
+    parsed: &[(String, String, syn::File)],
+    cfg_test_files: &HashSet<String>,
+) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    parsed.iter().for_each(|(path, _, syntax)| {
+        let in_test = cfg_test_files.contains(path);
+        syntax
+            .items
+            .iter()
+            .for_each(|item| count_cfg_test_trait_impls(item, in_test, &mut counts));
+    });
+    counts
+}
+
+/// Recurse one item, counting `#[cfg(test)]` trait impls by last-path-segment
+/// trait name, descending into submodules. "In test" = a whole test file, an
+/// inline `#[cfg(test)] mod`, or an item-level `#[cfg(test)]` on the impl.
+///
+/// Counting is deliberately PURELY name-based: it makes no attempt to resolve
+/// which trait a same-named impl actually targets. That guarantees it never
+/// drops a real test double — so a legitimate DI seam is never re-flagged (no
+/// false positive, the original bug class). The accepted cost is a safe,
+/// documented false NEGATIVE: an unrelated test-only trait that happens to share
+/// a production trait's last-segment name is counted toward it and can make SIT
+/// under-report that production trait. (Earlier attempts to disambiguate by
+/// lexical scope / path form re-introduced false positives — e.g. a nested
+/// `super::Clock` double dropped because the nested module defined its own
+/// `Clock` — because correctly resolving `self::`/`super::`/glob/re-export/
+/// absolute paths IS trait identity, which the name-keyed metadata models on
+/// neither the production nor the test side. The production side has the same
+/// name-collision limitation.)
+/// Operation: match dispatch; own calls hidden in closures for IOSP.
+fn count_cfg_test_trait_impls(
+    item: &syn::Item,
+    in_test: bool,
+    counts: &mut HashMap<String, usize>,
+) {
+    let cfg_test = |attrs: &[syn::Attribute]| -> bool { has_cfg_test_attr(attrs) };
+    match item {
+        syn::Item::Impl(imp) if in_test || cfg_test(&imp.attrs) => {
+            if let Some((_, tp, _)) = &imp.trait_ {
+                if let Some(name) = tp.segments.last().map(|s| s.ident.to_string()) {
+                    *counts.entry(name).or_insert(0) += 1;
+                }
+            }
+        }
+        syn::Item::Mod(m) => {
+            let mod_in_test = in_test || cfg_test(&m.attrs);
+            m.content.iter().for_each(|(_, items)| {
+                items
+                    .iter()
+                    .for_each(|i| count_cfg_test_trait_impls(i, mod_in_test, counts));
+            });
+        }
+        _ => {}
+    }
+}
+
 /// Visit all inherent (non-trait) impl methods in parsed files, excluding test modules.
 /// Operation: iterates items, dispatches to callback via closure.
 pub(crate) fn visit_inherent_methods(
@@ -228,13 +302,15 @@ fn visit_item_methods(
     callback: &mut dyn FnMut(&syn::ImplItemFn, &str),
 ) {
     match item {
-        syn::Item::Impl(imp) => {
+        syn::Item::Impl(imp) if !has_cfg_test_attr(&imp.attrs) => {
             if imp.trait_.is_some() {
                 return;
             }
             imp.items.iter().for_each(|i| {
                 if let syn::ImplItem::Fn(method) = i {
-                    callback(method, path);
+                    if !has_cfg_test_attr(&method.attrs) {
+                        callback(method, path);
+                    }
                 }
             });
         }

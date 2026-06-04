@@ -21,6 +21,21 @@ fn inconsistent_error_types_in_cfg_test_file_excluded() {
 }
 
 #[test]
+fn cfg_test_attr_pub_fn_error_type_excluded() {
+    // A `#[cfg(test)]` pub fn is test code even in a production file — its error
+    // type must not count toward IET's inconsistent-error-type check, leaving a
+    // single production error type (no finding).
+    let w = detect_in(
+        "pub fn a() -> Result<(), String> { Ok(()) } #[cfg(test)] pub fn b() -> Result<(), u32> { Ok(()) }",
+    );
+    assert!(
+        w.is_empty(),
+        "a #[cfg(test)] pub fn's error type must be excluded from IET: {} warning(s)",
+        w.len()
+    );
+}
+
+#[test]
 fn test_consistent_error_types_not_flagged() {
     let w = detect_in(
         "pub fn a() -> Result<(), String> { Ok(()) } pub fn b() -> Result<i32, String> { Ok(1) }",

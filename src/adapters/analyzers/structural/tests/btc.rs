@@ -22,6 +22,35 @@ fn stub_impl_in_cfg_test_file_excluded() {
 }
 
 #[test]
+fn cfg_test_attr_impl_stub_excluded() {
+    // An item-level `#[cfg(test)]` trait impl is test code (a mock) even in a
+    // production file — its stub bodies must not trip BTC, consistent with the
+    // SIT metadata treating the same impl as a test impl.
+    let w = detect_in(
+        "trait Foo { fn bar(&self); } struct M; #[cfg(test)] impl Foo for M { fn bar(&self) { todo!() } }",
+    );
+    assert!(
+        w.is_empty(),
+        "a #[cfg(test)] impl's stub must be excluded from BTC: {} warning(s)",
+        w.len()
+    );
+}
+
+#[test]
+fn cfg_test_attr_method_stub_excluded() {
+    // `#[cfg(test)]` directly on a trait-impl method marks it test code; its stub
+    // body must not trip BTC, consistent with the item-level `#[cfg(test)] impl`.
+    let w = detect_in(
+        "trait Foo { fn bar(&self); } struct M; impl Foo for M { #[cfg(test)] fn bar(&self) { todo!() } }",
+    );
+    assert!(
+        w.is_empty(),
+        "a #[cfg(test)] method stub must be excluded from BTC: {} warning(s)",
+        w.len()
+    );
+}
+
+#[test]
 fn test_all_stub_methods_flagged() {
     let w = detect_in("trait Foo { fn bar(&self); } impl Foo for MyType { fn bar(&self) { todo!() } } struct MyType;");
     assert_eq!(w.len(), 1);

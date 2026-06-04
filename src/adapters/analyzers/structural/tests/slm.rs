@@ -18,6 +18,30 @@ fn selfless_method_in_cfg_test_file_excluded() {
 }
 
 #[test]
+fn cfg_test_attr_impl_method_excluded() {
+    // An item-level `#[cfg(test)]` impl is test code even in a production file;
+    // its methods must not trip SLM (consistent with whole cfg-test files).
+    let w = detect_in("struct S; #[cfg(test)] impl S { fn foo(&self) -> i32 { 42 } }");
+    assert!(
+        w.is_empty(),
+        "a #[cfg(test)] impl method must be excluded from SLM: {} warning(s)",
+        w.len()
+    );
+}
+
+#[test]
+fn cfg_test_attr_method_excluded() {
+    // `#[cfg(test)]` directly on an impl METHOD makes that method test code even
+    // in a regular production impl — it must not trip SLM.
+    let w = detect_in("struct S; impl S { #[cfg(test)] fn foo(&self) -> i32 { 42 } }");
+    assert!(
+        w.is_empty(),
+        "a #[cfg(test)] method must be excluded from SLM: {} warning(s)",
+        w.len()
+    );
+}
+
+#[test]
 fn test_selfless_method_flagged() {
     let w = detect_in("struct S; impl S { fn foo(&self) -> i32 { 42 } }");
     assert_eq!(w.len(), 1);

@@ -66,6 +66,24 @@ impl<'ast, 'a> Visit<'ast> for DowncastVisitor<'a> {
         self.in_test = was_in_test;
     }
 
+    fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
+        let was_in_test = self.in_test;
+        if has_cfg_test_attr(&node.attrs) {
+            self.in_test = true;
+        }
+        syn::visit::visit_item_impl(self, node);
+        self.in_test = was_in_test;
+    }
+
+    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+        let was_in_test = self.in_test;
+        if has_cfg_test_attr(&node.attrs) {
+            self.in_test = true;
+        }
+        syn::visit::visit_impl_item_fn(self, node);
+        self.in_test = was_in_test;
+    }
+
     fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
         if !self.in_test {
             let method_name = node.method.to_string();

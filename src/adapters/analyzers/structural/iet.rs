@@ -53,7 +53,7 @@ fn collect_pub_error_types(file: &syn::File) -> HashSet<String> {
 fn collect_item_errors(item: &syn::Item, error_types: &mut HashSet<String>) {
     let extract_error = |output: &syn::ReturnType| extract_result_error_type(output);
     match item {
-        syn::Item::Fn(f) => {
+        syn::Item::Fn(f) if !super::has_cfg_test_attr(&f.attrs) => {
             if matches!(f.vis, syn::Visibility::Public(_)) {
                 extract_error(&f.sig.output).iter().for_each(|e| {
                     error_types.insert(e.clone());
