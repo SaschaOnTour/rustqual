@@ -58,6 +58,55 @@ fn architecture_marker_must_cover_the_architecture_dimension() {
     );
 }
 
+fn targeted_marker(
+    line: usize,
+    target: &str,
+) -> HashMap<String, Vec<crate::findings::Suppression>> {
+    [(
+        "src/x.rs".to_string(),
+        vec![crate::findings::Suppression {
+            line,
+            dimensions: vec![Dimension::Architecture],
+            reason: Some("r".to_string()),
+            target: Some(crate::domain::SuppressionTarget {
+                name: target.to_string(),
+                pin: None,
+            }),
+        }],
+    )]
+    .into()
+}
+
+fn arch_finding_with(line: usize, rule_id: &str) -> Finding {
+    Finding {
+        rule_id: rule_id.into(),
+        ..arch_finding(line, false)
+    }
+}
+
+#[test]
+fn architecture_targeted_marker_matches_only_its_family() {
+    // The finding family is `layer` (rule id `architecture/layer`).
+    let mut layer = vec![arch_finding(6, false)];
+    mark_architecture_suppressions(&mut layer, &targeted_marker(5, "layer"));
+    assert!(layer[0].suppressed, "layer target silences a layer finding");
+
+    let mut layer2 = vec![arch_finding(6, false)];
+    mark_architecture_suppressions(&mut layer2, &targeted_marker(5, "forbidden"));
+    assert!(
+        !layer2[0].suppressed,
+        "a forbidden target must not silence a layer finding"
+    );
+}
+
+#[test]
+fn architecture_family_is_first_segment_after_prefix() {
+    // `architecture/layer/unmatched` still has family `layer`.
+    let mut sub = vec![arch_finding_with(6, "architecture/layer/unmatched")];
+    mark_architecture_suppressions(&mut sub, &targeted_marker(5, "layer"));
+    assert!(sub[0].suppressed, "sub-rule inherits the `layer` family");
+}
+
 #[test]
 fn count_architecture_warnings_excludes_suppressed() {
     // Two active + one suppressed → 2. The asymmetric counts pin the

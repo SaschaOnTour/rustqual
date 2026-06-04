@@ -69,9 +69,14 @@ pub fn target_kind(dim: Dimension, name: &str) -> Option<TargetKind> {
             }
             _ => None,
         },
-        // Architecture and test-quality targets are added in their slices;
-        // iosp is single-kind, so only the bare `allow(iosp)` form exists.
-        D::Iosp | D::Architecture | D::TestQuality => None,
+        D::Architecture => match name {
+            // The top-level rule family (the `architecture/<family>/…` segment).
+            "call_parity" | "forbidden" | "layer" | "pattern" | "trait_contract" => Some(Boolean),
+            _ => None,
+        },
+        // test-quality targets are added in its slice; iosp is single-kind,
+        // so only the bare `allow(iosp)` form exists.
+        D::Iosp | D::TestQuality => None,
     }
 }
 
@@ -104,6 +109,13 @@ pub fn target_names(dim: Dimension) -> &'static [&'static str] {
             "wildcard_imports",
             "repeated_matches",
         ],
-        D::Iosp | D::Architecture | D::TestQuality => &[],
+        D::Architecture => &[
+            "call_parity",
+            "forbidden",
+            "layer",
+            "pattern",
+            "trait_contract",
+        ],
+        D::Iosp | D::TestQuality => &[],
     }
 }
