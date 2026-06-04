@@ -11,28 +11,9 @@ pub use dead_code::{DeadCodeKind, DeadCodeWarning};
 pub use fragments::FragmentGroup;
 pub use functions::{DuplicateGroup, DuplicateKind};
 
-use syn::visit::Visit;
-
+use crate::adapters::shared::declared_function::DeclaredFunction;
+use crate::adapters::shared::file_visitor::visit_all_files;
 use crate::adapters::shared::normalize::NormalizedToken;
-
-// ── Shared visitor infrastructure ──────────────────────────────
-
-/// Trait for AST visitors that need per-file state reset.
-pub(crate) trait FileVisitor {
-    fn reset_for_file(&mut self, file_path: &str);
-}
-
-/// Visit all parsed files with a visitor, resetting per-file state.
-/// Trivial: iteration with trait method call.
-pub(crate) fn visit_all_files<'a, V>(parsed: &'a [(String, String, syn::File)], visitor: &mut V)
-where
-    V: FileVisitor + Visit<'a>,
-{
-    parsed.iter().for_each(|(path, _, file)| {
-        visitor.reset_for_file(path);
-        syn::visit::visit_file(visitor, file);
-    });
-}
 
 // ── Shared types ────────────────────────────────────────────────
 
@@ -45,25 +26,6 @@ pub struct FunctionHashEntry {
     pub hash: u64,
     pub token_count: usize,
     pub tokens: Vec<NormalizedToken>,
-}
-
-/// A declared function with metadata for dead code analysis.
-pub struct DeclaredFunction {
-    pub name: String,
-    pub qualified_name: String,
-    pub file: String,
-    pub line: usize,
-    pub is_test: bool,
-    pub is_main: bool,
-    pub is_trait_impl: bool,
-    pub has_allow_dead_code: bool,
-    /// Whether this function is marked as public API via `// qual:api`.
-    pub is_api: bool,
-    /// Whether this function is marked as a test-only helper via
-    /// `// qual:test_helper`. Narrowly excludes the DRY-002 `testonly`
-    /// dead-code finding and TQ-003 (untested) without disabling
-    /// other checks.
-    pub is_test_helper: bool,
 }
 
 // ── Function hash collection ────────────────────────────────────

@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use syn::spanned::Spanned;
 use syn::visit::Visit;
 
+use crate::adapters::shared::file_visitor::{visit_all_files, FileVisitor};
 use crate::config::sections::DuplicatesConfig;
 
 /// Maximum entries per hash group before skipping pairwise comparison.
@@ -83,7 +84,7 @@ fn collect_all_windows(
         parent_type: None,
         is_trait_impl: false,
     };
-    super::visit_all_files(parsed, &mut collector);
+    visit_all_files(parsed, &mut collector);
     (collector.fn_infos, collector.windows)
 }
 
@@ -227,7 +228,7 @@ struct FragmentCollector<'a> {
     is_trait_impl: bool,
 }
 
-impl super::FileVisitor for FragmentCollector<'_> {
+impl FileVisitor for FragmentCollector<'_> {
     fn reset_for_file(&mut self, file_path: &str) {
         self.file = file_path.to_string();
         self.parent_type = None;

@@ -1,7 +1,9 @@
 use crate::adapters::analyzers::dry::dead_code::*;
 use crate::adapters::analyzers::dry::{
-    has_allow_dead_code, has_cfg_test, has_test_attr, qualify_name, DeclaredFunction, FileVisitor,
+    has_allow_dead_code, has_cfg_test, has_test_attr, qualify_name,
 };
+use crate::adapters::shared::declared_function::DeclaredFunction;
+use crate::adapters::shared::file_visitor::FileVisitor;
 use crate::config::Config;
 use std::collections::HashSet;
 use syn::visit::Visit;

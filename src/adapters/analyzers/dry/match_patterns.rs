@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use syn::visit::Visit;
 
-use crate::adapters::analyzers::dry::FileVisitor;
+use crate::adapters::shared::file_visitor::{visit_all_files, FileVisitor};
 
 /// Minimum number of match arms for a match to be considered.
 const MIN_MATCH_ARMS: usize = 3;
@@ -162,7 +162,7 @@ pub fn detect_repeated_matches(parsed: &[(String, String, syn::File)]) -> Vec<Re
         current_impl_type: String::new(),
         module_stack: Vec::new(),
     };
-    crate::adapters::analyzers::dry::visit_all_files(parsed, &mut collector);
+    visit_all_files(parsed, &mut collector);
     group_repeated_patterns(collector.collected)
 }
 

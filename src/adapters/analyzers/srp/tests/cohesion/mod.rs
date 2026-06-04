@@ -104,6 +104,6 @@ pub(super) fn collect_methods_for(code: &str) -> Vec<MethodFieldData> {
         file: String::new(),
         methods: &mut result,
     };
-    crate::adapters::analyzers::dry::visit_all_files(&parsed, &mut collector);
+    crate::adapters::shared::file_visitor::visit_all_files(&parsed, &mut collector);
     result
 }

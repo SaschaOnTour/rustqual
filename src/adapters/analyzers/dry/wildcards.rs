@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use syn::spanned::Spanned;
 use syn::visit::Visit;
 
-use super::FileVisitor;
+use crate::adapters::shared::file_visitor::{visit_all_files, FileVisitor};
 
 /// A wildcard import warning (e.g. `use crate::module::*`).
 #[derive(Debug, Clone)]
@@ -32,7 +32,7 @@ pub fn detect_wildcard_imports(
         in_test: false,
         file_is_test: false,
     };
-    super::visit_all_files(parsed, &mut collector);
+    visit_all_files(parsed, &mut collector);
     collector.warnings
 }
 

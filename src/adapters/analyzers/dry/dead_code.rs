@@ -2,9 +2,9 @@ use std::collections::HashSet;
 
 use syn::visit::Visit;
 
-use super::{
-    has_allow_dead_code, has_cfg_test, has_test_attr, qualify_name, DeclaredFunction, FileVisitor,
-};
+use super::{has_allow_dead_code, has_cfg_test, has_test_attr, qualify_name};
+use crate::adapters::shared::declared_function::DeclaredFunction;
+use crate::adapters::shared::file_visitor::FileVisitor;
 
 // ── DeclaredFnCollector (for dead code) ─────────────────────────
 
@@ -173,7 +173,7 @@ pub fn detect_dead_code(
 /// Mark functions that have a `// qual:api` annotation within the annotation window.
 /// Operation: iterates declarations checking line proximity to API markers.
 pub(crate) fn mark_api_declarations(
-    declared: &mut [super::DeclaredFunction],
+    declared: &mut [DeclaredFunction],
     api_lines: &std::collections::HashMap<String, std::collections::HashSet<usize>>,
 ) {
     declared.iter_mut().for_each(|d| {
@@ -189,7 +189,7 @@ pub(crate) fn mark_api_declarations(
 /// the annotation window.
 /// Operation: iterates declarations checking line proximity to markers.
 pub(crate) fn mark_test_helper_declarations(
-    declared: &mut [super::DeclaredFunction],
+    declared: &mut [DeclaredFunction],
     test_helper_lines: &std::collections::HashMap<String, std::collections::HashSet<usize>>,
 ) {
     declared.iter_mut().for_each(|d| {
@@ -216,9 +216,9 @@ pub(crate) use crate::adapters::shared::cfg_test_files::collect_cfg_test_file_pa
 /// Mark declared functions from cfg-test files as test code.
 /// Trivial: iteration + field mutation.
 fn mark_cfg_test_declarations(
-    mut declared: Vec<super::DeclaredFunction>,
+    mut declared: Vec<DeclaredFunction>,
     cfg_test_files: &HashSet<String>,
-) -> Vec<super::DeclaredFunction> {
+) -> Vec<DeclaredFunction> {
     declared.iter_mut().for_each(|d| {
         if cfg_test_files.contains(&d.file) {
             d.is_test = true;

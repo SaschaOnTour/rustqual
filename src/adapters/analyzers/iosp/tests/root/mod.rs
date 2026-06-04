@@ -3,8 +3,8 @@
 //! parse/analyze/classify helpers live here and reach the sub-modules via
 //! `use super::*`; per-test case tables live with their tests.
 
-pub(super) use crate::adapters::analyzers::iosp::scope::ProjectScope;
 pub(super) use crate::adapters::analyzers::iosp::*;
+pub(super) use crate::adapters::shared::project_scope::ProjectScope;
 pub(super) use crate::config::Config;
 
 mod analysis_structure;

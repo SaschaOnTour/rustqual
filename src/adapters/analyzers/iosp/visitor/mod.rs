@@ -2,7 +2,7 @@ mod visit;
 
 use std::collections::HashMap;
 
-use crate::adapters::analyzers::iosp::scope::ProjectScope;
+use crate::adapters::shared::project_scope::ProjectScope;
 use crate::config::Config;
 
 use super::types::{CallOccurrence, ComplexityHotspot, LogicOccurrence, MagicNumberOccurrence};

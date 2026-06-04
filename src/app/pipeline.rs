@@ -10,8 +10,8 @@ use crate::adapters::source::filesystem::{
 
 use std::path::Path;
 
-use crate::adapters::analyzers::iosp::scope::ProjectScope;
 use crate::adapters::analyzers::iosp::{Analyzer, FunctionAnalysis};
+use crate::adapters::shared::project_scope::ProjectScope;
 use crate::config::Config;
 use crate::report::{AnalysisResult, Summary};
 

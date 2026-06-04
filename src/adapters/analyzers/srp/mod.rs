@@ -6,6 +6,7 @@ use std::collections::HashSet;
 
 use syn::visit::Visit;
 
+use crate::adapters::shared::file_visitor::{visit_all_files, FileVisitor};
 use crate::config::sections::SrpConfig;
 
 /// Warning about a struct that may violate the Single Responsibility Principle.
@@ -95,14 +96,14 @@ pub fn analyze_srp(
         file: String::new(),
         structs: &mut structs,
     };
-    crate::adapters::analyzers::dry::visit_all_files(parsed, &mut struct_collector);
+    visit_all_files(parsed, &mut struct_collector);
 
     let mut methods = Vec::new();
     let mut method_collector = ImplMethodCollector {
         file: String::new(),
         methods: &mut methods,
     };
-    crate::adapters::analyzers::dry::visit_all_files(parsed, &mut method_collector);
+    visit_all_files(parsed, &mut method_collector);
 
     let struct_warnings = cohesion::build_struct_warnings(&structs, &methods, config);
     let cfg_test_files =
@@ -128,7 +129,7 @@ struct StructCollector<'a> {
     structs: &'a mut Vec<StructInfo>,
 }
 
-impl crate::adapters::analyzers::dry::FileVisitor for StructCollector<'_> {
+impl FileVisitor for StructCollector<'_> {
     fn reset_for_file(&mut self, file_path: &str) {
         self.file = file_path.to_string();
     }
@@ -160,7 +161,7 @@ struct ImplMethodCollector<'a> {
     methods: &'a mut Vec<MethodFieldData>,
 }
 
-impl crate::adapters::analyzers::dry::FileVisitor for ImplMethodCollector<'_> {
+impl FileVisitor for ImplMethodCollector<'_> {
     fn reset_for_file(&mut self, file_path: &str) {
         self.file = file_path.to_string();
     }

@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::adapters::analyzers::dry::dead_code::DeadCodeWarning;
-use crate::adapters::analyzers::dry::DeclaredFunction;
+use crate::adapters::shared::declared_function::DeclaredFunction;
 use crate::config::Config;
 
 use super::{TqWarning, TqWarningKind};

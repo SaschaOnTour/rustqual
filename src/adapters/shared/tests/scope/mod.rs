@@ -2,7 +2,7 @@
 //! (each ≤ the SRP file-length cap); shared imports + the `build_scope` helper
 //! live here and reach the sub-modules via `use super::*`.
 
-pub(super) use crate::adapters::analyzers::iosp::scope::*;
+pub(super) use crate::adapters::shared::project_scope::*;
 pub(super) use std::collections::{HashMap, HashSet};
 pub(super) use syn::visit::Visit;
 pub(super) use syn::{File, ImplItem, TraitItem};

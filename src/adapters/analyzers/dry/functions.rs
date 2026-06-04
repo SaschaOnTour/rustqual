@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use syn::spanned::Spanned;
 use syn::visit::Visit;
 
-use super::{qualify_name, FileVisitor, FunctionHashEntry};
+use super::{qualify_name, FunctionHashEntry};
+use crate::adapters::shared::file_visitor::FileVisitor;
 use crate::config::sections::DuplicatesConfig;
 
 // ── FunctionCollector (for DRY hashing) ─────────────────────────

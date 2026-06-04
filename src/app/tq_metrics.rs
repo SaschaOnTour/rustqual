@@ -19,7 +19,7 @@ pub(super) fn compute_tq(
         .iter()
         .map(|(path, _, file)| (path.as_str(), file))
         .collect();
-    let scope = crate::adapters::analyzers::iosp::scope::ProjectScope::from_files(&scope_refs);
+    let scope = crate::adapters::shared::project_scope::ProjectScope::from_files(&scope_refs);
     let mut declared_fns = crate::adapters::analyzers::dry::collect_declared_functions(parsed);
     crate::adapters::analyzers::dry::dead_code::mark_api_declarations(
         &mut declared_fns,

@@ -31,7 +31,8 @@ pub fn prepare_init_content(path: &Path) -> String {
 /// into `ProjectMetrics`.
 /// Integration: orchestrates parsing, scope build, analysis, extraction.
 fn compute_project_metrics(files: &[std::path::PathBuf], path: &Path) -> ProjectMetrics {
-    use crate::adapters::analyzers::iosp::{scope::ProjectScope, Analyzer};
+    use crate::adapters::analyzers::iosp::Analyzer;
+    use crate::adapters::shared::project_scope::ProjectScope;
     use crate::adapters::source::filesystem::read_and_parse_files;
     use crate::config::Config;
 

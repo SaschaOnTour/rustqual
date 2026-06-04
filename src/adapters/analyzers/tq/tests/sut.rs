@@ -1,7 +1,7 @@
-use crate::adapters::analyzers::dry::DeclaredFunction;
-use crate::adapters::analyzers::iosp::scope::ProjectScope;
 use crate::adapters::analyzers::tq::sut::*;
 use crate::adapters::analyzers::tq::{TqWarning, TqWarningKind};
+use crate::adapters::shared::declared_function::DeclaredFunction;
+use crate::adapters::shared::project_scope::ProjectScope;
 use std::collections::HashSet;
 use syn::visit::Visit;
 

@@ -122,7 +122,7 @@ fn import_of_different_module_same_adapter_tree_ok_when_to_is_peer_only() {
     // iosp importing from its own tree is fine.
     let fx = Fixture::new(&[(
         "src/adapters/analyzers/iosp/mod.rs",
-        "use crate::adapters::analyzers::iosp::scope::ProjectScope;",
+        "use crate::adapters::shared::project_scope::ProjectScope;",
     )]);
     // `to` only matches analyzers/<something> but must NOT include iosp itself.
     // Use an except to exclude iosp.

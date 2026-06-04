@@ -11,9 +11,9 @@ use std::path::Path;
 use syn::visit::Visit;
 
 use crate::adapters::analyzers::dry::dead_code::DeadCodeWarning;
-use crate::adapters::analyzers::dry::DeclaredFunction;
-use crate::adapters::analyzers::iosp::scope::ProjectScope;
 use crate::adapters::analyzers::iosp::FunctionAnalysis;
+use crate::adapters::shared::declared_function::DeclaredFunction;
+use crate::adapters::shared::project_scope::ProjectScope;
 use crate::config::Config;
 
 /// A single test quality warning.

@@ -1,5 +1,4 @@
 pub(crate) mod classify;
-pub(crate) mod scope;
 pub mod types;
 pub(crate) mod visitor;
 
@@ -7,8 +6,8 @@ pub use classify::classify_function;
 use syn::{File, ImplItem, Item, ItemFn, TraitItem};
 pub use types::*;
 
+use crate::adapters::shared::project_scope::ProjectScope;
 use crate::config::Config;
-use scope::ProjectScope;
 
 use classify::extract_type_name;
 
