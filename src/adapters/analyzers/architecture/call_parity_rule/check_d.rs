@@ -94,7 +94,7 @@ fn inspect_anchor(
 
 /// True iff any adapter has `concrete` in its count map. Mirror of
 /// `check_b::any_adapter_reaches_concrete` for Check D's count shape.
-fn any_adapter_counts_concrete(concrete: &str, counts: &AdapterTargetCounts) -> bool {
+pub(super) fn any_adapter_counts_concrete(concrete: &str, counts: &AdapterTargetCounts) -> bool {
     counts.values().any(|m| m.contains_key(concrete))
 }
 

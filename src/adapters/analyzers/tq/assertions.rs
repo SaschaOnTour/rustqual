@@ -34,7 +34,8 @@ pub(crate) fn detect_assertion_free_tests(
             visitor.visit_block(&test_fn.body);
             if !(visitor.has_assertion
                 || (test_fn.should_panic && visitor.has_panic)
-                || visitor.has_call)
+                || visitor.has_call
+                || test_fn.returns_bool)
             {
                 warnings.push(TqWarning {
                     file: path.clone(),
@@ -55,6 +56,9 @@ struct TestFnInfo {
     line: usize,
     body: syn::Block,
     should_panic: bool,
+    /// Return type is `bool` — a quickcheck-style property whose boolean
+    /// verdict is its oracle (see `is_bool_return`).
+    returns_bool: bool,
 }
 
 /// Collects `#[test]` functions from a file.
@@ -82,6 +86,7 @@ impl<'ast> Visit<'ast> for TestFunctionCollector {
                 line,
                 body: (*node.block).clone(),
                 should_panic: has_should_panic_attr(&node.attrs),
+                returns_bool: is_bool_return(&node.sig.output),
             });
         }
         syn::visit::visit_item_fn(self, node);
@@ -99,11 +104,14 @@ struct TestAssertionVisitor<'cfg> {
     extra_macros: &'cfg [String],
 }
 
-/// Check if a macro name is an assertion: `assert*` or `debug_assert*` prefix, or in extra list.
+/// Check if a macro name is an assertion: `assert*`, `debug_assert*` or
+/// proptest's `prop_assert*` (`prop_assert!` / `prop_assert_eq!` /
+/// `prop_assert_ne!`) prefix, or in the extra list.
 /// Operation: string prefix + linear search.
 fn is_assertion_macro(name: &str, extra_macros: &[String]) -> bool {
     name.starts_with("assert")
         || name.starts_with("debug_assert")
+        || name.starts_with("prop_assert")
         || extra_macros.iter().any(|m| m == name)
 }
 
@@ -157,4 +165,20 @@ use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
 /// Operation: attribute matching.
 fn has_should_panic_attr(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|a| a.path().is_ident("should_panic"))
+}
+
+/// True if the function returns `bool` — a quickcheck-style property whose
+/// boolean verdict IS its assertion. The macro-expansion pre-pass surfaces
+/// `quickcheck! { fn p(x: T) -> bool { … } }` as a synthetic `#[test] fn p()
+/// -> bool { … }` with its params dropped, so a body like `{ x < 100 }` carries
+/// no assertion macro or call — the returned bool is the oracle quickcheck
+/// checks across every generated input. A plain `#[test]` cannot return `bool`
+/// (it would not compile), so this signal is quickcheck-specific and safe.
+/// Operation: return-type path inspection.
+fn is_bool_return(output: &syn::ReturnType) -> bool {
+    let syn::ReturnType::Type(_, ty) = output else {
+        return false;
+    };
+    matches!(&**ty, syn::Type::Path(tp)
+        if tp.path.segments.last().is_some_and(|s| s.ident == "bool"))
 }

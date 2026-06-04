@@ -170,14 +170,14 @@ fn inspect_target(info: &PubFnInfo<'_>, ctx: &TargetCtx<'_>) -> Option<MatchLoca
 
 /// True iff any adapter has `concrete` in its coverage. Gates the
 /// anchor-backed-concrete skip so mixed-form drift stays visible.
-fn any_adapter_reaches_concrete(concrete: &str, coverage: &AdapterCoverage) -> bool {
+pub(super) fn any_adapter_reaches_concrete(concrete: &str, coverage: &AdapterCoverage) -> bool {
     coverage.values().any(|set| set.contains(concrete))
 }
 
 /// True iff any backed impl-method canonical is covered or
 /// transitively reachable. Drives the anchor-orphan suppression so
 /// all-direct-concrete coverage doesn't fire a false orphan.
-fn any_impl_canonical_covered_or_reachable(
+pub(super) fn any_impl_canonical_covered_or_reachable(
     info: &AnchorInfo,
     coverage: &AdapterCoverage,
     reachable: &HashSet<String>,

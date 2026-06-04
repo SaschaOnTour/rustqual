@@ -19,7 +19,7 @@
 //! file-local helpers — walking only pub fns would under-count delegation
 //! chains and trigger false positives in Check A.
 
-mod edge_rewrite;
+pub(crate) mod edge_rewrite;
 
 pub(crate) use edge_rewrite::apply_edge_rewrite;
 

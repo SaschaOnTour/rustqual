@@ -222,6 +222,10 @@ fn collect_iosp_complexity_positions<F>(
     use crate::findings::Dimension;
     let mode = MatchMode::LineWindow(windows::DEFAULT);
     let complexity_enabled = config.complexity.enabled;
+    let test_max_lines = config
+        .tests
+        .max_function_lines
+        .unwrap_or(config.complexity.max_function_lines);
     analysis.results.iter().for_each(|f| {
         if matches!(f.classification, Classification::Violation { .. }) {
             push(&f.file, f.line, Dimension::Iosp, mode);
@@ -230,7 +234,7 @@ fn collect_iosp_complexity_positions<F>(
             return;
         }
         if let Some(c) = &f.complexity {
-            if complexity_predicates::would_trigger(f, c, &config.complexity) {
+            if complexity_predicates::would_trigger(f, c, &config.complexity, test_max_lines) {
                 push(&f.file, f.line, Dimension::Complexity, mode);
             }
             push_magic_numbers(f, c, &config.complexity, push);

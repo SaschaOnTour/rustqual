@@ -1,15 +1,5 @@
+use super::make_parsed;
 use crate::adapters::analyzers::coupling::*;
-
-fn parse_code(code: &str) -> syn::File {
-    syn::parse_file(code).expect("Failed to parse test code")
-}
-
-fn make_parsed(files: Vec<(&str, &str)>) -> Vec<(String, String, syn::File)> {
-    files
-        .into_iter()
-        .map(|(path, code)| (path.to_string(), code.to_string(), parse_code(code)))
-        .collect()
-}
 
 /// Find module index by name in graph.modules.
 fn idx(graph: &ModuleGraph, name: &str) -> usize {
@@ -19,6 +9,21 @@ fn idx(graph: &ModuleGraph, name: &str) -> usize {
         .position(|m| m == name)
         .unwrap_or_else(|| panic!("module '{name}' not found in graph"))
 }
+
+/// Whether the module graph built from `files` has a forward edge `from → to`.
+fn has_module_edge(files: &[(&str, &str)], from: &str, to: &str) -> bool {
+    let parsed = make_parsed(files.to_vec());
+    let graph = graph::build_module_graph(&parsed);
+    graph.forward[idx(&graph, from)].contains(&idx(&graph, to))
+}
+
+/// `(label, files, from_module, to_module)` for a build-graph edge case.
+type EdgeCase = (
+    &'static str,
+    &'static [(&'static str, &'static str)],
+    &'static str,
+    &'static str,
+);
 
 // `file_to_module` lives in `adapters::shared::file_to_module`; its
 // tests are in `adapters::shared::tests::file_to_module`.
@@ -83,56 +88,70 @@ fn test_build_graph_group_use() {
 
 #[test]
 fn test_build_graph_external_dep_ignored() {
-    let parsed = make_parsed(vec![(
-        "main.rs",
-        "use std::collections::HashMap; use serde::Deserialize; fn main() {}",
-    )]);
-    let graph = graph::build_module_graph(&parsed);
-    let main_idx = idx(&graph, "main");
-    assert!(
-        graph.forward[main_idx].is_empty(),
-        "External dependencies should be ignored"
-    );
-}
-
-#[test]
-fn test_build_graph_multiple_files_same_module() {
+    // `serde::config` collides with the local `config` module on its second
+    // segment. Only a `crate::`-prefixed path may create an edge, so the
+    // external import must still be ignored: a non-crate root short-circuits
+    // the dependency, length alone is not enough.
     let parsed = make_parsed(vec![
         (
-            "config/mod.rs",
-            "use crate::analyzer::Foo; pub mod sections;",
+            "main.rs",
+            "use std::collections::HashMap; use serde::config::Opt; fn main() {}",
         ),
-        ("config/sections.rs", "pub struct Defaults;"),
-        ("analyzer.rs", "pub struct Foo;"),
-    ]);
-    let graph = graph::build_module_graph(&parsed);
-    let config_idx = idx(&graph, "config");
-    let analyzer_idx = idx(&graph, "analyzer");
-    assert!(graph.forward[config_idx].contains(&analyzer_idx));
-}
-
-#[test]
-fn test_build_graph_glob_use() {
-    let parsed = make_parsed(vec![
-        ("main.rs", "use crate::analyzer::*; fn main() {}"),
-        ("analyzer.rs", "pub fn analyze() {}"),
-    ]);
-    let graph = graph::build_module_graph(&parsed);
-    let main_idx = idx(&graph, "main");
-    let analyzer_idx = idx(&graph, "analyzer");
-    assert!(graph.forward[main_idx].contains(&analyzer_idx));
-}
-
-#[test]
-fn test_build_graph_rename_use() {
-    let parsed = make_parsed(vec![
-        ("main.rs", "use crate::config::Config as Cfg; fn main() {}"),
         ("config.rs", "pub struct Config;"),
     ]);
     let graph = graph::build_module_graph(&parsed);
     let main_idx = idx(&graph, "main");
-    let config_idx = idx(&graph, "config");
-    assert!(graph.forward[main_idx].contains(&config_idx));
+    assert!(
+        graph.forward[main_idx].is_empty(),
+        "External dependencies must be ignored even when a path segment \
+         collides with a local module name"
+    );
+}
+
+#[test]
+fn build_graph_records_use_edges_across_forms() {
+    // A `use crate::X::…` records a `from → X` edge whether it's spread across
+    // files of the same module, a glob import, or a renamed import.
+    // (label, files, from, to)
+    let cases: &[EdgeCase] = &[
+        (
+            "multiple files of the same module",
+            &[
+                (
+                    "config/mod.rs",
+                    "use crate::analyzer::Foo; pub mod sections;",
+                ),
+                ("config/sections.rs", "pub struct Defaults;"),
+                ("analyzer.rs", "pub struct Foo;"),
+            ],
+            "config",
+            "analyzer",
+        ),
+        (
+            "glob use",
+            &[
+                ("main.rs", "use crate::analyzer::*; fn main() {}"),
+                ("analyzer.rs", "pub fn analyze() {}"),
+            ],
+            "main",
+            "analyzer",
+        ),
+        (
+            "renamed use",
+            &[
+                ("main.rs", "use crate::config::Config as Cfg; fn main() {}"),
+                ("config.rs", "pub struct Config;"),
+            ],
+            "main",
+            "config",
+        ),
+    ];
+    for (label, files, from, to) in cases {
+        assert!(
+            has_module_edge(files, from, to),
+            "case {label}: expected a {from} → {to} edge"
+        );
+    }
 }
 
 // ── compute_coupling_metrics tests ──────────────────────────────
@@ -260,53 +279,4 @@ fn test_cycles_two_independent_cycles() {
     };
     let cycles = cycles::detect_cycles(&graph);
     assert_eq!(cycles.len(), 2);
-}
-
-// ── analyze_coupling integration test ───────────────────────────
-
-#[test]
-fn test_analyze_coupling_integration() {
-    let parsed = make_parsed(vec![
-        ("main.rs", "use crate::config::Config; fn main() {}"),
-        ("config.rs", "pub struct Config;"),
-        ("pipeline.rs", "use crate::config::Config; pub fn run() {}"),
-    ]);
-    let analysis = analyze_coupling(&parsed);
-    assert_eq!(analysis.metrics.len(), 3);
-    assert!(analysis.cycles.is_empty());
-
-    // config should have highest afferent coupling (2 dependents)
-    let config_metrics = analysis
-        .metrics
-        .iter()
-        .find(|m| m.module_name == "config")
-        .unwrap();
-    assert_eq!(config_metrics.afferent, 2);
-    assert_eq!(config_metrics.efferent, 0);
-}
-
-#[test]
-fn test_analyze_coupling_with_cycle() {
-    let parsed = make_parsed(vec![
-        ("a.rs", "use crate::b::Foo; pub struct Bar;"),
-        ("b.rs", "use crate::a::Bar; pub struct Foo;"),
-    ]);
-    let analysis = analyze_coupling(&parsed);
-    assert_eq!(analysis.cycles.len(), 1);
-    assert!(analysis.cycles[0].modules.contains(&"a".to_string()));
-    assert!(analysis.cycles[0].modules.contains(&"b".to_string()));
-}
-
-#[test]
-fn test_analyze_coupling_no_crate_deps() {
-    let parsed = make_parsed(vec![
-        ("a.rs", "use std::collections::HashMap; fn f() {}"),
-        ("b.rs", "use serde::Deserialize; fn g() {}"),
-    ]);
-    let analysis = analyze_coupling(&parsed);
-    assert!(analysis.cycles.is_empty());
-    for m in &analysis.metrics {
-        assert_eq!(m.afferent, 0);
-        assert_eq!(m.efferent, 0);
-    }
 }

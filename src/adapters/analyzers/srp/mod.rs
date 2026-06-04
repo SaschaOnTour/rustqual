@@ -88,6 +88,7 @@ pub fn analyze_srp(
     parsed: &[(String, String, syn::File)],
     config: &SrpConfig,
     file_call_graph: &std::collections::HashMap<String, Vec<(String, Vec<String>)>>,
+    test_length_thresholds: (usize, usize),
 ) -> SrpAnalysis {
     let mut structs = Vec::new();
     let mut struct_collector = StructCollector {
@@ -106,8 +107,13 @@ pub fn analyze_srp(
     let struct_warnings = cohesion::build_struct_warnings(&structs, &methods, config);
     let cfg_test_files =
         crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(parsed);
-    let module_warnings =
-        module::analyze_module_srp(parsed, config, file_call_graph, &cfg_test_files);
+    let module_warnings = module::analyze_module_srp(
+        parsed,
+        config,
+        file_call_graph,
+        &cfg_test_files,
+        test_length_thresholds,
+    );
     let param_warnings = Vec::new();
     SrpAnalysis {
         struct_warnings,

@@ -143,7 +143,6 @@ similarity_threshold = 0.85
 min_tokens = 30
 min_lines = 5
 min_statements = 3
-ignore_tests = true
 ignore_trait_impls = true
 detect_dead_code = true
 detect_wildcard_imports = true
@@ -190,6 +189,17 @@ check_sdp = true
 enabled = true
 # Optional: path to LCOV coverage file for TQ-004/TQ-005 checks.
 # coverage_file = "lcov.info"
+
+# ── Test-Code Thresholds ───────────────────────────────────────────────
+# A curated subset of checks also runs on test code: DRY-001/004/005, LONG_FN
+# (function length), SRP file-length, and the god-struct check (SRP-001). Each
+# key below overrides the matching production threshold FOR TEST CODE ONLY; an
+# unset key inherits the production value. Which checks apply is fixed.
+
+[tests]
+# max_function_lines   = 60      # overrides [complexity].max_function_lines
+# file_length_baseline = 300     # overrides [srp].file_length_baseline
+# file_length_ceiling  = 600     # overrides [srp].file_length_ceiling
 
 # ── Quality Score Weights ──────────────────────────────────────────────
 # Weights for each dimension in the overall quality score.
@@ -267,7 +277,6 @@ similarity_threshold = 0.85
 min_tokens = 30
 min_lines = 5
 min_statements = 3
-ignore_tests = true
 ignore_trait_impls = true
 detect_dead_code = true
 detect_wildcard_imports = true
@@ -309,6 +318,16 @@ check_sdp = true
 [test_quality]
 enabled = true
 # coverage_file = "lcov.info"
+
+# ── Test-Code Thresholds ───────────────────────────────────────────────
+# A curated subset of checks also runs on test code (DRY-001/004/005, LONG_FN,
+# SRP file-length, god-struct SRP-001). Each key overrides the matching
+# production threshold FOR TEST CODE ONLY; unset = inherit production.
+
+[tests]
+# max_function_lines   = 60      # overrides [complexity].max_function_lines
+# file_length_baseline = 300     # overrides [srp].file_length_baseline
+# file_length_ceiling  = 600     # overrides [srp].file_length_ceiling
 
 # ── Quality Score Weights ──────────────────────────────────────────────
 # Must sum to approximately 1.0.

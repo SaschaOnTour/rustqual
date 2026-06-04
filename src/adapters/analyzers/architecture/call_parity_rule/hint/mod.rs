@@ -157,7 +157,7 @@ fn group_by_adapter(candidates: &[PrivateCandidate]) -> HashMap<&str, Vec<&Priva
 
 /// Render the final hint string. Operation: per-adapter block
 /// assembly.
-fn format_hint(by_adapter: &[(String, Vec<&PrivateCandidate>)]) -> String {
+pub(super) fn format_hint(by_adapter: &[(String, Vec<&PrivateCandidate>)]) -> String {
     let mut lines: Vec<String> = Vec::new();
     for (adapter, hits) in by_adapter {
         let (noun, verb) = if hits.len() == 1 {

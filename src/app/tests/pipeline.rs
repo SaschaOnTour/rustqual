@@ -3,7 +3,7 @@ use crate::adapters::source::filesystem::{
     collect_filtered_files, collect_rust_files, collect_suppression_lines, read_and_parse_files,
 };
 use crate::app::metrics::{count_coupling_warnings, mark_coupling_suppressions};
-use crate::app::pipeline::{output_results, run_analysis};
+use crate::app::pipeline::{analyze_and_output, output_results, run_analysis};
 use crate::app::warnings::{check_suppression_ratio, count_all_suppressions};
 use crate::config::Config;
 use crate::findings::Suppression;
@@ -47,26 +47,28 @@ fn test_collect_rust_files_directory() {
     assert!(files.iter().all(|f| f.extension().unwrap() == "rs"));
 }
 
-#[test]
-fn test_collect_rust_files_skips_target() {
+/// In a fresh tempdir, put a `.rs` inside `excluded_subdir` and a visible
+/// `.rs` at the root, then collect — returning how many files were found.
+fn collect_count_excluding(excluded_subdir: &str) -> usize {
     let tmp = test_dir();
-    let target_dir = tmp.path().join("target");
-    fs::create_dir(&target_dir).unwrap();
-    fs::write(target_dir.join("compiled.rs"), "fn c() {}").unwrap();
-    fs::write(tmp.path().join("src.rs"), "fn s() {}").unwrap();
-    let files = collect_rust_files(tmp.path());
-    assert_eq!(files.len(), 1);
+    let sub = tmp.path().join(excluded_subdir);
+    fs::create_dir(&sub).unwrap();
+    fs::write(sub.join("excluded.rs"), "fn x() {}").unwrap();
+    fs::write(tmp.path().join("visible.rs"), "fn v() {}").unwrap();
+    collect_rust_files(tmp.path()).len()
 }
 
 #[test]
-fn test_collect_rust_files_skips_hidden() {
-    let tmp = test_dir();
-    let hidden_dir = tmp.path().join(".hidden");
-    fs::create_dir(&hidden_dir).unwrap();
-    fs::write(hidden_dir.join("secret.rs"), "fn h() {}").unwrap();
-    fs::write(tmp.path().join("visible.rs"), "fn v() {}").unwrap();
-    let files = collect_rust_files(tmp.path());
-    assert_eq!(files.len(), 1);
+fn test_collect_rust_files_skips_target_and_hidden_dirs() {
+    // `target/` and `.`-prefixed directories are excluded; only the visible
+    // root file is collected.
+    for excluded in ["target", ".hidden"] {
+        assert_eq!(
+            collect_count_excluding(excluded),
+            1,
+            "`{excluded}/` should be excluded, leaving only the visible file"
+        );
+    }
 }
 
 #[test]
@@ -183,7 +185,7 @@ fn test_collect_suppression_multiple() {
 fn test_run_analysis_empty_input() {
     let parsed: Vec<(String, String, syn::File)> = vec![];
     let config = Config::default();
-    let analysis = run_analysis(&parsed, &config);
+    let analysis = run_analysis(parsed, &config);
     assert!(analysis.results.is_empty());
     assert_eq!(analysis.summary.total, 0);
 }
@@ -194,7 +196,7 @@ fn test_run_analysis_trivial_function() {
     let syntax = syn::parse_file(source).unwrap();
     let parsed = vec![("test.rs".to_string(), source.to_string(), syntax)];
     let config = Config::default();
-    let analysis = run_analysis(&parsed, &config);
+    let analysis = run_analysis(parsed, &config);
     assert_eq!(analysis.results.len(), 1);
     assert!(matches!(
         analysis.results[0].classification,
@@ -320,36 +322,43 @@ fn test_mark_coupling_suppressions_marks_module() {
     assert!(!analysis.metrics[1].suppressed); // config
 }
 
-#[test]
-fn test_mark_coupling_suppressions_qual_allow_all_covers_coupling() {
+/// Mark a `pipeline.rs`-line-1 suppression with `dims` against the standard
+/// coupling analysis, and report whether its first metric got suppressed.
+fn coupling_metric0_suppressed_by(dims: Vec<crate::findings::Dimension>) -> bool {
     let mut analysis = make_coupling_analysis();
-    let sup = Suppression {
-        line: 1,
-        dimensions: vec![], // all dimensions
-        reason: None,
-    };
     let mut suppression_lines = std::collections::HashMap::new();
-    suppression_lines.insert("pipeline.rs".to_string(), vec![sup]);
-
+    suppression_lines.insert(
+        "pipeline.rs".to_string(),
+        vec![Suppression {
+            line: 1,
+            dimensions: dims,
+            reason: None,
+        }],
+    );
     mark_coupling_suppressions(Some(&mut analysis), &suppression_lines);
-
-    assert!(analysis.metrics[0].suppressed); // pipeline
+    analysis.metrics[0].suppressed
 }
 
 #[test]
-fn test_mark_coupling_suppressions_iosp_only_does_not_cover_coupling() {
-    let mut analysis = make_coupling_analysis();
-    let sup = Suppression {
-        line: 1,
-        dimensions: vec![crate::findings::Dimension::Iosp],
-        reason: None,
-    };
-    let mut suppression_lines = std::collections::HashMap::new();
-    suppression_lines.insert("pipeline.rs".to_string(), vec![sup]);
-
-    mark_coupling_suppressions(Some(&mut analysis), &suppression_lines);
-
-    assert!(!analysis.metrics[0].suppressed); // not suppressed
+fn test_mark_coupling_suppressions_dimension_coverage() {
+    use crate::findings::Dimension;
+    // A wildcard (`qual:allow` with no dims) covers coupling; an unrelated
+    // single dimension (iosp) does not. (label, dims, covers_coupling)
+    let cases: &[(&str, &[Dimension], bool)] = &[
+        ("wildcard (no dims) covers coupling", &[], true),
+        (
+            "iosp-only does not cover coupling",
+            &[Dimension::Iosp],
+            false,
+        ),
+    ];
+    for (label, dims, covers) in cases {
+        assert_eq!(
+            coupling_metric0_suppressed_by(dims.to_vec()),
+            *covers,
+            "case {label}"
+        );
+    }
 }
 
 #[test]
@@ -576,7 +585,7 @@ fn violator(x: i32) {
     let syntax = syn::parse_file(code).unwrap();
     let parsed = vec![("test.rs".to_string(), code.to_string(), syntax)];
     let config = Config::default();
-    let analysis = run_analysis(&parsed, &config);
+    let analysis = run_analysis(parsed, &config);
     assert!(
         analysis
             .results
@@ -631,7 +640,7 @@ fn beta(x: i32, y: i32) -> i32 {
     let syntax = syn::parse_file(source).unwrap();
     let parsed = vec![("test.rs".to_string(), source.to_string(), syntax)];
     let config = Config::default();
-    let analysis = run_analysis(&parsed, &config);
+    let analysis = run_analysis(parsed, &config);
     assert!(
         !analysis.findings.dry.is_empty(),
         "findings.dry empty — duplicate not detected"
@@ -669,7 +678,7 @@ fn measured(x: i32) -> i32 {
     let syntax = syn::parse_file(source).unwrap();
     let parsed = vec![("test.rs".to_string(), source.to_string(), syntax)];
     let config = Config::default();
-    let analysis = run_analysis(&parsed, &config);
+    let analysis = run_analysis(parsed, &config);
     let measured = analysis
         .results
         .iter()
@@ -692,7 +701,35 @@ fn test_run_analysis_findings_architecture_field_present() {
     // `findings.architecture` field must exist and be empty.
     let parsed: Vec<(String, String, syn::File)> = vec![];
     let config = Config::default();
-    let analysis = run_analysis(&parsed, &config);
+    let analysis = run_analysis(parsed, &config);
     assert!(analysis.findings.architecture.is_empty());
     let _len: usize = analysis.findings.architecture.len();
+}
+
+#[test]
+fn test_analyze_and_output_returns_analyzed_functions() {
+    // `analyze_and_output` orchestrates collect → parse → analyze → print and
+    // returns the `AnalysisResult` it printed. Asserting the returned analysis
+    // contains the fixture's functions pins the orchestration against being
+    // replaced by a no-op (the four delegated calls being skipped).
+    let tmp = test_dir();
+    fs::write(
+        tmp.path().join("lib.rs"),
+        "fn alpha() {}\nfn beta() { alpha(); }\n",
+    )
+    .unwrap();
+    let mut config = Config::default();
+    config.compile();
+    let analysis = analyze_and_output(
+        tmp.path(),
+        &config,
+        &crate::cli::OutputFormat::Text,
+        false,
+        false,
+    );
+    assert!(
+        analysis.results.iter().any(|f| f.name == "alpha"),
+        "returned analysis must carry the fixture's functions, got {:?}",
+        analysis.results.iter().map(|f| &f.name).collect::<Vec<_>>()
+    );
 }

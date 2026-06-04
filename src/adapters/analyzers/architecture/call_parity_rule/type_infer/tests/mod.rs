@@ -5,5 +5,6 @@ mod infer_call;
 mod patterns_destructure;
 mod patterns_iterator;
 mod resolve;
+mod resolve_internals;
 mod support;
 mod workspace_index;

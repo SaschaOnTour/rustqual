@@ -80,6 +80,20 @@ fn collect_methods(parsed: &[(String, String, syn::File)]) -> Vec<MethodFieldDat
     result
 }
 
+/// Run the full `analyze_srp` path over a single in-memory source and return
+/// just its struct warnings — the shared arrange for the source-level
+/// struct-SRP tests, so each test body is only its own source + oracle.
+fn struct_warnings_for(path: &str, code: &str) -> Vec<SrpWarning> {
+    let parsed = vec![(path.to_string(), code.to_string(), parse_file(code))];
+    analyze_srp(
+        &parsed,
+        &SrpConfig::default(),
+        &std::collections::HashMap::new(),
+        (300, 800),
+    )
+    .struct_warnings
+}
+
 #[test]
 fn test_struct_collector_named_fields() {
     let code = "struct Foo { x: i32, y: String }";
@@ -195,7 +209,7 @@ fn test_analyze_srp_empty() {
     let parsed: Vec<(String, String, syn::File)> = vec![];
     let config = SrpConfig::default();
     let call_graph = std::collections::HashMap::new();
-    let analysis = analyze_srp(&parsed, &config, &call_graph);
+    let analysis = analyze_srp(&parsed, &config, &call_graph, (300, 800));
     assert!(analysis.struct_warnings.is_empty());
     assert!(analysis.module_warnings.is_empty());
 }
@@ -210,14 +224,9 @@ fn test_analyze_srp_cohesive_struct() {
             fn reset(&mut self) { self.count = 0; }
         }
     "#;
-    let syntax = parse_file(code);
-    let parsed = vec![("test.rs".to_string(), code.to_string(), syntax)];
-    let config = SrpConfig::default();
-    let call_graph = std::collections::HashMap::new();
-    let analysis = analyze_srp(&parsed, &config, &call_graph);
     // Fully cohesive struct → no warning
     assert!(
-        analysis.struct_warnings.is_empty(),
+        struct_warnings_for("test.rs", code).is_empty(),
         "Cohesive struct should not trigger SRP warning"
     );
 }
@@ -234,7 +243,7 @@ fn test_analyze_srp_multiple_files() {
     ];
     let config = SrpConfig::default();
     let call_graph = std::collections::HashMap::new();
-    let analysis = analyze_srp(&parsed, &config, &call_graph);
+    let analysis = analyze_srp(&parsed, &config, &call_graph, (300, 800));
     // Both structs are simple → no warnings
     assert!(analysis.struct_warnings.is_empty());
 }
@@ -245,6 +254,44 @@ fn test_analyze_srp_returns_empty_param_warnings() {
     let parsed: Vec<(String, String, syn::File)> = vec![];
     let config = SrpConfig::default();
     let call_graph = std::collections::HashMap::new();
-    let analysis = analyze_srp(&parsed, &config, &call_graph);
+    let analysis = analyze_srp(&parsed, &config, &call_graph, (300, 800));
     assert!(analysis.param_warnings.is_empty());
+}
+
+#[test]
+fn test_analyze_srp_god_struct_fires_in_test_file() {
+    // SRP-001 (god-struct cohesion) deliberately applies to TEST code too: a
+    // god-fixture wiring up auth + db + caching + routing in one struct is a
+    // real smell, and the "independent #[test] fns are the file's purpose"
+    // rationale that makes the MODULE cluster-check production-only does NOT
+    // excuse it. Only `analyze_module_srp` skips test files; the struct-level
+    // check is intentionally NOT gated on cfg_test_files (production thresholds,
+    // no separate `[tests]` knob — `// qual:allow(srp)` covers rare fixtures).
+    // The `#![cfg(test)]` inner attr marks this a whole test file, so this pins
+    // the struct warning still fires there.
+    let code = r#"
+        #![cfg(test)]
+        struct GodFixture {
+            db: u8, cache: u8, logger: u8, metrics: u8, config: u8, state: u8,
+            buffer: u8, queue: u8, pool: u8, handler: u8, router: u8, auth: u8,
+        }
+        impl GodFixture {
+            fn read_db(&self) { query(self.db); }
+            fn write_db(&mut self) { commit(self.db); }
+            fn read_cache(&self) { get_key(self.cache); }
+            fn write_cache(&mut self) { set_key(self.cache); }
+            fn log_info(&self) { format_log(self.logger); }
+            fn log_error(&self) { format_log(self.logger); inc(self.metrics); }
+            fn route(&self) { dispatch(self.router, self.handler); }
+            fn authenticate(&self) { verify(self.auth, self.config); }
+            fn flush(&mut self) { drain(self.buffer, self.queue); }
+            fn manage_pool(&mut self) { alloc(self.pool, self.state); }
+        }
+    "#;
+    assert!(
+        struct_warnings_for("tests/fixtures.rs", code)
+            .iter()
+            .any(|w| w.struct_name == "GodFixture"),
+        "struct SRP-001 must fire on a god-struct even in a test file"
+    );
 }

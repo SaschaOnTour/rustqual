@@ -5,6 +5,173 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-06-02
+
+Patch release: **test-suite effectiveness, proven by mutation testing** (Phases
+2–4 of the test-quality effort). No change to how the tool scores user code,
+except the `prop_assert!` recognition fix below and the removal of the
+never-read `[tests].max_methods` config key.
+
+### Fixed
+- **TQ-001 no longer flags proptest property tests as assertion-free.**
+  `is_assertion_macro` now recognises proptest's `prop_assert!` /
+  `prop_assert_eq!` / `prop_assert_ne!` (the `prop_assert` prefix) in addition
+  to `assert*` / `debug_assert*`. A property test that asserts only via
+  `prop_assert!` is no longer a false TQ_NO_ASSERT.
+- **TQ-001 no longer flags `quickcheck!` boolean properties as assertion-free.**
+  The macro-expansion pre-pass surfaces `quickcheck! { fn p(x: T) -> bool { … }
+  }` as a synthetic `#[test] fn p() -> bool { … }` (params dropped), so a
+  property whose body is a bare boolean — e.g. `{ x < 100 }`, with no assertion
+  macro or call — was wrongly reported as `TQ_NO_ASSERT`. TQ now treats a
+  `-> bool` return as the property's oracle (the value quickcheck checks across
+  every input), which a plain `#[test]` can never have. Present since
+  macro-body walking shipped in v1.3.2.
+- **DEH (downcast escape-hatch) no longer flags `#[test]` function bodies.**
+  The detector derived its test-exempt state only from whole-file and
+  `#[cfg(test)] mod` context, never a function's own attributes, so a top-level
+  `#[test] fn { x.downcast_ref::<…>(); }` was wrongly reported. This surfaced
+  via the macro-expansion pre-pass, which emits `quickcheck!` / `proptest!`
+  properties as synthetic `#[test]` fns whose original `#[cfg(test)]` wrapper is
+  gone — flipping a test body into apparent production code. DEH now honours a
+  function's own `#[test]` / `#[cfg(test)]` attribute (consistent with the
+  cross-dimension `has_test_attr` rule). The other structural detectors are
+  unaffected — they key off impl methods, trait impls, or `pub` signatures, none
+  of which a free property fn produces.
+
+### Changed
+- **Internal consistency:** the architecture matcher's `has_cfg_test_attr` now
+  delegates to the shared `adapters::shared::cfg_test::has_cfg_test` recogniser
+  instead of a local copy, so `#[cfg(test)]` detection has a single source of
+  truth across all seven dimensions (consistency-audit finding F1).
+- **`rustqual --init` templates now include the `[tests]` section.** Both the
+  default and the calibrated template previously jumped from `[test_quality]`
+  straight to `[weights]`, so generated configs never surfaced the test-code
+  threshold knobs (`max_function_lines` / `file_length_baseline` /
+  `file_length_ceiling`). They are now emitted commented-out (inherit
+  production), matching `rustqual.toml`.
+- **Removed the dead `[tests].max_methods` config key.** It was never read, so
+  it changed no analysis — the god-struct check (`SRP-001`) already evaluates
+  test-file structs at the production `[srp]` thresholds, and a lone per-test
+  method-count override (without the other four composite inputs:
+  `max_fields` / `max_fan_out` / `lcom4_threshold` / `smell_threshold`) would be
+  incoherent. The applied behaviour is unchanged and now made explicit: struct
+  SRP-001 deliberately runs on test code (a god-fixture wiring up many concerns
+  is a real smell); only the SRP *module*-cohesion (independent-cluster) check
+  stays production-only, because a test file's independent `#[test]` fns are its
+  purpose. Use `// qual:allow(srp)` for the rare legitimate fixture. `[tests]`
+  still configures `max_function_lines` / `file_length_baseline` /
+  `file_length_ceiling`. (Note: a `rustqual.toml` that set the removed key now
+  errors under `deny_unknown_fields` — delete the line.)
+
+### Tests
+- **Mutation-proven coverage** (`cargo-mutants`). The test-recognition core
+  (`shared/cfg_test*`) and the structural normalizer (`shared/normalize.rs` +
+  `macro_expansion.rs`) now catch every non-equivalent viable mutant; the only
+  survivors are documented semantic equivalents. New enumeration tests
+  (`normalize_coverage.rs`) pin the exact `NormalizedToken` each operator /
+  expression-kind / pattern-kind emits.
+- **Mutation sweep extended to the whole analyzer** (Phase 3): all seven
+  dimensions plus `app` and `report` are now mutation-proven; every reachable
+  survivor was killed, only documented semantic equivalents remain.
+- **Per-dimension relevance review** (Phase 4): each dimension's tests were
+  audited against the `book/*-quality.md` specs for positive *and* negative
+  per-rule coverage, oracle quality (assert the meaningful output, not
+  incidentals), and behaviour- vs implementation-coupling. Weak oracles were
+  strengthened (e.g. the DRY near-duplicate threshold test, the SRP named-cluster
+  assertions, the architecture `PatternScope::accepts` scoping test) and a
+  god-fixture-in-a-test-file pin was added for struct SRP-001.
+- **proptest** added as a dev-dependency. A path × test-attribute property /
+  variant matrix on the recognisers guards against the decentralised
+  test-detection bug class that motivated the effort.
+
+### Docs
+- **Corrected two spec-vs-code deviations** surfaced by the Phase-4 review:
+  `book/function-quality.md` no longer lists `Default::default()` as a `BTC`
+  stub form (`is_stub_body` recognises only the `todo!` / `unimplemented!` /
+  `panic!("not implemented")` macros), and the `CLAUDE.md` DRY note now matches
+  the emitted rule IDs (DRY-003 = duplicate fragment, DRY-004 = wildcard import).
+
+## [1.4.0] - 2026-06-02
+
+Minor release: **quality checks now run on test code.** DRY (duplicate-function
+DRY-001, code-fragment DRY-004, repeated-match DRY-005), function-length
+(LONG_FN), and SRP file-length (SRP_MODULE) previously skipped
+`#[cfg(test)]`/test files. They now analyze test code too, so duplicated test
+helpers, copy-pasted arrange/assert blocks, overlong test fns, and oversized
+test files are all flagged — at test-specific thresholds that default to the
+production values.
+
+### Changed
+- **BREAKING (config):** the `[duplicates] ignore_tests` field is **removed**.
+  Because `[duplicates]` uses `deny_unknown_fields`, a `rustqual.toml` that
+  still sets `ignore_tests` will now fail to parse — delete the line. There is
+  no replacement: DRY-001/004/005 always run on tests. `detect_repeated_matches`
+  no longer takes a config argument.
+- DRY-003 (wildcard imports) remains test-exempt by its own logic, unchanged.
+- **LONG_FN now applies to test functions** at the new
+  `[tests].max_function_lines` threshold (an `Option` defaulting to
+  `[complexity].max_function_lines` = production, 60). Large table-driven tests
+  were refactored — case tables hoisted to module-level `const`s so the test
+  body stays small; genuinely-long single-scenario tests carry a
+  `// qual:allow(complexity)` with rationale.
+- **SRP file-length (SRP_MODULE) now applies to test files** at the new
+  `[tests].file_length_baseline` / `[tests].file_length_ceiling` thresholds
+  (`Option`s defaulting to `[srp]` = 300 / 800). Oversized test files were
+  **split along behavioral seams** into focused sub-modules — no suppressions.
+  The SRP **cohesion** (independent-cluster) check stays **production-only**: a
+  test file's many independent `#[test]` fns are its purpose, not a low-cohesion
+  smell.
+- Cognitive/cyclomatic/nesting complexity already ran on tests; magic-number
+  and error-handling checks remain test-exempt; no change there.
+
+## [1.3.2] - 2026-06-01
+
+Patch release: **test-recognition bug fix** — test functions declared
+inside `proptest! { … }` and `quickcheck! { … }` macro bodies are now
+visible to every analyzer dimension. `syn` does not expand function-like
+macros, so a `#[test] fn` inside `proptest! { … }` was an opaque
+`Item::Macro` — its body was invisible to test classification, IOSP, DRY,
+complexity, SRP and test-quality alike. A new pre-pass surfaces them.
+
+### Fixed (test detection)
+
+- **`proptest!` / `quickcheck!` bodies are walked.** A new pre-pass
+  (`adapters/shared/macro_expansion.rs`, run once at the top of
+  `run_analysis`) replaces a recognised test-macro invocation with the
+  `fn` items it declares, each marked `#[test]` so it routes through the
+  shared `cfg_test::has_test_attr` recognition. The reconstruction is
+  lenient: `proptest`'s non-Rust `x in <strategy>` parameter grammar is
+  dropped (the body — what length/complexity/DRY measure — is preserved
+  verbatim); a leading `#![proptest_config(…)]` inner attribute is
+  tolerated; anything that fails to parse is kept as the original opaque
+  macro (a blind spot, never a regression). Recognition lives next to
+  `cfg_test` in `adapters/shared` to keep all test-recognition policy in
+  one place. Failing-first regression tests in
+  `src/adapters/shared/tests/macro_expansion.rs`.
+
+### Changed (internal)
+
+- `app::run_analysis` now takes its `parsed` files by value so the
+  expansion pre-pass can rewrite them in place before any dimension runs.
+
+## [1.3.1] - 2026-06-01
+
+Patch release: **test-recognition bug fix** — `#[quickcheck]` property
+functions are now recognised as test entry points. This continues the
+v1.3.0 work of routing all test forms through the shared `cfg_test`
+predicates; `quickcheck`'s attribute (path segment `quickcheck`, not
+ending in `test`) was the one common framework attribute still missed,
+so a `#[quickcheck]` property fn could be flagged `DEAD_CODE` / uncovered
+when treated as production code.
+
+### Fixed (test detection)
+
+- **`has_test_attr` (`adapters/shared/cfg_test.rs`) now recognises
+  `#[quickcheck]`** alongside `#[test]`, `#[rstest]`, `#[test_case]`, and
+  any attribute whose path ends in `test`. Failing-first regression test
+  added to `framework_test_attributes_recognized` in
+  `src/adapters/shared/tests/cfg_test.rs`.
+
 ## [1.3.0] - 2026-05-29
 
 Minor release (one breaking removal — see below): **test-entry-point

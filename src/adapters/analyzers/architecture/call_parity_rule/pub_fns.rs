@@ -169,7 +169,7 @@ impl WorkspaceSetup {
 /// `collect_findings` runs `pub_fns` before `build_call_graph`. A
 /// future v1.2.6 refactor can hoist this into a shared `WorkspaceSetup`
 /// owned by `collect_findings` and threaded into both passes.
-fn build_reexports_for_pub_fns(
+pub(super) fn build_reexports_for_pub_fns(
     files: &[(&str, &syn::File)],
     aliases_per_file: &HashMap<String, AliasMap>,
     workspace: &super::local_symbols::WorkspaceLookup<'_>,

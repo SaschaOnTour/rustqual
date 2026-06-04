@@ -95,3 +95,132 @@ fn missing_adapter_message_omits_hint_section_when_none() {
         "no hint must mean no hint section; got {msg:?}"
     );
 }
+
+#[test]
+fn multiplicity_mismatch_head_lists_per_adapter_counts() {
+    let kind = ViolationKind::CallParityMultiplicityMismatch {
+        target_fn: "handle".into(),
+        target_layer: "domain".into(),
+        counts_per_adapter: vec![("cli".into(), 1), ("http".into(), 2)],
+    };
+    let msg = format_match_message(&kind, "call parity");
+    assert!(msg.contains("divergent handler counts"), "{msg}");
+    assert!(msg.contains("cli=1") && msg.contains("http=2"), "{msg}");
+}
+
+#[test]
+fn multi_touchpoint_head_lists_touchpoints() {
+    let kind = ViolationKind::CallParityMultiTouchpoint {
+        fn_name: "dispatch".into(),
+        adapter_layer: "adapters".into(),
+        touchpoints: vec!["a".into(), "b".into()],
+    };
+    let msg = format_match_message(&kind, "call parity");
+    assert!(msg.contains("multiple target touchpoints"), "{msg}");
+    assert!(msg.contains("adapters::dispatch"), "{msg}");
+    assert!(msg.contains('a') && msg.contains('b'), "{msg}");
+}
+
+#[test]
+fn item_kind_head_omits_empty_name() {
+    let named = format_match_message(
+        &ViolationKind::ItemKind {
+            kind: "struct",
+            name: "Foo".into(),
+        },
+        "r",
+    );
+    assert!(named.contains("struct Foo"), "named: {named}");
+    let anon = format_match_message(
+        &ViolationKind::ItemKind {
+            kind: "struct",
+            name: String::new(),
+        },
+        "r",
+    );
+    assert!(anon.contains("struct"), "anon kind: {anon}");
+    assert!(
+        !anon.contains("struct "),
+        "anonymous item omits the name: {anon}"
+    );
+}
+
+fn item_loc() -> crate::adapters::analyzers::architecture::MatchLocation {
+    crate::adapters::analyzers::architecture::MatchLocation {
+        file: "src/x.rs".into(),
+        line: 9,
+        column: 4,
+        kind: ViolationKind::ItemKind {
+            kind: "fn",
+            name: "bad".into(),
+        },
+    }
+}
+
+#[test]
+fn match_to_finding_projects_every_field() {
+    use crate::adapters::analyzers::architecture::rendering::match_to_finding;
+    let pattern = crate::adapters::config::architecture::SymbolPattern {
+        name: "p".into(),
+        allowed_in: None,
+        forbidden_in: None,
+        except: vec![],
+        forbid_path_prefix: None,
+        forbid_method_call: None,
+        forbid_function_call: None,
+        forbid_macro_call: None,
+        forbid_item_kind: None,
+        forbid_derive: None,
+        forbid_glob_import: None,
+        regex: None,
+        reason: "no anon fns".into(),
+    };
+    let f = match_to_finding(item_loc(), "architecture/pattern/x", &pattern);
+    assert_eq!(f.file, "src/x.rs");
+    assert_eq!(f.line, 9);
+    assert_eq!(f.column, 4);
+    assert_eq!(f.dimension, crate::domain::Dimension::Architecture);
+    assert_eq!(f.rule_id, "architecture/pattern/x");
+    assert_eq!(f.severity, crate::domain::Severity::Medium);
+    assert!(
+        f.message.contains("no anon fns"),
+        "reason in message: {}",
+        f.message
+    );
+}
+
+#[test]
+fn build_architecture_finding_projects_every_field() {
+    use crate::adapters::analyzers::architecture::rendering::build_architecture_finding;
+    let f = build_architecture_finding(
+        item_loc(),
+        "architecture/layer".into(),
+        "reason text",
+        crate::domain::Severity::High,
+    );
+    assert_eq!(f.file, "src/x.rs");
+    assert_eq!(f.line, 9);
+    assert_eq!(f.column, 4);
+    assert_eq!(f.dimension, crate::domain::Dimension::Architecture);
+    assert_eq!(f.rule_id, "architecture/layer");
+    assert_eq!(f.severity, crate::domain::Severity::High);
+}
+
+#[test]
+fn build_file_refs_maps_each_parsed_file() {
+    use crate::adapters::analyzers::architecture::rendering::build_file_refs;
+    use crate::ports::{AnalysisContext, ParsedFile};
+    let config = crate::config::Config::default();
+    let files = vec![ParsedFile {
+        path: "src/a.rs".into(),
+        content: "fn f() {}".into(),
+        ast: syn::parse_file("fn f() {}").unwrap(),
+    }];
+    let ctx = AnalysisContext {
+        files: &files,
+        config: &config,
+    };
+    let refs = build_file_refs(&ctx);
+    assert_eq!(refs.len(), 1, "one ref per parsed file");
+    assert_eq!(refs[0].0, "src/a.rs");
+}

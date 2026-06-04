@@ -102,32 +102,46 @@ pub(crate) fn count_independent_clusters(
 
 /// Analyze module-level SRP: flag files with excessive production line counts
 /// or too many independent function clusters.
+///
+/// Test files (per `cfg_test_files`) are length-scored against the
+/// `[tests]`-resolved baseline/ceiling instead of the production ones; the
+/// cohesion (independent-cluster) check is **production-only** because a test
+/// file's independent `#[test]` fns are its purpose, not a low-cohesion smell.
 /// Operation: iterates files, computes production lines, length score,
-/// and independent clusters via closures.
+/// and (production-only) independent clusters via closures.
 pub fn analyze_module_srp(
     parsed: &[(String, String, syn::File)],
     config: &SrpConfig,
     file_call_graph: &HashMap<String, Vec<(String, Vec<String>)>>,
     cfg_test_files: &std::collections::HashSet<String>,
+    test_length_thresholds: (usize, usize),
 ) -> Vec<ModuleSrpWarning> {
     parsed
         .iter()
-        .filter(|(path, _, _)| !cfg_test_files.contains(path))
         .filter_map(|(path, source, syntax)| {
+            let is_test = cfg_test_files.contains(path);
+            // `test_length_thresholds` = `(baseline, ceiling)` resolved from
+            // `[tests]` (defaults to production). Applied to test files only.
+            let (baseline, ceiling) = if is_test {
+                test_length_thresholds
+            } else {
+                (config.file_length_baseline, config.file_length_ceiling)
+            };
             let production_lines = count_production_lines(source);
-            let score = compute_file_length_score(
-                production_lines,
-                config.file_length_baseline,
-                config.file_length_ceiling,
-            );
+            let score = compute_file_length_score(production_lines, baseline, ceiling);
 
-            let free_fns = collect_free_functions(syntax);
-            let call_graph = file_call_graph
-                .get(path)
-                .map(|v| v.as_slice())
-                .unwrap_or(&[]);
-            let (cluster_count, cluster_names) =
-                count_independent_clusters(&free_fns, call_graph, config.min_cluster_statements);
+            // Cohesion is production-only: independent test fns are expected, so
+            // a test file contributes no clusters (and the walk is skipped).
+            let (cluster_count, cluster_names) = if is_test {
+                (0, Vec::new())
+            } else {
+                let free_fns = collect_free_functions(syntax);
+                let call_graph = file_call_graph
+                    .get(path)
+                    .map(|v| v.as_slice())
+                    .unwrap_or(&[]);
+                count_independent_clusters(&free_fns, call_graph, config.min_cluster_statements)
+            };
 
             let has_length_warning = score > 0.0;
             // Use strict `>` for consistency with the other `max_*`

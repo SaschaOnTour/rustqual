@@ -143,7 +143,7 @@ impl<'a> ReporterImpl for TextReporter<'a> {
 }
 
 /// Format the findings list with heading.
-fn format_findings_list(entries: &[FindingEntry]) -> String {
+pub(super) fn format_findings_list(entries: &[FindingEntry]) -> String {
     if entries.is_empty() {
         return String::new();
     }

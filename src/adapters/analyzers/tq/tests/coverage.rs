@@ -43,16 +43,25 @@ fn make_lcov_data(fn_hits: &[(&str, u64)], line_hits: &[(usize, u64)]) -> LcovFi
 // ── TQ-004 tests ────────────────────────────────────────
 
 #[test]
-fn test_uncovered_function_detected() {
-    let results = vec![make_func("process", "src/lib.rs", 10)];
-    let mut lcov = HashMap::new();
-    lcov.insert(
-        "src/lib.rs".to_string(),
-        make_lcov_data(&[("process", 0)], &[]),
-    );
-    let warnings = detect_uncovered_functions(&results, &lcov);
-    assert_eq!(warnings.len(), 1);
-    assert_eq!(warnings[0].kind, TqWarningKind::Uncovered);
+fn uncovered_function_is_flagged_regardless_of_name() {
+    // A function with zero hits is flagged Uncovered. The second case guards a
+    // real regression: a production function merely *named* `test_*` (no test
+    // attribute, is_test = false) is real production code and must still be
+    // coverage-checked — the old name-prefix heuristic wrongly skipped it.
+    for (label, fn_name) in [
+        ("ordinary production fn", "process"),
+        ("production fn named like a test", "test_connection"),
+    ] {
+        let results = vec![make_func(fn_name, "src/lib.rs", 10)];
+        let mut lcov = HashMap::new();
+        lcov.insert(
+            "src/lib.rs".to_string(),
+            make_lcov_data(&[(fn_name, 0)], &[]),
+        );
+        let warnings = detect_uncovered_functions(&results, &lcov);
+        assert_eq!(warnings.len(), 1, "case {label}");
+        assert_eq!(warnings[0].kind, TqWarningKind::Uncovered, "case {label}");
+    }
 }
 
 #[test]
@@ -90,22 +99,6 @@ fn test_function_excluded_by_is_test_flag() {
     );
     let warnings = detect_uncovered_functions(&results, &lcov);
     assert!(warnings.is_empty());
-}
-
-#[test]
-fn production_function_named_like_test_is_still_checked() {
-    // A production function merely *named* `test_*` (no test attribute,
-    // is_test = false) is real production code and must still be
-    // coverage-checked — the old name-prefix heuristic wrongly skipped it.
-    let results = vec![make_func("test_connection", "src/lib.rs", 10)];
-    let mut lcov = HashMap::new();
-    lcov.insert(
-        "src/lib.rs".to_string(),
-        make_lcov_data(&[("test_connection", 0)], &[]),
-    );
-    let warnings = detect_uncovered_functions(&results, &lcov);
-    assert_eq!(warnings.len(), 1);
-    assert_eq!(warnings[0].kind, TqWarningKind::Uncovered);
 }
 
 #[test]

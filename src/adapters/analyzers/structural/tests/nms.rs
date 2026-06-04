@@ -1,15 +1,8 @@
 use crate::adapters::analyzers::structural::nms::*;
 use crate::adapters::analyzers::structural::{StructuralWarning, StructuralWarningKind};
-use crate::config::StructuralConfig;
 
 fn detect_in(source: &str) -> Vec<StructuralWarning> {
-    let parsed = super::parse_single(source);
-    let config = StructuralConfig::default();
-    let cfg_test_files =
-        crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(&parsed);
-    let mut warnings = Vec::new();
-    detect_nms(&mut warnings, &parsed, &config, &cfg_test_files);
-    warnings
+    super::detect_single(source, detect_nms)
 }
 
 #[test]
@@ -88,5 +81,96 @@ fn test_indexed_field_method_call_not_flagged() {
     assert!(
         w.is_empty(),
         "self.items[i].push(v) should be recognized as mutation"
+    );
+}
+
+#[test]
+fn test_assign_to_local_still_flagged() {
+    // Assigning to a *local* (not `self`) is not a self-mutation, so a method
+    // that only reads self is still needless-mut — guards `is_self_target` /
+    // the `Expr::Assign` guard against treating every assignment as self-write.
+    let w = detect_in(
+        "struct S { x: i32 } impl S { fn f(&mut self) -> i32 { let mut y = 0; y = self.x; y } }",
+    );
+    assert_eq!(w.len(), 1, "assigning a local is not a self-mutation");
+}
+
+#[test]
+fn test_non_assign_binary_on_self_still_flagged() {
+    // `self.x > 0` is a comparison, not a compound assignment — it does not
+    // mutate self. Guards `is_compound_assign` and the `&&` in the binary arm.
+    let w = detect_in("struct S { x: i32 } impl S { fn f(&mut self) -> bool { self.x > 0 } }");
+    assert_eq!(w.len(), 1, "a comparison on self.x is not a mutation");
+}
+
+#[test]
+fn test_immutable_self_reference_still_flagged() {
+    // `&self.x` is an *immutable* borrow — not a mutation. Guards the
+    // `r.mutability.is_some() && is_self_target(...)` reference arm.
+    let w =
+        detect_in("struct S { x: i32 } impl S { fn f(&mut self) -> i32 { let r = &self.x; *r } }");
+    assert_eq!(w.len(), 1, "an immutable &self.x borrow is not a mutation");
+}
+
+#[test]
+fn test_method_call_on_local_still_flagged() {
+    // A method call on a *local* (not self) is not a self-mutation. Guards
+    // `is_self_field` / `is_self_path` / `is_self_indexed_field` against
+    // treating any method-call receiver as self.
+    let w = detect_in(
+        "struct S { x: i32 } impl S { fn f(&mut self) -> i32 { let v = String::new(); v.len(); self.x } }",
+    );
+    assert_eq!(
+        w.len(),
+        1,
+        "a method call on a local is not a self-mutation"
+    );
+}
+
+#[test]
+fn test_bare_self_reference_still_flagged() {
+    // `self` referenced only as a bare path (passed to a fn) still counts as a
+    // self-reference — guards the `Expr::Path` arm of `is_self_ref`.
+    let w = detect_in("struct S; impl S { fn f(&mut self) { take(self); } }");
+    assert_eq!(w.len(), 1, "a bare `self` argument is a self-reference");
+}
+
+#[test]
+fn test_non_self_path_not_referenced_as_self() {
+    // A non-`self` path (`x`) must NOT be mistaken for a self-reference;
+    // without a self-reference NMS defers to SLM. Guards the `== \"self\"`
+    // check in `is_self_ref`.
+    let w = detect_in("struct S; impl S { fn f(&mut self) { let x = 1; let _ = x; } }");
+    assert!(
+        w.is_empty(),
+        "a non-self local path is not a self-reference"
+    );
+}
+
+#[test]
+fn needless_mut_self_in_non_test_module_flagged() {
+    // The inherent-method collector must descend into regular (non-test)
+    // modules — guards the `!has_cfg_test_attr` recursion guard in
+    // `visit_item_methods` against never descending / only into test modules.
+    let w =
+        detect_in("mod inner { struct S { x: i32 } impl S { fn f(&mut self) -> i32 { self.x } } }");
+    assert_eq!(
+        w.len(),
+        1,
+        "needless &mut self in a non-test module must be flagged"
+    );
+}
+
+#[test]
+fn needless_mut_self_in_inline_cfg_test_module_excluded() {
+    // The same inside `#[cfg(test)] mod` must be skipped. `fn keep` keeps the
+    // file from being whole-file-classified as test code, so the inline guard
+    // is the thing under test.
+    let w = detect_in(
+        "fn keep() {} #[cfg(test)] mod tests { struct S { x: i32 } impl S { fn f(&mut self) -> i32 { self.x } } }",
+    );
+    assert!(
+        w.is_empty(),
+        "needless &mut self in a #[cfg(test)] mod must be excluded"
     );
 }

@@ -134,34 +134,60 @@ fn test_none_pattern_binds_nothing() {
 // ── Pat::Struct ──────────────────────────────────────────────────
 
 #[test]
-fn test_struct_pattern_binds_field_by_name() {
-    let mut f = TypeInferFixture::new();
-    f.index.insert_struct_field(
-        "crate::app::Ctx",
-        "session",
-        CanonicalType::path(["crate", "app", "Session"]),
+fn struct_pattern_binds_indexed_field_type() {
+    // A struct pattern binds each named field to its indexed field type; an
+    // aliased field (`field: alias`) binds the alias name; a `Some(Struct{..})`
+    // unwraps the Option first. (label, field, field_leaf, matched, pat, bound_name)
+    type Case = (
+        &'static str,
+        &'static str,
+        &'static str,
+        CanonicalType,
+        &'static str,
+        &'static str,
     );
-    let matched = CanonicalType::path(["crate", "app", "Ctx"]);
-    let b = bindings(&f, "Ctx { session }", matched);
-    assert_eq!(b.len(), 1);
-    assert_eq!(b[0].0, "session");
-    assert_eq!(b[0].1, CanonicalType::path(["crate", "app", "Session"]));
-}
-
-#[test]
-fn test_struct_pattern_with_aliased_field() {
-    let mut f = TypeInferFixture::new();
-    f.index.insert_struct_field(
-        "crate::app::Ctx",
-        "session",
-        CanonicalType::path(["crate", "app", "Session"]),
-    );
-    let matched = CanonicalType::path(["crate", "app", "Ctx"]);
-    let b = bindings(&f, "Ctx { session: s }", matched);
-    assert_eq!(b.len(), 1);
-    // The alias `s` is bound, not `session`.
-    assert_eq!(b[0].0, "s");
-    assert_eq!(b[0].1, CanonicalType::path(["crate", "app", "Session"]));
+    let cases: Vec<Case> = vec![
+        (
+            "field bound by name",
+            "session",
+            "Session",
+            CanonicalType::path(["crate", "app", "Ctx"]),
+            "Ctx { session }",
+            "session",
+        ),
+        (
+            "aliased field binds the alias, not the field name",
+            "session",
+            "Session",
+            CanonicalType::path(["crate", "app", "Ctx"]),
+            "Ctx { session: s }",
+            "s",
+        ),
+        (
+            "Some(Struct { field }) unwraps the Option first",
+            "id",
+            "Id",
+            CanonicalType::Option(Box::new(CanonicalType::path(["crate", "app", "Ctx"]))),
+            "Some(Ctx { id })",
+            "id",
+        ),
+    ];
+    for (label, field, field_leaf, matched, pat, bound_name) in cases {
+        let mut f = TypeInferFixture::new();
+        f.index.insert_struct_field(
+            "crate::app::Ctx",
+            field,
+            CanonicalType::path(["crate", "app", field_leaf]),
+        );
+        let b = bindings(&f, pat, matched);
+        assert_eq!(b.len(), 1, "case {label}: one binding");
+        assert_eq!(b[0].0, bound_name, "case {label}: bound name");
+        assert_eq!(
+            b[0].1,
+            CanonicalType::path(["crate", "app", field_leaf]),
+            "case {label}: bound type"
+        );
+    }
 }
 
 #[test]
@@ -252,17 +278,14 @@ fn test_or_pattern_uses_first_branch_bindings() {
 // ── Nested patterns ──────────────────────────────────────────────
 
 #[test]
-fn test_nested_some_struct() {
-    let mut f = TypeInferFixture::new();
-    f.index.insert_struct_field(
-        "crate::app::Ctx",
-        "id",
-        CanonicalType::path(["crate", "app", "Id"]),
-    );
-    // matched: Option<Ctx>; pattern unwraps Some to Ctx then binds id.
-    let opt = CanonicalType::Option(Box::new(CanonicalType::path(["crate", "app", "Ctx"])));
-    let b = bindings(&f, "Some(Ctx { id })", opt);
-    assert_eq!(b.len(), 1);
-    assert_eq!(b[0].0, "id");
-    assert_eq!(b[0].1, CanonicalType::path(["crate", "app", "Id"]));
+fn parenthesised_pattern_unwraps_to_inner_binding() {
+    // `(x)` is a parenthesised pattern; the collector must descend into it
+    // and bind the inner ident to the matched type. Pins the
+    // `Pat::Paren(p)` arm against deletion (which would drop the binding
+    // through the `_` fallback).
+    let f = TypeInferFixture::new();
+    let b = bindings(&f, "(x)", CanonicalType::path(["crate", "app", "T"]));
+    assert_eq!(b.len(), 1, "paren pattern binds its inner ident: {b:?}");
+    assert_eq!(b[0].0, "x");
+    assert_eq!(b[0].1, CanonicalType::path(["crate", "app", "T"]));
 }

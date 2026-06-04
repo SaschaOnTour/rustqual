@@ -331,24 +331,11 @@ fn forbidden_example_produces_exactly_one_violation() {
         reason: "peer analyzers are isolated".to_string(),
     };
     let hits = check_forbidden_rules(&refs, std::slice::from_ref(&rule));
-    assert_eq!(
-        hits.len(),
-        1,
-        "expected exactly one forbidden hit: {hits:?}"
+    super::assert_single_forbidden_edge(
+        &hits,
+        "peer analyzers are isolated",
+        "crate::adapters::analyzers::srp",
     );
-    match &hits[0].kind {
-        ViolationKind::ForbiddenEdge {
-            reason,
-            imported_path,
-        } => {
-            assert_eq!(reason, "peer analyzers are isolated");
-            assert!(
-                imported_path.starts_with("crate::adapters::analyzers::srp"),
-                "imported_path = {imported_path:?}"
-            );
-        }
-        other => panic!("unexpected kind: {other:?}"),
-    }
     assert!(
         hits[0].file.ends_with("iosp/bad.rs"),
         "file = {}",

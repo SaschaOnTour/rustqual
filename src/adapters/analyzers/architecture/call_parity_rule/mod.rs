@@ -218,7 +218,7 @@ fn collect_active_handler_canonicals(
     out
 }
 
-fn project_call_parity(hit: MatchLocation, cp: &CompiledCallParity) -> Finding {
+pub(super) fn project_call_parity(hit: MatchLocation, cp: &CompiledCallParity) -> Finding {
     let rule_id = match &hit.kind {
         ViolationKind::CallParityNoDelegation { .. } => RULE_NO_DELEGATION,
         ViolationKind::CallParityMissingAdapter { .. } => RULE_MISSING_ADAPTER,
@@ -234,7 +234,7 @@ fn project_call_parity(hit: MatchLocation, cp: &CompiledCallParity) -> Finding {
 /// (Warn → Low, Error → Medium; Off is filtered out before projection).
 /// All other call-parity findings are Medium.
 /// Operation: variant dispatch.
-fn severity_for(kind: &ViolationKind, cp: &CompiledCallParity) -> Severity {
+pub(super) fn severity_for(kind: &ViolationKind, cp: &CompiledCallParity) -> Severity {
     match kind {
         ViolationKind::CallParityMultiTouchpoint { .. } => match cp.single_touchpoint {
             SingleTouchpointMode::Error => Severity::Medium,

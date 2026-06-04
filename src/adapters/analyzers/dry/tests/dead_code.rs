@@ -11,6 +11,50 @@ fn parse(code: &str) -> Vec<(String, String, syn::File)> {
     vec![("test.rs".to_string(), code.to_string(), syntax)]
 }
 
+/// Parse a two-file workspace (`parent` + `child`) into a `parsed` vec.
+fn parse2(
+    parent_path: &str,
+    parent_code: &str,
+    child_path: &str,
+    child_code: &str,
+) -> Vec<(String, String, syn::File)> {
+    vec![
+        (
+            parent_path.to_string(),
+            parent_code.to_string(),
+            syn::parse_file(parent_code).expect("parse parent"),
+        ),
+        (
+            child_path.to_string(),
+            child_code.to_string(),
+            syn::parse_file(child_code).expect("parse child"),
+        ),
+    ]
+}
+
+/// `(production_calls, test_calls)` collected from `code` (single file).
+fn collected_calls(code: &str) -> (HashSet<String>, HashSet<String>) {
+    let parsed = parse(code);
+    let cfg_test_files =
+        crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(&parsed);
+    collect_all_calls(&parsed, &cfg_test_files)
+}
+
+/// Run dead-code detection over `parsed` with the default config and no
+/// api/test-helper line markers.
+fn dead_code_warnings(parsed: &[(String, String, syn::File)]) -> Vec<DeadCodeWarning> {
+    let config = Config::default();
+    let cfg_test_files =
+        crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(parsed);
+    detect_dead_code(
+        parsed,
+        &config,
+        &std::collections::HashMap::new(),
+        &std::collections::HashMap::new(),
+        &cfg_test_files,
+    )
+}
+
 #[test]
 fn test_detect_dead_code_empty() {
     let parsed = parse("");
@@ -523,46 +567,58 @@ fn integration_test_entry_point_in_crate_tests_dir_not_dead_code() {
 }
 
 #[test]
-fn test_cfg_test_mod_file_not_flagged() {
-    // Parent file declares `#[cfg(test)] mod helpers;` (external module)
-    let parent_code = r#"
-        fn production_fn() { let x = 1; }
-        #[cfg(test)]
-        mod helpers;
-    "#;
-    // Child file contains helper functions (no #[cfg(test)] at root)
-    let child_code = r#"
-        pub fn test_helper() { let x = 1; }
-    "#;
-    let parent_ast = syn::parse_file(parent_code).expect("parse parent");
-    let child_ast = syn::parse_file(child_code).expect("parse child");
-    let parsed = vec![
+fn cfg_test_mod_child_files_not_flagged() {
+    // A function in an externally-declared `#[cfg(test)] mod X;` child file
+    // is test code and must not be flagged as dead, across the three
+    // module-resolution shapes: flat (`helpers.rs`), dir (`helpers/mod.rs`),
+    // and non-mod parent (`foo.rs` → `foo/`). (label, parent_path,
+    // parent_code, child_path, child_code, fn_not_flagged)
+    let cases: &[(&str, &str, &str, &str, &str, &str)] = &[
         (
-            "src/mod.rs".to_string(),
-            parent_code.to_string(),
-            parent_ast,
+            "flat helpers.rs child",
+            "src/mod.rs",
+            r#"
+            fn production_fn() { let x = 1; }
+            #[cfg(test)]
+            mod helpers;
+            "#,
+            "src/helpers.rs",
+            "pub fn test_helper() { let x = 1; }",
+            "test_helper",
         ),
         (
-            "src/helpers.rs".to_string(),
-            child_code.to_string(),
-            child_ast,
+            "dir helpers/mod.rs child",
+            "src/foo/mod.rs",
+            r#"
+            fn prod() { let x = 1; }
+            #[cfg(test)]
+            mod helpers;
+            "#,
+            "src/foo/helpers/mod.rs",
+            "pub fn test_util() { let x = 1; }",
+            "test_util",
+        ),
+        (
+            "non-mod parent foo.rs → foo/",
+            "src/foo.rs",
+            r#"
+            fn prod() { let x = 1; }
+            #[cfg(test)]
+            mod test_utils;
+            "#,
+            "src/foo/test_utils.rs",
+            "pub fn helper() { let x = 1; }",
+            "helper",
         ),
     ];
-    let config = Config::default();
-    let cfg_test_files =
-        crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(&parsed);
-    let warnings = detect_dead_code(
-        &parsed,
-        &config,
-        &std::collections::HashMap::new(),
-        &std::collections::HashMap::new(),
-        &cfg_test_files,
-    );
-    // test_helper lives in a cfg(test) module file — should be excluded
-    assert!(
-        !warnings.iter().any(|w| w.function_name == "test_helper"),
-        "Functions in #[cfg(test)] mod file should not be flagged as dead code"
-    );
+    for (label, parent_path, parent_code, child_path, child_code, fn_name) in cases {
+        let warnings =
+            dead_code_warnings(&parse2(parent_path, parent_code, child_path, child_code));
+        assert!(
+            !warnings.iter().any(|w| w.function_name == *fn_name),
+            "case {label}: {fn_name} in a #[cfg(test)] mod child must not be flagged; got {warnings:?}"
+        );
+    }
 }
 
 #[test]
@@ -620,88 +676,6 @@ fn test_cfg_test_mod_calls_classified_as_test() {
             .iter()
             .any(|w| w.function_name == "used_by_production"),
         "Function called from production should not be flagged"
-    );
-}
-
-#[test]
-fn test_cfg_test_mod_dir_module() {
-    // Parent declares #[cfg(test)] mod helpers; where child is helpers/mod.rs
-    let parent_code = r#"
-        fn prod() { let x = 1; }
-        #[cfg(test)]
-        mod helpers;
-    "#;
-    let child_code = r#"
-        pub fn test_util() { let x = 1; }
-    "#;
-    let parent_ast = syn::parse_file(parent_code).expect("parse parent");
-    let child_ast = syn::parse_file(child_code).expect("parse child");
-    let parsed = vec![
-        (
-            "src/foo/mod.rs".to_string(),
-            parent_code.to_string(),
-            parent_ast,
-        ),
-        (
-            "src/foo/helpers/mod.rs".to_string(),
-            child_code.to_string(),
-            child_ast,
-        ),
-    ];
-    let config = Config::default();
-    let cfg_test_files =
-        crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(&parsed);
-    let warnings = detect_dead_code(
-        &parsed,
-        &config,
-        &std::collections::HashMap::new(),
-        &std::collections::HashMap::new(),
-        &cfg_test_files,
-    );
-    assert!(
-        !warnings.iter().any(|w| w.function_name == "test_util"),
-        "Functions in #[cfg(test)] dir module (mod.rs) should not be flagged"
-    );
-}
-
-#[test]
-fn test_cfg_test_file_path_from_non_mod_parent() {
-    // Parent is foo.rs (not mod.rs) → child dir is foo/
-    let parent_code = r#"
-        fn prod() { let x = 1; }
-        #[cfg(test)]
-        mod test_utils;
-    "#;
-    let child_code = r#"
-        pub fn helper() { let x = 1; }
-    "#;
-    let parent_ast = syn::parse_file(parent_code).expect("parse parent");
-    let child_ast = syn::parse_file(child_code).expect("parse child");
-    let parsed = vec![
-        (
-            "src/foo.rs".to_string(),
-            parent_code.to_string(),
-            parent_ast,
-        ),
-        (
-            "src/foo/test_utils.rs".to_string(),
-            child_code.to_string(),
-            child_ast,
-        ),
-    ];
-    let config = Config::default();
-    let cfg_test_files =
-        crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(&parsed);
-    let warnings = detect_dead_code(
-        &parsed,
-        &config,
-        &std::collections::HashMap::new(),
-        &std::collections::HashMap::new(),
-        &cfg_test_files,
-    );
-    assert!(
-        !warnings.iter().any(|w| w.function_name == "helper"),
-        "Functions in cfg(test) child of foo.rs → foo/test_utils.rs should be excluded"
     );
 }
 
@@ -971,48 +945,88 @@ fn test_serde_default_fn_realistic_pattern() {
     );
 }
 
-#[test]
-fn test_call_inside_assert_detected_as_test_call() {
-    let code = r#"
-        fn helper() -> bool { true }
-        #[cfg(test)]
-        mod tests {
-            use super::*;
-            #[test]
-            fn test_it() {
-                assert!(helper());
+// `collect_all_calls` must see calls in various syntactic forms and route them
+// to the production vs test set by scope: calls inside `assert!` / `assert_eq!`
+// within a `#[test]` count as TEST calls; a `&fn` passed as an argument and a
+// bare fn name in a struct field count as PRODUCTION calls.
+// (label, code, in_test_scope, callee)
+const CALL_FORM_CASES: &[(&str, &str, bool, &str)] = &[
+    (
+        "call inside assert!() in a #[test]",
+        r#"
+            fn helper() -> bool { true }
+            #[cfg(test)]
+            mod tests {
+                use super::*;
+                #[test]
+                fn test_it() {
+                    assert!(helper());
+                }
             }
-        }
-    "#;
-    let parsed = parse(code);
-    let cfg_test_files = collect_cfg_test_file_paths(&parsed);
-    let (_prod_calls, test_calls) = collect_all_calls(&parsed, &cfg_test_files);
-    assert!(
-        test_calls.contains("helper"),
-        "Call inside assert!() should be in test_calls"
-    );
-}
+            "#,
+        true,
+        "helper",
+    ),
+    (
+        "call inside assert_eq!() in a #[test]",
+        r#"
+            fn compute() -> usize { 42 }
+            #[cfg(test)]
+            mod tests {
+                use super::*;
+                #[test]
+                fn test_it() {
+                    assert_eq!(compute(), 42);
+                }
+            }
+            "#,
+        true,
+        "compute",
+    ),
+    (
+        "&fn passed as a closure argument",
+        r#"
+            fn format_item(s: &str) -> String { s.to_string() }
+
+            fn process(items: &[&str], transform: &dyn Fn(&str) -> String) {
+                items.iter().for_each(|i| { transform(i); });
+            }
+
+            fn run() {
+                process(&["a"], &format_item);
+            }
+            "#,
+        false,
+        "format_item",
+    ),
+    (
+        "bare fn name in a struct field",
+        r#"
+            struct Config { handler: fn() -> i32 }
+            fn my_handler() -> i32 { 42 }
+            fn setup() -> Config {
+                Config { handler: my_handler }
+            }
+            "#,
+        false,
+        "my_handler",
+    ),
+];
 
 #[test]
-fn test_call_inside_assert_eq_detected() {
-    let code = r#"
-        fn compute() -> usize { 42 }
-        #[cfg(test)]
-        mod tests {
-            use super::*;
-            #[test]
-            fn test_it() {
-                assert_eq!(compute(), 42);
-            }
-        }
-    "#;
-    let parsed = parse(code);
-    let cfg_test_files = collect_cfg_test_file_paths(&parsed);
-    let (_prod, test_calls) = collect_all_calls(&parsed, &cfg_test_files);
-    assert!(
-        test_calls.contains("compute"),
-        "Call inside assert_eq!() should be in test_calls"
-    );
+fn collect_all_calls_recognizes_call_forms() {
+    for (label, code, in_test_scope, callee) in CALL_FORM_CASES {
+        let (prod_calls, test_calls) = collected_calls(code);
+        let set = if *in_test_scope {
+            &test_calls
+        } else {
+            &prod_calls
+        };
+        assert!(
+            set.contains(*callee),
+            "case {label}: callee `{callee}` not found in {set:?}"
+        );
+    }
 }
 
 #[test]
@@ -1076,46 +1090,6 @@ fn test_api_function_excluded_from_dead_code() {
 fn test_api_does_not_count_as_suppression() {
     // Verify parse_suppression returns None for qual:api
     assert!(crate::findings::parse_suppression(1, "// qual:api").is_none());
-}
-
-#[test]
-fn test_function_pointer_ref_recognized_as_call() {
-    let code = r#"
-        fn format_item(s: &str) -> String { s.to_string() }
-
-        fn process(items: &[&str], transform: &dyn Fn(&str) -> String) {
-            items.iter().for_each(|i| { transform(i); });
-        }
-
-        fn run() {
-            process(&["a"], &format_item);
-        }
-    "#;
-    let parsed = parse(code);
-    let cfg_test_files = collect_cfg_test_file_paths(&parsed);
-    let (prod_calls, _test_calls) = collect_all_calls(&parsed, &cfg_test_files);
-    assert!(
-        prod_calls.contains("format_item"),
-        "&format_item passed as argument should be recognized as a call"
-    );
-}
-
-#[test]
-fn test_struct_field_function_pointer_recognized_as_call() {
-    let code = r#"
-        struct Config { handler: fn() -> i32 }
-        fn my_handler() -> i32 { 42 }
-        fn setup() -> Config {
-            Config { handler: my_handler }
-        }
-    "#;
-    let parsed = parse(code);
-    let cfg_test_files = collect_cfg_test_file_paths(&parsed);
-    let (prod_calls, _test_calls) = collect_all_calls(&parsed, &cfg_test_files);
-    assert!(
-        prod_calls.contains("my_handler"),
-        "Bare function name in struct field should be recognized as a call"
-    );
 }
 
 // ── Test-helper marker tests ─────────────────────────────────
@@ -1222,32 +1196,22 @@ fn test_helper_marker_does_not_suppress_uncalled() {
 // both sides of the chain are captured by name and the helper stays
 // production-reachable.
 
-#[test]
-fn helper_reached_via_trait_blanket_dispatch_is_not_dead_code() {
-    // Three-file setup mirroring the original v1.2.2 incident:
-    //   ports/reporter.rs  → trait definitions + blanket impl
-    //   sarif/rules.rs     → the helper that was flagged
-    //   sarif/mod.rs       → the concrete ReporterImpl, plus a #[cfg(test)]
-    //                        module that calls the helper directly via
-    //                        a pub-API wrapper (which is what made it
-    //                        look like the helper was *only* test-reachable)
-    //
-    // The production path is:
-    //   <SarifReporter as Reporter>::render
-    //     → <SarifReporter as ReporterImpl>::publish
-    //       → sarif_rules()
-    //
-    // The test path is:
-    //   #[cfg(test)] tests::it()
-    //     → build_sarif_string()  (which also calls publish() indirectly,
-    //                              but the analyzer only sees its name)
-    //
-    // If the analyzer cannot trace through the trait-blanket-dispatch,
-    // it concludes "sarif_rules has only a test caller" → TestOnly.
-    let ports_reporter = (
-        "src/ports/reporter.rs".to_string(),
-        String::new(),
-        syn::parse_file(
+/// Three-file workspace mirroring the v1.2.2 incident: `ports/reporter.rs`
+/// (trait defs + blanket `impl<T: ReporterImpl> Reporter for T`),
+/// `sarif/rules.rs` (the helper that was flagged), and `sarif/mod.rs` (the
+/// concrete `SarifReporter` + a `#[cfg(test)]` module calling the helper via a
+/// pub-API wrapper — the thing that made it look test-only).
+fn blanket_dispatch_parsed() -> Vec<(String, String, syn::File)> {
+    let pf = |path: &str, src: &str| {
+        (
+            path.to_string(),
+            String::new(),
+            syn::parse_file(src).expect("parse fixture"),
+        )
+    };
+    vec![
+        pf(
+            "src/ports/reporter.rs",
             r#"
             pub trait ReporterImpl {
                 type Output;
@@ -1262,25 +1226,17 @@ fn helper_reached_via_trait_blanket_dispatch_is_not_dead_code() {
                 fn render(&self) -> Self::Output { self.publish() }
             }
             "#,
-        )
-        .unwrap(),
-    );
-    let sarif_rules = (
-        "src/adapters/report/sarif/rules.rs".to_string(),
-        String::new(),
-        syn::parse_file(
+        ),
+        pf(
+            "src/adapters/report/sarif/rules.rs",
             r#"
             pub(super) fn sarif_rules() -> Vec<String> {
                 vec![String::from("rule")]
             }
             "#,
-        )
-        .unwrap(),
-    );
-    let sarif_mod = (
-        "src/adapters/report/sarif/mod.rs".to_string(),
-        String::new(),
-        syn::parse_file(
+        ),
+        pf(
+            "src/adapters/report/sarif/mod.rs",
             r#"
             use super::rules::sarif_rules;
             pub struct SarifReporter;
@@ -1302,10 +1258,17 @@ fn helper_reached_via_trait_blanket_dispatch_is_not_dead_code() {
                 fn it() { let _ = build_sarif_string(); }
             }
             "#,
-        )
-        .unwrap(),
-    );
-    let parsed = vec![ports_reporter, sarif_rules, sarif_mod];
+        ),
+    ]
+}
+
+// Production path `<SarifReporter as Reporter>::render → …ReporterImpl::publish
+// → sarif_rules()` reaches the helper through a trait-blanket impl. If the
+// analyzer can't trace that, it sees only the `#[cfg(test)]` caller and wrongly
+// concludes `sarif_rules` is TestOnly. It must NOT be flagged dead-code.
+#[test]
+fn helper_reached_via_trait_blanket_dispatch_is_not_dead_code() {
+    let parsed = blanket_dispatch_parsed();
     let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
@@ -1318,5 +1281,21 @@ fn helper_reached_via_trait_blanket_dispatch_is_not_dead_code() {
         !warnings.iter().any(|w| w.function_name == "sarif_rules"),
         "sarif_rules is reached via trait-blanket dispatch and must not be flagged dead-code, got: {:?}",
         warnings.iter().map(|w| (&w.function_name, &w.kind)).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_only_called_fn_is_not_uncalled() {
+    // A production fn called only from tests is TestOnly, NOT Uncalled — guards
+    // the `!test_calls.contains(qualified)` term of `find_uncalled` (a `||`
+    // there would wrongly report it as uncalled).
+    let parsed =
+        parse("fn helper() { let _ = 1; } #[cfg(test)] mod tests { #[test] fn t() { helper(); } }");
+    let warnings = dead_code_warnings(&parsed);
+    assert!(
+        !warnings
+            .iter()
+            .any(|w| w.function_name == "helper" && matches!(w.kind, DeadCodeKind::Uncalled)),
+        "a test-only fn must not be reported as Uncalled, got {warnings:?}"
     );
 }

@@ -44,6 +44,7 @@ const STDLIB_ATTRS: &[&str] = &[
 /// One private + attributed fn that survives the stdlib-attribute
 /// filter. Carries the source location for hint rendering and the
 /// attribute names so the hint can name them explicitly.
+#[derive(Debug)]
 pub(crate) struct PrivateCandidate {
     pub canonical: String,
     pub file: String,

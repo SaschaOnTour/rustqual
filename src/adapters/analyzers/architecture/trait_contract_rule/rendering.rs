@@ -18,7 +18,7 @@ use quote::ToTokens;
 /// stay intact so keyword patterns like `"dyn Error"` or `"impl Trait"`
 /// match as written.
 /// Operation: token-stream stringification + targeted whitespace normalisation.
-pub(super) fn render_type(ty: &syn::Type) -> String {
+pub(crate) fn render_type(ty: &syn::Type) -> String {
     let mut tokens = proc_macro2::TokenStream::new();
     ty.to_tokens(&mut tokens);
     normalise_rendering(&tokens.to_string())

@@ -178,7 +178,7 @@ fn last_path_segment(path: &str) -> &str {
 /// Stage 3 starter-pack: prepend these common framework attribute-macro
 /// names so users don't need to list them in every rustqual.toml. The
 /// full set is `defaults ∪ user`. Operation.
-fn build_transparent_macros(user: &[String]) -> HashSet<String> {
+pub(super) fn build_transparent_macros(user: &[String]) -> HashSet<String> {
     const DEFAULTS: &[&str] = &[
         "instrument",   // tracing::instrument
         "async_trait",  // async_trait::async_trait
@@ -282,7 +282,7 @@ fn parse_unmatched_behavior(raw: &str) -> Result<UnmatchedBehavior, String> {
 /// runtime; users who want to match a hyphenated Cargo package name
 /// must supply the underscore form or a glob.
 /// Operation: pure predicate over the character set.
-fn is_exact_crate_key(key: &str) -> bool {
+pub(super) fn is_exact_crate_key(key: &str) -> bool {
     !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 

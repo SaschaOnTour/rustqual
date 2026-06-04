@@ -103,13 +103,13 @@ pub fn create_baseline(results: &[FunctionAnalysis], summary: &Summary) -> Strin
         .unwrap_or_else(|e| format!("{{\"error\":\"baseline serialization failed: {e}\"}}"))
 }
 
-/// Print v2-specific deltas: TQ warnings, findings, and quality score.
-/// Returns true if quality score regressed.
-/// Operation: data extraction, comparison, and display logic; own call hidden in closure.
-fn print_v2_deltas(raw: &serde_json::Value, summary: &Summary) -> bool {
-    let show_delta = |label: &str, old_pct: f64, new_pct: f64| {
-        print_score_delta(label, old_pct, new_pct);
-    };
+/// Build the v2-specific delta lines (TQ warnings, quality score) plus the
+/// regression flag (quality score dropped). Pure so the TQ sum, the
+/// `* PERCENTAGE_MULTIPLIER` scaling, and the regression comparison are
+/// observable in tests rather than buried in stdout.
+/// Operation: data extraction + comparison; own call hidden in closure.
+pub(super) fn v2_delta_lines(raw: &serde_json::Value, summary: &Summary) -> (Vec<String>, bool) {
+    let fmt = |label: &str, old_pct: f64, new_pct: f64| format_score_delta(label, old_pct, new_pct);
     let tq_keys = [
         "tq_no_assertion_warnings",
         "tq_no_sut_warnings",
@@ -123,35 +123,79 @@ fn print_v2_deltas(raw: &serde_json::Value, summary: &Summary) -> bool {
         + summary.tq_untested_warnings
         + summary.tq_uncovered_warnings
         + summary.tq_untested_logic_warnings;
-    println!(
-        "  TQ warnings: {} \u{2192} {} ({:+})",
-        old_tq,
-        new_tq,
-        new_tq as i64 - old_tq as i64
-    );
     let old_quality = raw["quality_score"].as_f64().unwrap_or(0.0);
-    show_delta(
-        "Quality",
-        old_quality * PERCENTAGE_MULTIPLIER,
-        summary.quality_score * PERCENTAGE_MULTIPLIER,
-    );
-    summary.quality_score - old_quality < 0.0
+    let lines = vec![
+        format!(
+            "  TQ warnings: {} \u{2192} {} ({:+})",
+            old_tq,
+            new_tq,
+            new_tq as i64 - old_tq as i64
+        ),
+        fmt(
+            "Quality",
+            old_quality * PERCENTAGE_MULTIPLIER,
+            summary.quality_score * PERCENTAGE_MULTIPLIER,
+        ),
+    ];
+    (lines, summary.quality_score - old_quality < 0.0)
+}
+
+/// Build all baseline-comparison lines plus the regression flag, given the
+/// already-parsed baseline JSON. Pure so the violation/finding deltas, the
+/// IOSP scaling, and the v1/v2 regression branch are observable in tests.
+/// Operation: comparison + display logic; own calls hidden in closures.
+pub(super) fn comparison_lines(raw: &serde_json::Value, summary: &Summary) -> (Vec<String>, bool) {
+    let fmt = |label: &str, old_pct: f64, new_pct: f64| format_score_delta(label, old_pct, new_pct);
+    let v2 = |r: &serde_json::Value, s: &Summary| v2_delta_lines(r, s);
+    let findings = |s: &Summary| s.total_findings();
+    let is_v2 = raw.get("version").and_then(|v| v.as_u64()).unwrap_or(0) >= 2;
+    let old_iosp = raw["iosp_score"].as_f64().unwrap_or(0.0);
+    let old_violations = raw["violations"].as_u64().unwrap_or(0) as usize;
+    let violation_delta = summary.violations as i64 - old_violations as i64;
+    let mut lines = vec![
+        format!(
+            "\n{}",
+            "\u{2550}\u{2550}\u{2550} Baseline Comparison \u{2550}\u{2550}\u{2550}".bold()
+        ),
+        format!(
+            "  Violations: {} \u{2192} {} ({:+})",
+            old_violations, summary.violations, violation_delta
+        ),
+    ];
+    if is_v2 {
+        let old_findings = raw["total_findings"].as_u64().unwrap_or(0) as usize;
+        let finding_delta = findings(summary) as i64 - old_findings as i64;
+        lines.push(format!(
+            "  Findings:   {} \u{2192} {} ({:+})",
+            old_findings,
+            findings(summary),
+            finding_delta
+        ));
+    }
+    lines.push(fmt(
+        "IOSP Score",
+        old_iosp * PERCENTAGE_MULTIPLIER,
+        summary.iosp_score * PERCENTAGE_MULTIPLIER,
+    ));
+    let regressed = if is_v2 {
+        let (v2_lines, reg) = v2(raw, summary);
+        lines.extend(v2_lines);
+        reg
+    } else {
+        summary.iosp_score - old_iosp < 0.0
+    };
+    (lines, regressed)
 }
 
 /// Compare current results against a baseline and print delta.
 /// Returns true if there was a regression (quality score decreased).
 /// Supports v1 (IOSP-only) and v2 (full quality score) baseline formats.
-/// Operation: comparison and display logic. Own calls hidden in closures.
+/// Integration: parse, then delegate line-building to `comparison_lines`.
 pub fn print_comparison(
     baseline_content: &str,
     _results: &[FunctionAnalysis],
     summary: &Summary,
 ) -> bool {
-    let show_delta = |label: &str, old_pct: f64, new_pct: f64| {
-        print_score_delta(label, old_pct, new_pct);
-    };
-    let v2_deltas = |r: &serde_json::Value, s: &Summary| print_v2_deltas(r, s);
-    let findings = |s: &Summary| s.total_findings();
     let raw: serde_json::Value = match serde_json::from_str(baseline_content) {
         Ok(v) => v,
         Err(e) => {
@@ -159,55 +203,28 @@ pub fn print_comparison(
             return false;
         }
     };
-    let is_v2 = raw.get("version").and_then(|v| v.as_u64()).unwrap_or(0) >= 2;
-    println!(
-        "\n{}",
-        "\u{2550}\u{2550}\u{2550} Baseline Comparison \u{2550}\u{2550}\u{2550}".bold()
-    );
-    let old_iosp = raw["iosp_score"].as_f64().unwrap_or(0.0);
-    let old_violations = raw["violations"].as_u64().unwrap_or(0) as usize;
-    let violation_delta = summary.violations as i64 - old_violations as i64;
-    println!(
-        "  Violations: {} \u{2192} {} ({:+})",
-        old_violations, summary.violations, violation_delta
-    );
-    if is_v2 {
-        let old_findings = raw["total_findings"].as_u64().unwrap_or(0) as usize;
-        let finding_delta = findings(summary) as i64 - old_findings as i64;
-        println!(
-            "  Findings:   {} \u{2192} {} ({:+})",
-            old_findings,
-            findings(summary),
-            finding_delta
-        );
-    }
-    show_delta(
-        "IOSP Score",
-        old_iosp * PERCENTAGE_MULTIPLIER,
-        summary.iosp_score * PERCENTAGE_MULTIPLIER,
-    );
-    if is_v2 {
-        v2_deltas(&raw, summary)
-    } else {
-        summary.iosp_score - old_iosp < 0.0
-    }
+    let (lines, regressed) = comparison_lines(&raw, summary);
+    lines.iter().for_each(|l| println!("{l}"));
+    regressed
 }
 
-/// Print a labeled score delta line with colored arrow.
+/// Build a labeled score-delta line: up-arrow (green) when the score rose,
+/// down-arrow (red) when it fell, `(unchanged)` when equal. Pure so the
+/// direction branch and the `new - old` delta are observable in tests.
 /// Operation: conditional formatting logic, no own calls.
-fn print_score_delta(label: &str, old_pct: f64, new_pct: f64) {
+pub(super) fn format_score_delta(label: &str, old_pct: f64, new_pct: f64) -> String {
     let delta = new_pct - old_pct;
     if delta > 0.0 {
-        println!(
+        format!(
             "  {label}: {old_pct:.1}% \u{2192} {new_pct:.1}% ({})",
             format!("\u{2191} {:.1}%", delta).green()
-        );
+        )
     } else if delta < 0.0 {
-        println!(
+        format!(
             "  {label}: {old_pct:.1}% \u{2192} {new_pct:.1}% ({})",
             format!("\u{2193} {:.1}%", delta.abs()).red()
-        );
+        )
     } else {
-        println!("  {label}: {new_pct:.1}% (unchanged)");
+        format!("  {label}: {new_pct:.1}% (unchanged)")
     }
 }

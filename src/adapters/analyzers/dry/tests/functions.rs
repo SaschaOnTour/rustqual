@@ -113,7 +113,10 @@ fn test_detect_duplicates_below_min_tokens_excluded() {
 }
 
 #[test]
-fn test_detect_duplicates_test_functions_excluded() {
+fn test_detect_duplicates_includes_test_functions() {
+    // Duplicate detection always runs on test code (the `ignore_tests`
+    // toggle was removed in v1.4.0) — duplicate `#[cfg(test)]` helpers are
+    // flagged just like production duplicates.
     let code = r#"
         #[cfg(test)]
         mod tests {
@@ -122,41 +125,15 @@ fn test_detect_duplicates_test_functions_excluded() {
         }
     "#;
     let parsed = parse(code);
-    let mut config = low_threshold_config();
-    config.ignore_tests = true;
-    let groups = detect_duplicates(&parsed, &config);
-    assert!(
-        groups.is_empty(),
-        "Test functions should be excluded when ignore_tests=true"
-    );
+    let groups = detect_duplicates(&parsed, &low_threshold_config());
+    assert_eq!(groups.len(), 1, "test functions must be included");
 }
 
 #[test]
-fn test_detect_duplicates_test_functions_included() {
-    let code = r#"
-        #[cfg(test)]
-        mod tests {
-            fn helper_a() { let x = 1; let y = x + 2; let z = y * x; }
-            fn helper_b() { let a = 1; let b = a + 2; let c = b * a; }
-        }
-    "#;
-    let parsed = parse(code);
-    let mut config = low_threshold_config();
-    config.ignore_tests = false;
-    let groups = detect_duplicates(&parsed, &config);
-    assert_eq!(
-        groups.len(),
-        1,
-        "Test functions should be included when ignore_tests=false"
-    );
-}
-
-#[test]
-fn duplicates_in_cfg_test_companion_file_skipped() {
+fn duplicates_in_cfg_test_companion_file_flagged() {
     // A `#![cfg(test)]` companion file is test code even though its path
-    // has no `tests/` segment. Duplicate detection must skip it by
-    // consulting the authoritative cfg-test file set, not a `tests/`
-    // path heuristic.
+    // has no `tests/` segment. Since v1.4.0 duplicate detection runs on
+    // tests too, so its duplicate helpers ARE flagged.
     let code = r#"
         #![cfg(test)]
         fn helper_one() { let x = 1; let y = x + 2; let z = y * x; }
@@ -167,11 +144,11 @@ fn duplicates_in_cfg_test_companion_file_skipped() {
         code.to_string(),
         syn::parse_file(code).expect("parse failed"),
     )];
-    let config = low_threshold_config(); // ignore_tests = true
-    let groups = detect_duplicates(&parsed, &config);
-    assert!(
-        groups.is_empty(),
-        "duplicates in a #![cfg(test)] file must be skipped: {groups:?}"
+    let groups = detect_duplicates(&parsed, &low_threshold_config());
+    assert_eq!(
+        groups.len(),
+        1,
+        "duplicates in a #![cfg(test)] file must be flagged: {groups:?}"
     );
 }
 
@@ -202,22 +179,8 @@ fn duplicates_in_production_file_under_nested_tests_dir_still_flagged() {
 
 #[test]
 fn test_detect_duplicates_three_way() {
-    let parsed = parse_multi(&[
-        (
-            "a.rs",
-            "fn func_a() { let x = 1; let y = x + 2; let z = y * x; }",
-        ),
-        (
-            "b.rs",
-            "fn func_b() { let a = 1; let b = a + 2; let c = b * a; }",
-        ),
-        (
-            "c.rs",
-            "fn func_c() { let p = 1; let q = p + 2; let r = q * p; }",
-        ),
-    ]);
-    let config = low_threshold_config();
-    let groups = detect_duplicates(&parsed, &config);
+    let parsed = super::three_matching_funcs();
+    let groups = detect_duplicates(&parsed, &low_threshold_config());
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0].entries.len(), 3, "Should detect 3-way duplicate");
 }
@@ -279,9 +242,34 @@ fn test_group_exact_duplicates_returns_remaining() {
     assert_eq!(remaining[0], 1); // index of b
 }
 
+/// Count the `NearDuplicate` groups in `parsed` at the given similarity
+/// threshold, plus the first one's similarity. Operation: filter + project.
+fn near_dup_similarity(
+    parsed: &[(String, String, syn::File)],
+    threshold: f64,
+) -> (usize, Option<f64>) {
+    let mut config = low_threshold_config();
+    config.similarity_threshold = threshold;
+    let groups = detect_duplicates(parsed, &config);
+    let near: Vec<f64> = groups
+        .iter()
+        .filter_map(|g| match g.kind {
+            DuplicateKind::NearDuplicate { similarity } => Some(similarity),
+            _ => None,
+        })
+        .collect();
+    (near.len(), near.first().copied())
+}
+
 #[test]
-fn test_detect_near_duplicates_high_similarity() {
-    // Two functions with slight differences — should be near-duplicates
+fn near_duplicate_detected_above_threshold_but_rejected_below_it() {
+    // `func_a`/`func_b` are token-identical except `+ 1` vs `- 1` (same token
+    // count → same bucket → comparable), forming a near- (not exact)
+    // duplicate. At a permissive threshold it IS flagged; raising the
+    // threshold strictly ABOVE the pair's measured similarity rejects it.
+    // Pins both halves of the spec's "deliberately strict" contract — the old
+    // version asserted similarity only INSIDE an `if detected`, so it passed
+    // vacuously when detection broke.
     let parsed = parse_multi(&[
         (
             "a.rs",
@@ -292,22 +280,19 @@ fn test_detect_near_duplicates_high_similarity() {
             "fn func_b() { let x = 1; let y = x + 2; let z = y * x; let w = z - 1; }",
         ),
     ]);
-    let mut config = low_threshold_config();
-    config.similarity_threshold = 0.80;
-    let groups = detect_duplicates(&parsed, &config);
-    // These have different hashes (+ vs -) but high Jaccard similarity
-    let near_groups: Vec<_> = groups
-        .iter()
-        .filter(|g| matches!(g.kind, DuplicateKind::NearDuplicate { .. }))
-        .collect();
-    // Whether detected depends on bucketing — both have similar token counts
-    // The test verifies the mechanism works, even if thresholds vary
-    if !near_groups.is_empty() {
-        let DuplicateKind::NearDuplicate { similarity } = near_groups[0].kind else {
-            panic!("expected near duplicate");
-        };
-        assert!(similarity >= 0.80);
-    }
+    let (count, similarity) = near_dup_similarity(&parsed, 0.50);
+    assert_eq!(count, 1, "permissive threshold detects the near-duplicate");
+    let similarity = similarity.unwrap();
+    assert!(
+        (0.50..1.0).contains(&similarity),
+        "near (not exact) similarity in [0.50, 1.0): {similarity}"
+    );
+    let strict = (similarity + 1.0) / 2.0;
+    let (strict_count, _) = near_dup_similarity(&parsed, strict);
+    assert_eq!(
+        strict_count, 0,
+        "threshold {strict} above similarity {similarity} rejects the pair"
+    );
 }
 
 #[test]
@@ -329,4 +314,26 @@ fn test_duplicate_entry_has_file_and_line() {
         assert!(!entry.file.is_empty());
         assert!(!entry.name.is_empty());
     }
+}
+
+#[test]
+fn token_count_exactly_at_min_tokens_is_kept() {
+    // `let x = 1;` normalises to exactly 5 tokens. With `min_tokens = 5` it is
+    // at the boundary and must be KEPT (`tokens.len() < min_tokens` is false).
+    // Guards the `<` in `build_hash_entry` (a `<=` would drop it).
+    let config = DuplicatesConfig {
+        min_tokens: 5,
+        min_lines: 1,
+        ..DuplicatesConfig::default()
+    };
+    let parsed = parse_multi(&[
+        ("a.rs", "fn a() { let x = 1; }"),
+        ("b.rs", "fn b() { let y = 1; }"),
+    ]);
+    let groups = detect_duplicates(&parsed, &config);
+    assert_eq!(
+        groups.len(),
+        1,
+        "bodies with exactly min_tokens tokens are kept and form a duplicate, got {groups:?}"
+    );
 }

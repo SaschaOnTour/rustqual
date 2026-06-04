@@ -164,6 +164,43 @@ fn required_param_fires_when_none_of_the_params_match() {
     assert_eq!(checks(&hits), vec!["required_param"]);
 }
 
+#[test]
+fn required_param_flags_the_method_that_lacks_the_param_not_the_one_that_has_it() {
+    // The `!has_required` guard means the fn WITHOUT the param is flagged.
+    // Asserting on count alone can't catch a deleted `!` (it would flag the
+    // other method, keeping the count at 1) — pin the flagged method's
+    // identity via the detail message.
+    let mut rule = empty();
+    rule.required_param_type_contains = Some("CancellationToken".into());
+    let src = r#"
+        pub trait Svc {
+            fn with_ctx(&self, ctx: CancellationToken);
+            fn without(&self, path: String);
+        }
+    "#;
+    let hits = run("any.rs", src, &rule);
+    let details: Vec<&str> = hits
+        .iter()
+        .filter_map(|h| match &h.kind {
+            ViolationKind::TraitContract {
+                check: "required_param",
+                detail,
+                ..
+            } => Some(detail.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(details.len(), 1, "exactly one required_param hit: {hits:?}");
+    assert!(
+        details[0].contains("without"),
+        "the method LACKING the param is flagged: {details:?}"
+    );
+    assert!(
+        !details[0].contains("with_ctx"),
+        "the method that HAS the param is not flagged: {details:?}"
+    );
+}
+
 // ── required_supertraits_contain ──────────────────────────────────────
 
 #[test]
@@ -265,6 +302,27 @@ fn error_variant_substring_flagged_via_naming() {
     assert_eq!(checks(&hits), vec!["error_variant"]);
 }
 
+#[test]
+fn error_variant_check_inspects_the_named_enum_not_the_first_one() {
+    // `find_enum_in_file` must match the error enum BY NAME. A decoy enum
+    // declared first carries the forbidden `syn::` field; the method's
+    // actual error type (`MyError`, declared second) is clean. Pins the
+    // `e.ident == name` match guard against `true` (which would pick the
+    // first enum and wrongly flag it).
+    let mut rule = empty();
+    rule.forbidden_error_variant_contains = vec!["syn::".into()];
+    let src = r#"
+        pub enum DecoyError { Bad(syn::Error) }
+        pub enum MyError { Clean(String) }
+        pub trait Svc { fn f(&self) -> Result<(), MyError>; }
+    "#;
+    let hits = run("any.rs", src, &rule);
+    assert!(
+        checks(&hits).is_empty(),
+        "must inspect MyError (clean), not the first-declared DecoyError: {hits:?}"
+    );
+}
+
 // ── combined: clean trait passes all checks ───────────────────────────
 
 #[test]
@@ -325,4 +383,43 @@ fn trait_in_nested_inline_module_is_checked() {
         vec!["return_type"],
         "traits inside deeply nested inline modules must be checked"
     );
+}
+
+#[test]
+fn trait_contract_hit_to_finding_projects_rule_id_and_fields() {
+    use crate::adapters::analyzers::architecture::trait_contract_rule::hit_to_finding;
+    use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
+    let hit = MatchLocation {
+        file: "src/ports/x.rs".into(),
+        line: 12,
+        column: 1,
+        kind: ViolationKind::TraitContract {
+            trait_name: "Repo".into(),
+            check: "receiver",
+            detail: "must take &self".into(),
+        },
+    };
+    let f = hit_to_finding(hit);
+    assert_eq!(f.file, "src/ports/x.rs");
+    assert_eq!(f.line, 12);
+    assert_eq!(f.column, 1);
+    assert_eq!(f.dimension, crate::domain::Dimension::Architecture);
+    assert_eq!(
+        f.rule_id, "architecture/trait_contract/receiver",
+        "rule id embeds the check name (pins the TraitContract arm)"
+    );
+    assert_eq!(f.severity, crate::domain::Severity::High);
+}
+
+#[test]
+fn render_type_collapses_path_colons() {
+    use crate::adapters::analyzers::architecture::trait_contract_rule::rendering::render_type;
+    let ty: syn::Type = syn::parse_str("std::fmt::Debug").unwrap();
+    assert_eq!(
+        render_type(&ty),
+        "std::fmt::Debug",
+        "`::` closed up, no stray spaces"
+    );
+    let generic: syn::Type = syn::parse_str("Vec<String>").unwrap();
+    assert_eq!(render_type(&generic), "Vec<String>");
 }

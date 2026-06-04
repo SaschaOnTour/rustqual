@@ -118,7 +118,6 @@ pub struct DuplicatesConfig {
     pub min_tokens: usize,
     pub min_lines: usize,
     pub min_statements: usize,
-    pub ignore_tests: bool,
     pub ignore_trait_impls: bool,
     pub detect_dead_code: bool,
     pub detect_wildcard_imports: bool,
@@ -133,7 +132,6 @@ impl Default for DuplicatesConfig {
             min_tokens: DEFAULT_MIN_TOKENS,
             min_lines: DEFAULT_MIN_LINES,
             min_statements: DEFAULT_MIN_STATEMENTS,
-            ignore_tests: true,
             ignore_trait_impls: true,
             detect_dead_code: DEFAULT_DETECT_DEAD_CODE,
             detect_wildcard_imports: DEFAULT_DETECT_WILDCARD_IMPORTS,
@@ -196,6 +194,34 @@ impl Default for SrpConfig {
             max_parameters: DEFAULT_SRP_MAX_PARAMETERS,
         }
     }
+}
+
+/// Per-test-code threshold overrides.
+///
+/// rustqual applies a curated subset of checks to test code — DRY-001/004/005
+/// (duplicate fns / fragments / repeated matches), LONG_FN (function length),
+/// and SRP file-length (SRP_MODULE). The god-struct check (SRP-001) also fires
+/// on test structs — a god-fixture is a real smell — but at production
+/// thresholds, with no separate test knob (`// qual:allow(srp)` covers the rare
+/// legitimate fixture). The remaining checks stay test-exempt: ERROR_HANDLING,
+/// MAGIC_NUMBER, IOSP, DRY-002 dead code, DRY-003 wildcard imports, Coupling,
+/// all Structural detectors, and the SRP *module*-cohesion (independent-cluster)
+/// check — a test file's independent `#[test]` fns are its purpose, not a smell.
+/// **This split is fixed — only the thresholds below are configurable.**
+///
+/// Each field overrides the matching production threshold *for test code
+/// only*. The default is `None`, meaning the production value is inherited —
+/// so out of the box test code is judged by the same limits as production.
+/// Field names mirror the production sections (`[complexity]`, `[srp]`).
+#[derive(Debug, Deserialize, Clone, Default)]
+#[serde(default, deny_unknown_fields)]
+pub struct TestsConfig {
+    /// Overrides `[complexity].max_function_lines` for test fns (LONG_FN).
+    pub max_function_lines: Option<usize>,
+    /// Overrides `[srp].file_length_baseline` for test files.
+    pub file_length_baseline: Option<usize>,
+    /// Overrides `[srp].file_length_ceiling` for test files.
+    pub file_length_ceiling: Option<usize>,
 }
 
 /// Configuration for coupling analysis.

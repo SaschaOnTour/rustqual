@@ -14,18 +14,17 @@ fn find(src: &str, names: &[&str]) -> Vec<crate::adapters::analyzers::architectu
 // ── Direct method calls (x.method()) ──────────────────────────────────
 
 #[test]
-fn matches_direct_method_call_unwrap() {
-    let src = r#"
-        fn run() {
-            let x: Option<i32> = Some(1);
-            x.unwrap();
-        }
-    "#;
-    let hits = find(src, &["unwrap"]);
-    assert_eq!(hits.len(), 1, "expected one hit: {hits:?}");
-    match &hits[0].kind {
-        ViolationKind::MethodCall { name, .. } => assert_eq!(name, "unwrap"),
-        other => panic!("unexpected kind: {other:?}"),
+fn matches_unwrap_in_direct_and_ufcs_form() {
+    // A banned method is caught by its final path segment in both
+    // dot-notation (`x.unwrap()`) and UFCS form (`Option::unwrap(x)`).
+    for src in [
+        // direct dot-notation
+        "fn run() { let x: Option<i32> = Some(1); x.unwrap(); }",
+        // UFCS form
+        "fn run() { let x: Option<i32> = Some(1); Option::unwrap(x); }",
+    ] {
+        let hits = find(src, &["unwrap"]);
+        super::assert_one_named(&hits, "unwrap");
     }
 }
 
@@ -68,22 +67,6 @@ fn matches_multiple_occurrences_separately() {
 }
 
 // ── UFCS-form calls (Type::method(receiver)) ──────────────────────────
-
-#[test]
-fn matches_ufcs_call_option_unwrap() {
-    let src = r#"
-        fn run() {
-            let x: Option<i32> = Some(1);
-            Option::unwrap(x);
-        }
-    "#;
-    let hits = find(src, &["unwrap"]);
-    assert_eq!(hits.len(), 1, "UFCS form must be caught: {hits:?}");
-    match &hits[0].kind {
-        ViolationKind::MethodCall { name, .. } => assert_eq!(name, "unwrap"),
-        other => panic!("unexpected kind: {other:?}"),
-    }
-}
 
 #[test]
 fn matches_ufcs_call_result_expect() {

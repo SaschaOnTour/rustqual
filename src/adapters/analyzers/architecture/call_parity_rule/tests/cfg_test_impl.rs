@@ -12,6 +12,14 @@ use crate::adapters::analyzers::architecture::call_parity_rule::pub_fns::{
 };
 use std::collections::HashSet;
 
+/// `(label, files, present_anchor, absent_anchor)` for the cfg-test anchor cases.
+type AnchorCase = (
+    &'static str,
+    &'static [(&'static str, &'static str)],
+    &'static str,
+    &'static str,
+);
+
 #[test]
 fn file_fn_collector_skips_cfg_test_impl_block() {
     // `#[cfg(test)] impl X { pub fn helper(&self) {} }` — the attribute
@@ -41,84 +49,70 @@ fn file_fn_collector_skips_cfg_test_impl_block() {
     );
 }
 
-#[test]
-fn record_trait_impl_excludes_cfg_test_overrides_from_overridden_set() {
-    // Mixed impl block: one production method + one `#[cfg(test)]`
-    // method on the same `impl Handler for X { … }`. The trait-impl
-    // index must record the production method as overriding, but the
-    // test-only method must NOT enter the override set — otherwise
-    // production dispatch on `dyn Handler.helper()` would route to
-    // a phantom `X::helper` (whose body is cfg-test-gated and never
-    // present in production builds).
-    //
-    // We assert via the anchor capability set: an anchor for `helper`
-    // has NO production impl in the workspace, so `target_anchor_capabilities`
-    // for the target layer must NOT include it (the overridden set
-    // for `helper` is empty after filtering, so no impl-layer is
-    // recorded for the helper anchor).
-    let ws = build_workspace(&[(
-        "src/application/h.rs",
-        r#"
-        pub trait Handler {
-            fn handle(&self);
-            fn helper(&self);
-        }
-        pub struct X;
-        impl Handler for X {
-            fn handle(&self) {}
-            #[cfg(test)]
-            fn helper(&self) {}
-        }
-        "#,
-    )]);
+/// Target-layer (`application`) anchor capability names for a workspace.
+fn target_anchor_caps(files: &[(&str, &str)]) -> HashSet<String> {
+    let ws = build_workspace(files);
     let graph = build_graph_only(&ws, &three_layer(), &empty_cfg_test(), &HashSet::new());
-    let caps: std::collections::HashSet<&str> = graph
+    graph
         .target_anchor_capabilities("application", &[])
-        .map(|(name, _)| name)
-        .collect();
-    assert!(
-        caps.contains("crate::application::h::Handler::handle"),
-        "production method must be present as anchor capability, got {caps:?}"
-    );
-    assert!(
-        !caps.contains("crate::application::h::Handler::helper"),
-        "cfg-test method must NOT be in target anchor capabilities — its only override is test-only and `record_trait_impl` filters it out, leaving the override set empty for helper, so no impl-layer is recorded; got {caps:?}"
-    );
+        .map(|(name, _)| name.to_string())
+        .collect()
 }
 
 #[test]
-fn record_trait_methods_excludes_cfg_test_method_default_body() {
-    // Production trait that declares a `#[cfg(test)]` method WITH a
-    // default body. Without filtering at the per-method level, the
-    // default body lands in `trait_methods_with_default_body`, the
-    // method ends up in `trait_methods`, and the unified capability
-    // rule promotes it to a target anchor — even though the method
-    // is invisible in production builds. Filter test-only entries
-    // when walking trait items so anchor capabilities + dispatch
-    // gating only see production methods.
-    let ws = build_workspace(&[(
-        "src/application/h.rs",
-        r#"
-        pub trait Handler {
-            fn handle(&self) {}
-            #[cfg(test)]
-            fn test_helper(&self) {}
-        }
-        "#,
-    )]);
-    let graph = build_graph_only(&ws, &three_layer(), &empty_cfg_test(), &HashSet::new());
-    let caps: std::collections::HashSet<&str> = graph
-        .target_anchor_capabilities("application", &[])
-        .map(|(name, _)| name)
-        .collect();
-    assert!(
-        caps.contains("crate::application::h::Handler::handle"),
-        "production default-body method must remain a target anchor capability, got {caps:?}"
-    );
-    assert!(
-        !caps.contains("crate::application::h::Handler::test_helper"),
-        "cfg-test trait method (even with default body) must NOT be a target anchor capability; got {caps:?}"
-    );
+fn cfg_test_trait_methods_excluded_from_anchor_capabilities() {
+    // A `#[cfg(test)]` trait method — whether it's a test-only impl override
+    // (its production override set ends up empty) or a test-only default body
+    // on the trait — must NOT become a target anchor capability, while the
+    // sibling production method still does. (label, files, present, absent)
+    let cases: &[AnchorCase] = &[
+        (
+            "cfg-test impl override is filtered from the override set",
+            &[(
+                "src/application/h.rs",
+                r#"
+                pub trait Handler {
+                    fn handle(&self);
+                    fn helper(&self);
+                }
+                pub struct X;
+                impl Handler for X {
+                    fn handle(&self) {}
+                    #[cfg(test)]
+                    fn helper(&self) {}
+                }
+                "#,
+            )],
+            "crate::application::h::Handler::handle",
+            "crate::application::h::Handler::helper",
+        ),
+        (
+            "cfg-test trait default-body method is filtered from trait_methods",
+            &[(
+                "src/application/h.rs",
+                r#"
+                pub trait Handler {
+                    fn handle(&self) {}
+                    #[cfg(test)]
+                    fn test_helper(&self) {}
+                }
+                "#,
+            )],
+            "crate::application::h::Handler::handle",
+            "crate::application::h::Handler::test_helper",
+        ),
+    ];
+    for (label, files, present, absent) in cases {
+        let caps = target_anchor_caps(files);
+        assert!(
+            caps.contains(*present),
+            "case {label}: production method `{present}` must be a capability; got {caps:?}"
+        );
+        assert!(
+            !caps.contains(*absent),
+            "case {label}: cfg-test method `{absent}` must NOT be a capability; got {caps:?}"
+        );
+    }
 }
 
 #[test]

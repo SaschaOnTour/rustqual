@@ -32,11 +32,10 @@ fn low_threshold_config() -> DuplicatesConfig {
 }
 
 #[test]
-fn fragments_in_cfg_test_companion_file_skipped() {
-    // DRY-004 must skip repeated statement windows in test code. A
-    // `#![cfg(test)]` companion file (no `tests/` path segment) is test
-    // code; the fragment collector recognises it via the authoritative
-    // cfg-test file set, not a path heuristic.
+fn fragments_in_cfg_test_companion_file_flagged() {
+    // Since v1.4.0 DRY-004 runs on test code too. A `#![cfg(test)]`
+    // companion file (no `tests/` path segment) is test code, and its
+    // repeated statement windows ARE flagged.
     let code = r#"
         #![cfg(test)]
         fn helper_a() {
@@ -55,11 +54,10 @@ fn fragments_in_cfg_test_companion_file_skipped() {
         code.to_string(),
         syn::parse_file(code).expect("parse failed"),
     )];
-    let config = low_threshold_config(); // ignore_tests = true
-    let groups = detect_fragments(&parsed, &config);
+    let groups = detect_fragments(&parsed, &low_threshold_config());
     assert!(
-        groups.is_empty(),
-        "fragments in a #![cfg(test)] file must be skipped: {groups:?}"
+        !groups.is_empty(),
+        "fragments in a #![cfg(test)] file must be flagged: {groups:?}"
     );
 }
 
@@ -278,7 +276,10 @@ fn test_detect_fragments_below_min_tokens() {
 }
 
 #[test]
-fn test_detect_fragments_test_excluded() {
+fn test_detect_fragments_includes_test_code() {
+    // DRY-004 always runs on test code (the `ignore_tests` toggle was removed
+    // in v1.4.0): a repeated statement window shared between a production fn
+    // and a `#[cfg(test)]` helper is flagged.
     let parsed = parse_multi(&[
         (
             "a.rs",
@@ -304,49 +305,8 @@ fn test_detect_fragments_test_excluded() {
         "#,
         ),
     ]);
-    let mut config = low_threshold_config();
-    config.ignore_tests = true;
-    let groups = detect_fragments(&parsed, &config);
-    assert!(
-        groups.is_empty(),
-        "Test functions should be excluded when ignore_tests=true"
-    );
-}
-
-#[test]
-fn test_detect_fragments_test_included() {
-    let parsed = parse_multi(&[
-        (
-            "a.rs",
-            r#"
-            fn prod() {
-                let x = 1;
-                let y = x + 2;
-                let z = y * x;
-            }
-        "#,
-        ),
-        (
-            "b.rs",
-            r#"
-            #[cfg(test)]
-            mod tests {
-                fn test_helper() {
-                    let a = 1;
-                    let b = a + 2;
-                    let c = b * a;
-                }
-            }
-        "#,
-        ),
-    ]);
-    let mut config = low_threshold_config();
-    config.ignore_tests = false;
-    let groups = detect_fragments(&parsed, &config);
-    assert!(
-        !groups.is_empty(),
-        "Test functions should be included when ignore_tests=false"
-    );
+    let groups = detect_fragments(&parsed, &low_threshold_config());
+    assert!(!groups.is_empty(), "test code must be included");
 }
 
 #[test]
@@ -470,43 +430,43 @@ fn test_detect_fragments_impl_method() {
 
 #[test]
 fn test_detect_fragments_three_way() {
-    let parsed = parse_multi(&[
-        (
-            "a.rs",
-            r#"
-            fn func_a() {
-                let x = 1;
-                let y = x + 2;
-                let z = y * x;
-            }
-        "#,
-        ),
-        (
-            "b.rs",
-            r#"
-            fn func_b() {
-                let a = 1;
-                let b = a + 2;
-                let c = b * a;
-            }
-        "#,
-        ),
-        (
-            "c.rs",
-            r#"
-            fn func_c() {
-                let p = 1;
-                let q = p + 2;
-                let r = q * p;
-            }
-        "#,
-        ),
-    ]);
-    let config = low_threshold_config();
-    let groups = detect_fragments(&parsed, &config);
+    let parsed = super::three_matching_funcs();
+    let groups = detect_fragments(&parsed, &low_threshold_config());
     // With 3 matching functions, we get pairs: (a,b), (a,c), (b,c)
     assert!(
         groups.len() >= 3,
         "Three matching functions should produce at least 3 pair groups"
     );
+}
+
+#[test]
+fn fragment_entries_span_the_full_window() {
+    // Two functions share a 3-statement window, each statement on its own line.
+    // Every fragment entry must span from the first to the last statement line
+    // (end_line > start_line). Guards the `start + stmt_count - 1` end-index
+    // arithmetic in `merge_into_fragments` — a `+`/`/` there indexes past the
+    // window, collapsing the span to a single line.
+    let parsed = parse_multi(&[
+        (
+            "a.rs",
+            "fn foo() {\n    let x = 1;\n    let y = x + 2;\n    let z = y * x;\n}\n",
+        ),
+        (
+            "b.rs",
+            "fn bar() {\n    let a = 1;\n    let b = a + 2;\n    let c = b * a;\n}\n",
+        ),
+    ]);
+    let groups = detect_fragments(&parsed, &low_threshold_config());
+    assert!(
+        !groups.is_empty(),
+        "a shared 3-statement window is a fragment"
+    );
+    for e in &groups[0].entries {
+        assert!(
+            e.end_line > e.start_line,
+            "fragment entry must span multiple lines, got {}..{}",
+            e.start_line,
+            e.end_line
+        );
+    }
 }

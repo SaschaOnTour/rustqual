@@ -1,9 +1,10 @@
 use crate::adapters::analyzers::dry::dead_code::DeadCodeWarning;
 use crate::adapters::analyzers::dry::DeclaredFunction;
+use crate::adapters::analyzers::tq::build_reaches_prod_set;
 use crate::adapters::analyzers::tq::untested::*;
 use crate::adapters::analyzers::tq::{TqWarning, TqWarningKind};
 use crate::config::Config;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 
 fn make_declared(name: &str, is_test: bool) -> DeclaredFunction {
     DeclaredFunction {
@@ -18,6 +19,28 @@ fn make_declared(name: &str, is_test: bool) -> DeclaredFunction {
         is_api: false,
         is_test_helper: false,
     }
+}
+
+/// Build the declared / prod-call / test-call / call-graph inputs, derive the
+/// transitive tested set, and run TQ-untested detection. Collapses the shared
+/// arrange across the transitive-coverage tests (each `edges` entry is one
+/// `from → to` call; each `from` is unique in these fixtures).
+fn untested_via_graph(
+    declared: &[&str],
+    prod: &[&str],
+    test: &[&str],
+    edges: &[(&str, &str)],
+) -> Vec<TqWarning> {
+    let declared: Vec<DeclaredFunction> =
+        declared.iter().map(|n| make_declared(n, false)).collect();
+    let prod_calls: HashSet<String> = prod.iter().map(|s| s.to_string()).collect();
+    let test_calls: HashSet<String> = test.iter().map(|s| s.to_string()).collect();
+    let call_graph: HashMap<String, Vec<String>> = edges
+        .iter()
+        .map(|(f, t)| (f.to_string(), vec![t.to_string()]))
+        .collect();
+    let tested = build_transitive_tested_set(&test_calls, &call_graph);
+    detect_untested_functions(&declared, &prod_calls, &tested, &[], &Config::default())
 }
 
 #[test]
@@ -149,55 +172,26 @@ fn test_dead_code_excluded() {
 #[test]
 fn test_transitive_tested_not_flagged() {
     // Test calls A, A calls B → B should not be flagged
-    let declared = vec![make_declared("a", false), make_declared("b", false)];
-    let prod_calls: HashSet<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
-    let test_calls: HashSet<String> = ["a".to_string()].into();
-    let call_graph: HashMap<String, Vec<String>> =
-        [("a".to_string(), vec!["b".to_string()])].into();
-    let tested = build_transitive_tested_set(&test_calls, &call_graph);
-    let config = Config::default();
-
-    let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
+    let warnings = untested_via_graph(&["a", "b"], &["a", "b"], &["a"], &[("a", "b")]);
     assert!(warnings.is_empty(), "b is transitively tested via a");
 }
 
 #[test]
 fn test_deep_transitive_not_flagged() {
     // Test calls A, A→B→C → C should not be flagged
-    let declared = vec![
-        make_declared("a", false),
-        make_declared("b", false),
-        make_declared("c", false),
-    ];
-    let prod_calls: HashSet<String> = ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
-    let test_calls: HashSet<String> = ["a".to_string()].into();
-    let call_graph: HashMap<String, Vec<String>> = [
-        ("a".to_string(), vec!["b".to_string()]),
-        ("b".to_string(), vec!["c".to_string()]),
-    ]
-    .into();
-    let tested = build_transitive_tested_set(&test_calls, &call_graph);
-    let config = Config::default();
-
-    let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
+    let warnings = untested_via_graph(
+        &["a", "b", "c"],
+        &["a", "b", "c"],
+        &["a"],
+        &[("a", "b"), ("b", "c")],
+    );
     assert!(warnings.is_empty(), "c is transitively tested via a→b→c");
 }
 
 #[test]
 fn test_circular_calls_no_infinite_loop() {
     // A→B→A (cycle), test calls A → terminates without infinite loop
-    let declared = vec![make_declared("a", false), make_declared("b", false)];
-    let prod_calls: HashSet<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
-    let test_calls: HashSet<String> = ["a".to_string()].into();
-    let call_graph: HashMap<String, Vec<String>> = [
-        ("a".to_string(), vec!["b".to_string()]),
-        ("b".to_string(), vec!["a".to_string()]),
-    ]
-    .into();
-    let tested = build_transitive_tested_set(&test_calls, &call_graph);
-    let config = Config::default();
-
-    let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
+    let warnings = untested_via_graph(&["a", "b"], &["a", "b"], &["a"], &[("a", "b"), ("b", "a")]);
     assert!(
         warnings.is_empty(),
         "cycle terminates; both a and b are tested"
@@ -207,19 +201,7 @@ fn test_circular_calls_no_infinite_loop() {
 #[test]
 fn test_untested_leaf_still_flagged() {
     // Test calls A, A calls B, but D is never called transitively → D flagged
-    let declared = vec![
-        make_declared("a", false),
-        make_declared("b", false),
-        make_declared("d", false),
-    ];
-    let prod_calls: HashSet<String> = ["a", "b", "d"].iter().map(|s| s.to_string()).collect();
-    let test_calls: HashSet<String> = ["a".to_string()].into();
-    let call_graph: HashMap<String, Vec<String>> =
-        [("a".to_string(), vec!["b".to_string()])].into();
-    let tested = build_transitive_tested_set(&test_calls, &call_graph);
-    let config = Config::default();
-
-    let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
+    let warnings = untested_via_graph(&["a", "b", "d"], &["a", "b", "d"], &["a"], &[("a", "b")]);
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0].function_name, "d");
 }
@@ -235,4 +217,30 @@ fn test_empty_call_graph_falls_back_to_direct() {
     let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0].function_name, "b");
+}
+
+#[test]
+fn build_reaches_prod_set_seeds_prod_and_walks_callers_backward() {
+    // call graph: test_a → helper → prod_fn. Backward BFS from the production
+    // seed must reach helper (calls prod_fn) and test_a (calls helper).
+    let mut call_graph: HashMap<String, Vec<String>> = HashMap::new();
+    call_graph.insert("helper".to_string(), vec!["prod_fn".to_string()]);
+    call_graph.insert("test_a".to_string(), vec!["helper".to_string()]);
+    // `lonely_test` reaches no production code; the `!is_test` seed filter must
+    // keep it out of the set.
+    let declared = vec![
+        make_declared("prod_fn", false),
+        make_declared("lonely_test", true),
+    ];
+    let reaches = build_reaches_prod_set(&call_graph, &declared);
+    assert!(reaches.contains("prod_fn"), "production fn seeds the set");
+    assert!(reaches.contains("helper"), "helper calls prod_fn");
+    assert!(
+        reaches.contains("test_a"),
+        "test_a transitively reaches prod via helper"
+    );
+    assert!(
+        !reaches.contains("lonely_test"),
+        "a test fn reaching no prod code is excluded from the seed"
+    );
 }

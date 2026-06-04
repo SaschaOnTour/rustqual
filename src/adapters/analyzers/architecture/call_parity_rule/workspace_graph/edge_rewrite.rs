@@ -97,7 +97,7 @@ fn inherited_default_anchor_for(
 /// `impl_canon` in its impl list, and the impl does NOT override the
 /// method. Extracted so `inherited_default_anchor_for` stays under
 /// the SRP cyclomatic budget after adding the ambiguity guard.
-fn is_inherited_default_match(
+pub(crate) fn is_inherited_default_match(
     type_index: &WorkspaceTypeIndex,
     trait_canon: &str,
     impls: &[String],

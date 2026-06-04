@@ -144,7 +144,7 @@ fn propagate_callees(
 /// Phantom edge sinks (e.g. fabricated `<Impl>::<method>` canonicals
 /// from inherited-default impls) carry a cached `layer_of` but no
 /// `forward` entry; they must not propagate as target capabilities.
-fn is_target_capability_node(
+pub(super) fn is_target_capability_node(
     canonical: &str,
     graph: &CallGraph,
     target_layer: &str,

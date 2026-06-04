@@ -94,3 +94,94 @@ fn split_dry_findings_collapses_duplicate_repeated_match_group_emissions() {
         buckets.repeated_match_groups.len(),
     );
 }
+
+fn dead_code_finding(name: &str, suppressed: bool) -> DryFinding {
+    let mut common = dry_common(1);
+    common.suppressed = suppressed;
+    DryFinding {
+        common,
+        kind: DryFindingKind::DeadCodeUncalled,
+        details: DryFindingDetails::DeadCode {
+            qualified_name: name.into(),
+            suggestion: Some("remove".into()),
+        },
+    }
+}
+
+#[test]
+fn dead_code_boilerplate_wildcard_buckets_built_and_drop_suppressed() {
+    let findings = vec![
+        dead_code_finding("dead_fn", false),
+        dead_code_finding("suppressed_dead", true),
+        DryFinding {
+            common: dry_common(2),
+            kind: DryFindingKind::Boilerplate,
+            details: DryFindingDetails::Boilerplate {
+                pattern_id: "BP-001".into(),
+                struct_name: Some("Foo".into()),
+                suggestion: "derive".into(),
+            },
+        },
+        DryFinding {
+            common: dry_common(3),
+            kind: DryFindingKind::Wildcard,
+            details: DryFindingDetails::Wildcard {
+                module_path: "foo::*".into(),
+            },
+        },
+    ];
+    let b = split_dry_findings(&findings);
+    assert_eq!(
+        b.dead_code.len(),
+        1,
+        "suppressed dead-code dropped (`!suppressed`)"
+    );
+    assert_eq!(b.dead_code[0].qualified_name, "dead_fn");
+    assert_eq!(b.boilerplate.len(), 1);
+    assert_eq!(b.boilerplate[0].pattern_id, "BP-001");
+    assert_eq!(b.wildcards.len(), 1);
+    assert_eq!(b.wildcards[0].module_path, "foo::*");
+}
+
+#[test]
+fn duplicate_and_fragment_groups_carry_participants() {
+    use crate::domain::findings::{DuplicateParticipant, FragmentParticipant};
+    let findings = vec![
+        DryFinding {
+            common: dry_common(1),
+            kind: DryFindingKind::DuplicateExact,
+            details: DryFindingDetails::Duplicate {
+                participants: vec![DuplicateParticipant {
+                    function_name: "dup_a".into(),
+                    file: "lib.rs".into(),
+                    line: 5,
+                }],
+                similarity: None,
+            },
+        },
+        DryFinding {
+            common: dry_common(2),
+            kind: DryFindingKind::Fragment,
+            details: DryFindingDetails::Fragment {
+                participants: vec![FragmentParticipant {
+                    function_name: "frag_a".into(),
+                    file: "lib.rs".into(),
+                    line: 10,
+                    end_line: 14,
+                }],
+                statement_count: 4,
+            },
+        },
+    ];
+    let b = split_dry_findings(&findings);
+    assert_eq!(b.duplicate_groups.len(), 1);
+    assert!(b.duplicate_groups[0]
+        .participants
+        .iter()
+        .any(|p| p.function_name == "dup_a"));
+    assert_eq!(b.fragment_groups.len(), 1);
+    assert!(b.fragment_groups[0]
+        .participants
+        .iter()
+        .any(|p| p.function_name == "frag_a"));
+}

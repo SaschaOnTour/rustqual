@@ -6,8 +6,12 @@
 .claude/
 *.baseline.json
 coverage.lcov
+*.profraw
+mutants.out/
+mutants.out.old/
 CLAUDE.md
 bugs/
 bugs.txt
 docs/
 prd-*.md
+docs/report-survivors.txt

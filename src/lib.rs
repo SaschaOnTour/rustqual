@@ -85,7 +85,7 @@ pub fn run() -> Result<(), i32> {
     }
 
     let parsed = adapters::source::filesystem::read_and_parse_files(&files, &cli.path);
-    let mut analysis = app::run_analysis(&parsed, &config);
+    let mut analysis = app::run_analysis(parsed, &config);
     if cli.sort_by_effort {
         sort_by_effort(&mut analysis.results);
     }

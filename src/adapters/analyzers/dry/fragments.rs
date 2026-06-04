@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use syn::spanned::Spanned;
 use syn::visit::Visit;
@@ -75,15 +75,11 @@ fn collect_all_windows(
     parsed: &[(String, String, syn::File)],
     config: &DuplicatesConfig,
 ) -> (Vec<FnInfo>, Vec<WindowEntry>) {
-    let cfg_test_files =
-        crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(parsed);
     let mut collector = FragmentCollector {
         config,
-        cfg_test_files: &cfg_test_files,
         file: String::new(),
         fn_infos: Vec::new(),
         windows: Vec::new(),
-        in_test: false,
         parent_type: None,
         is_trait_impl: false,
     };
@@ -224,11 +220,9 @@ pub(crate) fn merge_into_fragments(
 /// AST visitor that collects statement windows from all function bodies.
 struct FragmentCollector<'a> {
     config: &'a DuplicatesConfig,
-    cfg_test_files: &'a HashSet<String>,
     file: String,
     fn_infos: Vec<FnInfo>,
     windows: Vec<WindowEntry>,
-    in_test: bool,
     parent_type: Option<String>,
     is_trait_impl: bool,
 }
@@ -236,9 +230,6 @@ struct FragmentCollector<'a> {
 impl super::FileVisitor for FragmentCollector<'_> {
     fn reset_for_file(&mut self, file_path: &str) {
         self.file = file_path.to_string();
-        // Whole-file test classification from the authoritative cfg-test
-        // set; inline `#[cfg(test)] mod` is still handled per-item below.
-        self.in_test = self.cfg_test_files.contains(file_path);
         self.parent_type = None;
         self.is_trait_impl = false;
     }
@@ -247,11 +238,7 @@ impl super::FileVisitor for FragmentCollector<'_> {
 impl FragmentCollector<'_> {
     /// Process a function body: record fn_info and extract statement windows.
     /// Operation: window extraction logic; normalize/hash calls hidden in closure.
-    fn process_body(&mut self, name: &str, body: &syn::Block, is_test_fn: bool) {
-        let is_test = self.in_test || is_test_fn;
-        if self.config.ignore_tests && is_test {
-            return;
-        }
+    fn process_body(&mut self, name: &str, body: &syn::Block) {
         if self.config.ignore_trait_impls && self.is_trait_impl {
             return;
         }
@@ -306,8 +293,7 @@ impl FragmentCollector<'_> {
 impl<'ast> Visit<'ast> for FragmentCollector<'_> {
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
         let name = node.sig.ident.to_string();
-        let is_test = super::has_test_attr(&node.attrs);
-        self.process_body(&name, &node.block, is_test);
+        self.process_body(&name, &node.block);
         syn::visit::visit_item_fn(self, node);
     }
 
@@ -330,16 +316,6 @@ impl<'ast> Visit<'ast> for FragmentCollector<'_> {
 
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
         let name = node.sig.ident.to_string();
-        let is_test = super::has_test_attr(&node.attrs);
-        self.process_body(&name, &node.block, is_test);
-    }
-
-    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
-        let prev_in_test = self.in_test;
-        if super::has_cfg_test(&node.attrs) {
-            self.in_test = true;
-        }
-        syn::visit::visit_item_mod(self, node);
-        self.in_test = prev_in_test;
+        self.process_body(&name, &node.block);
     }
 }

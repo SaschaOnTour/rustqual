@@ -4,14 +4,7 @@ use crate::adapters::analyzers::structural::{StructuralWarning, StructuralWarnin
 use crate::config::StructuralConfig;
 
 fn detect_from(source: &str) -> Vec<StructuralWarning> {
-    let parsed = super::parse_single(source);
-    let cfg_test_files =
-        crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(&parsed);
-    let meta = collect_metadata(&parsed, &cfg_test_files);
-    let config = StructuralConfig::default();
-    let mut warnings = Vec::new();
-    detect_sit(&mut warnings, &meta, &config);
-    warnings
+    super::detect_meta(&super::parse_single(source), detect_sit)
 }
 
 #[test]
@@ -67,6 +60,22 @@ fn test_marker_trait_excluded() {
 fn test_zero_impls_not_flagged() {
     let w = detect_from("trait Drawable { fn draw(&self); }");
     assert!(w.is_empty());
+}
+
+#[test]
+fn single_impl_in_non_test_module_collected() {
+    // The metadata collector must descend into regular (non-test) modules: an
+    // impl living in `mod inner` must still count toward the trait's impl set
+    // so SIT sees the single implementor. Guards the metadata-recursion guard
+    // in `collect_item_metadata` against being skipped.
+    let w = detect_from(
+        "trait Drawable { fn draw(&self); } mod inner { struct Circle; impl super::Drawable for Circle { fn draw(&self) {} } }",
+    );
+    assert_eq!(
+        w.len(),
+        1,
+        "an impl inside a non-test module must be collected into the metadata"
+    );
 }
 
 #[test]

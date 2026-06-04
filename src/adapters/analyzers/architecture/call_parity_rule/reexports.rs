@@ -221,7 +221,7 @@ fn build_reexport_canonical(file_path: &str, mod_stack: &[String], name: &str) -
 /// True iff `vis` is anything other than `Inherited`. `pub`,
 /// `pub(crate)`, `pub(super)`, `pub(in path)` all create re-exports;
 /// only the bare-private form skips registration.
-fn is_pub_use(vis: &syn::Visibility) -> bool {
+pub(super) fn is_pub_use(vis: &syn::Visibility) -> bool {
     !matches!(vis, syn::Visibility::Inherited)
 }
 
@@ -231,7 +231,7 @@ fn is_pub_use(vis: &syn::Visibility) -> bool {
 /// reexport and target canonicals.
 /// Operation: recursive AST walk, own calls hidden in closure.
 // qual:recursive
-fn collect_pub_use_leaves(
+pub(super) fn collect_pub_use_leaves(
     prefix: &[String],
     tree: &syn::UseTree,
     out: &mut Vec<(Vec<String>, String)>,
@@ -284,7 +284,7 @@ fn collect_pub_use_leaves(
 /// re-export key, replace with its target. Bounded by
 /// `MAX_REEXPORT_CHAIN_DEPTH` so a malformed cyclic input can't
 /// hang. Operation.
-fn flatten_chains(map: &mut ReexportMap) {
+pub(super) fn flatten_chains(map: &mut ReexportMap) {
     let keys: Vec<String> = map.keys().cloned().collect();
     for key in keys {
         let mut current = map.get(&key).cloned().unwrap_or_default();

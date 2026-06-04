@@ -82,3 +82,21 @@ fn test_parse_zero_hit_function() {
         Some(&0)
     );
 }
+
+#[test]
+fn test_parse_unknown_line_within_record_does_not_split() {
+    // `LF:1` matches none of SF/FNDA/DA and is not `end_of_record`, so it must
+    // be ignored *while a file is open* — a record is closed only on a real
+    // `end_of_record`, never merely because a file is currently open. Both line
+    // hits must land in the single `src/lib.rs` record.
+    let (_tmp, path) = write_lcov("SF:src/lib.rs\nDA:1,1\nLF:1\nDA:2,1\nend_of_record\n");
+    let result = parse_lcov(&path).unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "an unknown mid-record line must not open a new record"
+    );
+    let data = &result["src/lib.rs"];
+    assert_eq!(data.line_hits.get(&1), Some(&1));
+    assert_eq!(data.line_hits.get(&2), Some(&1));
+}

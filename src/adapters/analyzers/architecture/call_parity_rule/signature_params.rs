@@ -319,7 +319,7 @@ fn trait_bound_paths(
 /// `Path(p)`, `Json(body)`, `Data(ctx)`). Returns `None` for deeper
 /// destructuring that the resolver can't express yet.
 /// Operation: pattern peel.
-fn param_name_from_pat(pat: &syn::Pat) -> Option<String> {
+pub(super) fn param_name_from_pat(pat: &syn::Pat) -> Option<String> {
     match pat {
         syn::Pat::Ident(pi) => Some(pi.ident.to_string()),
         syn::Pat::TupleStruct(ts) if ts.elems.len() == 1 => {

@@ -6,7 +6,9 @@
 //! asserted to keep the tests resilient to cosmetic tweaks.
 
 use crate::adapters::analyzers::architecture::compiled::CompiledArchitecture;
-use crate::adapters::analyzers::architecture::explain::{explain_file, ImportKind};
+use crate::adapters::analyzers::architecture::explain::{
+    explain_file, ExplainReport, ImportEntry, ImportKind,
+};
 use crate::adapters::analyzers::architecture::forbidden_rule::CompiledForbiddenRule;
 use crate::adapters::analyzers::architecture::layer_rule::{LayerDefinitions, UnmatchedBehavior};
 use globset::{Glob, GlobMatcher, GlobSet, GlobSetBuilder};
@@ -52,6 +54,21 @@ fn minimal_compiled() -> CompiledArchitecture {
 
 fn parse_file(src: &str) -> syn::File {
     syn::parse_str(src).expect("parse")
+}
+
+/// `minimal_compiled()` plus one `src/domain/** → src/adapters/**` forbidden
+/// rule, then explain a domain file that imports an adapter — the fixture
+/// shared by the forbidden-violation tests.
+fn explain_domain_importing_adapter() -> ExplainReport {
+    let mut compiled = minimal_compiled();
+    compiled.forbidden.push(CompiledForbiddenRule {
+        from: matcher("src/domain/**"),
+        to: matcher("src/adapters/**"),
+        except: globset(&[]),
+        reason: "no outward imports".to_string(),
+    });
+    let ast = parse_file("use crate::adapters::X;");
+    explain_file("src/domain/bad.rs", &ast, &compiled)
 }
 
 // ── file layer classification ──────────────────────────────────────────
@@ -155,15 +172,7 @@ fn layer_violation_surfaced() {
 
 #[test]
 fn forbidden_violation_surfaced() {
-    let mut compiled = minimal_compiled();
-    compiled.forbidden.push(CompiledForbiddenRule {
-        from: matcher("src/domain/**"),
-        to: matcher("src/adapters/**"),
-        except: globset(&[]),
-        reason: "no outward imports".to_string(),
-    });
-    let ast = parse_file("use crate::adapters::X;");
-    let report = explain_file("src/domain/bad.rs", &ast, &compiled);
+    let report = explain_domain_importing_adapter();
     assert_eq!(report.forbidden_violations.len(), 1);
 }
 
@@ -188,16 +197,95 @@ fn render_marks_reexport_point() {
 
 #[test]
 fn render_includes_violation_sections() {
-    let mut compiled = minimal_compiled();
-    compiled.forbidden.push(CompiledForbiddenRule {
-        from: matcher("src/domain/**"),
-        to: matcher("src/adapters/**"),
-        except: globset(&[]),
-        reason: "no outward imports".to_string(),
-    });
-    let ast = parse_file("use crate::adapters::X;");
-    let report = explain_file("src/domain/bad.rs", &ast, &compiled);
-    let text = report.render();
+    let text = explain_domain_importing_adapter().render();
     assert!(text.to_lowercase().contains("layer violation"), "{text}");
     assert!(text.to_lowercase().contains("forbidden"), "{text}");
+}
+
+use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
+
+fn base_report() -> ExplainReport {
+    ExplainReport {
+        file: "src/x.rs".into(),
+        layer: None,
+        rank: None,
+        is_reexport: false,
+        imports: vec![],
+        layer_violations: vec![],
+        forbidden_violations: vec![],
+    }
+}
+
+fn layer_violation() -> MatchLocation {
+    MatchLocation {
+        file: "src/x.rs".into(),
+        line: 5,
+        column: 0,
+        kind: ViolationKind::LayerViolation {
+            from_layer: "application".into(),
+            to_layer: "domain".into(),
+            imported_path: "crate::domain::Y".into(),
+        },
+    }
+}
+
+#[test]
+fn header_shows_layer_and_rank() {
+    let mut r = base_report();
+    r.layer = Some("domain".into());
+    r.rank = Some(2);
+    let text = r.render();
+    assert!(text.contains("Layer: domain (rank 2)"), "{text}");
+}
+
+#[test]
+fn layer_violation_line_rendered_and_no_all_clear() {
+    let mut r = base_report();
+    r.layer_violations = vec![layer_violation()];
+    let text = r.render();
+    assert!(text.contains("Layer violations:"), "section header: {text}");
+    assert!(
+        text.contains("application") && text.contains("domain"),
+        "from/to layers + import in the line: {text}"
+    );
+    assert!(text.contains("crate::domain::Y"), "imported path: {text}");
+    // Violations present → the all-clear line must NOT appear (pins the `&&`).
+    assert!(
+        !text.contains("No architecture violations"),
+        "all-clear suppressed when violations exist: {text}"
+    );
+}
+
+#[test]
+fn forbidden_violation_line_rendered() {
+    let mut r = base_report();
+    r.forbidden_violations = vec![MatchLocation {
+        file: "src/x.rs".into(),
+        line: 9,
+        column: 0,
+        kind: ViolationKind::ForbiddenEdge {
+            reason: "no outward imports".into(),
+            imported_path: "crate::app::Z".into(),
+        },
+    }];
+    let text = r.render();
+    assert!(text.contains("Forbidden rule violations:"), "{text}");
+    assert!(
+        text.contains("crate::app::Z") || text.contains("no outward imports"),
+        "{text}"
+    );
+}
+
+#[test]
+fn import_entry_renders_tail() {
+    let mut r = base_report();
+    r.imports = vec![ImportEntry {
+        line: 3,
+        rendered: "use std::fmt;".into(),
+        kind: ImportKind::Ignored {
+            first_segment: "std".into(),
+        },
+    }];
+    let text = r.render();
+    assert!(text.contains("ignored (std)"), "import tail: {text}");
 }
