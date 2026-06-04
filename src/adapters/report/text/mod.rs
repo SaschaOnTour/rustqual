@@ -135,11 +135,25 @@ impl<'a> ReporterImpl for TextReporter<'a> {
         } else {
             out.push_str(&format_findings_list(&all_entries));
         }
+        if !all_entries.is_empty() {
+            out.push_str(&suppression_footer());
+        }
         if let Some(s) = self.suggestions_text {
             out.push_str(s);
         }
         out
     }
+}
+
+/// Footer shown whenever findings remain: fixing is the expectation,
+/// suppression the last resort. Points at `--explain allow` (the agent reaches
+/// for the tool before the README), and deliberately prints no paste-ready
+/// suppression so silencing isn't the path of least resistance.
+/// Operation: constant string.
+fn suppression_footer() -> String {
+    "\n── Fix the findings above. Suppression is a last resort — it needs a written\n   \
+     reason and re-fires when the code worsens.  Syntax:  rustqual --explain allow\n"
+        .to_string()
 }
 
 /// Format the findings list with heading.
