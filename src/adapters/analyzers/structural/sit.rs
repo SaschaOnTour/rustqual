@@ -3,8 +3,10 @@ use crate::findings::Dimension;
 
 use super::{StructuralMetadata, StructuralWarning, StructuralWarningKind};
 
-/// Detect single-implementation traits: non-pub trait with exactly 1 impl.
-/// Operation: compares trait definitions against impl counts.
+/// Detect single-implementation traits: non-pub trait with exactly 1 impl
+/// total, counting `#[cfg(test)]` impls (a test double is a real implementor,
+/// so a trait with prod impl + test doubles is a DI seam, not over-abstraction).
+/// Operation: compares trait definitions against total impl counts.
 pub(crate) fn detect_sit(
     warnings: &mut Vec<StructuralWarning>,
     meta: &StructuralMetadata,
@@ -32,6 +34,18 @@ pub(crate) fn detect_sit(
         let [(impl_type, _)] = impls.as_slice() else {
             return;
         };
+        // A `#[cfg(test)]` impl is a real implementor too: one prod impl plus any
+        // test doubles is the idiomatic DI / test-seam pattern, not an
+        // over-abstraction. Only fire when the TOTAL implementor count is 1.
+        if meta
+            .cfg_test_trait_impl_counts
+            .get(trait_name)
+            .copied()
+            .unwrap_or(0)
+            != 0
+        {
+            return;
+        }
         warnings.push(StructuralWarning {
             file: info.file.clone(),
             line: info.line,

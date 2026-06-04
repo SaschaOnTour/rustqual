@@ -28,6 +28,40 @@ fn orphaned_impl_across_cfg_test_files_excluded() {
 }
 
 #[test]
+fn trait_seam_with_cfg_test_impl_does_not_trip_oi() {
+    // Sibling check to the SIT fix: OI is location-based (inherent impl in a
+    // different top-level module than its type def), it does NOT count trait
+    // impls, so the DI/test-seam pattern (trait + one prod impl + a cfg(test)
+    // double) has no analog of the SIT denominator-shrink bug. Pin that the
+    // exact seam shape produces no OrphanedImpl, whether the double is inline…
+    let inline = detect_multi(&[(
+        "lib.rs",
+        "trait Clock { fn now(&self) -> u64; } \
+         struct SystemClock; impl Clock for SystemClock { fn now(&self) -> u64 { 0 } } \
+         #[cfg(test)] mod tests { use super::*; \
+         struct FixedClock(u64); impl Clock for FixedClock { fn now(&self) -> u64 { self.0 } } }",
+    )]);
+    assert!(inline.is_empty(), "seam pattern must not trip OI (inline)");
+    // …or in a separate #![cfg(test)] companion file.
+    let split = detect_multi(&[
+        (
+            "lib.rs",
+            "trait Clock { fn now(&self) -> u64; } \
+             struct SystemClock; impl Clock for SystemClock { fn now(&self) -> u64 { 0 } }",
+        ),
+        (
+            "clock_tests.rs",
+            "#![cfg(test)]\nstruct FixedClock(u64); \
+             impl Clock for FixedClock { fn now(&self) -> u64 { self.0 } }",
+        ),
+    ]);
+    assert!(
+        split.is_empty(),
+        "seam pattern must not trip OI (split file)"
+    );
+}
+
+#[test]
 fn test_same_file_not_flagged() {
     let w = detect_multi(&[("lib.rs", "struct Foo {} impl Foo { fn bar() {} }")]);
     assert!(w.is_empty());

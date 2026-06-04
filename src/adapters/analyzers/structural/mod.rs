@@ -89,8 +89,14 @@ pub(crate) struct StructuralMetadata {
     pub type_defs: HashMap<String, String>,
     /// trait_name → TraitInfo
     pub trait_defs: HashMap<String, TraitInfo>,
-    /// trait_name → list of (impl_type, file)
+    /// trait_name → list of (impl_type, file) — production impls only
     pub trait_impls: HashMap<String, Vec<(String, String)>>,
+    /// trait_name → number of impls living in `#[cfg(test)]` code (whole test
+    /// files or inline `#[cfg(test)] mod` blocks). Not in `trait_impls`
+    /// (metadata skips test code), but they count toward a trait's TOTAL
+    /// implementor count so SIT does not flag a trait whose only extra
+    /// implementers are test doubles — the idiomatic DI / test-seam pattern.
+    pub cfg_test_trait_impl_counts: HashMap<String, usize>,
     /// (type_name, impl_file, impl_block_line) for inherent impls
     pub inherent_impls: Vec<(String, String, usize)>,
 }
@@ -117,6 +123,7 @@ pub(crate) fn collect_metadata(
         type_defs: HashMap::new(),
         trait_defs: HashMap::new(),
         trait_impls: HashMap::new(),
+        cfg_test_trait_impl_counts: collect_cfg_test_trait_impl_counts(parsed, cfg_test_files),
         inherent_impls: Vec::new(),
     };
     parsed.iter().for_each(|(path, _, syntax)| {
@@ -162,7 +169,7 @@ fn collect_item_metadata(item: &syn::Item, path: &str, meta: &mut StructuralMeta
                 },
             );
         }
-        syn::Item::Impl(imp) => {
+        syn::Item::Impl(imp) if !cfg_test(&imp.attrs) => {
             if let Some(ref type_name) = impl_type_name(imp) {
                 let line = imp.span().start().line;
                 if let Some((_, ref tp, _)) = imp.trait_ {
@@ -202,6 +209,76 @@ fn extract_impl_type_name(imp: &syn::ItemImpl) -> Option<String> {
 }
 
 use crate::adapters::shared::cfg_test::has_cfg_test as has_cfg_test_attr;
+
+/// Count trait impls living in `#[cfg(test)]` code, keyed by trait name. The
+/// main metadata walk skips test code, so these production-invisible impls
+/// would otherwise vanish from a trait's implementor count — making a test
+/// seam (one prod impl + test doubles) look like a single-impl over-abstraction
+/// to SIT. "Test" means a whole `#![cfg(test)]` / integration-test file, an
+/// inline `#[cfg(test)] mod`, or an item-level `#[cfg(test)]` on the impl.
+/// Operation: iterates files, delegates per-scope collection via a closure.
+fn collect_cfg_test_trait_impl_counts(
+    parsed: &[(String, String, syn::File)],
+    cfg_test_files: &HashSet<String>,
+) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    parsed.iter().for_each(|(path, _, syntax)| {
+        let in_test = cfg_test_files.contains(path);
+        collect_test_impls_in_scope(&syntax.items, in_test, &mut counts);
+    });
+    counts
+}
+
+/// Tally `#[cfg(test)]` trait impls in one item scope (file or module body),
+/// keyed by trait name, recursing into submodules. A test impl whose trait is a
+/// **single bare segment** naming a trait DEFINED in test code in the *same*
+/// scope is attributed to that local test-only trait — not a same-named
+/// production trait — so it is not counted; this keeps an unrelated test-only
+/// `trait Clock` from suppressing the production `Clock`, while a real double in
+/// a *different* test module (or via a qualified `super::Clock` path) still
+/// counts. NOTE: still name-based — a test impl of an *imported/external* trait
+/// that merely shares a production trait's last-segment name collides; fully
+/// resolving that needs real trait identity, which the name-keyed metadata
+/// models on neither the production nor the test side.
+/// Operation: builds the local test-trait set, then tallies / recurses — own
+/// calls hidden in closures for IOSP.
+fn collect_test_impls_in_scope(
+    items: &[syn::Item],
+    in_test: bool,
+    counts: &mut HashMap<String, usize>,
+) {
+    let cfg_test = |attrs: &[syn::Attribute]| -> bool { has_cfg_test_attr(attrs) };
+    let local_test_traits: HashSet<String> = items
+        .iter()
+        .filter_map(|it| match it {
+            syn::Item::Trait(t) if in_test || cfg_test(&t.attrs) => Some(t.ident.to_string()),
+            _ => None,
+        })
+        .collect();
+    items.iter().for_each(|item| match item {
+        syn::Item::Impl(imp) if in_test || cfg_test(&imp.attrs) => {
+            if let Some((_, tp, _)) = &imp.trait_ {
+                let bare_local = tp.segments.len() == 1
+                    && tp
+                        .segments
+                        .last()
+                        .is_some_and(|s| local_test_traits.contains(&s.ident.to_string()));
+                if !bare_local {
+                    if let Some(name) = tp.segments.last().map(|s| s.ident.to_string()) {
+                        *counts.entry(name).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+        syn::Item::Mod(m) => {
+            let mod_in_test = in_test || cfg_test(&m.attrs);
+            if let Some((_, sub_items)) = &m.content {
+                collect_test_impls_in_scope(sub_items, mod_in_test, counts);
+            }
+        }
+        _ => {}
+    });
+}
 
 /// Visit all inherent (non-trait) impl methods in parsed files, excluding test modules.
 /// Operation: iterates items, dispatches to callback via closure.

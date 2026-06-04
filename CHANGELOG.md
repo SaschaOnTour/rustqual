@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.2] - 2026-06-04
+
+Patch release: a false-positive fix found while applying 1.4.1. No change to
+how production code is scored beyond removing this incorrect finding.
+
+### Fixed
+- **SIT (single-impl trait) no longer flags traits with `#[cfg(test)]` test
+  doubles.** SIT counted only production impls (metadata collection skips test
+  code), so a non-pub trait with one production impl plus test-double impls —
+  the idiomatic dependency-injection / test-seam pattern — was wrongly reported
+  as an over-abstraction once the test impls became invisible. `#[cfg(test)]`
+  impls are now counted toward the trait's total implementor count — whether
+  they live in a whole test file, an inline `#[cfg(test)] mod`, or carry
+  `#[cfg(test)]` directly on the impl item — and SIT fires only when that total
+  is `1`. A genuine single-impl trait (one prod impl, no doubles) is still
+  flagged. Counting is name-based (the structural metadata models no trait
+  identity, on either the production or test side), so it is scoped per module:
+  a test impl whose trait is a bare name defined as a test-only trait in the
+  *same* module is attributed to that local trait, not a same-named production
+  trait — so an unrelated test-only `trait Clock` does not suppress the
+  production `Clock`, while a real double in another test module still counts.
+  Known residual limitation: a test impl of an *imported/external* trait that
+  merely shares a production trait's last-segment name still collides (a name
+  collision symmetric with the pre-existing production-side one; resolving it
+  needs real trait identity). Regressed when v1.4.x improved
+  `#[cfg(test)] mod foo;`-chain test-file recognition (the better classification
+  correctly excluded the companion test files, shrinking SIT's denominator). The
+  sibling detector OI is unaffected — it matches impl locations, it does not
+  count.
+
 ## [1.4.1] - 2026-06-02
 
 Patch release: **test-suite effectiveness, proven by mutation testing** (Phases
