@@ -2,7 +2,8 @@ use crate::adapters::analyzers::iosp::Classification;
 use crate::adapters::source::filesystem::{
     collect_filtered_files, collect_rust_files, collect_suppression_lines, read_and_parse_files,
 };
-use crate::app::metrics::{count_coupling_warnings, mark_coupling_suppressions};
+use crate::app::coupling_suppressions::{mark_coupling_blanket, ModuleCouplingSuppressions};
+use crate::app::metrics::count_coupling_warnings;
 use crate::app::pipeline::{analyze_and_output, output_results, run_analysis};
 use crate::app::warnings::{check_suppression_ratio, count_all_suppressions};
 use crate::config::Config;
@@ -317,7 +318,10 @@ fn test_mark_coupling_suppressions_marks_module() {
     let mut suppression_lines = std::collections::HashMap::new();
     suppression_lines.insert("pipeline.rs".to_string(), vec![sup]);
 
-    mark_coupling_suppressions(Some(&mut analysis), &suppression_lines);
+    mark_coupling_blanket(
+        Some(&mut analysis),
+        &ModuleCouplingSuppressions::build(&suppression_lines),
+    );
 
     assert!(analysis.metrics[0].suppressed); // pipeline
     assert!(!analysis.metrics[1].suppressed); // config
@@ -337,7 +341,10 @@ fn coupling_metric0_suppressed_by(dims: Vec<crate::findings::Dimension>) -> bool
             target: None,
         }],
     );
-    mark_coupling_suppressions(Some(&mut analysis), &suppression_lines);
+    mark_coupling_blanket(
+        Some(&mut analysis),
+        &ModuleCouplingSuppressions::build(&suppression_lines),
+    );
     analysis.metrics[0].suppressed
 }
 
@@ -390,7 +397,10 @@ fn test_mark_coupling_suppressions_submodule_file() {
     // Suppression in a submodule file maps to the top-level module
     suppression_lines.insert("analyzer/visitor.rs".to_string(), vec![sup]);
 
-    mark_coupling_suppressions(Some(&mut analysis), &suppression_lines);
+    mark_coupling_blanket(
+        Some(&mut analysis),
+        &ModuleCouplingSuppressions::build(&suppression_lines),
+    );
 
     assert!(analysis.metrics[0].suppressed); // analyzer suppressed
 }
@@ -399,18 +409,33 @@ fn test_mark_coupling_suppressions_submodule_file() {
 fn test_mark_coupling_suppressions_none_analysis() {
     let suppression_lines = std::collections::HashMap::new();
     // Should not panic
-    mark_coupling_suppressions(None, &suppression_lines);
+    mark_coupling_blanket(None, &ModuleCouplingSuppressions::build(&suppression_lines));
 }
 
 #[test]
 fn test_count_coupling_warnings_skips_suppressed() {
     let mut analysis = make_coupling_analysis();
-    analysis.metrics[0].suppressed = true; // pipeline suppressed
+    // A blanket allow(coupling) in a file of the `pipeline` module silences it.
+    let mut suppression_lines = std::collections::HashMap::new();
+    suppression_lines.insert(
+        "pipeline.rs".to_string(),
+        vec![Suppression {
+            line: 1,
+            dimensions: vec![crate::findings::Dimension::Coupling],
+            reason: Some("orchestrator".to_string()),
+            target: None,
+        }],
+    );
 
     let config = crate::config::sections::CouplingConfig::default();
     let mut summary = Summary::from_results(&[]);
 
-    count_coupling_warnings(Some(&mut analysis), &config, &mut summary);
+    count_coupling_warnings(
+        Some(&mut analysis),
+        &config,
+        &ModuleCouplingSuppressions::build(&suppression_lines),
+        &mut summary,
+    );
 
     assert_eq!(summary.coupling_warnings, 0); // pipeline warning suppressed
 }
@@ -422,7 +447,12 @@ fn test_count_coupling_warnings_counts_unsuppressed() {
     let config = crate::config::sections::CouplingConfig::default();
     let mut summary = Summary::from_results(&[]);
 
-    count_coupling_warnings(Some(&mut analysis), &config, &mut summary);
+    count_coupling_warnings(
+        Some(&mut analysis),
+        &config,
+        &ModuleCouplingSuppressions::build(&std::collections::HashMap::new()),
+        &mut summary,
+    );
 
     assert_eq!(summary.coupling_warnings, 1); // pipeline exceeds threshold
 }
@@ -448,7 +478,12 @@ fn test_count_coupling_warnings_leaf_module_excluded() {
     let config = crate::config::sections::CouplingConfig::default();
     let mut summary = Summary::from_results(&[]);
 
-    count_coupling_warnings(Some(&mut analysis), &config, &mut summary);
+    count_coupling_warnings(
+        Some(&mut analysis),
+        &config,
+        &ModuleCouplingSuppressions::build(&std::collections::HashMap::new()),
+        &mut summary,
+    );
 
     assert_eq!(summary.coupling_warnings, 0); // leaf excluded
 }

@@ -1,5 +1,6 @@
 mod analyze_codebase;
 mod architecture;
+mod coupling_targeted;
 mod gates;
 mod metrics;
 mod pipeline;

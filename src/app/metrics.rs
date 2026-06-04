@@ -19,56 +19,41 @@ pub(super) fn compute_coupling(
     ))
 }
 
-/// Mark coupling metrics as suppressed based on `// qual:allow(coupling)` comments.
-/// Operation: iteration + suppression check logic, no own calls.
-/// A module is suppressed if ANY of its files contains a coupling suppression.
-pub(super) fn mark_coupling_suppressions(
-    analysis: Option<&mut crate::adapters::analyzers::coupling::CouplingAnalysis>,
-    suppression_lines: &std::collections::HashMap<String, Vec<Suppression>>,
-) {
-    let Some(analysis) = analysis else { return };
-
-    // Collect module names that have coupling suppressions in any of their files
-    let suppressed_modules: std::collections::HashSet<String> = suppression_lines
-        .iter()
-        .filter(|(_, sups)| {
-            sups.iter()
-                .any(|s| s.covers(crate::findings::Dimension::Coupling))
-        })
-        .map(|(path, _)| crate::adapters::shared::file_to_module::file_to_module(path))
-        .collect();
-
-    for m in &mut analysis.metrics {
-        if suppressed_modules.contains(&m.module_name) {
-            m.suppressed = true;
-        }
-    }
-}
-
-/// Count coupling warnings and update summary.
-/// Operation: iteration + threshold comparison logic, no own calls.
-/// Leaf modules (afferent=0) are excluded from instability warnings
-/// because I=1.0 is the natural, harmless state for leaf modules.
-/// Suppressed modules are excluded from all coupling warnings.
+/// Count coupling warnings and update summary. Each module-level metric
+/// (instability / fan-in / fan-out) is gated by a blanket or targeted
+/// `allow(coupling, …)`; leaf modules (afferent=0) are instability-exempt.
+/// Operation: iterates metrics, delegating the per-module decision.
 pub(super) fn count_coupling_warnings(
     analysis: Option<&mut crate::adapters::analyzers::coupling::CouplingAnalysis>,
     config: &crate::config::sections::CouplingConfig,
+    sups: &crate::app::coupling_suppressions::ModuleCouplingSuppressions,
     summary: &mut Summary,
 ) {
     let Some(analysis) = analysis else { return };
     for m in &mut analysis.metrics {
-        m.warning = false;
-        if m.suppressed {
-            continue;
-        }
-        let instability_exceeded = m.afferent > 0 && m.instability > config.max_instability;
-        if instability_exceeded || m.afferent > config.max_fan_in || m.efferent > config.max_fan_out
-        {
-            m.warning = true;
+        m.warning = module_coupling_warns(m, config, sups);
+        if m.warning {
             summary.coupling_warnings += 1;
         }
     }
     summary.coupling_cycles = analysis.cycles.len();
+}
+
+/// Whether a module has any unsuppressed coupling metric breach.
+/// Operation: per-metric checks reaching the suppression helper.
+fn module_coupling_warns(
+    m: &crate::adapters::analyzers::coupling::CouplingMetrics,
+    config: &crate::config::sections::CouplingConfig,
+    sups: &crate::app::coupling_suppressions::ModuleCouplingSuppressions,
+) -> bool {
+    let inst = m.afferent > 0
+        && m.instability > config.max_instability
+        && !sups.suppresses(&m.module_name, "max_instability", Some(m.instability));
+    let fan_in = m.afferent > config.max_fan_in
+        && !sups.suppresses(&m.module_name, "max_fan_in", Some(m.afferent as f64));
+    let fan_out = m.efferent > config.max_fan_out
+        && !sups.suppresses(&m.module_name, "max_fan_out", Some(m.efferent as f64));
+    inst || fan_in || fan_out
 }
 
 /// Run a detection pass if enabled, returning empty vec when disabled.

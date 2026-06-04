@@ -4,6 +4,7 @@
 //! asserted total.
 use super::*;
 use crate::adapters::analyzers::coupling::{CouplingAnalysis, CouplingMetrics, ModuleGraph};
+use crate::app::coupling_suppressions::ModuleCouplingSuppressions;
 use crate::config::sections::CouplingConfig;
 
 fn coupling_config() -> CouplingConfig {
@@ -37,7 +38,12 @@ fn coupling_warnings(metrics: Vec<CouplingMetrics>) -> usize {
     };
     let config = coupling_config();
     let mut summary = Summary::from_results(&[]);
-    count_coupling_warnings(Some(&mut analysis), &config, &mut summary);
+    count_coupling_warnings(
+        Some(&mut analysis),
+        &config,
+        &ModuleCouplingSuppressions::build(&std::collections::HashMap::new()),
+        &mut summary,
+    );
     summary.coupling_warnings
 }
 

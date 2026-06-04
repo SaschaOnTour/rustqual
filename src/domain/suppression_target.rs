@@ -56,7 +56,9 @@ pub fn target_kind(dim: Dimension, name: &str) -> Option<TargetKind> {
         },
         D::Coupling => match name {
             "max_fan_in" | "max_fan_out" | "max_instability" => Some(Metric),
-            "cycle" | "sdp" => Some(Boolean),
+            // `cycle` is NOT here: circular dependencies are not suppressible
+            // via allow(coupling) (they always count toward the score).
+            "sdp" => Some(Boolean),
             _ => None,
         },
         D::Dry => match name {
@@ -94,13 +96,7 @@ pub fn target_names(dim: Dimension) -> &'static [&'static str] {
             "max_parameters",
             "god_struct",
         ],
-        D::Coupling => &[
-            "max_fan_in",
-            "max_fan_out",
-            "max_instability",
-            "cycle",
-            "sdp",
-        ],
+        D::Coupling => &["max_fan_in", "max_fan_out", "max_instability", "sdp"],
         D::Dry => &[
             "duplicate",
             "fragment",
