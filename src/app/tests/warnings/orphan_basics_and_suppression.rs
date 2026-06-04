@@ -135,6 +135,7 @@ fn suppressed_srp_param_over_threshold_is_not_orphan() {
             line: 5,
             dimensions: vec![crate::findings::Dimension::Srp],
             reason: None,
+            target: None,
         }],
     );
     let mut analysis = empty_analysis();
@@ -169,6 +170,7 @@ fn coupling_marker_is_not_orphan_for_structural_coupling_finding() {
             line: 10,
             dimensions: vec![crate::findings::Dimension::Coupling],
             reason: None,
+            target: None,
         }],
     );
     let mut analysis = empty_analysis();
@@ -202,6 +204,7 @@ fn coupling_only_marker_with_no_line_anchored_finding_is_skipped() {
             line: 5,
             dimensions: vec![crate::findings::Dimension::Coupling],
             reason: None,
+            target: None,
         }],
     );
     let analysis = empty_analysis();

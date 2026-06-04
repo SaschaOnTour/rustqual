@@ -31,6 +31,7 @@ fn fake_parser_returns_injected_suppressions() {
         line: FIXTURE_LINE,
         dimensions: vec![Dimension::Architecture],
         reason: Some("migration".into()),
+        target: None,
     };
     let parser = FakeParser {
         returns: vec![sup.clone()],

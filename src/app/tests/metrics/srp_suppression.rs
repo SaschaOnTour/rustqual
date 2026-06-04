@@ -14,6 +14,7 @@ fn srp_sups(line: usize, dim: Dimension) -> HashMap<String, Vec<Suppression>> {
             line,
             dimensions: vec![dim],
             reason: None,
+            target: None,
         }],
     )]
     .into()

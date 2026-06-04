@@ -16,6 +16,7 @@ pub mod score;
 pub mod severity;
 pub mod source_unit;
 pub mod suppression;
+pub mod suppression_target;
 
 pub use analysis_data::AnalysisData;
 pub use dimension::Dimension;
@@ -25,6 +26,7 @@ pub use score::PERCENTAGE_MULTIPLIER;
 pub use severity::Severity;
 pub use source_unit::SourceUnit;
 pub use suppression::Suppression;
+pub use suppression_target::{target_kind, target_names, SuppressionTarget, TargetKind};
 
 #[cfg(test)]
 mod tests;

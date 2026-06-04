@@ -25,6 +25,7 @@ fn marker(line: usize, dim: Dimension) -> HashMap<String, Vec<crate::findings::S
             line,
             dimensions: vec![dim],
             reason: None,
+            target: None,
         }],
     )]
     .into()

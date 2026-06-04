@@ -312,6 +312,7 @@ fn test_mark_coupling_suppressions_marks_module() {
         line: 1,
         dimensions: vec![crate::findings::Dimension::Coupling],
         reason: Some("orchestrator module".to_string()),
+        target: None,
     };
     let mut suppression_lines = std::collections::HashMap::new();
     suppression_lines.insert("pipeline.rs".to_string(), vec![sup]);
@@ -333,6 +334,7 @@ fn coupling_metric0_suppressed_by(dims: Vec<crate::findings::Dimension>) -> bool
             line: 1,
             dimensions: dims,
             reason: None,
+            target: None,
         }],
     );
     mark_coupling_suppressions(Some(&mut analysis), &suppression_lines);
@@ -382,6 +384,7 @@ fn test_mark_coupling_suppressions_submodule_file() {
         line: 1,
         dimensions: vec![crate::findings::Dimension::Coupling],
         reason: None,
+        target: None,
     };
     let mut suppression_lines = std::collections::HashMap::new();
     // Suppression in a submodule file maps to the top-level module
@@ -494,11 +497,13 @@ fn test_count_all_suppressions_qual_only() {
                 line: 1,
                 dimensions: vec![],
                 reason: None,
+                target: None,
             },
             crate::findings::Suppression {
                 line: 3,
                 dimensions: vec![crate::findings::Dimension::Iosp],
                 reason: None,
+                target: None,
             },
         ],
     );
@@ -526,6 +531,7 @@ fn test_count_all_suppressions_both_types() {
             line: 3,
             dimensions: vec![crate::findings::Dimension::Iosp],
             reason: None,
+            target: None,
         }],
     );
     assert_eq!(count_all_suppressions(&supp, &parsed), 2);

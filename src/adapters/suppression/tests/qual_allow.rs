@@ -101,11 +101,19 @@ fn test_invalid_qual_allow_reason_distinguishes_kinds() {
 }
 
 #[test]
-fn test_detect_invalid_qual_allow_passes_partial_recognized_dims() {
-    // At least one recognized dim → partially valid → not flagged
-    // here (the parser keeps the recognized parts as a real
-    // Suppression).
-    assert!(detect_invalid_qual_allow("// qual:allow(srp, srp_params)").is_none());
+fn test_detect_invalid_qual_allow_flags_unknown_target() {
+    // `srp` is a valid dim, but the second entry is no longer silently
+    // dropped — it is read as a *target*, and `srp_params` is not a known
+    // srp target, so the marker surfaces as invalid with the valid list.
+    // This is exactly what stops an agent inventing a non-existent target.
+    match detect_invalid_qual_allow("// qual:allow(srp, srp_params)") {
+        Some(InvalidQualAllow::UnknownTarget { dim, target, valid }) => {
+            assert_eq!(dim, "srp");
+            assert_eq!(target, "srp_params");
+            assert!(valid.contains(&"file_length".to_string()));
+        }
+        other => panic!("expected UnknownTarget, got {other:?}"),
+    }
 }
 
 #[test]

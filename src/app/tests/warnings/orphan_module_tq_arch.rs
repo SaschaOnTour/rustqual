@@ -14,6 +14,7 @@ fn srp_module_marker_anywhere_in_file_is_not_orphan() {
             line: 500,
             dimensions: vec![crate::findings::Dimension::Srp],
             reason: None,
+            target: None,
         }],
     );
     let mut analysis = empty_analysis();
@@ -44,6 +45,7 @@ fn tq_marker_within_5_line_window_is_not_orphan() {
             line: 10,
             dimensions: vec![crate::findings::Dimension::TestQuality],
             reason: None,
+            target: None,
         }],
     );
     let mut analysis = empty_analysis();
@@ -80,6 +82,7 @@ fn architecture_marker_only_matches_findings_in_window() {
             line: 1,
             dimensions: vec![crate::findings::Dimension::Architecture],
             reason: None,
+            target: None,
         }],
     );
     let mut analysis = empty_analysis();
@@ -115,6 +118,7 @@ fn complexity_marker_without_any_overshoot_is_orphan() {
             line: 5,
             dimensions: vec![crate::findings::Dimension::Complexity],
             reason: None,
+            target: None,
         }],
     );
     let mut analysis = empty_analysis();

@@ -35,6 +35,7 @@ fn dry_marker_orphan_depends_on_finding_kind_and_window() {
                 line: *sup_line,
                 dimensions: vec![crate::findings::Dimension::Dry],
                 reason: None,
+                target: None,
             }],
         );
         let mut analysis = empty_analysis();
@@ -64,6 +65,7 @@ fn complexity_marker_is_orphan_when_complexity_dimension_disabled() {
             line: 5,
             dimensions: vec![crate::findings::Dimension::Complexity],
             reason: None,
+            target: None,
         }],
     );
     let mut analysis = empty_analysis();
@@ -103,6 +105,7 @@ fn srp_marker_is_orphan_when_srp_dimension_disabled() {
             line: 2,
             dimensions: vec![crate::findings::Dimension::Srp],
             reason: None,
+            target: None,
         }],
     );
     let mut analysis = empty_analysis();
@@ -155,6 +158,7 @@ fn srp_marker_within_5_line_window_is_not_orphan() {
                 line: *sup_line,
                 dimensions: vec![crate::findings::Dimension::Srp],
                 reason: None,
+                target: None,
             }],
         );
         let mut analysis = empty_analysis();

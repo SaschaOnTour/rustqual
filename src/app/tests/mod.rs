@@ -23,6 +23,7 @@ pub(super) fn one_suppression(
             line,
             dimensions: vec![dim],
             reason: None,
+            target: None,
         }],
     )]
     .into()

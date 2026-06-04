@@ -127,6 +127,7 @@ pub(super) fn complexity_sup_orphans(
             line: sup_line,
             dimensions: vec![crate::findings::Dimension::Complexity],
             reason: None,
+            target: None,
         }],
     );
     let mut analysis = empty_analysis();

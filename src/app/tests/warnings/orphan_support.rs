@@ -214,6 +214,7 @@ pub(crate) fn srp_orphan_count(
             line: 5,
             dimensions: dims.to_vec(),
             reason: None,
+            target: None,
         }],
     );
     let mut analysis = empty_analysis();
@@ -255,6 +256,7 @@ pub(crate) fn complexity_orphans_for(fa: FunctionAnalysis) -> usize {
             line: fa.line,
             dimensions: vec![crate::findings::Dimension::Complexity],
             reason: None,
+            target: None,
         }],
     );
     let mut analysis = empty_analysis();

@@ -150,6 +150,7 @@ fn dry_suppression_must_cover_the_dry_dimension() {
             line: 4,
             dimensions: vec![crate::findings::Dimension::Complexity],
             reason: None,
+            target: None,
         }],
     )]
     .into();

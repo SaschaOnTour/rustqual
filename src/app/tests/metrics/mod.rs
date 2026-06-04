@@ -72,6 +72,7 @@ pub(super) fn dry_suppression_at(
             line,
             dimensions: vec![crate::findings::Dimension::Dry],
             reason: None,
+            target: None,
         }],
     )]
     .into()

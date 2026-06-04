@@ -149,6 +149,7 @@ fn sups_at(line: usize, dim: Dimension) -> HashMap<String, Vec<Suppression>> {
             line,
             dimensions: vec![dim],
             reason: None,
+            target: None,
         }],
     )]
     .into()

@@ -6,6 +6,7 @@ fn empty_dimensions_list_covers_everything() {
         line: 1,
         dimensions: vec![],
         reason: None,
+        target: None,
     };
     assert!(s.covers(Dimension::Iosp));
     assert!(s.covers(Dimension::Complexity));
@@ -18,6 +19,7 @@ fn specific_dimensions_only_cover_those_listed() {
         line: 1,
         dimensions: vec![Dimension::Iosp],
         reason: None,
+        target: None,
     };
     assert!(s.covers(Dimension::Iosp));
     assert!(!s.covers(Dimension::Complexity));
@@ -30,6 +32,7 @@ fn multiple_dimensions_cover_all_listed() {
         line: 1,
         dimensions: vec![Dimension::Iosp, Dimension::Architecture],
         reason: Some("migration in progress".into()),
+        target: None,
     };
     assert!(s.covers(Dimension::Iosp));
     assert!(s.covers(Dimension::Architecture));
