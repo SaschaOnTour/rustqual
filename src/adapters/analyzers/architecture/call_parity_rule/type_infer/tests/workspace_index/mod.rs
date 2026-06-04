@@ -35,6 +35,7 @@ mod inline_mod_and_traits;
 mod leading_colon_and_disambiguation;
 mod method_and_fn_returns;
 mod turbofish_and_generics;
+mod visitor_walks;
 
 pub(super) fn parse_file(src: &str) -> syn::File {
     syn::parse_str(src).expect("parse file")

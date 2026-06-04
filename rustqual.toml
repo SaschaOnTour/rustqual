@@ -90,9 +90,12 @@ enabled = true
 # ── Test-Code Thresholds ───────────────────────────────────────────────
 #
 # rustqual applies a curated subset of checks to test code: DRY-001/004/005,
-# LONG_FN (function length), and SRP size (file/module length, method count).
-# Everything else stays test-exempt (ERROR_HANDLING, MAGIC_NUMBER, IOSP,
-# DRY-002 dead code, DRY-003 wildcards, Coupling, all Structural detectors).
+# LONG_FN (function length), and SRP file-length (SRP_MODULE). The god-struct
+# check (SRP-001) also fires on test structs (a god-fixture is a real smell) at
+# production thresholds — no separate test knob; use `// qual:allow(srp)` for the
+# rare legitimate fixture. Everything else stays test-exempt (ERROR_HANDLING,
+# MAGIC_NUMBER, IOSP, DRY-002 dead code, DRY-003 wildcards, Coupling, all
+# Structural detectors, and the SRP module-cohesion / independent-cluster check).
 # This split is fixed; only the thresholds are configurable.
 #
 # Each key overrides the matching production threshold FOR TEST CODE ONLY.
@@ -104,7 +107,6 @@ enabled = true
 # max_function_lines   = 60      # overrides [complexity].max_function_lines (LONG_FN)
 # file_length_baseline = 300     # overrides [srp].file_length_baseline
 # file_length_ceiling  = 600     # overrides [srp].file_length_ceiling
-# max_methods          = 20      # overrides [srp].max_methods
 
 # ── Quality Score Weights ──────────────────────────────────────────────
 

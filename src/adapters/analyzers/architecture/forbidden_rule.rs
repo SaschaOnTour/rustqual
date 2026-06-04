@@ -249,7 +249,7 @@ pub(crate) fn is_tie_break_winner(
 /// item lives inside `foo`'s own file, so crate-root candidates are
 /// not added.
 /// Operation: loop building candidate list, no own calls.
-fn candidate_paths(inner: &[String]) -> Vec<String> {
+pub(super) fn candidate_paths(inner: &[String]) -> Vec<String> {
     let mut candidates = Vec::new();
     for len in (1..=inner.len()).rev() {
         let head = &inner[..len];

@@ -35,6 +35,44 @@ fn test_bp001_non_trivial_from_not_flagged() {
     );
 }
 
+#[test]
+fn test_bp001_struct_literal_from_detected() {
+    // A `From` returning a struct literal with path fields is trivial; guards the
+    // `Expr::Struct` arm of the triviality check.
+    let code =
+        "struct W { a: i32 } impl From<i32> for W { fn from(a: i32) -> Self { Self { a } } }";
+    let findings = detect_boilerplate(&parse(code), &BoilerplateConfig::default());
+    assert!(
+        findings.iter().any(|f| f.pattern_id == "BP-001"),
+        "a struct-literal From with path fields is trivial"
+    );
+}
+
+#[test]
+fn test_bp001_struct_literal_with_rest_not_trivial() {
+    // `Self { a, ..Default::default() }` has a rest (`..`), so it is NOT trivial;
+    // guards the `s.rest.is_none() && …` conjunction.
+    let code = "struct W { a: i32 } impl From<i32> for W { fn from(a: i32) -> Self { Self { a, ..Default::default() } } }";
+    let findings = detect_boilerplate(&parse(code), &BoilerplateConfig::default());
+    assert!(
+        !findings.iter().any(|f| f.pattern_id == "BP-001"),
+        "a struct literal with `..rest` is not a trivial From"
+    );
+}
+
+#[test]
+fn test_bp001_requires_method_named_from() {
+    // A single method NOT named `from` must not be treated as a From body; guards
+    // the `methods.len() != 1 || ident != "from"` short-circuit.
+    let code =
+        "struct W { a: i32 } impl From<i32> for W { fn convert(a: i32) -> Self { Self { a } } }";
+    let findings = detect_boilerplate(&parse(code), &BoilerplateConfig::default());
+    assert!(
+        !findings.iter().any(|f| f.pattern_id == "BP-001"),
+        "an impl From whose only method isn't `from` is not BP-001"
+    );
+}
+
 // ── BP-002 ─────────────────────────────────────────────────
 
 #[test]
@@ -206,5 +244,50 @@ fn test_bp005_custom_default_not_flagged() {
     assert!(
         !findings.iter().any(|f| f.pattern_id == "BP-005"),
         "Default with custom value (42) should not be flagged"
+    );
+}
+
+#[test]
+fn test_bp005_recognises_each_default_value_kind() {
+    // BP-005 fires only when *every* field is a default value, so each fixture's
+    // single field uses a distinct default-value kind: dropping that kind's arm
+    // in `is_default_value_expr` (or breaking its `==`) stops the impl flagging.
+    let cases = [
+        ("float 0.0", "struct S { x: f64 } impl Default for S { fn default() -> Self { Self { x: 0.0 } } }"),
+        ("empty str", r#"struct S { x: String } impl Default for S { fn default() -> Self { Self { x: "" } } }"#),
+        ("None", "struct S { x: Option<i32> } impl Default for S { fn default() -> Self { Self { x: None } } }"),
+        ("empty vec!", "struct S { x: Vec<i32> } impl Default for S { fn default() -> Self { Self { x: vec![] } } }"),
+    ];
+    for (label, code) in cases {
+        let findings = detect_boilerplate(&parse(code), &BoilerplateConfig::default());
+        assert!(
+            findings.iter().any(|f| f.pattern_id == "BP-005"),
+            "default-value kind not recognised: {label}"
+        );
+    }
+}
+
+#[test]
+fn test_bp005_reports_struct_name() {
+    // The finding carries the impl's self-type name; guards `self_type_of`.
+    let code = "struct Config { x: i32 } impl Default for Config { fn default() -> Self { Self { x: 0 } } }";
+    let findings = detect_boilerplate(&parse(code), &BoilerplateConfig::default());
+    let bp005 = findings
+        .iter()
+        .find(|f| f.pattern_id == "BP-005")
+        .expect("BP-005 finding");
+    assert_eq!(bp005.struct_name.as_deref(), Some("Config"));
+}
+
+#[test]
+fn test_bp005_requires_method_named_default() {
+    // A single method NOT named `default` must not be treated as a Default impl
+    // body. Guards the `methods.len() != 1 || ident != "default"` short-circuit.
+    let code =
+        "struct S { x: i32 } impl Default for S { fn not_default() -> Self { Self { x: 0 } } }";
+    let findings = detect_boilerplate(&parse(code), &BoilerplateConfig::default());
+    assert!(
+        !findings.iter().any(|f| f.pattern_id == "BP-005"),
+        "an impl Default whose only method isn't `default` is not BP-005"
     );
 }

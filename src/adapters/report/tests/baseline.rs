@@ -206,3 +206,94 @@ fn test_baseline_v2_regression_by_quality_score() {
     let regressed = compare(&ab(Classification::Operation), &ab(violation("if", "x")));
     assert!(regressed, "Quality score regression should be detected");
 }
+
+#[test]
+fn test_format_score_delta_direction_and_magnitude() {
+    use crate::report::baseline::format_score_delta;
+    // Rose: up-arrow + the exact delta magnitude. Pins `new - old` (a `+`/`/`
+    // would change the printed magnitude) and the `delta > 0.0` branch.
+    let up = format_score_delta("Quality", 80.0, 90.0);
+    assert!(up.contains('\u{2191}'), "score rise shows ↑: {up}");
+    assert!(up.contains("10.0%"), "delta magnitude is 10.0%: {up}");
+    // Fell: down-arrow + abs magnitude. Pins the `delta < 0.0` branch.
+    let down = format_score_delta("Quality", 90.0, 80.0);
+    assert!(down.contains('\u{2193}'), "score drop shows ↓: {down}");
+    assert!(down.contains("10.0%"), "abs delta is 10.0%: {down}");
+    // Equal: the unchanged branch (no arrow).
+    let same = format_score_delta("Quality", 50.0, 50.0);
+    assert!(
+        same.contains("unchanged"),
+        "equal scores are unchanged: {same}"
+    );
+    assert!(
+        !same.contains('\u{2191}') && !same.contains('\u{2193}'),
+        "unchanged shows no arrow: {same}"
+    );
+}
+
+#[test]
+fn test_comparison_lines_pins_deltas_and_regression() {
+    use crate::report::baseline::comparison_lines;
+    // v2 baseline: iosp 0.5, violations 2, total_findings 3, quality 0.8, 1 TQ.
+    let raw = serde_json::json!({
+        "version": 2,
+        "iosp_score": 0.5,
+        "violations": 2,
+        "total_findings": 3,
+        "quality_score": 0.8,
+        "tq_no_assertion_warnings": 1
+    });
+    // Current: violations 5 (Δ+3), all 5 TQ kinds = 1 (Σ5, Δ+4),
+    // total_findings = 5 + 5 = 10 (Δ+7), iosp 0.6, quality 0.7 (regressed).
+    let summary = Summary {
+        violations: 5,
+        iosp_score: 0.6,
+        quality_score: 0.7,
+        tq_no_assertion_warnings: 1,
+        tq_no_sut_warnings: 1,
+        tq_untested_warnings: 1,
+        tq_uncovered_warnings: 1,
+        tq_untested_logic_warnings: 1,
+        ..Summary::default()
+    };
+    let (lines, regressed) = comparison_lines(&raw, &summary);
+    let joined = lines.join("\n");
+    assert!(joined.contains("(+3)"), "violation delta +3: {joined}");
+    assert!(joined.contains("(+7)"), "finding delta +7: {joined}");
+    assert!(
+        joined.contains("(+4)"),
+        "TQ delta +4 (Σ pins the 5-field sum): {joined}"
+    );
+    assert!(
+        joined.contains("50.0%"),
+        "old IOSP 0.5 → 50.0% (pins *MULTIPLIER): {joined}"
+    );
+    assert!(joined.contains("60.0%"), "new IOSP 0.6 → 60.0%: {joined}");
+    assert!(
+        joined.contains("80.0%"),
+        "old quality 0.8 → 80.0%: {joined}"
+    );
+    assert!(
+        joined.contains("70.0%"),
+        "new quality 0.7 → 70.0%: {joined}"
+    );
+    assert!(regressed, "quality 0.7 < baseline 0.8 → regressed");
+}
+
+#[test]
+fn test_comparison_lines_v1_skips_findings_line() {
+    use crate::report::baseline::comparison_lines;
+    // A v1 baseline (no version) has no Findings line and regresses on IOSP only.
+    let raw = serde_json::json!({"iosp_score": 0.9, "violations": 0});
+    let summary = Summary {
+        iosp_score: 0.8,
+        ..Summary::default()
+    };
+    let (lines, regressed) = comparison_lines(&raw, &summary);
+    let joined = lines.join("\n");
+    assert!(
+        !joined.contains("Findings:"),
+        "v1 has no findings line: {joined}"
+    );
+    assert!(regressed, "v1 IOSP 0.8 < 0.9 → regressed");
+}

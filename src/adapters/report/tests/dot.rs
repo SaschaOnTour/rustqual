@@ -161,3 +161,20 @@ fn dot_reporter_intentionally_omits_orphan_rendering() {
         "dot reporter must NOT render orphan reason text, got:\n{out}"
     );
 }
+
+#[test]
+fn dot_nodes_use_classification_specific_fill_colors() {
+    // Each classification maps to its own fill/font color pair; pins
+    // `classification_colours` against a constant/blank tuple.
+    let data = data_with(vec![
+        make_record("i_fn", FunctionClassification::Integration),
+        make_record("o_fn", FunctionClassification::Operation),
+        make_record("t_fn", FunctionClassification::Trivial),
+        make_record("v_fn", FunctionClassification::Violation),
+    ]);
+    let out = DotReporter.render(&AnalysisFindings::default(), &data);
+    assert!(out.contains("#c8e6c9"), "integration fill: {out}");
+    assert!(out.contains("#bbdefb"), "operation fill: {out}");
+    assert!(out.contains("#f5f5f5"), "trivial fill: {out}");
+    assert!(out.contains("#ffcdd2"), "violation fill: {out}");
+}

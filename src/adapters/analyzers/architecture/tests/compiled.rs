@@ -410,3 +410,51 @@ fn test_layer_of_crate_path_resolves_crate_root_items() {
         "crate-root single-segment path must resolve to lib/main's layer"
     );
 }
+
+#[test]
+fn build_transparent_macros_unions_defaults_and_user() {
+    use crate::adapters::analyzers::architecture::compiled::build_transparent_macros;
+    let set = build_transparent_macros(&["my_crate::custom_macro".to_string(), "  ".to_string()]);
+    assert!(set.contains("instrument"), "a default is present");
+    assert!(
+        set.contains("custom_macro"),
+        "user macro's last segment added"
+    );
+    // A blank/whitespace user entry trims to empty and is filtered out (`!is_empty`).
+    assert!(!set.contains(""), "empty entries filtered: {set:?}");
+}
+
+#[test]
+fn is_exact_crate_key_accepts_alnum_underscore_only() {
+    use crate::adapters::analyzers::architecture::compiled::is_exact_crate_key;
+    assert!(
+        is_exact_crate_key("foo_bar2"),
+        "alnum + underscore is exact"
+    );
+    assert!(!is_exact_crate_key("foo-bar"), "hyphen → not exact (glob)");
+    assert!(!is_exact_crate_key(""), "empty → not exact");
+}
+
+#[test]
+fn compile_includes_trait_contracts() {
+    use crate::config::architecture::TraitContract;
+    let mut cfg = cfg_with_layers(&[("domain", "src/domain/**")]);
+    cfg.trait_contracts = vec![TraitContract {
+        name: "no_async".into(),
+        scope: "src/ports/**".into(),
+        receiver_may_be: None,
+        required_param_type_contains: None,
+        forbidden_return_type_contains: None,
+        forbidden_error_variant_contains: None,
+        error_types: None,
+        methods_must_be_async: Some(false),
+        must_be_object_safe: None,
+        required_supertraits_contain: None,
+    }];
+    let compiled = compile_architecture(&cfg).expect("compile");
+    assert_eq!(
+        compiled.trait_contracts.len(),
+        1,
+        "the trait contract is compiled (pins compile_trait_contracts != Ok(vec![]))"
+    );
+}

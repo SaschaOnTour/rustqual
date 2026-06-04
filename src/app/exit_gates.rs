@@ -21,17 +21,27 @@ pub(crate) fn apply_exit_gates(cli: &Cli, config: &Config, summary: &Summary) ->
 }
 
 /// Emit a stderr warning when the suppression ratio exceeds the configured max.
-/// Operation: conditional formatting.
+/// Integration: delegates the message to `suppression_ratio_warning`.
 fn warn_suppression_ratio(summary: &Summary, max_ratio: f64) {
+    suppression_ratio_warning(summary, max_ratio)
+        .into_iter()
+        .for_each(|msg| eprintln!("{msg}"));
+}
+
+/// Build the suppression-ratio warning message, or `None` when the ratio gate
+/// didn't trip (not exceeded, or no functions analysed). Pure so the gate logic
+/// is observable in tests rather than buried in a stderr side effect.
+/// Operation: conditional formatting.
+pub(crate) fn suppression_ratio_warning(summary: &Summary, max_ratio: f64) -> Option<String> {
     if !summary.suppression_ratio_exceeded || summary.total == 0 {
-        return;
+        return None;
     }
-    eprintln!(
+    Some(format!(
         "Warning: {} suppression(s) found ({:.1}% of functions, max: {:.1}%)",
         summary.all_suppressions,
         summary.all_suppressions as f64 / summary.total as f64 * PERCENTAGE_MULTIPLIER,
         max_ratio * PERCENTAGE_MULTIPLIER,
-    );
+    ))
 }
 
 /// Return Err(1) iff `--fail-on-warnings` is set and the

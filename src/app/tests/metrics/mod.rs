@@ -21,7 +21,10 @@ pub(super) use crate::config::sections::SrpConfig;
 pub(super) use crate::findings::Suppression;
 pub(super) use crate::report::Summary;
 
+mod counters;
+mod dry_detection;
 mod param_warnings;
+mod srp_suppression;
 mod suppression;
 
 pub(super) fn make_func(name: &str, param_count: usize, trait_impl: bool) -> FunctionAnalysis {

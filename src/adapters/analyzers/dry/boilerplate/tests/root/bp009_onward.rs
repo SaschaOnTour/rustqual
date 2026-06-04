@@ -186,3 +186,99 @@ fn test_disabled_boilerplate_returns_empty() {
         "No findings when no patterns are enabled"
     );
 }
+
+// ── BP-006 position variants (let binding / impl method) ───
+
+#[test]
+fn test_bp006_match_in_let_binding_detected() {
+    // The repetitive match assigned via `let r = match …` must still be detected;
+    // guards the `Stmt::Local` arm of `check_repetitive_match`.
+    let code = r#"
+        enum Color { Red, Blue, Green, Yellow }
+        enum Shade { Red, Blue, Green, Yellow }
+        fn convert(c: Color) -> Shade {
+            let r = match c {
+                Color::Red => Shade::Red,
+                Color::Blue => Shade::Blue,
+                Color::Green => Shade::Green,
+                Color::Yellow => Shade::Yellow,
+            };
+            r
+        }
+    "#;
+    let findings = detect_boilerplate(&parse(code), &BoilerplateConfig::default());
+    assert!(
+        findings.iter().any(|f| f.pattern_id == "BP-006"),
+        "a repetitive match in a let binding is detected"
+    );
+}
+
+#[test]
+fn test_bp006_match_in_impl_method_detected() {
+    // Guards the `Item::Impl` arm of `check_repetitive_match` (recursion into
+    // impl methods).
+    let code = r#"
+        enum Color { Red, Blue, Green, Yellow }
+        enum Shade { Red, Blue, Green, Yellow }
+        struct Conv;
+        impl Conv {
+            fn convert(&self, c: Color) -> Shade {
+                match c {
+                    Color::Red => Shade::Red,
+                    Color::Blue => Shade::Blue,
+                    Color::Green => Shade::Green,
+                    Color::Yellow => Shade::Yellow,
+                }
+            }
+        }
+    "#;
+    let findings = detect_boilerplate(&parse(code), &BoilerplateConfig::default());
+    assert!(
+        findings.iter().any(|f| f.pattern_id == "BP-006"),
+        "a repetitive match in an impl method is detected"
+    );
+}
+
+// ── BP-008 / BP-009 position variants ──────────────────────
+
+#[test]
+fn test_bp008_clone_heavy_in_let_binding_detected() {
+    // The clone-heavy construction bound via `let b = B {…}` must be detected;
+    // guards the `Stmt::Local` arm of `check_clone_heavy_conversion`.
+    let code = r#"
+        struct A { x: String, y: String, z: String }
+        struct B { x: String, y: String, z: String }
+        impl A {
+            fn to_b(&self) -> B {
+                let b = B { x: self.x.clone(), y: self.y.clone(), z: self.z.clone() };
+                b
+            }
+        }
+    "#;
+    let findings = detect_boilerplate(&parse(code), &BoilerplateConfig::default());
+    assert!(
+        findings.iter().any(|f| f.pattern_id == "BP-008"),
+        "a clone-heavy construction in a let binding is detected"
+    );
+}
+
+#[test]
+fn test_bp009_overlapping_constructions_in_impl_method_detected() {
+    // Guards the `Item::Impl` arm of `check_repetitive_struct_update`.
+    let code = r#"
+        struct Config { host: String, port: u16, timeout: u64, retries: u32 }
+        struct Maker;
+        impl Maker {
+            fn make(&self) -> (Config, Config) {
+                let a = Config { host: "a".to_string(), port: 80, timeout: 30, retries: 3 };
+                let b = Config { host: "b".to_string(), port: 80, timeout: 30, retries: 3 };
+                (a, b)
+            }
+        }
+    "#;
+    let findings = detect_boilerplate(&parse(code), &BoilerplateConfig::default());
+    assert!(
+        findings.iter().any(|f| f.pattern_id == "BP-009"),
+        "overlapping constructions in an impl method are detected"
+    );
+}

@@ -200,10 +200,14 @@ impl Default for SrpConfig {
 ///
 /// rustqual applies a curated subset of checks to test code — DRY-001/004/005
 /// (duplicate fns / fragments / repeated matches), LONG_FN (function length),
-/// and SRP size (file/module length, method count). The remaining checks stay
-/// test-exempt: ERROR_HANDLING, MAGIC_NUMBER, IOSP, DRY-002 dead code, DRY-003
-/// wildcard imports, Coupling, and all Structural detectors. **This split is
-/// fixed — only the thresholds below are configurable.**
+/// and SRP file-length (SRP_MODULE). The god-struct check (SRP-001) also fires
+/// on test structs — a god-fixture is a real smell — but at production
+/// thresholds, with no separate test knob (`// qual:allow(srp)` covers the rare
+/// legitimate fixture). The remaining checks stay test-exempt: ERROR_HANDLING,
+/// MAGIC_NUMBER, IOSP, DRY-002 dead code, DRY-003 wildcard imports, Coupling,
+/// all Structural detectors, and the SRP *module*-cohesion (independent-cluster)
+/// check — a test file's independent `#[test]` fns are its purpose, not a smell.
+/// **This split is fixed — only the thresholds below are configurable.**
 ///
 /// Each field overrides the matching production threshold *for test code
 /// only*. The default is `None`, meaning the production value is inherited —
@@ -218,8 +222,6 @@ pub struct TestsConfig {
     pub file_length_baseline: Option<usize>,
     /// Overrides `[srp].file_length_ceiling` for test files.
     pub file_length_ceiling: Option<usize>,
-    /// Overrides `[srp].max_methods` for test impls / inherent blocks.
-    pub max_methods: Option<usize>,
 }
 
 /// Configuration for coupling analysis.

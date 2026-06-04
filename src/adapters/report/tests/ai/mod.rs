@@ -26,6 +26,7 @@ pub(super) use crate::report::AnalysisResult;
 pub(super) use serde_json::Value;
 
 mod build_ai_value_shape;
+mod details;
 mod dimension_entries_a;
 mod dimension_entries_b;
 mod smoke_and_orphan;
@@ -77,5 +78,46 @@ pub(super) fn make_reporter<'a>(
         config,
         data,
         format: AiOutputFormat::Json,
+    }
+}
+
+/// A Violation `FunctionRecord` for the IOSP function-name-resolution tests.
+pub(super) fn violation_record(file: &str, line: usize) -> FunctionRecord {
+    use crate::domain::analysis_data::FunctionClassification;
+    FunctionRecord {
+        name: "bad_fn".into(),
+        file: file.into(),
+        line,
+        qualified_name: "MyType::bad_fn".into(),
+        parent_type: Some("MyType".into()),
+        classification: FunctionClassification::Violation,
+        severity: Some(crate::domain::Severity::Medium),
+        complexity: None,
+        parameter_count: 0,
+        own_calls: vec![],
+        is_trait_impl: false,
+        is_test: false,
+        effort_score: None,
+        suppressed: false,
+        complexity_suppressed: false,
+    }
+}
+
+/// An IOSP violation `Finding` at `file:line` with no logic/call locations.
+pub(super) fn iosp_finding(file: &str, line: usize) -> IospFinding {
+    IospFinding {
+        common: Finding {
+            file: file.into(),
+            line,
+            column: 0,
+            dimension: crate::findings::Dimension::Iosp,
+            rule_id: "iosp/violation".into(),
+            message: "x".into(),
+            severity: crate::domain::Severity::Medium,
+            suppressed: false,
+        },
+        logic_locations: vec![],
+        call_locations: vec![],
+        effort_score: None,
     }
 }

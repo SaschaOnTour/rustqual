@@ -273,3 +273,24 @@ fn unknown_kind_silently_ignored() {
     let hits = find(src, &["bogus_kind", "async_fn"]);
     assert_eq!(hits.len(), 1);
 }
+
+#[test]
+fn top_level_cfg_test_items_detected_for_every_item_kind() {
+    // One #[cfg(test)] item of each non-mod kind that classify_top_level_non_mod
+    // handles. Each match arm projects exactly one hit, so a deleted arm drops
+    // the count below 6.
+    let src = r#"
+        #[cfg(test)] static S: u8 = 0;
+        #[cfg(test)] struct St;
+        #[cfg(test)] enum En { A }
+        #[cfg(test)] trait Tr {}
+        #[cfg(test)] type Ty = u8;
+        #[cfg(test)] use std::fmt;
+    "#;
+    let hits = find(src, &["top_level_cfg_test_item"]);
+    assert_eq!(hits.len(), 6, "all six item kinds classified: {hits:?}");
+    let ns = names(&hits);
+    for name in ["S", "St", "En", "Tr", "Ty"] {
+        assert!(ns.contains(&name.to_string()), "{name} present: {ns:?}");
+    }
+}

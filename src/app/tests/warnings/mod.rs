@@ -13,10 +13,14 @@ pub(super) use crate::config::Config;
 pub(super) use crate::report::Summary;
 pub(super) use std::collections::{HashMap, HashSet};
 
+mod complexity_flags;
 mod exclude_and_error_handling;
 mod extended_warnings;
+mod flag_application;
 mod orphan_basics_and_suppression;
+mod orphan_complexity_thresholds;
 mod orphan_dry_and_disabled;
+mod orphan_mod_internals;
 mod orphan_module_tq_arch;
 mod orphan_support;
 pub(super) use orphan_support::*;

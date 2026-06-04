@@ -1,6 +1,7 @@
 use crate::domain::findings::{
-    ArchitectureFinding, CouplingFinding, CouplingFindingDetails, CouplingFindingKind, DryFinding,
-    DryFindingDetails, DryFindingKind, IospFinding, SrpFinding, SrpFindingDetails, SrpFindingKind,
+    ArchitectureFinding, ComplexityFinding, ComplexityFindingKind, CouplingFinding,
+    CouplingFindingDetails, CouplingFindingKind, DryFinding, DryFindingDetails, DryFindingKind,
+    IospFinding, SrpFinding, SrpFindingDetails, SrpFindingKind, TqFinding, TqFindingKind,
 };
 use crate::domain::{AnalysisData, AnalysisFindings, Finding, Severity};
 use crate::report::sarif::build_sarif_value;
@@ -160,4 +161,125 @@ fn every_emitted_rule_id_is_registered_in_rules_table() {
         emitted.contains("iosp/violation"),
         "IOSP findings must emit canonical rule_id `iosp/violation`"
     );
+}
+
+fn cxf(kind: ComplexityFindingKind, suppressed: bool) -> ComplexityFinding {
+    let mut common = dim_finding(crate::findings::Dimension::Complexity, "cx");
+    common.suppressed = suppressed;
+    ComplexityFinding {
+        common,
+        kind,
+        metric_value: 0,
+        threshold: 0,
+        hotspot: None,
+    }
+}
+
+fn tqf(kind: TqFindingKind, suppressed: bool) -> TqFinding {
+    let mut common = dim_finding(crate::findings::Dimension::TestQuality, "tq");
+    common.suppressed = suppressed;
+    TqFinding {
+        common,
+        kind,
+        function_name: "t".into(),
+        uncovered_lines: None,
+    }
+}
+
+fn drf(kind: DryFindingKind, suppressed: bool) -> DryFinding {
+    let mut common = dim_finding(crate::findings::Dimension::Dry, "dry");
+    common.suppressed = suppressed;
+    DryFinding {
+        common,
+        kind,
+        details: DryFindingDetails::DeadCode {
+            qualified_name: String::new(),
+            suggestion: None,
+        },
+    }
+}
+
+fn cpf(details: CouplingFindingDetails, suppressed: bool) -> CouplingFinding {
+    let mut common = dim_finding(crate::findings::Dimension::Coupling, "cp");
+    common.suppressed = suppressed;
+    CouplingFinding {
+        common,
+        kind: CouplingFindingKind::Structural,
+        details,
+    }
+}
+
+#[test]
+fn sarif_results_exclude_suppressed_findings_and_emit_ratio() {
+    // Each dimension carries one unsuppressed + one suppressed finding with
+    // distinct rule ids. Only the unsuppressed ids reach the results array
+    // (pins the five `!suppressed` filters), and an exceeded suppression ratio
+    // emits the SUP-001 result (pins `suppression_ratio_result`).
+    let findings = AnalysisFindings {
+        complexity: vec![
+            cxf(ComplexityFindingKind::Cognitive, false),
+            cxf(ComplexityFindingKind::Unsafe, true),
+        ],
+        dry: vec![
+            drf(DryFindingKind::DuplicateExact, false),
+            drf(DryFindingKind::DeadCodeUncalled, true),
+        ],
+        srp: vec![
+            srp_kind(SrpFindingKind::StructCohesion, false),
+            srp_kind(SrpFindingKind::ParameterCount, true),
+        ],
+        coupling: vec![
+            cpf(CouplingFindingDetails::Cycle { modules: vec![] }, false),
+            cpf(
+                CouplingFindingDetails::ThresholdExceeded {
+                    module_name: String::new(),
+                    afferent: 0,
+                    efferent: 0,
+                    instability: 0.0,
+                },
+                true,
+            ),
+        ],
+        test_quality: vec![
+            tqf(TqFindingKind::NoAssertion, false),
+            tqf(TqFindingKind::Uncovered, true),
+        ],
+        ..Default::default()
+    };
+    let mut analysis = make_analysis_for(findings);
+    analysis.summary.suppression_ratio_exceeded = true;
+    let value = build_sarif_value(&analysis);
+    let emitted: HashSet<String> = value["runs"][0]["results"]
+        .as_array()
+        .expect("results")
+        .iter()
+        .filter_map(|r| r["ruleId"].as_str().map(str::to_string))
+        .collect();
+    for present in [
+        "CX-001", "DRY-001", "SRP-001", "CP-001", "TQ-001", "SUP-001",
+    ] {
+        assert!(
+            emitted.contains(present),
+            "{present} must be emitted: {emitted:?}"
+        );
+    }
+    for absent in ["CX-006", "DRY-002", "SRP-003", "CP-003"] {
+        assert!(
+            !emitted.contains(absent),
+            "suppressed {absent} must be excluded: {emitted:?}"
+        );
+    }
+}
+
+fn srp_kind(kind: SrpFindingKind, suppressed: bool) -> SrpFinding {
+    let mut common = dim_finding(crate::findings::Dimension::Srp, "srp");
+    common.suppressed = suppressed;
+    SrpFinding {
+        common,
+        kind,
+        details: SrpFindingDetails::ParameterCount {
+            function_name: String::new(),
+            parameter_count: 0,
+        },
+    }
 }

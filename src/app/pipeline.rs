@@ -173,6 +173,8 @@ fn finalize_summary(
 }
 
 /// Run a full analysis pipeline on a set of files and produce output.
+/// Returns the `AnalysisResult` it printed, so callers (and tests) can observe
+/// the orchestration's product rather than only its stdout side effect.
 /// Integration: orchestrates read_and_parse_files, run_analysis, output_results.
 pub(crate) fn analyze_and_output(
     path: &Path,
@@ -180,11 +182,12 @@ pub(crate) fn analyze_and_output(
     output_format: &crate::cli::OutputFormat,
     verbose: bool,
     suggestions: bool,
-) {
+) -> AnalysisResult {
     let files = collect_filtered_files(path, config);
     let parsed = read_and_parse_files(&files, path);
     let analysis = run_analysis(parsed, config);
     output_results(&analysis, output_format, verbose, suggestions, config);
+    analysis
 }
 
 /// Output results in the requested format.

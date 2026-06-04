@@ -98,7 +98,6 @@ fn test_tests_config_defaults_inherit_production() {
     assert_eq!(c.max_function_lines, None);
     assert_eq!(c.file_length_baseline, None);
     assert_eq!(c.file_length_ceiling, None);
-    assert_eq!(c.max_methods, None);
 }
 
 #[test]
@@ -107,13 +106,11 @@ fn test_tests_config_deserialize_overrides() {
         max_function_lines = 120
         file_length_baseline = 500
         file_length_ceiling = 1200
-        max_methods = 40
     "#;
     let c: TestsConfig = toml::from_str(toml_str).unwrap();
     assert_eq!(c.max_function_lines, Some(120));
     assert_eq!(c.file_length_baseline, Some(500));
     assert_eq!(c.file_length_ceiling, Some(1200));
-    assert_eq!(c.max_methods, Some(40));
 }
 
 #[test]

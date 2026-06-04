@@ -44,40 +44,9 @@ fn build_iosp_emits_violation_with_logic_and_call_lines() {
 
 #[test]
 fn build_iosp_resolves_function_name_via_data() {
-    use crate::domain::analysis_data::FunctionClassification;
     let mut data = crate::domain::AnalysisData::default();
-    data.functions.push(FunctionRecord {
-        name: "bad_fn".into(),
-        file: "src/lib.rs".into(),
-        line: 40,
-        qualified_name: "MyType::bad_fn".into(),
-        parent_type: Some("MyType".into()),
-        classification: FunctionClassification::Violation,
-        severity: Some(crate::domain::Severity::Medium),
-        complexity: None,
-        parameter_count: 0,
-        own_calls: vec![],
-        is_trait_impl: false,
-        is_test: false,
-        effort_score: None,
-        suppressed: false,
-        complexity_suppressed: false,
-    });
-    let f = IospFinding {
-        common: Finding {
-            file: "src/lib.rs".into(),
-            line: 40,
-            column: 0,
-            dimension: crate::findings::Dimension::Iosp,
-            rule_id: "iosp/violation".into(),
-            message: "x".into(),
-            severity: crate::domain::Severity::Medium,
-            suppressed: false,
-        },
-        logic_locations: vec![],
-        call_locations: vec![],
-        effort_score: None,
-    };
+    data.functions.push(violation_record("src/lib.rs", 40));
+    let f = iosp_finding("src/lib.rs", 40);
     let config = Config::default();
     let reporter = make_reporter(&config, &data);
     let rows = reporter.build_iosp(&[f]);

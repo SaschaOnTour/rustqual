@@ -345,3 +345,49 @@ fn super_does_not_match_unrelated_rule() {
     )];
     assert!(run(&fx, &rules).is_empty());
 }
+
+#[test]
+fn file_to_module_segments_treats_crate_roots_as_empty() {
+    use crate::adapters::analyzers::architecture::forbidden_rule::file_to_module_segments;
+    // Crate roots (lib.rs / main.rs) map to the empty module path; pins the
+    // `== "lib" || == "main"` guard against `&&`.
+    assert!(file_to_module_segments("src/lib.rs").is_empty(), "lib root");
+    assert!(
+        file_to_module_segments("src/main.rs").is_empty(),
+        "main root"
+    );
+    assert_eq!(
+        file_to_module_segments("src/foo/bar.rs"),
+        vec!["foo".to_string(), "bar".to_string()],
+        "normal module path"
+    );
+}
+
+#[test]
+fn module_map_prefers_modern_file_over_legacy_mod_rs() {
+    use crate::adapters::analyzers::architecture::forbidden_rule::build_module_segs_to_path_map;
+    let ast = syn::parse_str::<syn::File>("fn f() {}").unwrap();
+    // mod.rs FIRST, then the modern foo.rs — the modern form must win regardless
+    // of order (pins the `existing.ends_with("/mod.rs")` overwrite guard).
+    let files: Vec<(&str, &syn::File)> = vec![("src/foo/mod.rs", &ast), ("src/foo.rs", &ast)];
+    let map = build_module_segs_to_path_map(&files);
+    assert_eq!(
+        map.get(&vec!["foo".to_string()]).copied(),
+        Some("src/foo.rs")
+    );
+}
+
+#[test]
+fn candidate_paths_adds_crate_roots_only_for_single_segment() {
+    use crate::adapters::analyzers::architecture::forbidden_rule::candidate_paths;
+    let single = candidate_paths(&["foo".to_string()]);
+    assert!(
+        single.iter().any(|c| c == "src/lib.rs"),
+        "single segment → lib root"
+    );
+    let nested = candidate_paths(&["foo".to_string(), "bar".to_string()]);
+    assert!(
+        !nested.iter().any(|c| c == "src/lib.rs"),
+        "nested path → no crate roots (pins `inner.len() == 1`)"
+    );
+}

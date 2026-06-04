@@ -1283,3 +1283,19 @@ fn helper_reached_via_trait_blanket_dispatch_is_not_dead_code() {
         warnings.iter().map(|w| (&w.function_name, &w.kind)).collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn test_only_called_fn_is_not_uncalled() {
+    // A production fn called only from tests is TestOnly, NOT Uncalled — guards
+    // the `!test_calls.contains(qualified)` term of `find_uncalled` (a `||`
+    // there would wrongly report it as uncalled).
+    let parsed =
+        parse("fn helper() { let _ = 1; } #[cfg(test)] mod tests { #[test] fn t() { helper(); } }");
+    let warnings = dead_code_warnings(&parsed);
+    assert!(
+        !warnings
+            .iter()
+            .any(|w| w.function_name == "helper" && matches!(w.kind, DeadCodeKind::Uncalled)),
+        "a test-only fn must not be reported as Uncalled, got {warnings:?}"
+    );
+}

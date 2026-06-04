@@ -5,7 +5,7 @@
 //! trait is defined; cross-file resolution is out of scope.
 
 mod checks;
-mod rendering;
+pub(crate) mod rendering;
 
 use crate::adapters::analyzers::architecture::rendering::{
     build_architecture_finding, build_file_refs,
@@ -123,7 +123,7 @@ pub fn collect_findings(
 
 /// Project a trait-contract hit to a domain `Finding`.
 /// Operation: rule_id selection + field copy.
-fn hit_to_finding(hit: MatchLocation) -> Finding {
+pub(super) fn hit_to_finding(hit: MatchLocation) -> Finding {
     let rule_id = match &hit.kind {
         ViolationKind::TraitContract { check, .. } => {
             format!("architecture/trait_contract/{check}")

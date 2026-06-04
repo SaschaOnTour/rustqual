@@ -242,9 +242,34 @@ fn test_group_exact_duplicates_returns_remaining() {
     assert_eq!(remaining[0], 1); // index of b
 }
 
+/// Count the `NearDuplicate` groups in `parsed` at the given similarity
+/// threshold, plus the first one's similarity. Operation: filter + project.
+fn near_dup_similarity(
+    parsed: &[(String, String, syn::File)],
+    threshold: f64,
+) -> (usize, Option<f64>) {
+    let mut config = low_threshold_config();
+    config.similarity_threshold = threshold;
+    let groups = detect_duplicates(parsed, &config);
+    let near: Vec<f64> = groups
+        .iter()
+        .filter_map(|g| match g.kind {
+            DuplicateKind::NearDuplicate { similarity } => Some(similarity),
+            _ => None,
+        })
+        .collect();
+    (near.len(), near.first().copied())
+}
+
 #[test]
-fn test_detect_near_duplicates_high_similarity() {
-    // Two functions with slight differences — should be near-duplicates
+fn near_duplicate_detected_above_threshold_but_rejected_below_it() {
+    // `func_a`/`func_b` are token-identical except `+ 1` vs `- 1` (same token
+    // count → same bucket → comparable), forming a near- (not exact)
+    // duplicate. At a permissive threshold it IS flagged; raising the
+    // threshold strictly ABOVE the pair's measured similarity rejects it.
+    // Pins both halves of the spec's "deliberately strict" contract — the old
+    // version asserted similarity only INSIDE an `if detected`, so it passed
+    // vacuously when detection broke.
     let parsed = parse_multi(&[
         (
             "a.rs",
@@ -255,22 +280,19 @@ fn test_detect_near_duplicates_high_similarity() {
             "fn func_b() { let x = 1; let y = x + 2; let z = y * x; let w = z - 1; }",
         ),
     ]);
-    let mut config = low_threshold_config();
-    config.similarity_threshold = 0.80;
-    let groups = detect_duplicates(&parsed, &config);
-    // These have different hashes (+ vs -) but high Jaccard similarity
-    let near_groups: Vec<_> = groups
-        .iter()
-        .filter(|g| matches!(g.kind, DuplicateKind::NearDuplicate { .. }))
-        .collect();
-    // Whether detected depends on bucketing — both have similar token counts
-    // The test verifies the mechanism works, even if thresholds vary
-    if !near_groups.is_empty() {
-        let DuplicateKind::NearDuplicate { similarity } = near_groups[0].kind else {
-            panic!("expected near duplicate");
-        };
-        assert!(similarity >= 0.80);
-    }
+    let (count, similarity) = near_dup_similarity(&parsed, 0.50);
+    assert_eq!(count, 1, "permissive threshold detects the near-duplicate");
+    let similarity = similarity.unwrap();
+    assert!(
+        (0.50..1.0).contains(&similarity),
+        "near (not exact) similarity in [0.50, 1.0): {similarity}"
+    );
+    let strict = (similarity + 1.0) / 2.0;
+    let (strict_count, _) = near_dup_similarity(&parsed, strict);
+    assert_eq!(
+        strict_count, 0,
+        "threshold {strict} above similarity {similarity} rejects the pair"
+    );
 }
 
 #[test]
@@ -292,4 +314,26 @@ fn test_duplicate_entry_has_file_and_line() {
         assert!(!entry.file.is_empty());
         assert!(!entry.name.is_empty());
     }
+}
+
+#[test]
+fn token_count_exactly_at_min_tokens_is_kept() {
+    // `let x = 1;` normalises to exactly 5 tokens. With `min_tokens = 5` it is
+    // at the boundary and must be KEPT (`tokens.len() < min_tokens` is false).
+    // Guards the `<` in `build_hash_entry` (a `<=` would drop it).
+    let config = DuplicatesConfig {
+        min_tokens: 5,
+        min_lines: 1,
+        ..DuplicatesConfig::default()
+    };
+    let parsed = parse_multi(&[
+        ("a.rs", "fn a() { let x = 1; }"),
+        ("b.rs", "fn b() { let y = 1; }"),
+    ]);
+    let groups = detect_duplicates(&parsed, &config);
+    assert_eq!(
+        groups.len(),
+        1,
+        "bodies with exactly min_tokens tokens are kept and form a duplicate, got {groups:?}"
+    );
 }

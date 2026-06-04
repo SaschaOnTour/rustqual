@@ -63,6 +63,22 @@ fn test_zero_impls_not_flagged() {
 }
 
 #[test]
+fn single_impl_in_non_test_module_collected() {
+    // The metadata collector must descend into regular (non-test) modules: an
+    // impl living in `mod inner` must still count toward the trait's impl set
+    // so SIT sees the single implementor. Guards the metadata-recursion guard
+    // in `collect_item_metadata` against being skipped.
+    let w = detect_from(
+        "trait Drawable { fn draw(&self); } mod inner { struct Circle; impl super::Drawable for Circle { fn draw(&self) {} } }",
+    );
+    assert_eq!(
+        w.len(),
+        1,
+        "an impl inside a non-test module must be collected into the metadata"
+    );
+}
+
+#[test]
 fn test_disabled_check() {
     let syntax =
         syn::parse_file("trait D { fn d(&self); } struct C; impl D for C { fn d(&self) {} }")

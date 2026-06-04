@@ -11,6 +11,7 @@ pub(super) use std::collections::{HashMap, HashSet};
 
 mod basic;
 mod inference_fallback;
+mod pattern_collectors;
 mod receiver_tracking;
 mod resolution_misc;
 mod turbofish;

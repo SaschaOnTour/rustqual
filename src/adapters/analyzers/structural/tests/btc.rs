@@ -56,6 +56,22 @@ fn test_inherent_impl_not_flagged() {
 }
 
 #[test]
+fn test_default_default_body_not_treated_as_stub() {
+    // BTC stub forms are the panic-style macros only — `todo!`,
+    // `unimplemented!`, `panic!("not implemented")` (see `is_stub_body` and
+    // `book/function-quality.md`). A method whose body is `Default::default()`
+    // is frequently a genuine implementation, so it is intentionally NOT a stub.
+    // Pin that contract so any future change to flag it is deliberate.
+    let w = detect_in(
+        "trait Foo { fn bar(&self) -> i32; } impl Foo for M { fn bar(&self) -> i32 { Default::default() } } struct M;",
+    );
+    assert!(
+        w.is_empty(),
+        "a Default::default() body is not treated as a BTC stub"
+    );
+}
+
+#[test]
 fn test_empty_impl_not_flagged() {
     let w = detect_in("trait Foo {} impl Foo for MyType {} struct MyType;");
     assert!(w.is_empty());
@@ -66,6 +82,31 @@ fn test_partial_stub_flags_only_stubs() {
     let w = detect_in("trait Foo { fn a(&self); fn b(&self) -> i32; } impl Foo for M { fn a(&self) { todo!() } fn b(&self) -> i32 { 42 } } struct M;");
     assert_eq!(w.len(), 1);
     assert_eq!(w[0].name, "a");
+}
+
+#[test]
+fn stub_impl_in_non_test_module_flagged() {
+    // A stub trait impl nested in a regular (non-test) module must still be
+    // found — guards the recursion guard against never descending / descending
+    // only into test modules.
+    let w = detect_in(
+        "mod inner { trait Foo { fn bar(&self); } impl Foo for MyType { fn bar(&self) { todo!() } } struct MyType; }",
+    );
+    assert_eq!(w.len(), 1, "stub impl in a non-test module must be flagged");
+}
+
+#[test]
+fn stub_impl_in_inline_cfg_test_module_excluded() {
+    // The same stub inside `#[cfg(test)] mod` must be skipped. `struct Keep`
+    // stops the file being whole-file-classified as test code, so the inline
+    // `!has_cfg_test_attr` guard is the thing under test.
+    let w = detect_in(
+        "struct Keep; #[cfg(test)] mod tests { trait Foo { fn bar(&self); } impl Foo for MyType { fn bar(&self) { todo!() } } struct MyType; }",
+    );
+    assert!(
+        w.is_empty(),
+        "stub impl in a #[cfg(test)] mod must be excluded"
+    );
 }
 
 #[test]

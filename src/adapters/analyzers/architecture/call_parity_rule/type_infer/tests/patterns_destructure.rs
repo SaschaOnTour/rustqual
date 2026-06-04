@@ -276,3 +276,16 @@ fn test_or_pattern_uses_first_branch_bindings() {
 }
 
 // ── Nested patterns ──────────────────────────────────────────────
+
+#[test]
+fn parenthesised_pattern_unwraps_to_inner_binding() {
+    // `(x)` is a parenthesised pattern; the collector must descend into it
+    // and bind the inner ident to the matched type. Pins the
+    // `Pat::Paren(p)` arm against deletion (which would drop the binding
+    // through the `_` fallback).
+    let f = TypeInferFixture::new();
+    let b = bindings(&f, "(x)", CanonicalType::path(["crate", "app", "T"]));
+    assert_eq!(b.len(), 1, "paren pattern binds its inner ident: {b:?}");
+    assert_eq!(b[0].0, "x");
+    assert_eq!(b[0].1, CanonicalType::path(["crate", "app", "T"]));
+}

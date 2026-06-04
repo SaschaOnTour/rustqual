@@ -121,6 +121,145 @@ fn test_score_all_violations_is_near_zero() {
 }
 
 #[test]
+fn compute_quality_score_pins_every_dimension_deficit() {
+    // Each dimension's deficit is `1 - (sum_of_its_findings / total).min(1)`.
+    // With total = 100 and one finding in every contributing field, each
+    // dimension score is an exact, distinct value. Asserting all seven pins
+    // every `+` in the per-dimension sums, the `coupling_cycles * 2` weight, the
+    // `/ total` divisions, and the leading `1.0 -` — any of those mutations
+    // shifts the corresponding score off its expected value.
+    let mut summary = Summary {
+        total: 100,
+        iosp_score: 0.80,
+        // complexity: 6 fields → 6
+        complexity_warnings: 1,
+        magic_number_warnings: 1,
+        nesting_depth_warnings: 1,
+        function_length_warnings: 1,
+        unsafe_warnings: 1,
+        error_handling_warnings: 1,
+        // dry: 6 fields → 6
+        duplicate_groups: 1,
+        fragment_groups: 1,
+        dead_code_warnings: 1,
+        boilerplate_warnings: 1,
+        wildcard_import_warnings: 1,
+        repeated_match_groups: 1,
+        // srp: 4 fields → 4
+        srp_struct_warnings: 1,
+        srp_module_warnings: 1,
+        srp_param_warnings: 1,
+        structural_srp_warnings: 1,
+        // coupling: 1 + 1*2 + 1 + 1 = 5
+        coupling_warnings: 1,
+        coupling_cycles: 1,
+        sdp_violations: 1,
+        structural_coupling_warnings: 1,
+        // tq: 5 fields → 5
+        tq_no_assertion_warnings: 1,
+        tq_no_sut_warnings: 1,
+        tq_untested_warnings: 1,
+        tq_uncovered_warnings: 1,
+        tq_untested_logic_warnings: 1,
+        // architecture → 1
+        architecture_warnings: 1,
+        ..Default::default()
+    };
+    summary.compute_quality_score(&crate::config::sections::DEFAULT_QUALITY_WEIGHTS);
+    let expected = [0.80, 0.94, 0.94, 0.96, 0.95, 0.95, 0.99];
+    for (i, want) in expected.iter().enumerate() {
+        assert!(
+            (summary.dimension_scores[i] - want).abs() < 1e-9,
+            "dimension_scores[{i}] = {} want {want}",
+            summary.dimension_scores[i]
+        );
+    }
+}
+
+#[test]
+fn compute_quality_score_zero_weights_collapse_to_zero() {
+    // With every weight zero, `active_dims` is 0, so the `active_dims > 0.0`
+    // guard falls to `scale = 1.0` and the score is `1 - 1*(1 - 0) = 0`.
+    // Flipping that guard to `>=` would take `scale = active_dims = 0.0`,
+    // yielding 1.0 — caught by asserting exactly 0.0.
+    let mut summary = Summary {
+        total: 100,
+        iosp_score: 0.9,
+        ..Default::default()
+    };
+    summary.compute_quality_score(&[0.0; 7]);
+    assert!(
+        summary.quality_score.abs() < 1e-12,
+        "all-zero weights → score 0, got {}",
+        summary.quality_score
+    );
+}
+
+#[test]
+fn compute_quality_score_epsilon_weight_is_inactive() {
+    // A weight of exactly `f64::EPSILON` is *not* an active dimension
+    // (`w > f64::EPSILON` is false). With two real weights of 0.5 the scale is
+    // 2; counting the epsilon weight as active (the `>`→`>=` mutation) would
+    // make it 3 and pull the score from 0.90 to 0.85.
+    let mut summary = Summary {
+        total: 100,
+        iosp_score: 0.9,
+        ..Default::default()
+    };
+    let mut weights = [0.0; 7];
+    weights[0] = 0.5;
+    weights[1] = 0.5;
+    weights[2] = f64::EPSILON;
+    summary.compute_quality_score(&weights);
+    // dimension_scores = [0.9, 1, 1, ...]; weighted_avg = 0.9*0.5 + 1*0.5 ≈ 0.95;
+    // scale = 2 → 1 - 2*(1 - 0.95) = 0.90.
+    assert!(
+        (summary.quality_score - 0.90).abs() < 1e-9,
+        "epsilon weight must not count as active (scale 2 → 0.90), got {}",
+        summary.quality_score
+    );
+}
+
+#[test]
+fn total_findings_sums_every_contributing_field() {
+    // Every one of the 28 finding-count fields set to 1 → total 28. With all
+    // fields non-zero, any `+`→`-`/`*` in the sum changes the result, so the
+    // exact assertion pins the whole `total_findings` chain.
+    let summary = Summary {
+        violations: 1,
+        complexity_warnings: 1,
+        magic_number_warnings: 1,
+        nesting_depth_warnings: 1,
+        function_length_warnings: 1,
+        unsafe_warnings: 1,
+        error_handling_warnings: 1,
+        duplicate_groups: 1,
+        fragment_groups: 1,
+        dead_code_warnings: 1,
+        boilerplate_warnings: 1,
+        srp_struct_warnings: 1,
+        srp_module_warnings: 1,
+        srp_param_warnings: 1,
+        wildcard_import_warnings: 1,
+        repeated_match_groups: 1,
+        coupling_warnings: 1,
+        coupling_cycles: 1,
+        sdp_violations: 1,
+        tq_no_assertion_warnings: 1,
+        tq_no_sut_warnings: 1,
+        tq_untested_warnings: 1,
+        tq_uncovered_warnings: 1,
+        tq_untested_logic_warnings: 1,
+        structural_srp_warnings: 1,
+        structural_coupling_warnings: 1,
+        architecture_warnings: 1,
+        orphan_suppressions: 1,
+        ..Summary::default()
+    };
+    assert_eq!(summary.total_findings(), 28);
+}
+
+#[test]
 fn test_total_findings() {
     let summary = Summary {
         violations: 1,

@@ -1,15 +1,5 @@
+use super::make_parsed;
 use crate::adapters::analyzers::coupling::*;
-
-fn parse_code(code: &str) -> syn::File {
-    syn::parse_file(code).expect("Failed to parse test code")
-}
-
-fn make_parsed(files: Vec<(&str, &str)>) -> Vec<(String, String, syn::File)> {
-    files
-        .into_iter()
-        .map(|(path, code)| (path.to_string(), code.to_string(), parse_code(code)))
-        .collect()
-}
 
 /// Find module index by name in graph.modules.
 fn idx(graph: &ModuleGraph, name: &str) -> usize {
@@ -98,15 +88,23 @@ fn test_build_graph_group_use() {
 
 #[test]
 fn test_build_graph_external_dep_ignored() {
-    let parsed = make_parsed(vec![(
-        "main.rs",
-        "use std::collections::HashMap; use serde::Deserialize; fn main() {}",
-    )]);
+    // `serde::config` collides with the local `config` module on its second
+    // segment. Only a `crate::`-prefixed path may create an edge, so the
+    // external import must still be ignored: a non-crate root short-circuits
+    // the dependency, length alone is not enough.
+    let parsed = make_parsed(vec![
+        (
+            "main.rs",
+            "use std::collections::HashMap; use serde::config::Opt; fn main() {}",
+        ),
+        ("config.rs", "pub struct Config;"),
+    ]);
     let graph = graph::build_module_graph(&parsed);
     let main_idx = idx(&graph, "main");
     assert!(
         graph.forward[main_idx].is_empty(),
-        "External dependencies should be ignored"
+        "External dependencies must be ignored even when a path segment \
+         collides with a local module name"
     );
 }
 
@@ -281,53 +279,4 @@ fn test_cycles_two_independent_cycles() {
     };
     let cycles = cycles::detect_cycles(&graph);
     assert_eq!(cycles.len(), 2);
-}
-
-// ── analyze_coupling integration test ───────────────────────────
-
-#[test]
-fn test_analyze_coupling_integration() {
-    let parsed = make_parsed(vec![
-        ("main.rs", "use crate::config::Config; fn main() {}"),
-        ("config.rs", "pub struct Config;"),
-        ("pipeline.rs", "use crate::config::Config; pub fn run() {}"),
-    ]);
-    let analysis = analyze_coupling(&parsed);
-    assert_eq!(analysis.metrics.len(), 3);
-    assert!(analysis.cycles.is_empty());
-
-    // config should have highest afferent coupling (2 dependents)
-    let config_metrics = analysis
-        .metrics
-        .iter()
-        .find(|m| m.module_name == "config")
-        .unwrap();
-    assert_eq!(config_metrics.afferent, 2);
-    assert_eq!(config_metrics.efferent, 0);
-}
-
-#[test]
-fn test_analyze_coupling_with_cycle() {
-    let parsed = make_parsed(vec![
-        ("a.rs", "use crate::b::Foo; pub struct Bar;"),
-        ("b.rs", "use crate::a::Bar; pub struct Foo;"),
-    ]);
-    let analysis = analyze_coupling(&parsed);
-    assert_eq!(analysis.cycles.len(), 1);
-    assert!(analysis.cycles[0].modules.contains(&"a".to_string()));
-    assert!(analysis.cycles[0].modules.contains(&"b".to_string()));
-}
-
-#[test]
-fn test_analyze_coupling_no_crate_deps() {
-    let parsed = make_parsed(vec![
-        ("a.rs", "use std::collections::HashMap; fn f() {}"),
-        ("b.rs", "use serde::Deserialize; fn g() {}"),
-    ]);
-    let analysis = analyze_coupling(&parsed);
-    assert!(analysis.cycles.is_empty());
-    for m in &analysis.metrics {
-        assert_eq!(m.afferent, 0);
-        assert_eq!(m.efferent, 0);
-    }
 }

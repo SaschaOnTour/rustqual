@@ -9,6 +9,8 @@ pub(super) use crate::adapters::report::test_support::{make_analysis, make_resul
 pub(super) use crate::report::json::*;
 pub(super) use crate::report::AnalysisResult;
 
+mod functions;
+mod sections;
 mod srp_complexity_severity;
 mod summary_fields_and_orphan;
 mod violations_and_dups;

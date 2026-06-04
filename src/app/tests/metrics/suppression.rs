@@ -126,6 +126,89 @@ fn test_inverse_annotation_suppresses_duplicate() {
 }
 
 #[test]
+fn dry_suppression_must_cover_the_dry_dimension() {
+    // A marker in the line window but covering a *different* dimension must not
+    // suppress a DRY group. Pins the `is_within_window && covers(dry)` filter
+    // against `&&`→`||` (which would suppress on window alone).
+    use crate::adapters::analyzers::dry::functions::{
+        DuplicateEntry, DuplicateGroup, DuplicateKind,
+    };
+    let mut groups = vec![DuplicateGroup {
+        entries: vec![DuplicateEntry {
+            name: "foo".into(),
+            qualified_name: "foo".into(),
+            file: "test.rs".into(),
+            line: 5,
+        }],
+        kind: DuplicateKind::Exact,
+        suppressed: false,
+    }];
+    // Marker on line 4 (in window of entry line 5) but covering Complexity.
+    let sups: std::collections::HashMap<String, Vec<Suppression>> = [(
+        "test.rs".to_string(),
+        vec![Suppression {
+            line: 4,
+            dimensions: vec![crate::findings::Dimension::Complexity],
+            reason: None,
+        }],
+    )]
+    .into();
+    mark_dry_suppressions(&mut groups, &sups);
+    assert!(
+        !groups[0].suppressed,
+        "an in-window marker for another dimension must not suppress DRY"
+    );
+}
+
+/// Build a single near-duplicate group `[as_str@as_line, parse@15]` and mark it
+/// against a `qual:inverse(parse)` annotation at `inv_line`.
+fn inverse_suppressed(inv_line: usize, as_line: usize) -> bool {
+    use crate::adapters::analyzers::dry::functions::{
+        DuplicateEntry, DuplicateGroup, DuplicateKind,
+    };
+    let mut groups = vec![DuplicateGroup {
+        entries: vec![
+            DuplicateEntry {
+                name: "as_str".into(),
+                qualified_name: "Foo::as_str".into(),
+                file: "test.rs".into(),
+                line: as_line,
+            },
+            DuplicateEntry {
+                name: "parse".into(),
+                qualified_name: "Foo::parse".into(),
+                file: "test.rs".into(),
+                line: 15,
+            },
+        ],
+        kind: DuplicateKind::NearDuplicate { similarity: 0.91 },
+        suppressed: false,
+    }];
+    let inverse_lines: std::collections::HashMap<String, Vec<(usize, String)>> =
+        [("test.rs".to_string(), vec![(inv_line, "parse".to_string())])].into();
+    mark_inverse_suppressions(&mut groups, &inverse_lines);
+    groups[0].suppressed
+}
+
+#[test]
+fn inverse_suppression_window_boundaries() {
+    // The inverse window is `line <= entry.line && entry.line - line <= WINDOW`
+    // (WINDOW = 3). Annotation at line 1:
+    //  - entry at line 4 → diff exactly 3 → suppressed (pins `<=`→`>` and the
+    //    `entry.line - line` subtraction against `-`→`/`: 4/1=4 > 3).
+    //  - entry at line 10 → diff 9 → not suppressed (pins `&&`→`||`, which would
+    //    suppress on the `line <= entry.line` half alone).
+    assert!(
+        inverse_suppressed(1, 4),
+        "inverse pair at the window edge (diff 3) is suppressed"
+    );
+    assert!(
+        !inverse_suppressed(1, 10),
+        "inverse pair outside the window (diff 9) is not suppressed"
+    );
+}
+
+#[test]
 fn test_inverse_annotation_must_target_group_member() {
     use crate::adapters::analyzers::dry::functions::{
         DuplicateEntry, DuplicateGroup, DuplicateKind,

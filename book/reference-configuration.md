@@ -119,10 +119,13 @@ subset of checks to test code — `DRY-001`/`DRY-004`/`DRY-005`, `LONG_FN`
 (function length), and SRP **file-length** (`SRP_MODULE`). The rest stay
 test-exempt (`ERROR_HANDLING`, `MAGIC_NUMBER`, IOSP, `DRY-002` dead code,
 `DRY-003` wildcard imports, Coupling, all Structural detectors). The SRP
-**cohesion** check (independent function clusters) is also **production-only**:
-a test file's many independent `#[test]` fns are its purpose, not a low-cohesion
-smell — so only file-length is judged on test files. Which checks apply is
-**not** configurable; only the thresholds below are.
+**module-cohesion** check (independent function clusters) is also
+**production-only**: a test file's many independent `#[test]` fns are its
+purpose, not a low-cohesion smell. The **god-struct** check (`SRP-001`) *does*
+fire on test structs — a god-fixture wiring up many concerns is a real smell —
+but at production thresholds, with no separate test knob (use `// qual:allow(srp)`
+for the rare legitimate fixture). Which checks apply is **not** configurable;
+only the thresholds below are.
 
 Each key overrides the matching production threshold *for test code only*.
 An unset key inherits the production value, so by default test code is judged
@@ -134,14 +137,12 @@ by the same limits as production. Field names mirror `[complexity]` and
 | `max_function_lines` | `[complexity].max_function_lines` | `LONG_FN` limit for test fns |
 | `file_length_baseline` | `[srp].file_length_baseline` | File-length score baseline for test files |
 | `file_length_ceiling` | `[srp].file_length_ceiling` | File-length score ceiling for test files |
-| `max_methods` | `[srp].max_methods` | Method-count limit for test impls |
 
 ```toml
 [tests]
 max_function_lines   = 120
 file_length_baseline = 500
 file_length_ceiling  = 1200
-max_methods          = 40
 ```
 
 ## `[weights]`

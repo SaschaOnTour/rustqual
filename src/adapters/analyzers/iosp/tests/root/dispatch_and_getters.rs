@@ -1,5 +1,19 @@
 use super::*;
 
+/// A pure match-dispatch fn (every arm is a single delegation). Shared by the
+/// classification test and the "complexity is still tracked" test — two
+/// distinct contracts on the same canonical shape.
+const MATCH_DISPATCH: &str = r#"
+    fn call_a() {}
+    fn call_b() {}
+    fn dispatch(x: i32) {
+        match x {
+            0 => call_a(),
+            _ => call_b(),
+        }
+    }
+"#;
+
 #[test]
 fn test_trivial_self_getter_not_violation() {
     let code = r#"
@@ -110,17 +124,7 @@ fn test_for_loop_delegation_not_violation() {
 
 #[test]
 fn test_match_dispatch_is_integration() {
-    let code = r#"
-        fn call_a() {}
-        fn call_b() {}
-        fn dispatch(x: i32) {
-            match x {
-                0 => call_a(),
-                _ => call_b(),
-            }
-        }
-    "#;
-    let results = parse_and_analyze(code);
+    let results = parse_and_analyze(MATCH_DISPATCH);
     let f = results.iter().find(|r| r.name == "dispatch").unwrap();
     assert_eq!(
         f.classification,
@@ -199,24 +203,10 @@ fn test_match_with_guard_is_violation() {
 
 #[test]
 fn test_match_dispatch_complexity_still_tracked() {
-    let code = r#"
-        fn call_a() {}
-        fn call_b() {}
-        fn dispatch(x: i32) {
-            match x {
-                0 => call_a(),
-                _ => call_b(),
-            }
-        }
-    "#;
-    let results = parse_and_analyze(code);
+    // Leniency reclassifies the match as orchestration but must NOT zero out
+    // the cognitive complexity — the match arms are still decision points.
+    let results = parse_and_analyze(MATCH_DISPATCH);
     let f = results.iter().find(|r| r.name == "dispatch").unwrap();
-    assert_eq!(
-        f.classification,
-        Classification::Integration,
-        "Match dispatch should be Integration, got {:?}",
-        f.classification
-    );
     assert!(
         f.complexity.as_ref().unwrap().cognitive_complexity >= 1,
         "Complexity should still be tracked for dispatch match"

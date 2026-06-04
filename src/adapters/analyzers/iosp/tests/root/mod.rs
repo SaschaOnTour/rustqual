@@ -7,12 +7,15 @@ pub(super) use crate::adapters::analyzers::iosp::scope::ProjectScope;
 pub(super) use crate::adapters::analyzers::iosp::*;
 pub(super) use crate::config::Config;
 
+mod analysis_structure;
 mod classification_exact;
 mod classification_predicate;
 mod classify_basics;
 mod complexity_and_metadata;
 mod dispatch_and_getters;
 mod is_test;
+mod metrics_exact;
+mod own_call_resolution;
 mod own_calls_a;
 mod own_calls_b;
 
@@ -64,11 +67,44 @@ pub(super) fn classify_cfg(code: &str, fn_name: &str, config: &Config) -> Classi
 
 /// Whether `fn_name` in `code` is classified as test code (`is_test`).
 pub(super) fn is_test_of(code: &str, fn_name: &str) -> bool {
+    analysis_of(code, fn_name).is_test
+}
+
+/// Full analysis of function `name` in `code` (with leaf reclassification).
+pub(super) fn analysis_of(code: &str, name: &str) -> FunctionAnalysis {
     parse_and_analyze(code)
         .into_iter()
-        .find(|f| f.name == fn_name)
-        .unwrap_or_else(|| panic!("fn {fn_name} not found"))
-        .is_test
+        .find(|r| r.name == name)
+        .unwrap_or_else(|| panic!("fn {name} not found"))
+}
+
+/// Raw analysis of `name` without leaf reclassification, so a genuine Violation
+/// keeps its `Violation` classification (and its `effort_score`/`severity`).
+pub(super) fn raw_analysis_of(code: &str, name: &str) -> FunctionAnalysis {
+    parse_and_analyze_with_config(code, &Config::default())
+        .into_iter()
+        .find(|r| r.name == name)
+        .unwrap_or_else(|| panic!("fn {name} not found"))
+}
+
+/// Complexity metrics of the single function `f` in `code`.
+pub(super) fn metrics_of(code: &str) -> ComplexityMetrics {
+    analysis_of(code, "f")
+        .complexity
+        .expect("f should have complexity metrics")
+}
+
+/// Own-call targets recorded for function `name` in `code`.
+pub(super) fn own_calls_of(code: &str, name: &str) -> Vec<String> {
+    analysis_of(code, name).own_calls
+}
+
+/// Names of all analysed functions in `code`.
+pub(super) fn analysed_names(code: &str) -> Vec<String> {
+    parse_and_analyze(code)
+        .into_iter()
+        .map(|r| r.name)
+        .collect()
 }
 
 // (label, code, fn_name, expected) — Integration = orchestrates own calls only;

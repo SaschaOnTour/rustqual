@@ -198,3 +198,15 @@ fn test_pub_crate_use_reexport_excluded() {
         "pub(crate) use re-exports should be excluded"
     );
 }
+
+#[test]
+fn test_detects_wildcard_inside_module() {
+    // A `use x::*;` nested in an inline module must still be flagged; guards the
+    // `visit_item_mod` recursion in `WildcardCollector` against being a no-op.
+    let parsed = parse("mod inner { use crate::module::*; }");
+    let warnings = detect_wildcard_imports(&parsed);
+    assert!(
+        !warnings.is_empty(),
+        "a wildcard import inside a module must be detected"
+    );
+}

@@ -48,6 +48,7 @@ fn test_generate_default_config_contents() {
     assert!(content.contains("[boilerplate]"));
     assert!(content.contains("[srp]"));
     assert!(content.contains("[coupling]"));
+    assert!(content.contains("[tests]"));
     assert!(content.contains("max_suppression_ratio"));
     assert!(content.contains("fail_on_warnings"));
     assert!(content.contains("[weights]"));
@@ -120,4 +121,5 @@ fn test_generate_tailored_config_includes_metrics_comments() {
     assert!(content.contains("100 function(s)"));
     assert!(content.contains("current max: 10"));
     assert!(content.contains("current max: 8"));
+    assert!(content.contains("[tests]"));
 }

@@ -111,5 +111,53 @@ fn test_build_struct_warnings_triggers_for_incohesive() {
         !warnings.is_empty(),
         "Incohesive god object should trigger SRP warning"
     );
-    assert_eq!(warnings[0].struct_name, "GodObject");
+    let w = &warnings[0];
+    assert_eq!(w.struct_name, "GodObject");
+    // The spec's core SRP-001 contract is the NAMED disjoint clusters, not just
+    // "this struct warned". The 7 field-groups (db / cache / logger+metrics /
+    // router+handler / auth+config / buffer+queue / pool+state) are disjoint, so
+    // the warning must surface lcom4=7 AND name all 7 clusters with the right
+    // members — otherwise the "split into these types" refactor isn't mechanical.
+    assert_eq!(w.lcom4, 7, "seven disjoint field-groups → 7 clusters");
+    assert_eq!(
+        w.clusters.len(),
+        w.lcom4,
+        "every cluster is named in the warning"
+    );
+    let db = w
+        .clusters
+        .iter()
+        .find(|c| c.fields.contains(&"db".to_string()))
+        .expect("a db responsibility cluster is named");
+    let mut db_methods = db.methods.clone();
+    db_methods.sort();
+    assert_eq!(
+        db_methods,
+        vec!["read_db", "write_db"],
+        "the db cluster groups exactly its own methods"
+    );
+}
+
+#[test]
+fn test_build_struct_warnings_two_methods_analysed_not_skipped() {
+    // Exactly 2 methods is the boundary where LCOM4 becomes defined, so the
+    // skip guard must be `len < 2` — `== 2` or `<= 2` would wrongly drop it.
+    // `smell_threshold = 0.0` makes any analysed struct warn, isolating the
+    // skip decision from the score.
+    let structs = vec![make_struct("Pair", &["a", "b"])];
+    let methods = vec![
+        make_method("use_a", "Pair", &["a"], &[]),
+        make_method("use_b", "Pair", &["b"], &[]),
+    ];
+    let config = SrpConfig {
+        smell_threshold: 0.0,
+        ..SrpConfig::default()
+    };
+    let warnings = build_struct_warnings(&structs, &methods, &config);
+    assert_eq!(
+        warnings.len(),
+        1,
+        "a 2-method struct must be analysed, not skipped"
+    );
+    assert_eq!(warnings[0].struct_name, "Pair");
 }

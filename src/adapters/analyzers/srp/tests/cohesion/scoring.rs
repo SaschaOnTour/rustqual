@@ -100,3 +100,49 @@ fn test_composite_score_lcom4_one_is_zero() {
     let score_incohesive = compute_composite_score(3, 5, 5, 2, &config);
     assert!(score_incohesive > score_cohesive);
 }
+
+#[test]
+fn test_composite_score_exact_value() {
+    // Pin the whole formula to one exact number so every arithmetic step is
+    // observable. With threshold-range 4 and distinct weights:
+    //   lcom4_norm  = (3-1)/4            = 0.5  → 0.4 * 0.5  = 0.20
+    //   field_norm  = 1/4                = 0.25 → 0.3 * 0.25 = 0.075
+    //   method_norm = 5/10               = 0.5  → 0.2 * 0.5  = 0.10
+    //   fan_out_norm= 1/5                = 0.2  → 0.1 * 0.2  = 0.02
+    //   composite                                            = 0.395
+    let config = SrpConfig {
+        lcom4_threshold: 5,
+        max_fields: 4,
+        max_methods: 10,
+        max_fan_out: 5,
+        weights: [0.4, 0.3, 0.2, 0.1],
+        ..SrpConfig::default()
+    };
+    let score = compute_composite_score(3, 1, 5, 1, &config);
+    assert!(
+        (score - 0.395).abs() < 1e-9,
+        "expected composite 0.395, got {score}"
+    );
+}
+
+#[test]
+fn test_composite_score_zero_cap_ratio() {
+    // A misconfigured `max_fields == 0` must treat zero count as 0.0 and any
+    // non-zero count as fully penalised (1.0) — guards `normalised_ratio`'s
+    // `value == 0` branch. Weight only the field term so it drives the score.
+    let config = SrpConfig {
+        max_fields: 0,
+        weights: [0.0, 1.0, 0.0, 0.0],
+        ..SrpConfig::default()
+    };
+    assert_eq!(
+        compute_composite_score(0, 0, 0, 0, &config),
+        0.0,
+        "zero count under a zero cap is unpenalised"
+    );
+    assert_eq!(
+        compute_composite_score(0, 2, 0, 0, &config),
+        1.0,
+        "non-zero count under a zero cap is fully penalised"
+    );
+}

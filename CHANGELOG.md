@@ -7,9 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.4.1] - 2026-06-02
 
-Patch release: **test-suite effectiveness, proven by mutation testing** (Phase 2
-of the test-quality effort). No change to how the tool scores user code, except
-the `prop_assert!` recognition fix below.
+Patch release: **test-suite effectiveness, proven by mutation testing** (Phases
+2–4 of the test-quality effort). No change to how the tool scores user code,
+except the `prop_assert!` recognition fix below and the removal of the
+never-read `[tests].max_methods` config key.
 
 ### Fixed
 - **TQ-001 no longer flags proptest property tests as assertion-free.**
@@ -17,12 +18,50 @@ the `prop_assert!` recognition fix below.
   `prop_assert_eq!` / `prop_assert_ne!` (the `prop_assert` prefix) in addition
   to `assert*` / `debug_assert*`. A property test that asserts only via
   `prop_assert!` is no longer a false TQ_NO_ASSERT.
+- **TQ-001 no longer flags `quickcheck!` boolean properties as assertion-free.**
+  The macro-expansion pre-pass surfaces `quickcheck! { fn p(x: T) -> bool { … }
+  }` as a synthetic `#[test] fn p() -> bool { … }` (params dropped), so a
+  property whose body is a bare boolean — e.g. `{ x < 100 }`, with no assertion
+  macro or call — was wrongly reported as `TQ_NO_ASSERT`. TQ now treats a
+  `-> bool` return as the property's oracle (the value quickcheck checks across
+  every input), which a plain `#[test]` can never have. Present since
+  macro-body walking shipped in v1.3.2.
+- **DEH (downcast escape-hatch) no longer flags `#[test]` function bodies.**
+  The detector derived its test-exempt state only from whole-file and
+  `#[cfg(test)] mod` context, never a function's own attributes, so a top-level
+  `#[test] fn { x.downcast_ref::<…>(); }` was wrongly reported. This surfaced
+  via the macro-expansion pre-pass, which emits `quickcheck!` / `proptest!`
+  properties as synthetic `#[test]` fns whose original `#[cfg(test)]` wrapper is
+  gone — flipping a test body into apparent production code. DEH now honours a
+  function's own `#[test]` / `#[cfg(test)]` attribute (consistent with the
+  cross-dimension `has_test_attr` rule). The other structural detectors are
+  unaffected — they key off impl methods, trait impls, or `pub` signatures, none
+  of which a free property fn produces.
 
 ### Changed
 - **Internal consistency:** the architecture matcher's `has_cfg_test_attr` now
   delegates to the shared `adapters::shared::cfg_test::has_cfg_test` recogniser
   instead of a local copy, so `#[cfg(test)]` detection has a single source of
   truth across all seven dimensions (consistency-audit finding F1).
+- **`rustqual --init` templates now include the `[tests]` section.** Both the
+  default and the calibrated template previously jumped from `[test_quality]`
+  straight to `[weights]`, so generated configs never surfaced the test-code
+  threshold knobs (`max_function_lines` / `file_length_baseline` /
+  `file_length_ceiling`). They are now emitted commented-out (inherit
+  production), matching `rustqual.toml`.
+- **Removed the dead `[tests].max_methods` config key.** It was never read, so
+  it changed no analysis — the god-struct check (`SRP-001`) already evaluates
+  test-file structs at the production `[srp]` thresholds, and a lone per-test
+  method-count override (without the other four composite inputs:
+  `max_fields` / `max_fan_out` / `lcom4_threshold` / `smell_threshold`) would be
+  incoherent. The applied behaviour is unchanged and now made explicit: struct
+  SRP-001 deliberately runs on test code (a god-fixture wiring up many concerns
+  is a real smell); only the SRP *module*-cohesion (independent-cluster) check
+  stays production-only, because a test file's independent `#[test]` fns are its
+  purpose. Use `// qual:allow(srp)` for the rare legitimate fixture. `[tests]`
+  still configures `max_function_lines` / `file_length_baseline` /
+  `file_length_ceiling`. (Note: a `rustqual.toml` that set the removed key now
+  errors under `deny_unknown_fields` — delete the line.)
 
 ### Tests
 - **Mutation-proven coverage** (`cargo-mutants`). The test-recognition core
@@ -31,9 +70,26 @@ the `prop_assert!` recognition fix below.
   survivors are documented semantic equivalents. New enumeration tests
   (`normalize_coverage.rs`) pin the exact `NormalizedToken` each operator /
   expression-kind / pattern-kind emits.
+- **Mutation sweep extended to the whole analyzer** (Phase 3): all seven
+  dimensions plus `app` and `report` are now mutation-proven; every reachable
+  survivor was killed, only documented semantic equivalents remain.
+- **Per-dimension relevance review** (Phase 4): each dimension's tests were
+  audited against the `book/*-quality.md` specs for positive *and* negative
+  per-rule coverage, oracle quality (assert the meaningful output, not
+  incidentals), and behaviour- vs implementation-coupling. Weak oracles were
+  strengthened (e.g. the DRY near-duplicate threshold test, the SRP named-cluster
+  assertions, the architecture `PatternScope::accepts` scoping test) and a
+  god-fixture-in-a-test-file pin was added for struct SRP-001.
 - **proptest** added as a dev-dependency. A path × test-attribute property /
   variant matrix on the recognisers guards against the decentralised
   test-detection bug class that motivated the effort.
+
+### Docs
+- **Corrected two spec-vs-code deviations** surfaced by the Phase-4 review:
+  `book/function-quality.md` no longer lists `Default::default()` as a `BTC`
+  stub form (`is_stub_body` recognises only the `todo!` / `unimplemented!` /
+  `panic!("not implemented")` macros), and the `CLAUDE.md` DRY note now matches
+  the emitted rule IDs (DRY-003 = duplicate fragment, DRY-004 = wildcard import).
 
 ## [1.4.0] - 2026-06-02
 

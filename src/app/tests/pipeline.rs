@@ -3,7 +3,7 @@ use crate::adapters::source::filesystem::{
     collect_filtered_files, collect_rust_files, collect_suppression_lines, read_and_parse_files,
 };
 use crate::app::metrics::{count_coupling_warnings, mark_coupling_suppressions};
-use crate::app::pipeline::{output_results, run_analysis};
+use crate::app::pipeline::{analyze_and_output, output_results, run_analysis};
 use crate::app::warnings::{check_suppression_ratio, count_all_suppressions};
 use crate::config::Config;
 use crate::findings::Suppression;
@@ -704,4 +704,32 @@ fn test_run_analysis_findings_architecture_field_present() {
     let analysis = run_analysis(parsed, &config);
     assert!(analysis.findings.architecture.is_empty());
     let _len: usize = analysis.findings.architecture.len();
+}
+
+#[test]
+fn test_analyze_and_output_returns_analyzed_functions() {
+    // `analyze_and_output` orchestrates collect → parse → analyze → print and
+    // returns the `AnalysisResult` it printed. Asserting the returned analysis
+    // contains the fixture's functions pins the orchestration against being
+    // replaced by a no-op (the four delegated calls being skipped).
+    let tmp = test_dir();
+    fs::write(
+        tmp.path().join("lib.rs"),
+        "fn alpha() {}\nfn beta() { alpha(); }\n",
+    )
+    .unwrap();
+    let mut config = Config::default();
+    config.compile();
+    let analysis = analyze_and_output(
+        tmp.path(),
+        &config,
+        &crate::cli::OutputFormat::Text,
+        false,
+        false,
+    );
+    assert!(
+        analysis.results.iter().any(|f| f.name == "alpha"),
+        "returned analysis must carry the fixture's functions, got {:?}",
+        analysis.results.iter().map(|f| &f.name).collect::<Vec<_>>()
+    );
 }

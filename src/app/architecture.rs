@@ -28,7 +28,7 @@ pub(super) fn collect_architecture_findings(
     summary: &mut Summary,
 ) -> Vec<Finding> {
     let mut findings = run_architecture_dimension(parsed, config, suppression_lines);
-    summary.architecture_warnings = findings.iter().filter(|f| !f.suppressed).count();
+    summary.architecture_warnings = count_architecture_warnings(&findings);
     findings.sort_by(|a, b| {
         a.file
             .cmp(&b.file)
@@ -36,6 +36,12 @@ pub(super) fn collect_architecture_findings(
             .then(a.column.cmp(&b.column))
     });
     findings
+}
+
+/// Count the findings that remain active (not suppressed) for the summary.
+/// Operation: filter + count.
+pub(super) fn count_architecture_warnings(findings: &[Finding]) -> usize {
+    findings.iter().filter(|f| !f.suppressed).count()
 }
 
 /// Run every port-based dimension analyzer and return their findings with
@@ -72,7 +78,7 @@ fn run_architecture_dimension(
 /// `qual:allow(architecture)` for one helper would silence unrelated
 /// call-parity, layer, or forbidden-edge findings elsewhere in the
 /// same file. Operation: per-finding lookup over the suppression map.
-fn mark_architecture_suppressions(
+pub(super) fn mark_architecture_suppressions(
     findings: &mut [Finding],
     suppression_lines: &HashMap<String, Vec<Suppression>>,
 ) {

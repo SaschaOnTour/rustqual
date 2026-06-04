@@ -231,3 +231,39 @@ pub(crate) fn srp_orphan_count(
     )
     .len()
 }
+
+/// Like `make_fa_with_complexity` but flags the function as a test, so the
+/// `is_test` short-circuits in `push_magic_numbers` / `exceeds_error_handling`
+/// are exercised.
+pub(crate) fn make_test_fa_with_complexity(
+    file: &str,
+    line: usize,
+    metrics: crate::adapters::analyzers::iosp::ComplexityMetrics,
+) -> FunctionAnalysis {
+    let mut fa = make_fa_with_complexity(file, line, metrics);
+    fa.is_test = true;
+    fa
+}
+
+/// Run the orphan detector for a single `qual:allow(complexity)` marker placed
+/// on the same line as `fa`, against an analysis whose only function is `fa`.
+pub(crate) fn complexity_orphans_for(fa: FunctionAnalysis) -> usize {
+    let mut sups = HashMap::new();
+    sups.insert(
+        fa.file.clone(),
+        vec![crate::findings::Suppression {
+            line: fa.line,
+            dimensions: vec![crate::findings::Dimension::Complexity],
+            reason: None,
+        }],
+    );
+    let mut analysis = empty_analysis();
+    analysis.results = vec![fa];
+    crate::app::orphan_suppressions::detect_orphan_suppressions(
+        &sups,
+        &std::collections::HashMap::new(),
+        &analysis,
+        &Config::default(),
+    )
+    .len()
+}

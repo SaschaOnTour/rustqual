@@ -89,3 +89,18 @@ fn test_cfg_test_module_excluded() {
     let w = detect_in("#[cfg(test)] mod tests { pub fn a() -> Result<(), String> { Ok(()) } pub fn b() -> Result<i32, std::io::Error> { Ok(1) } }");
     assert!(w.is_empty());
 }
+
+#[test]
+fn inconsistent_error_types_across_non_test_module_flagged() {
+    // One conflicting error type lives in a regular (non-test) module; the
+    // collector must descend into it — guards the module-recursion guard
+    // against being skipped (otherwise only one error type is seen).
+    let w = detect_in(
+        "pub fn a() -> Result<(), String> { Ok(()) } mod inner { pub fn b() -> Result<i32, std::io::Error> { Ok(1) } }",
+    );
+    assert_eq!(
+        w.len(),
+        1,
+        "an error type inside a non-test module must be collected"
+    );
+}

@@ -105,14 +105,14 @@ fn collect_pattern_findings(ctx: &AnalysisContext<'_>, pattern: &SymbolPattern) 
 }
 
 /// Compiled scope decision for one pattern.
-struct PatternScope {
+pub(super) struct PatternScope {
     kind: ScopeKind,
     paths: GlobSet,
     except: GlobSet,
 }
 
 /// Whitelist or blocklist interpretation of `paths`.
-enum ScopeKind {
+pub(super) enum ScopeKind {
     AllowedIn,
     ForbiddenIn,
 }
@@ -120,7 +120,7 @@ enum ScopeKind {
 impl PatternScope {
     /// True when the pattern applies to `path` (i.e. matchers should run).
     /// Operation: glob-lookup logic.
-    fn accepts(&self, path: &str) -> bool {
+    pub(super) fn accepts(&self, path: &str) -> bool {
         if self.except.is_match(path) {
             return false;
         }
@@ -133,7 +133,7 @@ impl PatternScope {
 
 /// Compile a pattern's scope fields into matching globs.
 /// Operation: XOR validation + glob compilation.
-fn compile_pattern_scope(pattern: &SymbolPattern) -> Option<PatternScope> {
+pub(super) fn compile_pattern_scope(pattern: &SymbolPattern) -> Option<PatternScope> {
     let (kind, raw_paths) = match (&pattern.allowed_in, &pattern.forbidden_in) {
         (Some(p), None) => (ScopeKind::AllowedIn, p.as_slice()),
         (None, Some(p)) => (ScopeKind::ForbiddenIn, p.as_slice()),
@@ -249,7 +249,7 @@ fn collect_layer_findings(
 
 /// Project a layer/unmatched `MatchLocation` into a Finding.
 /// Operation: rule_id selection + field copy.
-fn layer_hit_to_finding(hit: MatchLocation) -> Finding {
+pub(super) fn layer_hit_to_finding(hit: MatchLocation) -> Finding {
     let rule_id = match &hit.kind {
         ViolationKind::UnmatchedLayer { .. } => "architecture/layer/unmatched",
         _ => "architecture/layer",
@@ -285,7 +285,7 @@ fn collect_forbidden_findings(
 
 /// Project a forbidden-edge hit into a Finding.
 /// Operation: field copy with dimension rule_id.
-fn forbidden_hit_to_finding(hit: MatchLocation) -> Finding {
+pub(super) fn forbidden_hit_to_finding(hit: MatchLocation) -> Finding {
     let reason = if let ViolationKind::ForbiddenEdge { reason, .. } = &hit.kind {
         reason.clone()
     } else {

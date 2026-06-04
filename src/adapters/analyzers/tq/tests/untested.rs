@@ -1,5 +1,6 @@
 use crate::adapters::analyzers::dry::dead_code::DeadCodeWarning;
 use crate::adapters::analyzers::dry::DeclaredFunction;
+use crate::adapters::analyzers::tq::build_reaches_prod_set;
 use crate::adapters::analyzers::tq::untested::*;
 use crate::adapters::analyzers::tq::{TqWarning, TqWarningKind};
 use crate::config::Config;
@@ -216,4 +217,30 @@ fn test_empty_call_graph_falls_back_to_direct() {
     let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0].function_name, "b");
+}
+
+#[test]
+fn build_reaches_prod_set_seeds_prod_and_walks_callers_backward() {
+    // call graph: test_a → helper → prod_fn. Backward BFS from the production
+    // seed must reach helper (calls prod_fn) and test_a (calls helper).
+    let mut call_graph: HashMap<String, Vec<String>> = HashMap::new();
+    call_graph.insert("helper".to_string(), vec!["prod_fn".to_string()]);
+    call_graph.insert("test_a".to_string(), vec!["helper".to_string()]);
+    // `lonely_test` reaches no production code; the `!is_test` seed filter must
+    // keep it out of the set.
+    let declared = vec![
+        make_declared("prod_fn", false),
+        make_declared("lonely_test", true),
+    ];
+    let reaches = build_reaches_prod_set(&call_graph, &declared);
+    assert!(reaches.contains("prod_fn"), "production fn seeds the set");
+    assert!(reaches.contains("helper"), "helper calls prod_fn");
+    assert!(
+        reaches.contains("test_a"),
+        "test_a transitively reaches prod via helper"
+    );
+    assert!(
+        !reaches.contains("lonely_test"),
+        "a test fn reaching no prod code is excluded from the seed"
+    );
 }

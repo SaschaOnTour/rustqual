@@ -229,3 +229,55 @@ fn test_method_call_unknown_method_is_none() {
     // No entry in method_returns for "bogus" on Session.
     assert!(infer(&f, "x.bogus()").is_none());
 }
+
+// ── try_method_return: ≥3-segment type-qualified calls ───────────
+
+#[test]
+fn type_qualified_assoc_call_resolves_via_method_returns() {
+    // A 3+-segment `crate::app::Session::open()` call splits the last
+    // segment as the method and probes `method_returns` for the type
+    // prefix. Pins `try_method_return`'s `segs.len() < 2` guard against
+    // `>` (which would bail on the 4-segment path and return None).
+    let mut f = TypeInferFixture::new();
+    f.index.insert_method_return(
+        "crate::app::Session",
+        "open",
+        CanonicalType::path(["crate", "app", "Session"]),
+    );
+    let t = infer(&f, "crate::app::Session::open()").expect("3-seg assoc call resolved");
+    assert_eq!(t, CanonicalType::path(["crate", "app", "Session"]));
+}
+
+// ── lookup_trait_method_return: dyn-Trait receiver dispatch ───────
+
+#[test]
+fn trait_bound_receiver_resolves_via_impl_return() {
+    // A receiver typed as a trait bound dispatches `.handle()` to the
+    // first workspace impl's return type. Pins both
+    // `lookup_trait_method_return -> None` and its `!trait_has_method`
+    // guard (delete `!`) — either would lose the resolution.
+    let mut f = TypeInferFixture::new();
+    f.bindings.insert(
+        "h",
+        CanonicalType::TraitBound(vec![vec![
+            "crate".to_string(),
+            "app".to_string(),
+            "Handler".to_string(),
+        ]]),
+    );
+    f.index.trait_methods.insert(
+        "crate::app::Handler".to_string(),
+        std::collections::HashSet::from(["handle".to_string()]),
+    );
+    f.index.trait_impls.insert(
+        "crate::app::Handler".to_string(),
+        vec!["crate::app::LogHandler".to_string()],
+    );
+    f.index.insert_method_return(
+        "crate::app::LogHandler",
+        "handle",
+        CanonicalType::path(["crate", "app", "Outcome"]),
+    );
+    let t = infer(&f, "h.handle()").expect("trait-bound method dispatch resolved");
+    assert_eq!(t, CanonicalType::path(["crate", "app", "Outcome"]));
+}

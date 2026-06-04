@@ -19,6 +19,7 @@ pub(super) use crate::report::github::*;
 pub(super) use crate::report::{AnalysisResult, Summary};
 
 mod annotations;
+mod messages;
 mod rendering;
 
 // Wrappers that preserve the test API: take a finding slice, return

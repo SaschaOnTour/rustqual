@@ -229,3 +229,67 @@ fn test_bp008_no_clones_not_flagged() {
         "Struct construction without clones should not be flagged"
     );
 }
+
+// ── BP-002 (trivial Display predicate edge cases) ──────────
+
+#[test]
+fn test_bp002_writeln_display_detected() {
+    // A Display body using `writeln!` (not just `write!`) is still trivial;
+    // guards the `writeln` arm of `is_write_macro`.
+    let code = r#"
+        use std::fmt;
+        struct Name(String);
+        impl fmt::Display for Name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                writeln!(f, "{}", self.0)
+            }
+        }
+    "#;
+    let findings = detect_boilerplate(&parse(code), &BoilerplateConfig::default());
+    assert!(
+        findings.iter().any(|f| f.pattern_id == "BP-002"),
+        "a writeln!-based Display is trivial"
+    );
+}
+
+#[test]
+fn test_bp002_requires_method_named_fmt() {
+    // A Display impl whose single method isn't `fmt` must not be treated as a
+    // Display body; guards the `methods.len() != 1 || ident != "fmt"` short-circuit.
+    let code = r#"
+        use std::fmt;
+        struct Name(String);
+        impl fmt::Display for Name {
+            fn render(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(f, "{}", self.0)
+            }
+        }
+    "#;
+    let findings = detect_boilerplate(&parse(code), &BoilerplateConfig::default());
+    assert!(
+        !findings.iter().any(|f| f.pattern_id == "BP-002"),
+        "an impl Display whose only method isn't `fmt` is not BP-002"
+    );
+}
+
+// ── BP-003 (setter branch) ─────────────────────────────────
+
+#[test]
+fn test_bp003_setters_detected() {
+    // Three trivial setters (`fn set_x(&mut self, v) { self.x = v; }`) — 1 stmt,
+    // 2 inputs, self-field assignment — must trip BP-003. Guards the setter
+    // `stmts.len() == 1` and `inputs.len() == 2` checks.
+    let code = r#"
+        struct Config { a: i32, b: i32, c: i32 }
+        impl Config {
+            fn set_a(&mut self, v: i32) { self.a = v; }
+            fn set_b(&mut self, v: i32) { self.b = v; }
+            fn set_c(&mut self, v: i32) { self.c = v; }
+        }
+    "#;
+    let findings = detect_boilerplate(&parse(code), &BoilerplateConfig::default());
+    assert!(
+        findings.iter().any(|f| f.pattern_id == "BP-003"),
+        "three trivial setters should be detected"
+    );
+}

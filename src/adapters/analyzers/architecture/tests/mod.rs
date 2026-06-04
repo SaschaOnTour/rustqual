@@ -1,6 +1,7 @@
 // Module-level integration tests for the Architecture analyzer.
 // Matcher-specific unit tests live in matcher/tests/.
 
+mod analyzer;
 mod call_parity_bench;
 mod call_parity_golden;
 mod compiled;

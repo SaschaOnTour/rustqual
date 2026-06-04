@@ -184,3 +184,62 @@ fn test_group_requires_multiple_functions() {
         "3 instances even in same fn should be flagged"
     );
 }
+
+#[test]
+fn repeated_matches_in_impl_methods_are_qualified() {
+    // Three impl methods with identical match patterns form a group. Asserting
+    // the entries' file and `Type::method` qualified names pins several pieces
+    // at once: impl-method collection (`visit_impl_item_fn` / `visit_item_impl`),
+    // the Self-type `Type::Path` arm, `qualify_with_modules`, and `reset_for_file`
+    // setting the file path.
+    let code = r#"
+        enum E { A, B, C }
+        struct S;
+        impl S {
+            fn m1(&self, e: E) -> i32 { match e { E::A => 1, E::B => 2, E::C => 3 } }
+            fn m2(&self, e: E) -> i32 { match e { E::A => 1, E::B => 2, E::C => 3 } }
+            fn m3(&self, e: E) -> i32 { match e { E::A => 1, E::B => 2, E::C => 3 } }
+        }
+    "#;
+    let result = detect_repeated_matches(&parse(code));
+    assert_eq!(
+        result.len(),
+        1,
+        "three identical impl-method matches form one group"
+    );
+    let entries = &result[0].entries;
+    assert!(
+        entries.iter().all(|e| e.file == "test.rs"),
+        "entries carry the reset file path, got {:?}",
+        entries.iter().map(|e| &e.file).collect::<Vec<_>>()
+    );
+    let mut names: Vec<&str> = entries.iter().map(|e| e.function_name.as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(
+        names,
+        vec!["S::m1", "S::m2", "S::m3"],
+        "method names are qualified as `Type::method`"
+    );
+}
+
+#[test]
+fn repeated_struct_variant_matches_carry_enum_name() {
+    // Struct-variant patterns (`E::A { .. }`) must yield the enum name; guards
+    // the `Pat::Struct` arm of `extract_enum_name`.
+    let code = r#"
+        enum E { A { x: i32 }, B { x: i32 }, C { x: i32 } }
+        fn f1(e: E) -> i32 { match e { E::A { .. } => 1, E::B { .. } => 2, E::C { .. } => 3 } }
+        fn f2(e: E) -> i32 { match e { E::A { .. } => 1, E::B { .. } => 2, E::C { .. } => 3 } }
+        fn f3(e: E) -> i32 { match e { E::A { .. } => 1, E::B { .. } => 2, E::C { .. } => 3 } }
+    "#;
+    let result = detect_repeated_matches(&parse(code));
+    assert_eq!(
+        result.len(),
+        1,
+        "three identical struct-variant matches form one group"
+    );
+    assert_eq!(
+        result[0].enum_name, "E",
+        "the enum name is extracted from struct-variant patterns"
+    );
+}

@@ -56,7 +56,7 @@ pub(super) fn canonical_from_type(
 /// else. `Arc<Rc<&Inner>>` → `Inner`. Conservative — only the well-known
 /// wrapper names are stripped so generics we don't understand remain as-is.
 // qual:recursive
-fn strip_wrappers(ty: &syn::Type) -> &syn::Type {
+pub(super) fn strip_wrappers(ty: &syn::Type) -> &syn::Type {
     match ty {
         syn::Type::Reference(r) => strip_wrappers(&r.elem),
         syn::Type::Paren(p) => strip_wrappers(&p.elem),
@@ -277,7 +277,7 @@ fn lookup_alias<'a>(scope: &'a CanonScope<'a>, name: &str) -> Option<&'a AliasTa
 /// flag we MUST NOT apply workspace canonicalisation (sibling-submodule
 /// promotion, crate-root prepending) — that's the exact bug the
 /// in-tree alias-map leading-colon drift caused before v1.2.4.
-fn normalize_after_alias(
+pub(super) fn normalize_after_alias(
     expanded: Vec<String>,
     absolute_root: bool,
     scope: &CanonScope<'_>,
@@ -409,7 +409,7 @@ fn extract_pat_name_and_type(pat: &syn::Pat) -> Option<(String, Option<&syn::Typ
 /// explicit annotation is present. Unwraps `?`, `.await`, and parens,
 /// then looks for a constructor pattern `Type::ctor(args)` and maps the
 /// prefix to a canonical path via alias_map / resolve_to_crate_absolute.
-fn binding_type_from_init(
+pub(super) fn binding_type_from_init(
     expr: &syn::Expr,
     alias_map: &AliasMap,
     local_symbols: &HashSet<String>,

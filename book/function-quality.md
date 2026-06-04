@@ -91,7 +91,7 @@ Beyond IOSP and complexity, rustqual flags structural smells at the method level
 |---|---|
 | `SLM` | **Selfless method** — takes `self` but never references it. Should be a free function or associated function. |
 | `NMS` | **Needless `&mut self`** — declares mutable receiver but never mutates. Tighten the signature to `&self`. |
-| `BTC` | **Broken trait contract** — every method in an `impl Trait` is a stub (`unimplemented!`, `todo!`, `Default::default()`). The trait is unimplemented in spirit. |
+| `BTC` | **Broken trait contract** — a method in an `impl Trait` block is a stub (`todo!`, `unimplemented!`, or `panic!("not implemented")`). The trait is unimplemented in spirit. |
 
 Configure under `[structural]`:
 

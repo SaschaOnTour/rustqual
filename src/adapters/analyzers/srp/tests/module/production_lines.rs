@@ -132,6 +132,20 @@ fn test_count_production_lines_nested_block_closes_properly() {
 }
 
 #[test]
+fn test_count_production_lines_skips_line_with_two_block_comments() {
+    // Two block comments separated by whitespace on one line is still a
+    // comment line: the inter-comment space at depth 0 must not be counted as
+    // code (guards the `!c.is_whitespace()` match guard against firing on
+    // whitespace).
+    let source = "fn foo() {}\n/* a */ /* b */\nfn bar() {}\n";
+    assert_eq!(
+        count_production_lines(source),
+        2,
+        "a whitespace-separated double block comment is not production code"
+    );
+}
+
+#[test]
 fn test_count_production_lines_empty() {
     assert_eq!(count_production_lines(""), 0);
 }

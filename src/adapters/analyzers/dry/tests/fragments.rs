@@ -438,3 +438,35 @@ fn test_detect_fragments_three_way() {
         "Three matching functions should produce at least 3 pair groups"
     );
 }
+
+#[test]
+fn fragment_entries_span_the_full_window() {
+    // Two functions share a 3-statement window, each statement on its own line.
+    // Every fragment entry must span from the first to the last statement line
+    // (end_line > start_line). Guards the `start + stmt_count - 1` end-index
+    // arithmetic in `merge_into_fragments` — a `+`/`/` there indexes past the
+    // window, collapsing the span to a single line.
+    let parsed = parse_multi(&[
+        (
+            "a.rs",
+            "fn foo() {\n    let x = 1;\n    let y = x + 2;\n    let z = y * x;\n}\n",
+        ),
+        (
+            "b.rs",
+            "fn bar() {\n    let a = 1;\n    let b = a + 2;\n    let c = b * a;\n}\n",
+        ),
+    ]);
+    let groups = detect_fragments(&parsed, &low_threshold_config());
+    assert!(
+        !groups.is_empty(),
+        "a shared 3-statement window is a fragment"
+    );
+    for e in &groups[0].entries {
+        assert!(
+            e.end_line > e.start_line,
+            "fragment entry must span multiple lines, got {}..{}",
+            e.start_line,
+            e.end_line
+        );
+    }
+}

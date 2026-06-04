@@ -8,6 +8,7 @@ pub(super) use crate::config::sections::BoilerplateConfig;
 mod bp001_to_005;
 mod bp006_to_008;
 mod bp009_onward;
+mod bp_predicates;
 
 pub(super) fn parse(code: &str) -> Vec<(String, String, syn::File)> {
     let syntax = syn::parse_file(code).expect("parse failed");

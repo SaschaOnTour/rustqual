@@ -710,7 +710,7 @@ enum PatKind {
 /// Still silent-skips on total parse failure (extern-DSL macros, custom
 /// grammar) — a documented limitation of syntax-level call-graph
 /// construction.
-fn parse_macro_tokens(tokens: proc_macro2::TokenStream) -> Vec<syn::Expr> {
+pub(super) fn parse_macro_tokens(tokens: proc_macro2::TokenStream) -> Vec<syn::Expr> {
     use syn::parse::Parser;
     use syn::punctuated::Punctuated;
     use syn::Token;
@@ -838,7 +838,7 @@ impl BindingLookup for CollectorBindings<'_> {
 /// patterns — those flow through `patterns::extract_bindings`.
 /// Operation: recursive pattern peel.
 // qual:recursive
-fn extract_pat_ident_name(pat: &syn::Pat) -> Option<String> {
+pub(super) fn extract_pat_ident_name(pat: &syn::Pat) -> Option<String> {
     match pat {
         syn::Pat::Ident(pi) => Some(pi.ident.to_string()),
         syn::Pat::Type(pt) => extract_pat_ident_name(&pt.pat),
@@ -852,7 +852,7 @@ fn extract_pat_ident_name(pat: &syn::Pat) -> Option<String> {
 /// matched type couldn't be inferred. Integration: dispatch over pat
 /// variants, each arm delegates to a recursive helper.
 // qual:recursive
-fn collect_pattern_idents(pat: &syn::Pat, out: &mut Vec<String>) {
+pub(super) fn collect_pattern_idents(pat: &syn::Pat, out: &mut Vec<String>) {
     match pat {
         syn::Pat::Ident(pi) => push_pat_ident(pi, out),
         syn::Pat::Type(pt) => collect_pattern_idents(&pt.pat, out),
