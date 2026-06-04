@@ -60,7 +60,9 @@ pub fn target_kind(dim: Dimension, name: &str) -> Option<TargetKind> {
             _ => None,
         },
         D::Dry => match name {
-            "duplicate" | "fragment" | "dead_code" | "wildcard_imports" | "repeated_matches" => {
+            // dead_code is NOT here: DRY-002 is excluded via `qual:api` /
+            // `qual:test_helper`, not via `allow(dry)`.
+            "duplicate" | "fragment" | "boilerplate" | "wildcard_imports" | "repeated_matches" => {
                 Some(Boolean)
             }
             _ => None,
@@ -102,7 +104,7 @@ pub fn target_names(dim: Dimension) -> &'static [&'static str] {
         D::Dry => &[
             "duplicate",
             "fragment",
-            "dead_code",
+            "boilerplate",
             "wildcard_imports",
             "repeated_matches",
         ],

@@ -55,6 +55,54 @@ fn dry_suppression_marks_every_group_kind() {
 }
 
 #[test]
+fn dry_targeted_suppression_is_per_kind() {
+    use crate::domain::SuppressionTarget;
+    let targeted = |target: &str| -> std::collections::HashMap<String, Vec<Suppression>> {
+        [(
+            "test.rs".to_string(),
+            vec![Suppression {
+                line: 4,
+                dimensions: vec![crate::findings::Dimension::Dry],
+                reason: Some("r".to_string()),
+                target: Some(SuppressionTarget {
+                    name: target.to_string(),
+                    pin: None,
+                }),
+            }],
+        )]
+        .into()
+    };
+    // allow(dry, duplicate) silences ONLY the duplicate group.
+    let (mut dup, mut rep, mut frag, mut bp) = dry_group_fixtures();
+    let dup_only = targeted("duplicate");
+    mark_dry_suppressions(std::slice::from_mut(&mut dup), &dup_only);
+    mark_dry_suppressions(std::slice::from_mut(&mut rep), &dup_only);
+    mark_dry_suppressions(std::slice::from_mut(&mut frag), &dup_only);
+    mark_dry_suppressions(std::slice::from_mut(&mut bp), &dup_only);
+    assert!(
+        dup.suppressed,
+        "duplicate silenced by allow(dry, duplicate)"
+    );
+    assert!(!rep.suppressed, "repeated-match must NOT be silenced");
+    assert!(!frag.suppressed, "fragment must NOT be silenced");
+    assert!(!bp.suppressed, "boilerplate must NOT be silenced");
+
+    // A different target (fragment) leaves the duplicate group active.
+    let (mut dup2, _, mut frag2, _) = dry_group_fixtures();
+    let frag_only = targeted("fragment");
+    mark_dry_suppressions(std::slice::from_mut(&mut dup2), &frag_only);
+    mark_dry_suppressions(std::slice::from_mut(&mut frag2), &frag_only);
+    assert!(
+        !dup2.suppressed,
+        "duplicate NOT silenced by fragment target"
+    );
+    assert!(
+        frag2.suppressed,
+        "fragment silenced by allow(dry, fragment)"
+    );
+}
+
+#[test]
 fn test_duplicate_without_suppression_not_marked() {
     use crate::adapters::analyzers::dry::functions::{
         DuplicateEntry, DuplicateGroup, DuplicateKind,

@@ -215,7 +215,9 @@ pub(super) fn mark_wildcard_suppressions(
     warnings.iter_mut().for_each(|w| {
         if let Some(sups) = suppression_lines.get(&w.file) {
             w.suppressed = sups.iter().any(|sup| {
-                sup.line <= w.line && w.line - sup.line <= window && sup.covers(dry_dim)
+                sup.line <= w.line
+                    && w.line - sup.line <= window
+                    && sup.suppresses(dry_dim, "wildcard_imports", None)
             });
         }
     });

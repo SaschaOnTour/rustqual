@@ -2,11 +2,14 @@ use crate::findings::Suppression;
 
 /// Trait for DRY finding groups that can be suppressed.
 pub(crate) trait DrySuppressible {
+    /// The `allow(dry, <target>)` name that silences this finding-kind.
+    const TARGET: &'static str;
     fn set_suppressed(&mut self, val: bool);
     fn entry_locations(&self) -> Vec<(&str, usize)>;
 }
 
 impl DrySuppressible for crate::adapters::analyzers::dry::functions::DuplicateGroup {
+    const TARGET: &'static str = "duplicate";
     fn set_suppressed(&mut self, val: bool) {
         self.suppressed = val;
     }
@@ -19,6 +22,7 @@ impl DrySuppressible for crate::adapters::analyzers::dry::functions::DuplicateGr
 }
 
 impl DrySuppressible for crate::adapters::analyzers::dry::match_patterns::RepeatedMatchGroup {
+    const TARGET: &'static str = "repeated_matches";
     fn set_suppressed(&mut self, val: bool) {
         self.suppressed = val;
     }
@@ -31,6 +35,7 @@ impl DrySuppressible for crate::adapters::analyzers::dry::match_patterns::Repeat
 }
 
 impl DrySuppressible for crate::adapters::analyzers::dry::fragments::FragmentGroup {
+    const TARGET: &'static str = "fragment";
     fn set_suppressed(&mut self, val: bool) {
         self.suppressed = val;
     }
@@ -43,6 +48,7 @@ impl DrySuppressible for crate::adapters::analyzers::dry::fragments::FragmentGro
 }
 
 impl DrySuppressible for crate::adapters::analyzers::dry::boilerplate::BoilerplateFind {
+    const TARGET: &'static str = "boilerplate";
     fn set_suppressed(&mut self, val: bool) {
         self.suppressed = val;
     }
@@ -64,7 +70,8 @@ pub(crate) fn mark_dry_suppressions<T: DrySuppressible>(
                 .get(*file)
                 .map(|sups| {
                     sups.iter().any(|sup| {
-                        crate::findings::is_within_window(sup.line, *line) && sup.covers(dry_dim)
+                        crate::findings::is_within_window(sup.line, *line)
+                            && sup.suppresses(dry_dim, T::TARGET, None)
                     })
                 })
                 .unwrap_or(false)
