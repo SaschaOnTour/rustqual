@@ -58,7 +58,8 @@ pub struct JsonOrphanSuppression {
     pub(crate) kind: &'static str,
     pub(crate) dimensions: Vec<String>,
     /// The targeted finding-kind (`"file_length=400"`, `"god_struct"`), absent
-    /// for a blanket/invalid marker — so consumers see which target is stale.
+    /// for a blanket/invalid marker — so consumers see which target is being
+    /// reported (stale or, for a metric pin, too-loose).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) target: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
