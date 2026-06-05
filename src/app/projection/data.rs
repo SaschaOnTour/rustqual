@@ -28,7 +28,7 @@ pub(crate) fn project_data(
     }
 }
 
-// qual:allow(dry) reason: "BP-008 clone-heavy conversion is intrinsic to the legacy→typed projection. FunctionAnalysis (analyzer output) and FunctionRecord (typed domain record) need full-field copy because the layers are intentionally decoupled — domain cannot import the adapter type."
+// qual:allow(dry, boilerplate) reason: "BP-008 clone-heavy conversion is intrinsic to the legacy→typed projection. FunctionAnalysis (analyzer output) and FunctionRecord (typed domain record) need full-field copy because the layers are intentionally decoupled — domain cannot import the adapter type."
 fn project_function(f: &FunctionAnalysis) -> FunctionRecord {
     FunctionRecord {
         name: f.name.clone(),
@@ -49,7 +49,7 @@ fn project_function(f: &FunctionAnalysis) -> FunctionRecord {
     }
 }
 
-// qual:allow(dry) reason: "BP-006 repetitive match mapping — this is the canonical enum-to-enum bridge between adapter and domain. A `From` impl would still need a 4-arm match on either side; relocating it doesn't reduce the lines, only their location."
+// qual:allow(dry, boilerplate) reason: "BP-006 repetitive match mapping — this is the canonical enum-to-enum bridge between adapter and domain. A `From` impl would still need a 4-arm match on either side; relocating it doesn't reduce the lines, only their location."
 fn classify(c: &LegacyClassification) -> FunctionClassification {
     match c {
         LegacyClassification::Integration => FunctionClassification::Integration,
