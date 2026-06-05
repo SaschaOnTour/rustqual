@@ -4,98 +4,114 @@ use crate::adapters::shared::file_to_module::file_to_module;
 
 use super::ModuleGraph;
 
-// qual:allow(complexity) reason: "stack-based use-tree traversal requires complex loop"
 /// Build a module dependency graph from parsed files' `use crate::` statements.
-/// Operation: iterates files and use trees (stack-based), builds adjacency lists.
-/// Calls `file_to_module` via closure for IOSP compliance.
+/// Integration: collect modules, then add each file's intra-crate edges.
 pub(super) fn build_module_graph(parsed: &[(String, String, syn::File)]) -> ModuleGraph {
-    let to_module = |path: &str| file_to_module(path);
-
-    // Collect all unique module names
-    let mut module_set: HashSet<String> = HashSet::new();
-    for (path, _, _) in parsed {
-        module_set.insert(to_module(path));
+    let (modules, index) = collect_modules(parsed);
+    let mut forward = vec![HashSet::<usize>::new(); modules.len()];
+    for (path, _, syntax) in parsed {
+        let source_idx = index[&file_to_module(path)];
+        add_edges(&mut forward[source_idx], source_idx, &crate_dep_modules(syntax), &index);
     }
-    let mut modules: Vec<String> = module_set.into_iter().collect();
-    modules.sort();
+    ModuleGraph {
+        modules,
+        forward: sort_adjacency(forward),
+    }
+}
 
-    let module_index: HashMap<String, usize> = modules
+/// Sorted unique module names + their index map.
+/// Operation: set build + sort, own call in closure.
+fn collect_modules(
+    parsed: &[(String, String, syn::File)],
+) -> (Vec<String>, HashMap<String, usize>) {
+    let mut modules: Vec<String> = parsed
+        .iter()
+        .map(|(path, _, _)| file_to_module(path))
+        .collect::<HashSet<String>>()
+        .into_iter()
+        .collect();
+    modules.sort();
+    let index = modules
         .iter()
         .enumerate()
         .map(|(i, name)| (name.clone(), i))
         .collect();
+    (modules, index)
+}
 
-    let n = modules.len();
-    let mut forward = vec![HashSet::<usize>::new(); n];
+/// The `crate::<module>` second-segment names imported by a file's `use` items.
+/// Operation: filter_map over fully-expanded use paths in closures.
+fn crate_dep_modules(syntax: &syn::File) -> Vec<String> {
+    use_paths(syntax)
+        .into_iter()
+        .filter_map(|segs| {
+            (segs.first().is_some_and(|s| s == "crate") && segs.len() >= 2).then(|| segs[1].clone())
+        })
+        .collect()
+}
 
-    for (path, _, syntax) in parsed {
-        let source_module = to_module(path);
-        let source_idx = module_index[&source_module];
-
-        // Stack-based iterative walk of use trees
-        let mut stack: Vec<(&syn::UseTree, Vec<String>)> = Vec::new();
-        for item in &syntax.items {
-            if let syn::Item::Use(use_item) = item {
-                stack.push((&use_item.tree, Vec::new()));
-            }
-        }
-
-        while let Some((tree, segments)) = stack.pop() {
-            match tree {
-                syn::UseTree::Path(p) => {
-                    let mut new_segments = segments.clone();
-                    new_segments.push(p.ident.to_string());
-                    stack.push((&p.tree, new_segments));
-                    continue;
-                }
-                syn::UseTree::Group(g) => {
-                    for subtree in &g.items {
-                        stack.push((subtree, segments.clone()));
-                    }
-                    continue;
-                }
-                _ => {} // Name, Rename, Glob handled below
-            }
-
-            // Terminal nodes: compute final path segments. A future `syn`
-            // variant (the enum is `#[non_exhaustive]` in spirit) should be
-            // silently skipped, not panic.
-            let final_segments = match tree {
-                syn::UseTree::Name(name) => {
-                    let mut s = segments;
-                    s.push(name.ident.to_string());
-                    s
-                }
-                syn::UseTree::Rename(rename) => {
-                    let mut s = segments;
-                    s.push(rename.ident.to_string());
-                    s
-                }
-                syn::UseTree::Glob(_) => segments,
-                _ => continue,
-            };
-
-            // Only track intra-crate dependencies (use crate::xxx)
-            if final_segments.first().is_some_and(|s| s == "crate") && final_segments.len() >= 2 {
-                let dep_module = &final_segments[1];
-                if let Some(&dep_idx) = module_index.get(dep_module.as_str()) {
-                    if dep_idx != source_idx {
-                        forward[source_idx].insert(dep_idx);
-                    }
-                }
-            }
+/// Fully-expanded path-segment lists for every terminal node of a file's `use`
+/// trees, via an iterative stack walk (paths and groups fan out, names/renames/
+/// globs terminate). Unknown future `syn` variants are skipped.
+/// Operation: stack walk with per-variant handling.
+fn use_paths(syntax: &syn::File) -> Vec<Vec<String>> {
+    let mut stack: Vec<(&syn::UseTree, Vec<String>)> = syntax
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            syn::Item::Use(u) => Some((&u.tree, Vec::new())),
+            _ => None,
+        })
+        .collect();
+    let mut paths = Vec::new();
+    while let Some((tree, segments)) = stack.pop() {
+        match tree {
+            syn::UseTree::Path(p) => stack.push((&p.tree, pushed(&segments, &p.ident))),
+            syn::UseTree::Group(g) => g
+                .items
+                .iter()
+                .for_each(|sub| stack.push((sub, segments.clone()))),
+            syn::UseTree::Name(name) => paths.push(pushed(&segments, &name.ident)),
+            syn::UseTree::Rename(r) => paths.push(pushed(&segments, &r.ident)),
+            syn::UseTree::Glob(_) => paths.push(segments),
         }
     }
+    paths
+}
 
-    // Convert HashSets to sorted Vecs for deterministic output
-    let forward: Vec<Vec<usize>> = forward
+/// `segments` with `ident` appended.
+/// Operation: clone + push, no own calls.
+fn pushed(segments: &[String], ident: &syn::Ident) -> Vec<String> {
+    let mut s = segments.to_vec();
+    s.push(ident.to_string());
+    s
+}
+
+/// Add `source_idx → dep` edges for every known, non-self dependency module.
+/// Operation: per-dep lookup, own calls in closures.
+fn add_edges(
+    row: &mut HashSet<usize>,
+    source_idx: usize,
+    deps: &[String],
+    index: &HashMap<String, usize>,
+) {
+    deps.iter()
+        .filter_map(|dep| index.get(dep.as_str()).copied())
+        .filter(|&dep_idx| dep_idx != source_idx)
+        .for_each(|dep_idx| {
+            row.insert(dep_idx);
+        });
+}
+
+/// Convert adjacency sets to sorted Vecs for deterministic output.
+/// Operation: per-row sort in closures.
+fn sort_adjacency(forward: Vec<HashSet<usize>>) -> Vec<Vec<usize>> {
+    forward
         .into_iter()
         .map(|set| {
             let mut v: Vec<usize> = set.into_iter().collect();
             v.sort();
             v
         })
-        .collect();
-
-    ModuleGraph { modules, forward }
+        .collect()
 }
