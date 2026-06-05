@@ -24,6 +24,8 @@ mod orphan_dry_and_disabled;
 mod orphan_mod_internals;
 mod orphan_module_tq_arch;
 mod orphan_support;
+mod orphan_target_helpers;
+mod orphan_targeting;
 mod orphan_too_loose;
 pub(super) use orphan_support::*;
 

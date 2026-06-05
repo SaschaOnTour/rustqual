@@ -2,8 +2,9 @@
 //!
 //! A `Suppression` is the parsed, framework-free representation of a
 //! `// qual:allow(…)` comment (or the legacy `// iosp:allow` form).
-//! The actual comment parsing lives in the suppression-adapter
-//! (`crate::findings` today, `src/adapters/suppression/` after Phase 4).
+//! The actual comment parsing lives in `src/adapters/suppression/qual_allow.rs`;
+//! `crate::findings::{Dimension, Suppression}` re-exports these domain types
+//! for existing call sites.
 
 use crate::domain::suppression_target::SuppressionTarget;
 use crate::domain::Dimension;
@@ -54,10 +55,13 @@ impl Suppression {
         }
         match &self.target {
             None => true,
-            Some(t) if t.name == target_name => match (t.pin, value) {
-                (Some(pin), Some(v)) => v <= pin,
-                (None, _) => true,
-                (Some(_), None) => false,
+            Some(t) if t.name() == target_name => match t {
+                // A metric pin silences only while the finding's value stays
+                // at or below it; a finding that carries no value cannot be
+                // matched by a metric pin (so a metric target never silences
+                // a value-less finding).
+                SuppressionTarget::Metric { pin, .. } => value.is_some_and(|v| v <= *pin),
+                SuppressionTarget::Boolean { .. } => true,
             },
             Some(_) => false,
         }

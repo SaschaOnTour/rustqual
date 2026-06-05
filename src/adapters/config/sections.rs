@@ -203,13 +203,14 @@ impl Default for SrpConfig {
 
 /// Per-test-code threshold overrides.
 ///
-/// rustqual applies a curated subset of checks to test code — DRY-001/004/005
+/// rustqual applies a curated subset of checks to test code — DRY-001/003/005
 /// (duplicate fns / fragments / repeated matches), LONG_FN (function length),
 /// and SRP file-length (SRP_MODULE). The god-struct check (SRP-001) also fires
 /// on test structs — a god-fixture is a real smell — but at production
-/// thresholds, with no separate test knob (`// qual:allow(srp)` covers the rare
-/// legitimate fixture). The remaining checks stay test-exempt: ERROR_HANDLING,
-/// MAGIC_NUMBER, IOSP, DRY-002 dead code, DRY-003 wildcard imports, Coupling,
+/// thresholds, with no separate test knob (`// qual:allow(srp, god_struct)`
+/// covers the rare legitimate fixture). The remaining checks stay test-exempt:
+/// ERROR_HANDLING, MAGIC_NUMBER, IOSP, DRY-002 dead code, DRY-004 wildcard
+/// imports, Coupling,
 /// all Structural detectors, and the SRP *module*-cohesion (independent-cluster)
 /// check — a test file's independent `#[test]` fns are its purpose, not a smell.
 /// **This split is fixed — only the thresholds below are configurable.**

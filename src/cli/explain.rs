@@ -1,9 +1,12 @@
-//! CLI-level entry points for architecture diagnostics.
+//! CLI-level entry points for the `--explain` flag.
 //!
-//! The composition-root dispatches the `--explain <file>` flag into
-//! `handle_explain`, which loads the file, compiles the architecture
-//! config, runs the rule checks on that single file, and prints the
-//! rendered report to stdout.
+//! Two entry points share this module:
+//! - `--explain <file>` → `handle_explain`, which loads the file, compiles the
+//!   architecture config, runs the rule checks on that single file, and prints
+//!   the rendered report to stdout.
+//! - `--explain allow` → `explain_allow` / `suppression_guide`, which print the
+//!   `// qual:allow(...)` suppression guide (grammar + per-dimension targets
+//!   sourced from the shared vocabulary + the pin/orphan rationale).
 
 use crate::adapters::analyzers::architecture::compiled::compile_architecture;
 use crate::adapters::analyzers::architecture::explain::explain_file;

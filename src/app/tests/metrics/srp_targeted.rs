@@ -34,10 +34,16 @@ fn sups(target: Option<SuppressionTarget>) -> HashMap<String, Vec<Suppression>> 
 }
 
 fn pin(name: &str, pin: Option<f64>) -> HashMap<String, Vec<Suppression>> {
-    sups(Some(SuppressionTarget {
-        name: name.to_string(),
-        pin,
-    }))
+    let target = match pin {
+        Some(pin) => SuppressionTarget::Metric {
+            name: name.to_string(),
+            pin,
+        },
+        None => SuppressionTarget::Boolean {
+            name: name.to_string(),
+        },
+    };
+    sups(Some(target))
 }
 
 fn suppressed(w: ModuleSrpWarning, s: &HashMap<String, Vec<Suppression>>) -> bool {

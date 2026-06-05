@@ -35,8 +35,9 @@ covers is reported.
   methods), and the single largest hidden suppression in a project. A
   `rustqual.toml` that still sets `ignore_functions` now fails to parse
   (`deny_unknown_fields`). **Migration:** delete the key. For the rare function
-  that genuinely cannot be analyzed, use `// qual:allow(<dim>)`, `// qual:api`,
-  `// qual:test_helper`, or `exclude_files` instead.
+  that genuinely cannot be analyzed, use a targeted `// qual:allow(<dim>, <target>)`
+  (or `// qual:allow(iosp)`), `// qual:api`, `// qual:test_helper`, or
+  `exclude_files` instead.
 - **BREAKING: a bare `// qual:allow(<dim>)` is rejected for any dimension with
   targets** (srp, complexity, dry, coupling, architecture, test_quality). It
   would silence *every* finding of that dimension — too blunt — so it must name
@@ -82,6 +83,13 @@ covers is reported.
   file-length baseline — eliminating their blanket `allow(srp)` markers by real
   refactoring rather than a pin. rustqual now carries **zero** production `srp`
   suppressions.
+- `domain::SuppressionTarget` is now a sum type (`Metric { name, pin } |
+  Boolean { name }`) so the "metric ⇒ has a pin, boolean ⇒ has none" invariant
+  is unrepresentable otherwise; `suppresses()` matches the variant directly.
+  The orphan detector was split into `orphan_suppressions/{mod,positions}.rs`
+  (decision vs. enumeration), made target-aware per finding-kind, and fixed so
+  a pin on an inactive SRP component, a module-global coupling pin, or a
+  magic-number marker is judged correctly rather than mis-reported.
 
 ## [1.4.2] - 2026-06-04
 

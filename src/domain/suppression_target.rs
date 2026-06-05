@@ -24,15 +24,34 @@ pub enum TargetKind {
     Boolean,
 }
 
-/// A parsed `allow(dim, target[, =N])` target: the finding-kind name plus,
-/// for metric targets, the pinned ceiling. `pin` is `Some` exactly when the
-/// target is a metric.
+/// A parsed `allow(dim, target[, =N])` target. Modeled as a sum type so the
+/// "metric ⇒ has a pin, boolean ⇒ has no pin" invariant is unrepresentable
+/// otherwise: there is no way to build a `Boolean` carrying a pin or a
+/// `Metric` without one. Construct via the parser; read via `name()`/`pin()`.
 #[derive(Debug, Clone, PartialEq)]
-pub struct SuppressionTarget {
-    /// Config field name (metric) or rule name (boolean).
-    pub name: String,
-    /// Pinned ceiling for metric targets; `None` for boolean targets.
-    pub pin: Option<f64>,
+pub enum SuppressionTarget {
+    /// Threshold metric (config field name) with its mandatory pinned ceiling.
+    /// Silences only while the finding's value is `<= pin`.
+    Metric { name: String, pin: f64 },
+    /// Boolean finding-kind (rule name); silences by name, carries no value.
+    Boolean { name: String },
+}
+
+impl SuppressionTarget {
+    /// The target's name (config field for metrics, rule name for booleans).
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Metric { name, .. } | Self::Boolean { name } => name,
+        }
+    }
+
+    /// The pinned ceiling for a metric target; `None` for a boolean target.
+    pub fn pin(&self) -> Option<f64> {
+        match self {
+            Self::Metric { pin, .. } => Some(*pin),
+            Self::Boolean { .. } => None,
+        }
+    }
 }
 
 /// Resolve a `(dimension, target-name)` pair to its kind, or `None` when the

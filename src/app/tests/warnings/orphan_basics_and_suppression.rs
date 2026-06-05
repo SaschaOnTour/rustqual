@@ -90,8 +90,12 @@ fn complexity_metric_extra_cases() -> Vec<(&'static str, usize, usize, Complexit
             },
         ),
         (
+            // The marker attaches to the function (line 6); the magic literal
+            // sits deeper in the body (line 12). The orphan position anchors at
+            // the function line, so a marker on the function — not on the
+            // literal — is the one that matches.
             "magic number",
-            10,
+            6,
             6,
             ComplexityMetrics {
                 magic_numbers: vec![MagicNumberOccurrence {

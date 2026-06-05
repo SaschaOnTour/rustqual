@@ -70,7 +70,11 @@ pub(crate) fn make_srp_module_finding(file: &str) -> crate::domain::findings::Sr
             production_lines: 900,
             independent_clusters: 1,
             cluster_names: vec![],
-            length_score: 0.0,
+            // A 900-line module has its length component active (score > 1.0);
+            // the cohesion component is inactive (1 cluster <= max). Mirrors a
+            // real "long but cohesive" finding so component-gated position
+            // emission (file_length only) is exercised.
+            length_score: 1.5,
         },
     }
 }

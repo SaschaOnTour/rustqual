@@ -4,7 +4,8 @@ Annotation forms, ordered from most-restricted to least:
 
 | Annotation | Scope | Counts against `max_suppression_ratio` |
 |---|---|---|
-| `// qual:allow(<dim>)` | One dimension (`iosp`, `complexity`, `dry`, `srp`, `coupling`, `test_quality`, `architecture`) | Yes |
+| `// qual:allow(<dim>, <target>[=N]) reason: "…"` | One finding-kind within a multi-kind dimension (`complexity`, `dry`, `srp`, `coupling`, `test_quality`, `architecture`) | Yes |
+| `// qual:allow(iosp)` | The whole `iosp` dimension (its only form — `iosp` has no targets) | Yes |
 | `// qual:allow(unsafe)` | `CX-006` only | No |
 | `// qual:api` | Excludes from `DRY-002`, `TQ-003` | No |
 | `// qual:test_helper` | Excludes from `DRY-002` (testonly), `TQ-003` | No |
@@ -13,30 +14,32 @@ Annotation forms, ordered from most-restricted to least:
 
 Each annotation lives in a `//`-comment block immediately above the item it applies to. The block extends upward until a blank line or a non-`//` line breaks it. `#[derive(...)]` and other attributes between the comment block and the item are fine — they don't break the block.
 
-**Removed in 1.2.3:** the bare `// qual:allow` (no parens) and `// qual:allow()` forms no longer suppress anything — they're silently ignored. Authors must spell out the targeted dimension(s) explicitly. Typos like `// qual:allow(srp_params)` (no recognised dimension in the parens) are surfaced as `ORPHAN_SUPPRESSION` findings so they don't quietly hide nothing.
+**Removed in 1.2.3:** the bare `// qual:allow` (no parens) and `// qual:allow()` forms no longer suppress anything — they're silently ignored.
 
-## `// qual:allow(<dim>)` — suppress one dimension
+**Breaking in 1.5.0 ("the flip"):** a bare `// qual:allow(<dim>)` is **rejected** for every dimension that has targets (`complexity`, `dry`, `srp`, `coupling`, `test_quality`, `architecture`) — it would silence *every* finding of that dimension, too blunt. You must name a target; the error lists the valid ones. Only `iosp` (no targets) keeps its bare form. Multi-dimension blanket markers (`allow(a, b)`) are gone — use one marker per dimension. Typos like `// qual:allow(srp_params)` (no recognised dimension) surface as `ORPHAN_SUPPRESSION` so they don't quietly hide nothing.
+
+## `// qual:allow(<dim>, <target>[=N])` — suppress one finding-kind
+
+Each multi-kind dimension exposes a **vocabulary of targets** (`rustqual --explain allow` lists them all). A *boolean* target takes no value; a *metric* target requires a pinned ceiling `=N` and re-fires once the value climbs above it. Every targeted suppression needs a `reason:`.
 
 ```rust
+// qual:allow(complexity, max_cyclomatic=12) reason: "Kosaraju three-pass is inherently branchy"
+fn detect_cycles(g: &Graph) -> Vec<Cycle> { /* … */ }
+
+// qual:allow(srp, file_length=400) reason: "long but cohesive single normalizer"
+mod normalizer { /* … */ }
+
+// qual:allow(architecture, forbidden) reason: "audited port→registry edge for round-trip ordering"
+use crate::adapters::registry::lookup;
+
+// iosp is the one single-kind dimension — bare form only:
 // qual:allow(iosp) — match dispatcher; arms intentionally inlined
 fn dispatch(cmd: Command) -> Result<()> {
-    match cmd {
-        Command::Sync => sync_handler(),
-        Command::Diff => diff_handler(),
-    }
+    match cmd { Command::Sync => sync_handler(), Command::Diff => diff_handler() }
 }
-
-// qual:allow(complexity) — large lookup table; splitting hurts readability
-fn rule_table() -> &'static [Rule] { /* … */ }
-
-// qual:allow(architecture) — port adapter must call registry directly here
-// for serialization round-trip; pure domain accessor would lose ordering.
-use crate::adapters::registry::lookup;
 ```
 
-Always pair with a rationale (`— <reason>`). Reviewers and future-you need to know *why* the rule is being bypassed.
-
-Legacy `// iosp:allow` is an alias for `// qual:allow(iosp)`.
+The `reason:` is mandatory for every targeted marker — reviewers and future-you need to know *why*, and a metric pin parked too far above the real value is itself reported (see Orphan detection). Legacy `// iosp:allow` is an alias for `// qual:allow(iosp)`.
 
 ## `// qual:allow(unsafe)` — for `CX-006` specifically
 

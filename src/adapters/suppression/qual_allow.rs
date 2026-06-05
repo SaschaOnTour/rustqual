@@ -34,8 +34,8 @@ pub fn is_api_marker(trimmed: &str) -> bool {
 /// The annotation narrowly suppresses DRY-002 (`testonly` dead code)
 /// and TQ-003 (untested) on a function that is only called from test
 /// code — without silencing complexity, SRP, coupling, or DRY
-/// duplicate checks the way `ignore_functions` would. It does not
-/// count against `max_suppression_ratio`.
+/// duplicate checks, which stay active. It does not count against
+/// `max_suppression_ratio`.
 /// Operation: string prefix check.
 pub fn is_test_helper_marker(trimmed: &str) -> bool {
     trimmed == "// qual:test_helper" || trimmed.starts_with("// qual:test_helper ")
@@ -335,9 +335,9 @@ fn classify_metric(
         line,
         dimensions: vec![dim],
         reason,
-        target: Some(SuppressionTarget {
+        target: Some(SuppressionTarget::Metric {
             name: name.to_string(),
-            pin: Some(pin),
+            pin,
         }),
     })
 }
@@ -367,9 +367,8 @@ fn classify_boolean(
         line,
         dimensions: vec![dim],
         reason,
-        target: Some(SuppressionTarget {
+        target: Some(SuppressionTarget::Boolean {
             name: name.to_string(),
-            pin: None,
         }),
     })
 }

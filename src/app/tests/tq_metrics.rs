@@ -44,9 +44,8 @@ fn tq_targeted(w_line: usize, kind: TqWarningKind, target: &str) -> bool {
             line: w_line,
             dimensions: vec![Dimension::TestQuality],
             reason: Some("r".to_string()),
-            target: Some(crate::domain::SuppressionTarget {
+            target: Some(crate::domain::SuppressionTarget::Boolean {
                 name: target.to_string(),
-                pin: None,
             }),
         }],
     )]

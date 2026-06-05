@@ -35,8 +35,10 @@ pub struct OrphanSuppression {
     /// 1-based line of the marker (already shifted to the last line
     /// of the contiguous `//`-comment block containing the marker).
     pub line: usize,
-    /// Which dimensions the marker tried to suppress. Empty = wildcard
-    /// (bare `// qual:allow`).
+    /// Which dimensions the marker tried to suppress. Empty only for a
+    /// malformed marker surfaced via the invalid-marker side-channel (e.g.
+    /// unclosed parens); a real parsed `Suppression` always carries at least
+    /// one dimension, so this is non-empty for stale/too-loose orphans.
     pub dimensions: Vec<Dimension>,
     /// Optional human-readable rationale attached to the marker (for a
     /// too-loose pin, this carries the tighten-to-~value advice instead).

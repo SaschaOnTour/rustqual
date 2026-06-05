@@ -120,37 +120,18 @@ fn collect_iosp_complexity_positions<F>(
                     mk(f.line, Dimension::Complexity, Some(target), value),
                 );
             }
-            push_magic_numbers(f, c, &config.complexity, push);
+            // One `magic_numbers` position per function (a boolean target),
+            // anchored at the *function* line — a literal deep in the body
+            // would otherwise fall outside a marker's window and make a valid
+            // suppression look stale. Honors `detect_magic_numbers` + is_test.
+            let cx = &config.complexity;
+            if cx.detect_magic_numbers && !f.is_test && !c.magic_numbers.is_empty() {
+                push(
+                    &f.file,
+                    mk(f.line, Dimension::Complexity, Some("magic_numbers"), None),
+                );
+            }
         }
-    });
-}
-
-/// Push complexity positions for every magic-number occurrence on the
-/// function, honoring `detect_magic_numbers` and the test-function skip.
-/// Operation: iteration + conditional push.
-fn push_magic_numbers<F>(
-    f: &crate::adapters::analyzers::iosp::FunctionAnalysis,
-    c: &crate::adapters::analyzers::iosp::ComplexityMetrics,
-    cx: &crate::config::sections::ComplexityConfig,
-    push: &mut F,
-) where
-    F: FnMut(&str, FindingPosition),
-{
-    if f.is_test || !cx.detect_magic_numbers {
-        return;
-    }
-    let mode = MatchMode::LineWindow(windows::DEFAULT);
-    c.magic_numbers.iter().for_each(|m| {
-        push(
-            &f.file,
-            FindingPosition {
-                line: m.line,
-                dim: crate::findings::Dimension::Complexity,
-                mode,
-                target: Some("magic_numbers"),
-                value: None,
-            },
-        )
     });
 }
 
@@ -230,8 +211,9 @@ fn collect_srp_positions<F>(
         return;
     }
     let line_mode = MatchMode::LineWindow(windows::SRP_STRUCT_PARAM);
+    let max_clusters = config.srp.max_independent_clusters;
     analysis.findings.srp.iter().for_each(|f| {
-        for (line, mode, target, value) in srp_finding_targets(f, line_mode) {
+        for (line, mode, target, value) in srp_finding_targets(f, line_mode, max_clusters) {
             push(
                 &f.common.file,
                 FindingPosition {
@@ -247,15 +229,18 @@ fn collect_srp_positions<F>(
 }
 
 /// The `(line, mode, target, value)` positions a single SRP finding
-/// contributes. A struct-cohesion smell maps to `god_struct`; a parameter
-/// smell to `max_parameters`; a module-length smell to *both* `file_length`
-/// and `max_independent_clusters` (either pin can silence it), each
-/// file-scoped at line 1. Structural BTC/SLM/NMS findings are handled by
-/// `collect_structural_positions` and contribute nothing here.
+/// contributes: `god_struct` (cohesion), `max_parameters` (params), or the
+/// module-length targets `file_length` / `max_independent_clusters` — the
+/// latter **only for the component that actually fired** (`length_score >
+/// 1.0` and/or `clusters > max_clusters`), mirroring
+/// `srp_suppressions::module_warning_suppressed`; a position for an inactive
+/// component would let a pin that silences nothing escape stale detection or
+/// mis-fire as too-loose. Structural findings are handled elsewhere.
 /// Operation: kind/details dispatch producing position tuples.
 fn srp_finding_targets(
     f: &crate::domain::findings::SrpFinding,
     line_mode: MatchMode,
+    max_clusters: usize,
 ) -> Vec<(usize, MatchMode, &'static str, Option<f64>)> {
     use crate::domain::findings::{SrpFindingDetails, SrpFindingKind};
     let scope = MatchMode::FileScope;
@@ -279,17 +264,26 @@ fn srp_finding_targets(
             SrpFindingDetails::ModuleLength {
                 production_lines,
                 independent_clusters,
+                length_score,
                 ..
             },
-        ) => vec![
-            (1, scope, "file_length", Some(*production_lines as f64)),
-            (
+        ) => [
+            (*length_score > 1.0).then_some((
+                1,
+                scope,
+                "file_length",
+                Some(*production_lines as f64),
+            )),
+            (*independent_clusters > max_clusters).then_some((
                 1,
                 scope,
                 "max_independent_clusters",
                 Some(*independent_clusters as f64),
-            ),
-        ],
+            )),
+        ]
+        .into_iter()
+        .flatten()
+        .collect(),
         _ => vec![],
     }
 }

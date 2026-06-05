@@ -140,14 +140,12 @@ by the same limits as production. Field names mirror `[complexity]` and
 | Key | Inherits | Meaning |
 |---|---|---|
 | `max_function_lines` | `[complexity].max_function_lines` | `LONG_FN` limit for test fns |
-| `file_length_baseline` | `[srp].file_length_baseline` | File-length score baseline for test files |
-| `file_length_ceiling` | `[srp].file_length_ceiling` | File-length score ceiling for test files |
+| `file_length` | `[srp].file_length` | `SRP_MODULE` file-length limit for test files |
 
 ```toml
 [tests]
-max_function_lines   = 120
-file_length_baseline = 500
-file_length_ceiling  = 1200
+max_function_lines = 120
+file_length        = 500
 ```
 
 ## `[suppression]`

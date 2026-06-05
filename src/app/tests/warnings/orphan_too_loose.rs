@@ -1,92 +1,11 @@
-//! Orphan detection for *targeted* suppressions: a targeted `allow(dim, t)`
-//! marker is verified against a finding of that exact target kind (not just
-//! any finding of the dimension), and a metric pin parked far above the
-//! value it covers is reported as a too-loose orphan (`[suppression].
-//! pin_headroom`, default 10%).
+//! Too-loose-pin orphan detection: a metric pin parked further above the
+//! value it covers than `[suppression].pin_headroom` (default 10%) is
+//! reported; a pin within headroom, or too tight (re-firing), is healthy.
+
+use super::orphan_target_helpers::*;
 use super::*;
-use crate::domain::findings::OrphanSuppression;
-use crate::domain::SuppressionTarget;
-use crate::findings::{Dimension, Suppression};
-
-/// Run the orphan detector for a single targeted marker on `src/x.rs`.
-fn orphans(
-    dim: Dimension,
-    target: &str,
-    pin: Option<f64>,
-    sup_line: usize,
-    mut seed: impl FnMut(&mut crate::report::AnalysisResult),
-) -> Vec<OrphanSuppression> {
-    let mut sups = HashMap::new();
-    sups.insert(
-        "src/x.rs".to_string(),
-        vec![Suppression {
-            line: sup_line,
-            dimensions: vec![dim],
-            reason: Some("r".to_string()),
-            target: Some(SuppressionTarget {
-                name: target.to_string(),
-                pin,
-            }),
-        }],
-    );
-    let mut analysis = empty_analysis();
-    seed(&mut analysis);
-    crate::app::orphan_suppressions::detect_orphan_suppressions(
-        &sups,
-        &std::collections::HashMap::new(),
-        &analysis,
-        &Config::default(),
-    )
-}
-
-fn srp_module(file: &str, production_lines: usize) -> crate::domain::findings::SrpFinding {
-    let mut f = make_srp_module_finding(file);
-    if let crate::domain::findings::SrpFindingDetails::ModuleLength {
-        production_lines: pl,
-        ..
-    } = &mut f.details
-    {
-        *pl = production_lines;
-    }
-    f
-}
-
-// ── target-awareness ───────────────────────────────────────────
-
-#[test]
-fn file_length_pin_mismatches_god_struct_is_orphan() {
-    // The only SRP finding is a god-struct (StructCohesion); a file_length
-    // pin targets a different kind, so it matches nothing → orphan.
-    let out = orphans(Dimension::Srp, "file_length", Some(400.0), 5, |a| {
-        a.findings.srp.push(make_srp_struct_finding("src/x.rs", 5));
-    });
-    assert_eq!(out.len(), 1, "file_length pin must not match god_struct");
-}
-
-#[test]
-fn complexity_wrong_metric_target_is_orphan() {
-    // Function trips cognitive only; a max_cyclomatic pin matches nothing.
-    let m = ComplexityMetrics {
-        cognitive_complexity: 18,
-        ..Default::default()
-    };
-    let out = orphans(
-        Dimension::Complexity,
-        "max_cyclomatic",
-        Some(20.0),
-        10,
-        |a| {
-            a.results = vec![make_fa_with_complexity("src/x.rs", 10, m.clone())];
-        },
-    );
-    assert_eq!(
-        out.len(),
-        1,
-        "max_cyclomatic pin must not match a cognitive finding"
-    );
-}
-
-// ── too-loose pin ──────────────────────────────────────────────
+use crate::domain::findings::OrphanKind;
+use crate::findings::Dimension;
 
 #[test]
 fn file_length_pin_within_headroom_is_clean() {
@@ -175,5 +94,168 @@ fn complexity_pin_too_tight_refires_not_orphan() {
     assert!(
         out.is_empty(),
         "too-tight (re-firing) pin is not an orphan, got {out:?}"
+    );
+}
+
+// ── too-loose for the other SRP metric targets ─────────────────
+
+#[test]
+fn cluster_pin_too_loose_is_orphan() {
+    // cohesion active (5 clusters > max 2); pin 10 > 5*1.10 → too loose.
+    let out = orphans(
+        Dimension::Srp,
+        "max_independent_clusters",
+        Some(10.0),
+        1,
+        |a| {
+            a.findings
+                .srp
+                .push(srp_module_full("src/x.rs", 200, 0.5, 5));
+        },
+    );
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].kind, OrphanKind::PinTooLoose, "{out:?}");
+    assert!(out[0].reason.as_deref().unwrap_or("").contains('5'));
+}
+
+#[test]
+fn cluster_pin_within_headroom_is_clean() {
+    // 5 clusters, pin 5 → covered and 5 <= 5*1.10 → fine.
+    let out = orphans(
+        Dimension::Srp,
+        "max_independent_clusters",
+        Some(5.0),
+        1,
+        |a| {
+            a.findings
+                .srp
+                .push(srp_module_full("src/x.rs", 200, 0.5, 5));
+        },
+    );
+    assert!(out.is_empty(), "{out:?}");
+}
+
+#[test]
+fn max_parameters_pin_too_loose_is_orphan() {
+    // 7-param function (make_srp_param_finding); pin 20 > 7*1.10 → too loose.
+    let out = orphans(Dimension::Srp, "max_parameters", Some(20.0), 5, |a| {
+        a.findings
+            .srp
+            .push(make_srp_param_finding("src/x.rs", 5, false));
+    });
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].kind, OrphanKind::PinTooLoose, "{out:?}");
+}
+
+#[test]
+fn max_parameters_pin_within_headroom_is_clean() {
+    let out = orphans(Dimension::Srp, "max_parameters", Some(7.0), 5, |a| {
+        a.findings
+            .srp
+            .push(make_srp_param_finding("src/x.rs", 5, false));
+    });
+    assert!(out.is_empty(), "{out:?}");
+}
+
+// ── headroom boundary + config-driven headroom ─────────────────
+
+#[test]
+fn pin_exactly_at_headroom_ceiling_is_clean() {
+    // cognitive 18, pin 19.8 == 18*1.10 exactly → strict `>` keeps it clean.
+    let m = ComplexityMetrics {
+        cognitive_complexity: 18,
+        ..Default::default()
+    };
+    let out = orphans(
+        Dimension::Complexity,
+        "max_cognitive",
+        Some(19.8),
+        10,
+        |a| {
+            a.results = vec![make_fa_with_complexity("src/x.rs", 10, m.clone())];
+        },
+    );
+    assert!(
+        out.is_empty(),
+        "pin exactly at the ceiling is healthy: {out:?}"
+    );
+}
+
+#[test]
+fn pin_just_above_headroom_ceiling_is_orphan() {
+    let m = ComplexityMetrics {
+        cognitive_complexity: 18,
+        ..Default::default()
+    };
+    let out = orphans(
+        Dimension::Complexity,
+        "max_cognitive",
+        Some(19.81),
+        10,
+        |a| {
+            a.results = vec![make_fa_with_complexity("src/x.rs", 10, m.clone())];
+        },
+    );
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].kind, OrphanKind::PinTooLoose, "{out:?}");
+}
+
+#[test]
+fn pin_headroom_config_flips_the_verdict() {
+    // cognitive 18, pin 20. Default headroom 0.10 (ceiling 19.8) → too loose;
+    // a 0.20 headroom (ceiling 21.6) accepts the very same pin.
+    let m = ComplexityMetrics {
+        cognitive_complexity: 18,
+        ..Default::default()
+    };
+    let seed = |a: &mut crate::report::AnalysisResult| {
+        a.results = vec![make_fa_with_complexity("src/x.rs", 10, m.clone())];
+    };
+    let tight = orphans(Dimension::Complexity, "max_cognitive", Some(20.0), 10, seed);
+    assert_eq!(tight.len(), 1, "default 10% headroom flags pin 20 over 18");
+
+    let mut cfg = Config::default();
+    cfg.suppression.pin_headroom = 0.20;
+    let loose = orphans_cfg(
+        target_of("max_cognitive", Some(20.0)),
+        Dimension::Complexity,
+        10,
+        &cfg,
+        seed,
+    );
+    assert!(
+        loose.is_empty(),
+        "20% headroom accepts pin 20 over 18: {loose:?}"
+    );
+}
+
+#[test]
+fn too_loose_uses_largest_covered_value_not_smallest() {
+    // Two cognitive findings under one marker (16 and 18); pin 19 is tight to
+    // the larger (18) — must stay clean. A min-fold regression would compare
+    // against 16 and wrongly flag it.
+    let lo = ComplexityMetrics {
+        cognitive_complexity: 16,
+        ..Default::default()
+    };
+    let hi = ComplexityMetrics {
+        cognitive_complexity: 18,
+        ..Default::default()
+    };
+    let out = orphans(
+        Dimension::Complexity,
+        "max_cognitive",
+        Some(19.0),
+        10,
+        |a| {
+            a.results = vec![
+                make_fa_with_complexity("src/x.rs", 10, lo.clone()),
+                make_fa_with_complexity("src/x.rs", 11, hi.clone()),
+            ];
+        },
+    );
+    assert!(
+        out.is_empty(),
+        "pin tight to the largest covered value is clean: {out:?}"
     );
 }

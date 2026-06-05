@@ -13,8 +13,12 @@ fn test_parse_targeted_metric_pin() {
     .unwrap();
     assert_eq!(s.dimensions, vec![Dimension::Srp]);
     let target = s.target.expect("should be targeted");
-    assert_eq!(target.name, "file_length");
-    assert_eq!(target.pin, Some(400.0));
+    assert!(matches!(
+        target,
+        crate::domain::SuppressionTarget::Metric { .. }
+    ));
+    assert_eq!(target.name(), "file_length");
+    assert_eq!(target.pin(), Some(400.0));
     assert_eq!(s.reason.as_deref(), Some("long but cohesive"));
 }
 
@@ -23,8 +27,12 @@ fn test_parse_targeted_boolean() {
     let s = parse_suppression(1, "// qual:allow(complexity, unsafe) reason: \"ffi\"").unwrap();
     assert_eq!(s.dimensions, vec![Dimension::Complexity]);
     let target = s.target.expect("should be targeted");
-    assert_eq!(target.name, "unsafe");
-    assert_eq!(target.pin, None);
+    assert!(matches!(
+        target,
+        crate::domain::SuppressionTarget::Boolean { .. }
+    ));
+    assert_eq!(target.name(), "unsafe");
+    assert_eq!(target.pin(), None);
 }
 
 #[test]

@@ -46,10 +46,16 @@ fn sups(target: Option<SuppressionTarget>) -> ModuleCouplingSuppressions {
 }
 
 fn pin(name: &str, value: Option<f64>) -> ModuleCouplingSuppressions {
-    sups(Some(SuppressionTarget {
-        name: name.to_string(),
-        pin: value,
-    }))
+    let target = match value {
+        Some(pin) => SuppressionTarget::Metric {
+            name: name.to_string(),
+            pin,
+        },
+        None => SuppressionTarget::Boolean {
+            name: name.to_string(),
+        },
+    };
+    sups(Some(target))
 }
 
 fn warnings(s: &ModuleCouplingSuppressions) -> usize {

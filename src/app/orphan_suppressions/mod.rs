@@ -78,7 +78,11 @@ fn classify_marker(
         return Some(orphan(file, sup, OrphanKind::Stale, sup.reason.clone()));
     }
     let value = too_loose_value(file, sup, positions, headroom)?;
-    let pin = sup.target.as_ref().and_then(|t| t.pin).unwrap_or_default();
+    let pin = sup
+        .target
+        .as_ref()
+        .and_then(|t| t.pin())
+        .unwrap_or_default();
     let reason = format!(
         "pin {} sits >{:.0}% above the actual value {} — tighten to ~{} or remove",
         fmt_num(pin),
@@ -130,7 +134,7 @@ fn too_loose_value(
     positions: &HashMap<String, Vec<FindingPosition>>,
     headroom: f64,
 ) -> Option<f64> {
-    let pin = sup.target.as_ref()?.pin?;
+    let pin = sup.target.as_ref()?.pin()?;
     let covered_max = positions
         .get(file)?
         .iter()
@@ -193,8 +197,18 @@ fn is_verifiable(
     if sup.dimensions.iter().any(|d| *d != Dimension::Coupling) {
         return true;
     }
-    // Coupling-only marker: verifiable iff the file has a line-anchored
-    // Coupling finding.
+    // Coupling-only marker. Every coupling *target* (max_fan_in/out,
+    // max_instability, sdp) is module-global and has no line-anchored
+    // position, so a targeted coupling marker can never match a position and
+    // must not be reported — it is unverifiable, not stale. (Were it treated
+    // as verifiable, a coexisting structural OI/SIT/DEH/IET finding would
+    // satisfy the line-anchor check below and then fail target matching,
+    // producing a false orphan for a legitimate pin.)
+    if sup.target.is_some() {
+        return false;
+    }
+    // A blanket coupling marker is verifiable iff the file has a line-anchored
+    // Coupling finding (e.g. a structural OI/SIT/DEH/IET warning).
     positions
         .get(file)
         .is_some_and(|ps| ps.iter().any(|p| p.dim == Dimension::Coupling))
@@ -229,7 +243,7 @@ fn position_matches(sup: &Suppression, p: &FindingPosition) -> bool {
     }
     match &sup.target {
         None => true,
-        Some(t) => p.target == Some(t.name.as_str()),
+        Some(t) => p.target == Some(t.name()),
     }
 }
 

@@ -64,9 +64,8 @@ fn dry_targeted_suppression_is_per_kind() {
                 line: 4,
                 dimensions: vec![crate::findings::Dimension::Dry],
                 reason: Some("r".to_string()),
-                target: Some(SuppressionTarget {
+                target: Some(SuppressionTarget::Boolean {
                     name: target.to_string(),
-                    pin: None,
                 }),
             }],
         )]

@@ -12,13 +12,23 @@ fn targeted(name: &str, pin: Option<f64>) -> HashMap<String, Vec<Suppression>> {
             line: 1,
             dimensions: vec![Dimension::Complexity],
             reason: Some("r".to_string()),
-            target: Some(SuppressionTarget {
-                name: name.to_string(),
-                pin,
-            }),
+            target: Some(target_of(name, pin)),
         }],
     )]
     .into()
+}
+
+/// Build a metric or boolean target from an optional pin (test helper).
+fn target_of(name: &str, pin: Option<f64>) -> SuppressionTarget {
+    match pin {
+        Some(pin) => SuppressionTarget::Metric {
+            name: name.to_string(),
+            pin,
+        },
+        None => SuppressionTarget::Boolean {
+            name: name.to_string(),
+        },
+    }
 }
 
 fn run_extended(
