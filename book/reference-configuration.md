@@ -26,8 +26,9 @@ max_suppression_ratio = 0.05
 
 > **Removed in 1.5.0:** the `ignore_functions` option no longer exists. It
 > excluded matching functions from *every* dimension — too blunt — and a
-> `rustqual.toml` that still sets it will fail to parse. To exempt code, use
-> `// qual:allow(<dim>)`, `// qual:api`, `// qual:test_helper`, or
+> `rustqual.toml` that still sets it will fail to parse. To exempt code, use a
+> targeted `// qual:allow(<dim>, <target>)` with a `reason:` (or bare
+> `// qual:allow(iosp)`), `// qual:api`, `// qual:test_helper`, or
 > `exclude_files`. (`visit_*` methods no longer need exempting: TQ-003 models
 > syn-visitor dispatch directly, and SRP cohesion accounts for trait methods.)
 
