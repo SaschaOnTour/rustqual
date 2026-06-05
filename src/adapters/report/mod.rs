@@ -121,10 +121,10 @@ pub struct Summary {
     pub all_suppressions: usize,
     /// Whether the suppression ratio exceeds the configured maximum.
     pub suppression_ratio_exceeded: bool,
-    /// Number of `// qual:allow(...)` markers that did not match any
-    /// finding within their annotation window. Orphan markers are
-    /// typically stale suppressions (the underlying finding was fixed
-    /// or moved) or misplaced annotations.
+    /// Number of reported `// qual:allow(...)` markers: stale (matched no
+    /// finding in their annotation window — a fixed/moved finding or a
+    /// misplaced annotation) plus too-loose metric pins (sitting further
+    /// above the value they cover than `pin_headroom` allows).
     pub orphan_suppressions: usize,
 }
 

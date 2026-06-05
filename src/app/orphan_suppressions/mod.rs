@@ -1,12 +1,13 @@
 //! Orphan-suppression detector.
 //!
-//! An orphan `// qual:allow(...)` marker is one that doesn't match any
-//! finding within its annotation window — typically a stale
-//! suppression (the underlying finding was fixed or moved) or a
-//! misplaced annotation. Orphans are emitted as a distinct finding
-//! category (`ORPHAN_SUPPRESSION`) so they show up in every output
-//! format (text, JSON, AI, SARIF, ...) just like any other finding —
-//! one-shot `--format ai` invocations don't miss them.
+//! An orphan `// qual:allow(...)` marker is one worth reporting: either
+//! *stale* — it matches no finding within its annotation window (the
+//! underlying finding was fixed or moved, or the annotation is misplaced) —
+//! or *too-loose* — a metric pin that does match a finding but sits further
+//! above the value it covers than `pin_headroom` allows. Orphans are emitted
+//! as a distinct finding category (`ORPHAN_SUPPRESSION`) so they show up in
+//! every output format (text, JSON, AI, SARIF, ...) just like any other
+//! finding — one-shot `--format ai` invocations don't miss them.
 
 mod complexity_predicates;
 mod positions;
