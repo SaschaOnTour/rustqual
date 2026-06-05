@@ -15,7 +15,6 @@
 ignore_functions = [
     "main",
     "run",
-    "visit_*",
 ]
 
 # Glob patterns for files to exclude.

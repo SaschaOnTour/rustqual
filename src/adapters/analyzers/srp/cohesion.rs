@@ -132,6 +132,11 @@ fn bridge_member_groups(
         .iter()
         .map(|m| (m.method_name.as_str(), &m.field_accesses))
         .collect();
+    let method_index: HashMap<&str, usize> = methods
+        .iter()
+        .enumerate()
+        .map(|(i, m)| (m.method_name.as_str(), i))
+        .collect();
     let struct_field_set: HashSet<&str> = struct_fields.iter().map(String::as_str).collect();
 
     bridges
@@ -160,6 +165,13 @@ fn bridge_member_groups(
                 .flatten()
                 .copied()
                 .collect();
+            // Also tie in the methods the bridge directly drives, so a handler
+            // that touches no field of its own (pure delegation, e.g. a visitor
+            // dispatch arm) still coheres with the rest of the walk.
+            b.self_method_calls
+                .iter()
+                .filter_map(|callee| method_index.get(callee.as_str()).copied())
+                .for_each(|idx| members.push(idx));
             members.sort_unstable();
             members.dedup();
             members

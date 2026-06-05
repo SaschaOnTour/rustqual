@@ -56,6 +56,33 @@ impl FileVisitor for WildcardCollector {
     }
 }
 
+impl WildcardCollector {
+    /// Whether a glob import under `prefix` is exempt: bare `use super::*` in a
+    /// test module, any import in a test file, or a `prelude` wildcard.
+    /// Operation: boolean guard logic, no own calls.
+    fn skip_glob(&self, prefix: &[String]) -> bool {
+        (self.in_test && prefix == ["super"])
+            || self.file_is_test
+            || prefix.iter().any(|p| p == "prelude")
+    }
+
+    /// Record a wildcard-import warning for `prefix` at `line`.
+    /// Operation: path formatting + push, no own calls.
+    fn push_glob_warning(&mut self, prefix: &[String], line: usize) {
+        let module_path = if prefix.is_empty() {
+            "*".to_string()
+        } else {
+            format!("{}::*", prefix.join("::"))
+        };
+        self.warnings.push(WildcardImportWarning {
+            file: self.file.clone(),
+            line,
+            module_path,
+            suppressed: false,
+        });
+    }
+}
+
 impl<'ast> Visit<'ast> for WildcardCollector {
     fn visit_item_use(&mut self, node: &'ast syn::ItemUse) {
         // Skip `pub use` / `pub(crate) use` re-exports — they are an API design pattern, not lazy imports.
@@ -72,38 +99,8 @@ impl<'ast> Visit<'ast> for WildcardCollector {
                     stack.push((new_prefix, &p.tree));
                 }
                 syn::UseTree::Glob(_) => {
-                    // Skip the bare `use super::*` in test modules
-                    // (common pattern to pull everything from the
-                    // enclosing module into the test scope). Deeper
-                    // wildcards like `use super::foo::*` still trigger.
-                    if self.in_test && prefix.as_slice() == ["super"] {
-                        continue;
-                    }
-                    // Skip wildcard imports in test files (integration-test
-                    // binaries and `#[cfg(test)]`/companion files alike).
-                    // Classification comes from the authoritative cfg-test
-                    // file set, computed in `detect_wildcard_imports`.
-                    if self.file_is_test {
-                        continue;
-                    }
-                    // Skip any prelude wildcard: matches the bare
-                    // `prelude::*` and versioned forms like
-                    // `std::prelude::v1::*` or `crate::prelude::rust_2024::*`
-                    // where `prelude` sits in the middle of the path.
-                    if prefix.iter().any(|p| p == "prelude") {
-                        continue;
-                    }
-                    let path = if prefix.is_empty() {
-                        "*".to_string()
-                    } else {
-                        format!("{}::*", prefix.join("::"))
-                    };
-                    self.warnings.push(WildcardImportWarning {
-                        file: self.file.clone(),
-                        line: node.span().start().line,
-                        module_path: path,
-                        suppressed: false,
-                    });
+                    let record = !self.skip_glob(&prefix);
+                    record.then(|| self.push_glob_warning(&prefix, node.span().start().line));
                 }
                 syn::UseTree::Group(g) => {
                     for item in &g.items {

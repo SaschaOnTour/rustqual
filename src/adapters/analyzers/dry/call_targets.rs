@@ -43,6 +43,16 @@ fn insert_path_segments(target: &mut HashSet<String>, path: &syn::Path) {
 }
 
 impl CallTargetCollector {
+    /// The call-target set for the current context (test vs production).
+    /// Operation: one branch, no own calls.
+    fn target(&mut self) -> &mut HashSet<String> {
+        if self.in_test {
+            &mut self.test_calls
+        } else {
+            &mut self.production_calls
+        }
+    }
+
     /// Extract function names referenced by serde field attributes.
     /// Operation: attribute parsing logic, no own calls.
     fn extract_serde_fn_refs(attrs: &[syn::Attribute]) -> Vec<String> {
@@ -178,11 +188,7 @@ impl<'ast> Visit<'ast> for CallTargetCollector {
 
     fn visit_field(&mut self, node: &'ast syn::Field) {
         let refs = Self::extract_serde_fn_refs(&node.attrs);
-        if self.in_test {
-            self.test_calls.extend(refs);
-        } else {
-            self.production_calls.extend(refs);
-        }
+        self.target().extend(refs);
         syn::visit::visit_field(self, node);
     }
 
