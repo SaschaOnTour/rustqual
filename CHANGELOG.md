@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-06-05
+
+Minor release with one **breaking** config change. rustqual stops shipping a
+blunt name-based ignore for `main`/`run`/`visit_*` and instead makes its own
+analyzer pass every dimension on its own merits — which required teaching two
+analyzers to see code they were structurally blind to (syn-visitor dispatch and
+trait-method cohesion). The `ignore_functions` option is removed.
+
+### Removed
+- **BREAKING: the `ignore_functions` config option is gone.** It excluded
+  matching functions from *every* dimension — a far broader effect than its
+  stated purpose (papering over call-graph blindness for trait-dispatched
+  methods), and the single largest hidden suppression in a project. A
+  `rustqual.toml` that still sets `ignore_functions` now fails to parse
+  (`deny_unknown_fields`). **Migration:** delete the key. For the rare function
+  that genuinely cannot be analyzed, use `// qual:allow(<dim>)`, `// qual:api`,
+  `// qual:test_helper`, or `exclude_files` instead.
+
+### Changed
+- **TQ-003 (untested) now models syn-visitor dispatch as real call-graph
+  edges.** Previously a visitor's `visit_*` overrides and their helper methods
+  looked unreachable from tests (the static call graph can't follow syn's
+  `visit_block → visit_expr` dispatch), and the gap was hidden by seeding every
+  ignored function as "implicitly tested." That blanket assumption is replaced:
+  for each visitor type the helper methods its overrides call are recorded, and
+  at each drive-site (`x.visit_block(..)`, `syn::visit::visit_*(&mut x, ..)`,
+  `visit_all_files(.., &mut x)`) the driven type is resolved locally and
+  `driver → helpers` edges are added. Testedness now flows only when a test
+  actually drives the visitor — an undriven visitor is still flagged.
+- **SRP cohesion (LCOM4) is more faithful to the canonical metric.** Two fixes,
+  both monotonic (they only *merge* components, never create new findings):
+  - Non-mechanical trait methods (e.g. a `syn::Visit` impl) now *bridge* the
+    inherent methods they tie together — via their field footprint **and** the
+    methods they call — without being counted as responsibility nodes. This
+    stops a struct whose core logic lives in a behavior trait (visitor, walker)
+    from fragmenting into false god-structs. Mechanical traits
+    (`Display`/`Debug`/`From`/`Serialize`/`PartialEq`/`Hash`/`Default`/`Clone`/…)
+    stay excluded so they can't mask genuine god-structs.
+  - Methods connected by a `self.other()` call are now unioned, matching the
+    canonical LCOM4 definition (methods cohere when they share a field **or**
+    call one another).
+
+### Internal
+- `main`, `run`, and all `visit_*` methods are no longer name-ignored; every
+  function in rustqual is analyzed by its own rules. The fat AST visitors
+  (`Normalizer`, `BodyVisitor`, and several collectors) were refactored to
+  per-node category dispatch, and the composition root `run()` was decomposed
+  into phase operations — so rustqual dogfoods its own complexity, IOSP, and
+  cohesion rules on its own visitor code.
+
 ## [1.4.2] - 2026-06-04
 
 Patch release: a false-positive fix found while applying 1.4.1. SIT stops

@@ -12,7 +12,6 @@ Below is the full schema, grouped by section. Every field has a default; a minim
 
 | Key | Default | Meaning |
 |---|---|---|
-| `ignore_functions` | `["main", "run", "visit_*"]` | Function names (or `prefix*` patterns) excluded from all dimensions |
 | `exclude_files` | `[]` | Glob patterns for files to skip entirely |
 | `strict_closures` | `false` | Treat closures as logic (stricter IOSP) |
 | `strict_iterator_chains` | `false` | Treat `.map`/`.filter`/`.fold` as logic |
@@ -21,10 +20,16 @@ Below is the full schema, grouped by section. Every field has a default; a minim
 | `max_suppression_ratio` | `0.05` | Cap on `qual:allow` annotations as fraction of functions |
 
 ```toml
-ignore_functions = ["main", "run", "visit_*"]
 exclude_files = ["examples/**", "vendor/**"]
 max_suppression_ratio = 0.05
 ```
+
+> **Removed in 1.5.0:** the `ignore_functions` option no longer exists. It
+> excluded matching functions from *every* dimension — too blunt — and a
+> `rustqual.toml` that still sets it will fail to parse. To exempt code, use
+> `// qual:allow(<dim>)`, `// qual:api`, `// qual:test_helper`, or
+> `exclude_files`. (`visit_*` methods no longer need exempting: TQ-003 models
+> syn-visitor dispatch directly, and SRP cohesion accounts for trait methods.)
 
 ## `[complexity]`
 
@@ -331,7 +336,6 @@ Aggregation strategies: `"loc_weighted"` (default), `"unweighted"`.
 Most projects converge on a layout like:
 
 ```toml
-ignore_functions = ["main", "run"]
 exclude_files = ["examples/**"]
 max_suppression_ratio = 0.05
 

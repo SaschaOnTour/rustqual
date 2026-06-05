@@ -72,7 +72,7 @@ pub fn assert_in_range(actual: f64, expected: f64, tol: f64) {
 
 Same exclusions as `qual:api` (`DRY-002`, `TQ-003`). Use when a helper lives in `src/` so it's importable from integration tests in `tests/`, but isn't called from any production code.
 
-Differs from `ignore_functions` in `rustqual.toml`: `ignore_functions` silences *every* dimension on a function, while `qual:test_helper` only silences DRY-002 and TQ-003 — complexity / SRP / IOSP all still apply.
+Unlike a blanket exclusion, `qual:test_helper` only silences DRY-002 and TQ-003 — complexity / SRP / IOSP all still apply. (rustqual has no function-name ignore list; the blunt `ignore_functions` option was removed in 1.5.0.)
 
 ## `// qual:inverse(<fn>)` — inverse method pairs
 
@@ -153,5 +153,5 @@ Files marked as reexport points in `[architecture.reexport_points]` (typically `
 ## Related
 
 - [reference-rules.md](./reference-rules.md) — every rule code each annotation can suppress
-- [reference-configuration.md](./reference-configuration.md) — `max_suppression_ratio`, `ignore_functions`, layer rules
+- [reference-configuration.md](./reference-configuration.md) — `max_suppression_ratio`, `exclude_files`, layer rules
 - [legacy-adoption.md](./legacy-adoption.md) — adoption patterns using suppressions vs baselines
