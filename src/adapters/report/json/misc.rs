@@ -71,6 +71,7 @@ pub(super) fn build_orphans(
         .map(|w| JsonOrphanSuppression {
             file: w.file.clone(),
             line: w.line,
+            kind: w.kind.json_kind(),
             dimensions: w.dimensions.iter().map(|d| format!("{d}")).collect(),
             target: w.target_spec(),
             reason: w.reason.clone(),

@@ -35,7 +35,12 @@ covers is reported.
   it covers is reported as an `ORPHAN_SUPPRESSION` — *"too-loose … tighten to
   ~value or remove"* — so a pin can no longer silently absorb regressions up to
   a far-away ceiling. A pin that re-fires (below its value) is left untouched,
-  not flagged. New `[suppression].pin_headroom` knob (default `0.10`).
+  not flagged. New `[suppression].pin_headroom` knob (default `0.10`). Every
+  reporter projects the orphan's `kind` (stale vs too-loose) and its targeted
+  finding-kind: text/SARIF/GitHub/AI/HTML lead with the status word, and the
+  JSON output gains stable `kind` (`"stale"`/`"too_loose"`) and `target`
+  (`"file_length=400"`) fields so CI consumers branch on the remedy without
+  parsing the message.
 
 ### Removed
 - **BREAKING: the `ignore_functions` config option is gone.** It excluded

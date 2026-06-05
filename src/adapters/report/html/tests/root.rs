@@ -238,4 +238,8 @@ fn html_reporter_renders_orphans_via_snapshot_view() {
         html.contains("Orphan") || html.contains("ORPHAN"),
         "HTML must include orphan section heading from snapshot.orphans, got:\n{html}"
     );
+    assert!(
+        html.contains("<th>Status</th>") && html.contains("<td>stale</td>"),
+        "HTML orphan table must carry a Status column, got:\n{html}"
+    );
 }

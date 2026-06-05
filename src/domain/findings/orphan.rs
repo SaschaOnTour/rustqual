@@ -28,13 +28,23 @@ pub enum OrphanKind {
 }
 
 impl OrphanKind {
-    /// Lead word for reports: `stale` for an unmatched/malformed marker,
+    /// Lead word for human reports: `stale` for an unmatched/malformed marker,
     /// `too-loose` for a metric pin above its headroom. Centralised so every
     /// reporter renders the same word for the same kind.
     pub fn status_word(self) -> &'static str {
         match self {
             OrphanKind::Stale => "stale",
             OrphanKind::PinTooLoose => "too-loose",
+        }
+    }
+
+    /// Stable snake_case token for structured output (JSON/AI), so machine
+    /// consumers can branch on the remedy — `stale` → delete the marker,
+    /// `too_loose` → tighten the pin — without parsing the human message.
+    pub fn json_kind(self) -> &'static str {
+        match self {
+            OrphanKind::Stale => "stale",
+            OrphanKind::PinTooLoose => "too_loose",
         }
     }
 }

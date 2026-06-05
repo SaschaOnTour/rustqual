@@ -11,7 +11,7 @@ pub(super) fn format_orphan_suppressions_section(orphans: &[OrphanSuppression]) 
         "<details>\n<summary>Orphan Suppressions</summary>\n\
          <div class=\"detail-content\">\n\
          <table>\n<thead><tr>\
-         <th>File</th><th>Line</th><th>Scope</th><th>Reason</th>\
+         <th>File</th><th>Line</th><th>Status</th><th>Scope</th><th>Reason</th>\
          </tr></thead>\n<tbody>\n",
     );
     orphans.iter().for_each(|w| html.push_str(&render_row(w)));
@@ -33,9 +33,10 @@ fn render_row(w: &OrphanSuppression) -> String {
     let scope = format!("{dims}{}", html_escape(&w.target_suffix()));
     let reason = w.reason.as_deref().map(html_escape).unwrap_or_default();
     format!(
-        "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n",
+        "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n",
         html_escape(&w.file),
         w.line,
+        w.kind.status_word(),
         scope,
         reason,
     )
