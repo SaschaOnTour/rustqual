@@ -4,69 +4,77 @@ use crate::config::sections::BoilerplateConfig;
 /// Minimum cloned fields for clone-heavy conversion detection.
 const MIN_CLONE_FIELDS: usize = 3;
 
-// qual:allow(complexity) reason: "clone detection with closure-based body check"
 /// Detect struct construction with many `.clone()` calls on fields.
-/// Operation: body inspection logic; helper calls in closures.
+/// Operation: per-file scan, detection delegated to helpers in closures.
 pub(super) fn check_clone_heavy_conversion(
     parsed: &[(String, String, syn::File)],
     config: &BoilerplateConfig,
 ) -> Vec<BoilerplateFind> {
     pattern_guard!("BP-008", config);
-    let mut findings = Vec::new();
-    for (file, _, syntax) in parsed {
-        let check_body = |block: &syn::Block, line: usize| {
-            for stmt in &block.stmts {
-                let expr = match stmt {
-                    syn::Stmt::Expr(e, _) => e,
-                    syn::Stmt::Local(local) => {
-                        if let Some(init) = &local.init {
-                            &*init.expr
-                        } else {
-                            continue;
-                        }
-                    }
-                    _ => continue,
-                };
-                let clones = count_field_clones(expr);
-                if clones >= MIN_CLONE_FIELDS {
-                    return Some(BoilerplateFind {
-                        pattern_id: "BP-008".to_string(),
-                        file: file.clone(),
-                        line,
-                        struct_name: None,
-                        description: format!(
-                            "Struct construction with {clones} .clone() calls — consider Into/From or ownership transfer"
-                        ),
-                        suggestion:
-                            "Consider implementing From/Into or restructuring to avoid cloning"
-                                .to_string(),
-                        suppressed: false,
-                    });
-                }
-            }
-            None
-        };
-        for item in &syntax.items {
-            match item {
-                syn::Item::Fn(f) => {
-                    if let Some(finding) = check_body(&f.block, f.sig.ident.span().start().line) {
-                        findings.push(finding);
-                    }
-                }
-                syn::Item::Impl(imp) => {
-                    for sub in &imp.items {
-                        if let syn::ImplItem::Fn(m) = sub {
-                            if let Some(finding) =
-                                check_body(&m.block, m.sig.ident.span().start().line)
-                            {
-                                findings.push(finding);
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
+    parsed
+        .iter()
+        .flat_map(|(file, _, syntax)| {
+            syntax
+                .items
+                .iter()
+                .flat_map(item_fn_bodies)
+                .filter_map(|(block, line)| clone_heavy_find(block, file, line))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// Yield each `(body, decl-line)` for an item: a free fn, or every method of an
+/// impl block. Other items contribute nothing.
+/// Operation: item match + impl-method filter in a closure.
+fn item_fn_bodies(item: &syn::Item) -> Vec<(&syn::Block, usize)> {
+    match item {
+        syn::Item::Fn(f) => vec![(&f.block, f.sig.ident.span().start().line)],
+        syn::Item::Impl(imp) => imp
+            .items
+            .iter()
+            .filter_map(|sub| match sub {
+                syn::ImplItem::Fn(m) => Some((&m.block, m.sig.ident.span().start().line)),
+                _ => None,
+            })
+            .collect(),
+        _ => vec![],
     }
-    findings
+}
+
+/// Find the first statement in `block` whose value is a struct construction with
+/// `>= MIN_CLONE_FIELDS` cloned fields, as a BP-008 find.
+/// Operation: statement scan via closures.
+fn clone_heavy_find(block: &syn::Block, file: &str, line: usize) -> Option<BoilerplateFind> {
+    block.stmts.iter().find_map(|stmt| {
+        let clones = count_field_clones(stmt_value(stmt)?);
+        (clones >= MIN_CLONE_FIELDS).then(|| bp008(file, line, clones))
+    })
+}
+
+/// The expression a statement evaluates: a tail/expr statement, or a local's
+/// initializer. Items and empty locals have no value.
+/// Operation: statement match, no own calls.
+fn stmt_value(stmt: &syn::Stmt) -> Option<&syn::Expr> {
+    match stmt {
+        syn::Stmt::Expr(e, _) => Some(e),
+        syn::Stmt::Local(local) => local.init.as_ref().map(|init| &*init.expr),
+        _ => None,
+    }
+}
+
+/// Build the BP-008 finding for `clones` cloned fields at `file:line`.
+/// Operation: struct construction, no own calls.
+fn bp008(file: &str, line: usize, clones: usize) -> BoilerplateFind {
+    BoilerplateFind {
+        pattern_id: "BP-008".to_string(),
+        file: file.to_string(),
+        line,
+        struct_name: None,
+        description: format!(
+            "Struct construction with {clones} .clone() calls — consider Into/From or ownership transfer"
+        ),
+        suggestion: "Consider implementing From/Into or restructuring to avoid cloning".to_string(),
+        suppressed: false,
+    }
 }
