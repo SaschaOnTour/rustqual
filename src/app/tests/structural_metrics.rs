@@ -52,6 +52,34 @@ fn structural_suppression_window_and_dimension() {
 }
 
 #[test]
+fn targeted_suppression_does_not_suppress_structural_warning() {
+    // Structural findings (BTC/SLM/NMS, OI/SIT/DEH/IET) are NOT in the
+    // suppression-target vocabulary, so a TARGETED marker — even one covering
+    // the right dimension and in-window — must not silence them. Only a blanket
+    // marker would, and blanket SRP/Coupling are rejected by the parser, so a
+    // structural finding is effectively unsuppressible. Mirrors the orphan side,
+    // where structural positions carry `target: None`.
+    let mut analysis = StructuralAnalysis {
+        warnings: vec![warning(5, Dimension::Coupling, false)],
+    };
+    let sups = [(
+        "test.rs".to_string(),
+        vec![crate::findings::Suppression {
+            line: 5,
+            dimensions: vec![Dimension::Coupling],
+            reason: Some("r".into()),
+            target: Some(crate::domain::SuppressionTarget::Boolean { name: "sdp".into() }),
+        }],
+    )]
+    .into();
+    mark_structural_suppressions(Some(&mut analysis), &sups);
+    assert!(
+        !analysis.warnings[0].suppressed,
+        "a targeted coupling marker must not hide a structural finding"
+    );
+}
+
+#[test]
 fn count_structural_warnings_splits_by_dimension() {
     // SRP: 2 unsuppressed + 1 suppressed → 2. Coupling: 1 unsuppressed + 1
     // suppressed → 1. Distinct counts pin the `!suppressed` filter, both match

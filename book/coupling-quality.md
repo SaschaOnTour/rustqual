@@ -73,7 +73,7 @@ check_iet = true
 
 **SDP violation**: invert the dependency — typically by introducing a trait in the stable module that the unstable one implements. The stable module then knows nothing about the unstable one.
 
-**Orphaned impl**: move the `impl` block next to the type definition, or — if it's a trait impl that *can't* live there (orphan rules) — accept it and add `// qual:allow(coupling)`.
+**Orphaned impl**: move the `impl` block next to the type definition, or — if it's a trait impl that *can't* live there (orphan rules) — accept it (structural findings are not suppressible; see Suppression).
 
 **Single-impl trait**: inline the trait. Most "interface for testability" cases can be replaced by direct dependency injection of the concrete type, or by a trait that has more than one real impl somewhere in the codebase.
 
@@ -83,16 +83,16 @@ check_iet = true
 
 ## Suppression
 
-Coupling warnings are *module-level*, not function-level. The `qual:allow(coupling)` annotation on a single function doesn't silence them — that's intentional. To suppress a coupling finding for a whole module:
+Coupling **metric** findings (instability, fan-in, fan-out) are *module-level*, not function-level. Suppress one for a whole module with an inner doc-comment that names the metric — a bare `allow(coupling)` is rejected since coupling has targets:
 
 ```rust
 // At the top of the module file:
-//! qual:allow(coupling) — orchestration layer, intentionally depends on every adapter.
+//! qual:allow(coupling, max_instability=0.95) reason: "orchestration layer, intentionally depends on every adapter."
 ```
 
-Inner doc-comment form (`//!`) attaches to the module, not to a single item.
+The inner `//!` form attaches to the module, not a single item; the pin re-fires if the metric climbs past it.
 
-For structural-binary checks (`OI`, `SIT`, `DEH`, `IET`) which target specific items, use `// qual:allow(coupling)` at the impl/trait/use site.
+The structural-binary checks (`OI`, `SIT`, `DEH`, `IET`) are **not** in the suppression vocabulary and cannot be silenced with `qual:allow` — fix the underlying smell (move the impl, inline the single-impl trait, replace the downcast) or it counts. (`SIT` already tolerates `#[cfg(test)]` test doubles.)
 
 ## Related
 

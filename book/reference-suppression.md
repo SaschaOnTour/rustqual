@@ -105,17 +105,17 @@ Removes self-calls from `own_calls` before the leaf-reclassification pass. Usefu
 
 ## Module-level suppression
 
-For *coupling* findings (which are module-global, not function-local), use the inner-doc form:
+*Coupling* findings are module-global, not function-local, so a coupling marker applies to the whole module. Use the inner-doc form, and — since coupling has targets — name the metric you mean (a bare `allow(coupling)` is rejected by the flip):
 
 ```rust
-//! qual:allow(coupling) — orchestration layer, intentionally depends on every adapter.
+//! qual:allow(coupling, max_instability=0.95) reason: "orchestration layer, intentionally depends on every adapter."
 
 use crate::adapters::a;
 use crate::adapters::b;
 // …
 ```
 
-The `//!` form attaches to the module, not to a single item.
+The `//!` form attaches to the module, not to a single item. The pin re-fires if instability climbs past it. Note that targeted coupling markers are module-global and have no line-anchored finding, so they are *not* orphan- or too-loose-checked (a deliberate blind spot — see Orphan detection).
 
 ## Suppression ratio (`SUP-001`)
 
@@ -149,13 +149,13 @@ Files marked as reexport points in `[architecture.reexport_points]` (typically `
 
 | You want… | Use |
 |---|---|
-| To skip one finding in production code temporarily | `// qual:allow(<dim>)` with rationale |
+| To skip one finding-kind in production code | `// qual:allow(<dim>, <target>)` with `reason:` (or bare `// qual:allow(iosp)`) |
 | To mark a function as exposed externally | `// qual:api` |
 | To mark a `src/` helper used only from `tests/` | `// qual:test_helper` |
 | To accept structurally-similar inverse pairs | `// qual:inverse(<peer>)` |
 | To allow a recursive helper through IOSP | `// qual:recursive` |
 | To accept FFI / `unsafe` blocks | `// qual:allow(unsafe)` |
-| To exempt a whole module from coupling | `//! qual:allow(coupling)` |
+| To exempt a module's coupling metric | `//! qual:allow(coupling, max_instability=N)` with `reason:` |
 
 ## Related
 
