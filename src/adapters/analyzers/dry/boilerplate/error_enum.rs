@@ -1,14 +1,13 @@
 use syn::spanned::Spanned;
 
-use super::BoilerplateFind;
+use super::{self_type_of, trait_name_of, BoilerplateFind};
 use crate::config::sections::BoilerplateConfig;
 
 /// Minimum From impls to flag as error enum boilerplate.
 const MIN_FROM_IMPLS_FOR_ERROR: usize = 3;
 
-// qual:allow(complexity) reason: "From impl grouping requires nested AST inspection"
 /// Detect enums with multiple trivial `impl From<T>` for wrapping errors.
-/// Operation: grouping + counting logic; helper calls in closures.
+/// Operation: per-file grouping, detection delegated to helpers in closures.
 pub(super) fn check_error_enum_boilerplate(
     parsed: &[(String, String, syn::File)],
     config: &BoilerplateConfig,
@@ -19,70 +18,75 @@ pub(super) fn check_error_enum_boilerplate(
     } else {
         "Consider using a derive macro to generate From implementations for error variants"
     };
-    let mut findings = Vec::new();
-    for (file, _, syntax) in parsed {
-        // Collect all trivial From<T> impls grouped by target type
-        let mut from_counts: std::collections::HashMap<String, (usize, usize)> =
-            std::collections::HashMap::new();
-        for item in &syntax.items {
-            let imp = if let syn::Item::Impl(imp) = item {
-                imp
-            } else {
-                continue;
-            };
-            let is_from = imp.trait_.as_ref().is_some_and(|(_, path, _)| {
-                path.segments.last().is_some_and(|s| s.ident == "From")
-            });
-            if !is_from {
-                continue;
-            }
-            let self_name = if let syn::Type::Path(tp) = &*imp.self_ty {
-                if let Some(seg) = tp.path.segments.last() {
-                    seg.ident.to_string()
-                } else {
-                    continue;
-                }
-            } else {
-                continue;
-            };
-            // Check if single method with simple wrapping body
-            let methods: Vec<_> = imp
-                .items
-                .iter()
-                .filter_map(|i| {
-                    if let syn::ImplItem::Fn(m) = i {
-                        Some(m)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            if methods.len() == 1 && methods[0].sig.ident == "from" {
-                let has_single_expr = methods[0].block.stmts.len() == 1
-                    && matches!(&methods[0].block.stmts[0], syn::Stmt::Expr(_, None));
-                if has_single_expr {
-                    let entry = from_counts
-                        .entry(self_name)
-                        .or_insert((0, imp.self_ty.span().start().line));
-                    entry.0 += 1;
-                }
-            }
-        }
-        for (type_name, (count, line)) in &from_counts {
-            if *count >= MIN_FROM_IMPLS_FOR_ERROR {
-                findings.push(BoilerplateFind {
-                    pattern_id: "BP-007".to_string(),
-                    file: file.clone(),
-                    line: *line,
-                    struct_name: Some(type_name.clone()),
-                    description: format!(
-                        "{count} trivial From impls for {type_name} — error enum boilerplate"
-                    ),
-                    suggestion: suggest.to_string(),
-                    suppressed: false,
-                });
-            }
-        }
+    parsed
+        .iter()
+        .flat_map(|(file, _, syntax)| {
+            count_from_impls(syntax)
+                .into_iter()
+                .filter(|(_, (count, _))| *count >= MIN_FROM_IMPLS_FOR_ERROR)
+                .map(|(name, (count, line))| bp007(file, line, &name, count, suggest))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// Group trivial `From<_>` impls by their target type → `(count, first line)`.
+/// Operation: filter_map + fold via closures.
+fn count_from_impls(syntax: &syn::File) -> std::collections::HashMap<String, (usize, usize)> {
+    let mut counts: std::collections::HashMap<String, (usize, usize)> =
+        std::collections::HashMap::new();
+    syntax
+        .items
+        .iter()
+        .filter_map(trivial_from_impl)
+        .for_each(|(name, line)| {
+            counts.entry(name).or_insert((0, line)).0 += 1;
+        });
+    counts
+}
+
+/// `(target type, decl line)` for an item that is a single-method `from`
+/// `impl From<_>` with a one-expression body, else `None`.
+/// Operation: trait/type checks via helpers in closures.
+fn trivial_from_impl(item: &syn::Item) -> Option<(String, usize)> {
+    let syn::Item::Impl(imp) = item else {
+        return None;
+    };
+    if trait_name_of(imp).as_deref() != Some("From") || !is_single_expr_from(imp) {
+        return None;
     }
-    findings
+    Some((self_type_of(imp)?, imp.self_ty.span().start().line))
+}
+
+/// Whether an impl has exactly one `from` method with a single-expression body.
+/// Operation: method filter + shape match in closures.
+fn is_single_expr_from(imp: &syn::ItemImpl) -> bool {
+    let methods: Vec<_> = imp
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            syn::ImplItem::Fn(m) => Some(m),
+            _ => None,
+        })
+        .collect();
+    methods.len() == 1
+        && methods[0].sig.ident == "from"
+        && methods[0].block.stmts.len() == 1
+        && matches!(&methods[0].block.stmts[0], syn::Stmt::Expr(_, None))
+}
+
+/// Build a BP-007 error-enum finding.
+/// Operation: struct construction, no own calls.
+fn bp007(file: &str, line: usize, type_name: &str, count: usize, suggest: &str) -> BoilerplateFind {
+    BoilerplateFind {
+        pattern_id: "BP-007".to_string(),
+        file: file.to_string(),
+        line,
+        struct_name: Some(type_name.to_string()),
+        description: format!(
+            "{count} trivial From impls for {type_name} — error enum boilerplate"
+        ),
+        suggestion: suggest.to_string(),
+        suppressed: false,
+    }
 }
