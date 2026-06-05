@@ -12,10 +12,7 @@
 #     und `DimensionAnalyzer` keine eigenen Calls.
 # `test_*` entfernt: Test-Aware-Analyse (is_test) erledigt die Filterung
 # jetzt strukturell; ein Namens-Präfix ist nicht mehr nötig.
-ignore_functions = [
-    "main",
-    "run",
-]
+ignore_functions = []
 
 # Glob patterns for files to exclude.
 # `examples/**` hält per-rule Fixture-Crates, die NICHT Teil rustquals sind —
