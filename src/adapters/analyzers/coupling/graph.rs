@@ -11,7 +11,12 @@ pub(super) fn build_module_graph(parsed: &[(String, String, syn::File)]) -> Modu
     let mut forward = vec![HashSet::<usize>::new(); modules.len()];
     for (path, _, syntax) in parsed {
         let source_idx = index[&file_to_module(path)];
-        add_edges(&mut forward[source_idx], source_idx, &crate_dep_modules(syntax), &index);
+        add_edges(
+            &mut forward[source_idx],
+            source_idx,
+            &crate_dep_modules(syntax),
+            &index,
+        );
     }
     ModuleGraph {
         modules,

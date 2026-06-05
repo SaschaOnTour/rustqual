@@ -65,7 +65,10 @@ fn is_trivial_wrap(expr: &syn::Expr) -> bool {
     match expr {
         syn::Expr::Call(c) => c.args.iter().all(|a| matches!(a, syn::Expr::Path(_))),
         syn::Expr::Struct(s) => {
-            s.rest.is_none() && s.fields.iter().all(|f| matches!(f.expr, syn::Expr::Path(_)))
+            s.rest.is_none()
+                && s.fields
+                    .iter()
+                    .all(|f| matches!(f.expr, syn::Expr::Path(_)))
         }
         _ => false,
     }

@@ -83,9 +83,7 @@ fn bp007(file: &str, line: usize, type_name: &str, count: usize, suggest: &str) 
         file: file.to_string(),
         line,
         struct_name: Some(type_name.to_string()),
-        description: format!(
-            "{count} trivial From impls for {type_name} — error enum boilerplate"
-        ),
+        description: format!("{count} trivial From impls for {type_name} — error enum boilerplate"),
         suggestion: suggest.to_string(),
         suppressed: false,
     }

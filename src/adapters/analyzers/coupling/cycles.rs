@@ -100,7 +100,10 @@ fn collect_component(start: usize, reverse: &[Vec<usize>], visited: &mut [bool])
 /// A `CycleReport` carrying the SCC's module names, sorted.
 /// Operation: name lookup + sort via closures.
 fn scc_report(graph: &ModuleGraph, component: &[usize]) -> CycleReport {
-    let mut names: Vec<String> = component.iter().map(|&i| graph.modules[i].clone()).collect();
+    let mut names: Vec<String> = component
+        .iter()
+        .map(|&i| graph.modules[i].clone())
+        .collect();
     names.sort();
     CycleReport { modules: names }
 }

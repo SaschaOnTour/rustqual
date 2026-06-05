@@ -20,7 +20,11 @@ pub(super) fn check_builder_boilerplate(
 /// BP-004 find for an item: a non-trait impl with at least
 /// `MIN_BUILDER_METHOD_COUNT` builder-style methods.
 /// Operation: method count + find building via closures.
-fn builder_find(item: &syn::Item, file: &str, config: &BoilerplateConfig) -> Option<BoilerplateFind> {
+fn builder_find(
+    item: &syn::Item,
+    file: &str,
+    config: &BoilerplateConfig,
+) -> Option<BoilerplateFind> {
     let syn::Item::Impl(imp) = item else {
         return None;
     };
