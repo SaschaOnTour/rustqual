@@ -1,5 +1,6 @@
 pub(crate) mod assertions;
 pub(crate) mod coverage;
+pub(crate) mod dispatch;
 pub(crate) mod lcov;
 pub(crate) mod sut;
 pub(crate) mod untested;
@@ -196,8 +197,13 @@ pub(crate) fn build_reaches_prod_set(
 pub(crate) fn analyze_test_quality(ctx: &TqContext<'_>) -> TqAnalysis {
     let mut warnings = Vec::new();
 
-    // Build complete call graph (includes ignored functions like visit_*)
-    let full_graph = build_full_call_graph(ctx.parsed);
+    // Build complete call graph, then add real edges that model syn-visitor
+    // dispatch (driver → the helper methods its visitor's overrides call), so
+    // TQ-003 reachability flows through visitors the same way it does at runtime.
+    let mut full_graph = build_full_call_graph(ctx.parsed);
+    for (from, tos) in dispatch::visitor_dispatch_edges(ctx.parsed) {
+        full_graph.entry(from).or_default().extend(tos);
+    }
     let reaches_prod = build_reaches_prod_set(&full_graph, ctx.declared_fns);
 
     let assertion_free = assertions::detect_assertion_free_tests(
@@ -209,18 +215,10 @@ pub(crate) fn analyze_test_quality(ctx: &TqContext<'_>) -> TqAnalysis {
     let no_sut = sut::detect_no_sut_tests(ctx.parsed, ctx.scope, ctx.declared_fns, &reaches_prod);
     warnings.extend(no_sut);
 
-    // Seed from test_calls + ignored functions (entry points, visitors are implicitly tested)
-    let seed: HashSet<String> = ctx
-        .test_calls
-        .iter()
-        .cloned()
-        .chain(
-            ctx.declared_fns
-                .iter()
-                .filter(|f| ctx.config.is_ignored_function(&f.name))
-                .map(|f| f.name.clone()),
-        )
-        .collect();
+    // Seed the tested set from test-reached calls only. Visitor `visit_*`
+    // overrides and their helpers become reachable through the real dispatch
+    // edges added above — no blanket "visitors are implicitly tested" seed.
+    let seed: HashSet<String> = ctx.test_calls.iter().cloned().collect();
     let transitive_tested = untested::build_transitive_tested_set(&seed, &full_graph);
 
     let untested_fns = untested::detect_untested_functions(
