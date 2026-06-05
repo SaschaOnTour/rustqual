@@ -52,13 +52,12 @@ fn structural_suppression_window_and_dimension() {
 }
 
 #[test]
-fn targeted_suppression_does_not_suppress_structural_warning() {
-    // Structural findings (BTC/SLM/NMS, OI/SIT/DEH/IET) are NOT in the
-    // suppression-target vocabulary, so a TARGETED marker — even one covering
-    // the right dimension and in-window — must not silence them. Only a blanket
-    // marker would, and blanket SRP/Coupling are rejected by the parser, so a
-    // structural finding is effectively unsuppressible. Mirrors the orphan side,
-    // where structural positions carry `target: None`.
+fn unrelated_targeted_marker_does_not_suppress_structural_warning() {
+    // A targeted marker silences only its OWN target. The warning is an SLM
+    // finding (target `slm`); an `allow(coupling, sdp)` marker — valid, covering
+    // the dimension, in-window — names a different target, so it must not
+    // silence it. (Before the fix, the dimension-only `covers()` check let any
+    // targeted marker hide structural findings.)
     let mut analysis = StructuralAnalysis {
         warnings: vec![warning(5, Dimension::Coupling, false)],
     };
@@ -75,7 +74,52 @@ fn targeted_suppression_does_not_suppress_structural_warning() {
     mark_structural_suppressions(Some(&mut analysis), &sups);
     assert!(
         !analysis.warnings[0].suppressed,
-        "a targeted coupling marker must not hide a structural finding"
+        "a targeted coupling marker for a different target must not hide a structural finding"
+    );
+}
+
+fn structural_target(
+    line: usize,
+    dim: Dimension,
+    target: &str,
+) -> std::collections::HashMap<String, Vec<crate::findings::Suppression>> {
+    [(
+        "test.rs".to_string(),
+        vec![crate::findings::Suppression {
+            line,
+            dimensions: vec![dim],
+            reason: Some("r".into()),
+            target: Some(crate::domain::SuppressionTarget::Boolean {
+                name: target.into(),
+            }),
+        }],
+    )]
+    .into()
+}
+
+#[test]
+fn structural_target_suppresses_its_own_kind() {
+    // `warning(..)` is an SLM finding → `allow(srp, slm)` silences it.
+    let mut a = StructuralAnalysis {
+        warnings: vec![warning(5, Dimension::Srp, false)],
+    };
+    mark_structural_suppressions(Some(&mut a), &structural_target(5, Dimension::Srp, "slm"));
+    assert!(
+        a.warnings[0].suppressed,
+        "allow(srp, slm) must silence an SLM finding"
+    );
+}
+
+#[test]
+fn structural_target_does_not_suppress_a_different_kind() {
+    // `allow(srp, btc)` must NOT silence an SLM finding.
+    let mut a = StructuralAnalysis {
+        warnings: vec![warning(5, Dimension::Srp, false)],
+    };
+    mark_structural_suppressions(Some(&mut a), &structural_target(5, Dimension::Srp, "btc"));
+    assert!(
+        !a.warnings[0].suppressed,
+        "allow(srp, btc) must not silence an SLM finding"
     );
 }
 

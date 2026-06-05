@@ -137,7 +137,7 @@ For functions you genuinely cannot refactor right now (legacy entry points, gene
 // qual:allow(iosp) — match-dispatcher; arms intentionally inlined for codegen
 fn dispatch(cmd: Command) -> Result<()> { /* … */ }
 
-// qual:allow(complexity) — large lookup table; splitting hurts readability
+// qual:allow(complexity, max_cyclomatic=20) reason: "large lookup table; splitting hurts readability"
 fn rule_table() -> &'static [Rule] { /* … */ }
 
 // qual:allow(unsafe) — FFI boundary, audited 2026-Q1

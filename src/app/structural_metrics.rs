@@ -21,14 +21,15 @@ pub(super) fn compute_structural(
 /// Operation: iteration + suppression matching, no own calls.
 /// Uses the warning's dimension (SRP or Coupling) to match suppressions.
 ///
-/// Structural checks (BTC/SLM/NMS on the SRP side, OI/SIT/DEH/IET on the
-/// coupling side) are NOT part of either dimension's suppression-target
-/// vocabulary, so only a *blanket* marker (`target.is_none()`) may silence
-/// them — a targeted marker like `allow(coupling, sdp)` silences its own
-/// finding-kind, not an unrelated structural one. This mirrors the orphan
-/// detector, where structural positions carry `target: None` and so match
-/// blanket markers only. Since blanket SRP/Coupling markers are rejected by
-/// the parser ("the flip"), a structural finding is effectively unsuppressible.
+/// Each structural check has its own boolean suppression target named by its
+/// lowercased code (`oi`/`sit`/`deh`/`iet` on the coupling side,
+/// `btc`/`slm`/`nms` on the SRP side), so a genuinely-unfixable finding (an
+/// orphan-rule-forced impl, a single-impl API boundary, a `downcast` plugin
+/// seam) can be silenced by name: `// qual:allow(coupling, oi) reason: "…"`.
+/// A targeted marker silences only its own kind — `allow(coupling, sdp)` does
+/// not touch an `OI` finding — and a metric coupling pin never silences a
+/// structural one (its `value` is `None`). This goes through `suppresses` so
+/// the marking and orphan-detection layers stay in lockstep.
 pub(super) fn mark_structural_suppressions(
     structural: Option<&mut crate::adapters::analyzers::structural::StructuralAnalysis>,
     suppression_lines: &std::collections::HashMap<String, Vec<Suppression>>,
@@ -41,7 +42,7 @@ pub(super) fn mark_structural_suppressions(
         if let Some(sups) = suppression_lines.get(&w.file) {
             w.suppressed = sups.iter().any(|sup| {
                 let in_window = sup.line <= w.line && w.line - sup.line <= window;
-                in_window && sup.target.is_none() && sup.covers(w.dimension)
+                in_window && sup.suppresses(w.dimension, w.kind.target_name(), None)
             });
         }
     });

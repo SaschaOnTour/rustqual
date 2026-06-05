@@ -109,7 +109,7 @@ inherited-default UFCS form. Workarounds are listed inline:
    both paths, but the call-graph edge ends up under the short
    `<method>:op` form. Workaround: write the impl at the file-level
    qualified path (`impl outer::Hidden { … }`) so impl-canonical
-   and caller-canonical agree, or `qual:allow(architecture)` at the
+   and caller-canonical agree, or `qual:allow(architecture, call_parity)` at the
    call-site.
 
 4. **Public function re-exports.** `mod private { pub fn op() {} }
@@ -228,7 +228,7 @@ Globs match against the *module path* (with `crate::` stripped), not the layer n
 For ad-hoc per-function suppression:
 
 ```rust
-// qual:allow(architecture) — internal capability, intentionally MCP-only
+// qual:allow(architecture, call_parity) reason: "internal capability, intentionally MCP-only"
 pub fn admin_purge() { /* … */ }
 ```
 

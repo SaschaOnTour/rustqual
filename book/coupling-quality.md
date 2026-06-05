@@ -73,7 +73,7 @@ check_iet = true
 
 **SDP violation**: invert the dependency — typically by introducing a trait in the stable module that the unstable one implements. The stable module then knows nothing about the unstable one.
 
-**Orphaned impl**: move the `impl` block next to the type definition, or — if it's a trait impl that *can't* live there (orphan rules) — accept it (structural findings are not suppressible; see Suppression).
+**Orphaned impl**: move the `impl` block next to the type definition, or — if it's a trait impl that *can't* live there (orphan rules) — accept it and add `// qual:allow(coupling, oi) reason: "orphan rules force this impl away from the type"`.
 
 **Single-impl trait**: inline the trait. Most "interface for testability" cases can be replaced by direct dependency injection of the concrete type, or by a trait that has more than one real impl somewhere in the codebase.
 
@@ -92,7 +92,14 @@ Coupling **metric** findings (instability, fan-in, fan-out) are *module-level*, 
 
 The inner `//!` form attaches to the module, not a single item; the pin re-fires if the metric climbs past it.
 
-The structural-binary checks (`OI`, `SIT`, `DEH`, `IET`) are **not** in the suppression vocabulary and cannot be silenced with `qual:allow` — fix the underlying smell (move the impl, inline the single-impl trait, replace the downcast) or it counts. (`SIT` already tolerates `#[cfg(test)]` test doubles.)
+The structural-binary checks each have their own boolean target named by the lowercased code — `oi`, `sit`, `deh`, `iet` (and `btc`, `slm`, `nms` on the SRP side). Prefer fixing the smell (move the impl, inline the single-impl trait, replace the downcast), but for the genuinely-unfixable case — an impl forced away by orphan rules, a single-impl trait that is a real API boundary, a `downcast` plugin seam — name it at the item:
+
+```rust
+// qual:allow(coupling, sit) reason: "public extension point; second impl lives downstream"
+pub trait Plugin { /* … */ }
+```
+
+(`SIT` already tolerates `#[cfg(test)]` test doubles, so test mocks don't need a marker.)
 
 ## Related
 

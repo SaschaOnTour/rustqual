@@ -127,7 +127,7 @@ test-exempt (`ERROR_HANDLING`, `MAGIC_NUMBER`, IOSP, `DRY-002` dead code,
 **production-only**: a test file's many independent `#[test]` fns are its
 purpose, not a low-cohesion smell. The **god-struct** check (`SRP-001`) *does*
 fire on test structs — a god-fixture wiring up many concerns is a real smell —
-but at production thresholds, with no separate test knob (use `// qual:allow(srp)`
+but at production thresholds, with no separate test knob (use `// qual:allow(srp, god_struct)`
 for the rare legitimate fixture). Which checks apply is **not** configurable;
 only the thresholds below are.
 

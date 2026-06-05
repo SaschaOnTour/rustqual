@@ -70,14 +70,19 @@ pub fn target_kind(dim: Dimension, name: &str) -> Option<TargetKind> {
         },
         D::Srp => match name {
             "file_length" | "max_independent_clusters" | "max_parameters" => Some(Metric),
-            "god_struct" => Some(Boolean),
+            // god_struct + the structural binary checks (BTC/SLM/NMS) — the
+            // latter so an orphan-rule-forced or API-stable case can be named.
+            "god_struct" | "btc" | "slm" | "nms" => Some(Boolean),
             _ => None,
         },
         D::Coupling => match name {
             "max_fan_in" | "max_fan_out" | "max_instability" => Some(Metric),
             // `cycle` is NOT here: circular dependencies are not suppressible
-            // via allow(coupling) (they always count toward the score).
-            "sdp" => Some(Boolean),
+            // via allow(coupling) (they always count toward the score). `sdp`
+            // plus the structural binary checks (OI/SIT/DEH/IET) — the latter
+            // so a genuinely-unfixable case (orphan rules, plugin downcast,
+            // single-impl API boundary) can be named.
+            "sdp" | "oi" | "sit" | "deh" | "iet" => Some(Boolean),
             _ => None,
         },
         D::Dry => match name {
@@ -124,8 +129,20 @@ pub fn target_names(dim: Dimension) -> &'static [&'static str] {
             "max_independent_clusters",
             "max_parameters",
             "god_struct",
+            "btc",
+            "slm",
+            "nms",
         ],
-        D::Coupling => &["max_fan_in", "max_fan_out", "max_instability", "sdp"],
+        D::Coupling => &[
+            "max_fan_in",
+            "max_fan_out",
+            "max_instability",
+            "sdp",
+            "oi",
+            "sit",
+            "deh",
+            "iet",
+        ],
         D::Dry => &[
             "duplicate",
             "fragment",

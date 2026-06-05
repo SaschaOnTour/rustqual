@@ -17,6 +17,15 @@ their own finding-kind, and a metric pin parked too far above the value it
 covers is reported.
 
 ### Added
+- **Structural binary checks are now suppressible by name.** Each structural
+  check has its own boolean target — `oi`/`sit`/`deh`/`iet` (coupling) and
+  `btc`/`slm`/`nms` (SRP), the lowercased rule code — so a genuinely-unfixable
+  finding can be silenced: `// qual:allow(coupling, oi) reason: "orphan rules
+  force this impl away from the type"`. A targeted marker silences only its own
+  kind, and marking + orphan-detection share one `structural::target_name_for_code`
+  mapping. (Before, structural findings could be silenced by *any* targeted
+  marker of the dimension via a dimension-only `covers()` check — a silent
+  over-suppression — yet had no way to be named deliberately.)
 - **Orphan detection is now target-aware, and reports too-loose metric pins.**
   A targeted `// qual:allow(dim, target[=N])` marker is verified against a
   finding of *that exact kind* — a `file_length` pin no longer counts a

@@ -36,10 +36,10 @@ pub(super) struct FindingPosition {
     pub(super) dim: crate::findings::Dimension,
     pub(super) mode: MatchMode,
     /// The suppression-target name this finding is silenced by (e.g.
-    /// `"max_cognitive"`, `"file_length"`, `"god_struct"`), so a targeted
-    /// marker only matches findings of its own kind. `None` for findings
-    /// that carry no suppressible target (e.g. IOSP violations, SRP
-    /// structural BTC/SLM/NMS) — those are matched only by a blanket marker.
+    /// `"max_cognitive"`, `"file_length"`, `"god_struct"`, the structural
+    /// codes `"oi"`/`"sit"`/…), so a targeted marker only matches findings of
+    /// its own kind. `None` for findings with no suppressible target (e.g.
+    /// IOSP violations) — those are matched only by a blanket marker.
     pub(super) target: Option<&'static str>,
     /// The metric value for a pinnable target (cognitive count, line count,
     /// parameter count, …), used by the too-loose-pin check. `None` for
@@ -339,37 +339,43 @@ fn collect_structural_positions<F>(
 ) where
     F: FnMut(&str, FindingPosition),
 {
-    use crate::domain::findings::{CouplingFindingKind, SrpFindingKind};
+    use crate::adapters::analyzers::structural::target_name_for_code;
+    use crate::domain::findings::{
+        CouplingFindingDetails, CouplingFindingKind, SrpFindingDetails, SrpFindingKind,
+    };
     use crate::findings::Dimension;
     if !config.structural.enabled {
         return;
     }
     let mode = MatchMode::LineWindow(windows::STRUCTURAL);
-    // Structural binary checks (BTC/SLM/NMS on the SRP side, OI/SIT/DEH/IET
-    // on the coupling side) are not part of either dimension's suppression-
-    // target vocabulary, so they carry no target — only a blanket marker
-    // (now unconstructible via the parser) would match them.
-    let structural = |dim| {
-        move |f: &crate::domain::Finding| FindingPosition {
-            line: f.line,
-            dim,
-            mode,
-            target: None,
-            value: None,
-        }
+    // Each structural binary check (BTC/SLM/NMS on the SRP side, OI/SIT/DEH/IET
+    // on the coupling side) is tagged with its own boolean target (the
+    // lowercased code), so a targeted `allow(coupling, oi)` matches its own
+    // finding and a stale one surfaces as an orphan.
+    let pos = |line, dim, code: &str| FindingPosition {
+        line,
+        dim,
+        mode,
+        target: target_name_for_code(code),
+        value: None,
     };
-    analysis
-        .findings
-        .srp
-        .iter()
-        .filter(|f| matches!(f.kind, SrpFindingKind::Structural))
-        .for_each(|f| push(&f.common.file, structural(Dimension::Srp)(&f.common)));
-    analysis
-        .findings
-        .coupling
-        .iter()
-        .filter(|f| matches!(f.kind, CouplingFindingKind::Structural))
-        .for_each(|f| push(&f.common.file, structural(Dimension::Coupling)(&f.common)));
+    analysis.findings.srp.iter().for_each(|f| {
+        if let (SrpFindingKind::Structural, SrpFindingDetails::Structural { code, .. }) =
+            (&f.kind, &f.details)
+        {
+            push(&f.common.file, pos(f.common.line, Dimension::Srp, code));
+        }
+    });
+    analysis.findings.coupling.iter().for_each(|f| {
+        if let (CouplingFindingKind::Structural, CouplingFindingDetails::Structural { code, .. }) =
+            (&f.kind, &f.details)
+        {
+            push(
+                &f.common.file,
+                pos(f.common.line, Dimension::Coupling, code),
+            );
+        }
+    });
 }
 
 /// Positions for Architecture-dimension findings. Architecture

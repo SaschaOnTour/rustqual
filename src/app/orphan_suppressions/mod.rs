@@ -197,21 +197,35 @@ fn is_verifiable(
     if sup.dimensions.iter().any(|d| *d != Dimension::Coupling) {
         return true;
     }
-    // Coupling-only marker. Every coupling *target* (max_fan_in/out,
-    // max_instability, sdp) is module-global and has no line-anchored
-    // position, so a targeted coupling marker can never match a position and
-    // must not be reported — it is unverifiable, not stale. (Were it treated
-    // as verifiable, a coexisting structural OI/SIT/DEH/IET finding would
-    // satisfy the line-anchor check below and then fail target matching,
-    // producing a false orphan for a legitimate pin.)
-    if sup.target.is_some() {
+    // Coupling-only marker pinning a *module-global* metric (max_fan_in/out,
+    // max_instability, sdp) has no line-anchored position, so it can never
+    // match and must not be reported — unverifiable, not stale. (Were it
+    // verifiable, a coexisting structural finding would satisfy the line-anchor
+    // check below and then fail target matching, a false orphan.) The
+    // structural coupling targets (oi/sit/deh/iet) ARE line-anchored and fall
+    // through to normal verification.
+    if sup
+        .target
+        .as_ref()
+        .is_some_and(|t| is_module_global_coupling(t.name()))
+    {
         return false;
     }
-    // A blanket coupling marker is verifiable iff the file has a line-anchored
-    // Coupling finding (e.g. a structural OI/SIT/DEH/IET warning).
+    // Otherwise verifiable iff the file has a line-anchored Coupling finding
+    // (a blanket marker, or a structural oi/sit/deh/iet target).
     positions
         .get(file)
         .is_some_and(|ps| ps.iter().any(|p| p.dim == Dimension::Coupling))
+}
+
+/// True if `target` is a module-global coupling metric (no line-anchored
+/// finding position), as opposed to a structural coupling target.
+/// Operation: name membership test, no own calls.
+fn is_module_global_coupling(target: &str) -> bool {
+    matches!(
+        target,
+        "max_fan_in" | "max_fan_out" | "max_instability" | "sdp"
+    )
 }
 
 /// True if some finding in `file` matches the suppression under its

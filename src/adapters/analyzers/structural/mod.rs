@@ -57,6 +57,15 @@ impl StructuralWarningKind {
         }
     }
 
+    /// The `// qual:allow(<dim>, <target>)` suppression-target name for this
+    /// check (the lowercased `code`). Used by the marking pass; the orphan
+    /// detector resolves the same name from the projected finding's code via
+    /// [`target_name_for_code`].
+    /// Operation: delegates to the shared code→target map.
+    pub fn target_name(&self) -> &'static str {
+        target_name_for_code(self.code()).unwrap_or("")
+    }
+
     /// Return the human-readable detail string.
     /// Operation: match dispatch with string formatting.
     pub fn detail(&self) -> String {
@@ -71,6 +80,25 @@ impl StructuralWarningKind {
                 format!("error types: {}", error_types.join(", "))
             }
         }
+    }
+}
+
+/// Map a structural rule code (`"SIT"`) to its lowercase suppression-target
+/// name (`"sit"`), or `None` for an unknown code. The single source for the
+/// code→target mapping, shared by `StructuralWarningKind::target_name` (marking)
+/// and the orphan detector, which only has the code string from the projected
+/// `Structural` finding.
+/// Operation: match dispatch returning string literals.
+pub fn target_name_for_code(code: &str) -> Option<&'static str> {
+    match code {
+        "BTC" => Some("btc"),
+        "SLM" => Some("slm"),
+        "NMS" => Some("nms"),
+        "OI" => Some("oi"),
+        "SIT" => Some("sit"),
+        "DEH" => Some("deh"),
+        "IET" => Some("iet"),
+        _ => None,
     }
 }
 

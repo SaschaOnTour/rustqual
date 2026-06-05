@@ -166,6 +166,37 @@ fn coupling_metric_pin_is_never_too_loose_checked() {
     );
 }
 
+#[test]
+fn structural_coupling_target_matches_its_finding() {
+    // A structural coupling target (oi/sit/deh/iet) IS line-anchored, so
+    // `allow(coupling, sit)` next to a SIT finding matches → not orphan.
+    let out = orphans(Dimension::Coupling, "sit", None, 5, |a| {
+        a.findings
+            .coupling
+            .push(make_structural_coupling_finding("src/x.rs", 5));
+    });
+    assert!(
+        out.is_empty(),
+        "allow(coupling, sit) matches a SIT finding: {out:?}"
+    );
+}
+
+#[test]
+fn structural_coupling_target_wrong_kind_is_orphan() {
+    // The finding is SIT; an `oi` marker matches no position → stale orphan
+    // (and a structural target is verifiable, unlike a module-global metric).
+    let out = orphans(Dimension::Coupling, "oi", None, 5, |a| {
+        a.findings
+            .coupling
+            .push(make_structural_coupling_finding("src/x.rs", 5));
+    });
+    assert_eq!(
+        out.len(),
+        1,
+        "allow(coupling, oi) must not match a SIT finding: {out:?}"
+    );
+}
+
 // ── both module-length components active ───────────────────────
 
 #[test]
