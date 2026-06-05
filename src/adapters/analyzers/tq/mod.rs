@@ -226,7 +226,6 @@ pub(crate) fn analyze_test_quality(ctx: &TqContext<'_>) -> TqAnalysis {
         ctx.prod_calls,
         &transitive_tested,
         ctx.dead_code,
-        ctx.config,
     );
     warnings.extend(untested_fns);
 

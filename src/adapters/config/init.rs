@@ -87,15 +87,6 @@ pub fn generate_default_config() -> &'static str {
 # Place this file in your project root.
 # Run `rustqual --init` to generate this file.
 
-# ── Function Classification ──────────────────────────────────────────────
-
-# Function names (or glob patterns) to exclude from analysis.
-# Examples: "main", "test_*", "visit_*"
-ignore_functions = [
-    "main",
-    "test_*",
-]
-
 # Glob patterns for files to exclude from analysis.
 # Examples: "generated/**", "tests/**"
 exclude_files = []
@@ -240,9 +231,6 @@ fn format_tailored_config(m: &ProjectMetrics, thresholds: &[usize; 4]) -> String
 # Thresholds are set to your current maximums + 20% headroom.
 # Tighten them over time as you improve code quality.
 
-# ── Function Classification ──────────────────────────────────────────────
-
-ignore_functions = ["main", "test_*"]
 exclude_files = []
 strict_closures = false
 strict_iterator_chains = false

@@ -111,7 +111,6 @@ pub(super) fn run_dry_detection(
             }
             crate::adapters::analyzers::dry::dead_code::detect_dead_code(
                 p,
-                c,
                 annotation_lines.api,
                 annotation_lines.test_helper,
                 cfg_test_files,

@@ -156,10 +156,7 @@ impl<'a> Analyzer<'a> {
         file.items
             .iter()
             .flat_map(|item| match item {
-                Item::Fn(f) => self
-                    .analyze_item_fn(f, file_path, None, file_in_test)
-                    .into_iter()
-                    .collect::<Vec<_>>(),
+                Item::Fn(f) => vec![self.analyze_item_fn(f, file_path, None, file_in_test)],
                 Item::Impl(i) => {
                     let test =
                         file_in_test || crate::adapters::shared::cfg_test::has_cfg_test(&i.attrs);
@@ -202,23 +199,20 @@ impl<'a> Analyzer<'a> {
     }
 
     /// Analyze a single function item.
-    /// Integration: orchestrates is_ignored_function check + classify_and_build (in closure).
+    /// Integration: orchestrates classify_and_build + test-flag resolution.
     fn analyze_item_fn(
         &self,
         item_fn: &ItemFn,
         file_path: &str,
         parent_type: Option<String>,
         in_test: bool,
-    ) -> Option<FunctionAnalysis> {
+    ) -> FunctionAnalysis {
         let name = item_fn.sig.ident.to_string();
-        (!self.config.is_ignored_function(&name)).then(|| {
-            let mut fa =
-                self.classify_and_build(name, file_path, &item_fn.block, parent_type, &item_fn.sig);
-            fa.parameter_count = count_non_self_params(&item_fn.sig);
-            fa.is_test =
-                in_test || crate::adapters::shared::cfg_test::has_test_attr(&item_fn.attrs);
-            fa
-        })
+        let mut fa =
+            self.classify_and_build(name, file_path, &item_fn.block, parent_type, &item_fn.sig);
+        fa.parameter_count = count_non_self_params(&item_fn.sig);
+        fa.is_test = in_test || crate::adapters::shared::cfg_test::has_test_attr(&item_fn.attrs);
+        fa
     }
 
     /// Analyze all methods in an impl block.
@@ -237,9 +231,6 @@ impl<'a> Analyzer<'a> {
             .filter_map(|impl_item| {
                 if let ImplItem::Fn(method) = impl_item {
                     let name = method.sig.ident.to_string();
-                    if self.config.is_ignored_function(&name) {
-                        return None;
-                    }
                     let mut fa = self.classify_and_build(
                         name,
                         file_path,
@@ -274,9 +265,6 @@ impl<'a> Analyzer<'a> {
                 if let TraitItem::Fn(method) = trait_item {
                     let block = method.default.as_ref()?;
                     let name = method.sig.ident.to_string();
-                    if self.config.is_ignored_function(&name) {
-                        return None;
-                    }
                     let mut fa = self.classify_and_build(
                         name,
                         file_path,
@@ -312,10 +300,9 @@ impl<'a> Analyzer<'a> {
                 items
                     .iter()
                     .flat_map(|item| match item {
-                        Item::Fn(f) => self
-                            .analyze_item_fn(f, file_path, None, mod_is_test)
-                            .into_iter()
-                            .collect::<Vec<_>>(),
+                        Item::Fn(f) => {
+                            vec![self.analyze_item_fn(f, file_path, None, mod_is_test)]
+                        }
                         Item::Impl(i) => {
                             let test = mod_is_test
                                 || crate::adapters::shared::cfg_test::has_cfg_test(&i.attrs);

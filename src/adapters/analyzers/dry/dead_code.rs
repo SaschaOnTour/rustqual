@@ -155,7 +155,6 @@ pub enum DeadCodeKind {
 /// Note: the `detect_dead_code` config flag is checked by the pipeline caller.
 pub fn detect_dead_code(
     parsed: &[(String, String, syn::File)],
-    config: &crate::config::Config,
     api_lines: &std::collections::HashMap<String, std::collections::HashSet<usize>>,
     test_helper_lines: &std::collections::HashMap<String, std::collections::HashSet<usize>>,
     cfg_test_files: &std::collections::HashSet<String>,
@@ -165,8 +164,8 @@ pub fn detect_dead_code(
     mark_api_declarations(&mut declared, api_lines);
     mark_test_helper_declarations(&mut declared, test_helper_lines);
     let (prod_calls, test_calls) = collect_all_calls(parsed, cfg_test_files);
-    let uncalled = find_uncalled(&declared, &prod_calls, &test_calls, config);
-    let test_only = find_test_only(&declared, &prod_calls, &test_calls, config);
+    let uncalled = find_uncalled(&declared, &prod_calls, &test_calls);
+    let test_only = find_test_only(&declared, &prod_calls, &test_calls);
     merge_warnings(uncalled, test_only)
 }
 
@@ -242,11 +241,10 @@ fn find_uncalled(
     declared: &[DeclaredFunction],
     prod_calls: &HashSet<String>,
     test_calls: &HashSet<String>,
-    config: &crate::config::Config,
 ) -> Vec<DeadCodeWarning> {
     declared
         .iter()
-        .filter(|d| !should_exclude_uncalled(d, config))
+        .filter(|d| !should_exclude_uncalled(d))
         .filter(|d| !prod_calls.contains(&d.name) && !test_calls.contains(&d.name))
         .filter(|d| {
             !prod_calls.contains(&d.qualified_name) && !test_calls.contains(&d.qualified_name)
@@ -269,11 +267,10 @@ fn find_test_only(
     declared: &[DeclaredFunction],
     prod_calls: &HashSet<String>,
     test_calls: &HashSet<String>,
-    config: &crate::config::Config,
 ) -> Vec<DeadCodeWarning> {
     declared
         .iter()
-        .filter(|d| !should_exclude_test_only(d, config))
+        .filter(|d| !should_exclude_test_only(d))
         // Must be called from tests but NOT from production
         .filter(|d| {
             let called_from_tests =
@@ -302,21 +299,14 @@ fn find_test_only(
 /// helper marker on a function with no callers at all is still worth
 /// flagging so the user sees that their annotation is stale.
 /// Operation: boolean logic combining multiple exclusion criteria.
-/// The `is_ignored_function` call is hidden in a closure (lenient mode).
-fn should_exclude_uncalled(d: &DeclaredFunction, config: &crate::config::Config) -> bool {
-    let is_ignored = |name: &str| config.is_ignored_function(name);
-    d.is_main
-        || d.is_test
-        || d.is_trait_impl
-        || d.has_allow_dead_code
-        || d.is_api
-        || is_ignored(&d.name)
+fn should_exclude_uncalled(d: &DeclaredFunction) -> bool {
+    d.is_main || d.is_test || d.is_trait_impl || d.has_allow_dead_code || d.is_api
 }
 
 /// Check if a declared function should be excluded from the TestOnly
 /// dead-code check. `// qual:test_helper` IS in this list — silencing
 /// the testonly finding is the whole point of the annotation.
 /// Operation: delegates to should_exclude_uncalled + test_helper check.
-fn should_exclude_test_only(d: &DeclaredFunction, config: &crate::config::Config) -> bool {
-    d.is_test_helper || should_exclude_uncalled(d, config)
+fn should_exclude_test_only(d: &DeclaredFunction) -> bool {
+    d.is_test_helper || should_exclude_uncalled(d)
 }

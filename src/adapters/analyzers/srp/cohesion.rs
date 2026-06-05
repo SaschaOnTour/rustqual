@@ -202,6 +202,21 @@ pub(crate) fn compute_lcom4(
     field_to_methods.values().for_each(|indices| {
         indices.windows(2).for_each(|w| unite(&mut uf, w[0], w[1]));
     });
+    // Union methods connected by a `self.other()` call. Canonical LCOM4 joins
+    // methods that share a field OR that call one another; a method delegating
+    // to a sibling collaborates with it even when it touches no field directly.
+    let method_index: HashMap<&str, usize> = methods
+        .iter()
+        .enumerate()
+        .map(|(i, m)| (m.method_name.as_str(), i))
+        .collect();
+    methods.iter().enumerate().for_each(|(i, m)| {
+        m.self_method_calls.iter().for_each(|callee| {
+            if let Some(&j) = method_index.get(callee.as_str()) {
+                unite(&mut uf, i, j);
+            }
+        });
+    });
     // Union methods tied together by a trait-method bridge.
     bridge_groups.iter().for_each(|group| {
         group.windows(2).for_each(|w| unite(&mut uf, w[0], w[1]));

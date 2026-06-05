@@ -20,9 +20,6 @@ pub use sections::{
 #[derive(Debug, Deserialize, Clone)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
-    /// Function name patterns to ignore entirely (e.g. test helpers, macros).
-    pub ignore_functions: Vec<String>,
-
     /// Glob patterns for files to exclude from analysis.
     pub exclude_files: Vec<String>,
 
@@ -78,10 +75,6 @@ pub struct Config {
     /// Rustqual-wide report aggregation settings (workspace mode).
     pub report: ReportConfig,
 
-    /// Pre-compiled glob set for ignore_functions patterns.
-    #[serde(skip)]
-    compiled_ignore_fns: Option<GlobSet>,
-
     /// Pre-compiled glob set for exclude_files patterns.
     #[serde(skip)]
     compiled_exclude_files: Option<GlobSet>,
@@ -90,7 +83,6 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            ignore_functions: vec![],
             exclude_files: vec![],
             strict_closures: false,
             strict_iterator_chains: false,
@@ -109,7 +101,6 @@ impl Default for Config {
             architecture: ArchitectureConfig::default(),
             weights: WeightsConfig::default(),
             report: ReportConfig::default(),
-            compiled_ignore_fns: None,
             compiled_exclude_files: None,
         }
     }
@@ -179,7 +170,6 @@ impl Config {
     /// Compile glob patterns into GlobSets for fast matching.
     /// Call this after loading or constructing a Config.
     pub fn compile(&mut self) {
-        self.compiled_ignore_fns = Some(build_globset(&self.ignore_functions));
         self.compiled_exclude_files = Some(build_globset(&self.exclude_files));
     }
 
@@ -202,13 +192,6 @@ impl Config {
         find_config_file(project_root)
             .map(|p| Self::load_from_file(&p))
             .unwrap_or_else(|| Ok(Self::default()))
-    }
-
-    /// Check if a function call path looks like an external/allowed call.
-    /// Check if a function name should be ignored (supports full glob patterns).
-    /// Trivial: single delegation to match_any_pattern.
-    pub fn is_ignored_function(&self, name: &str) -> bool {
-        match_any_pattern(&self.ignore_functions, &self.compiled_ignore_fns, name)
     }
 
     /// Check if a file path matches any exclude_files pattern.

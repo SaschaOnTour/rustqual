@@ -3,17 +3,6 @@
 # Place this file in your project root.
 
 
-# Function names (or patterns with trailing *) to exclude from analysis.
-#   - `main` / `run` — Composition-Root-Dispatcher, IOSP-Ignore
-#     (Top-Level-Entrypoints mischen zwangsläufig Branching + Delegation).
-#   - `visit_*` — syn-Visitor-Methoden mit fester extern-Signatur. Sie
-#     werden von `syn::visit::visit_file` via Trait-Dispatch aufgerufen,
-#     nicht direkt von Rustcode — daher sieht TQ-003 keinen Call-Pfad
-#     und `DimensionAnalyzer` keine eigenen Calls.
-# `test_*` entfernt: Test-Aware-Analyse (is_test) erledigt die Filterung
-# jetzt strukturell; ein Namens-Präfix ist nicht mehr nötig.
-ignore_functions = []
-
 # Glob patterns for files to exclude.
 # `examples/**` hält per-rule Fixture-Crates, die NICHT Teil rustquals sind —
 # sie werden von den Analyzer-Tests geladen, aber nicht mit-analysiert.

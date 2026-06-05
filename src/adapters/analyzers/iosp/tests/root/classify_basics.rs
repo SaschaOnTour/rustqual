@@ -72,27 +72,6 @@ fn test_trait_default_impl() {
 }
 
 #[test]
-fn test_ignored_function_skipped() {
-    let mut config = Config::default();
-    config.ignore_functions.push("test_*".to_string());
-    let code = r#"
-        fn test_something() {
-            if true { }
-        }
-        fn real_function() -> i32 { 42 }
-    "#;
-    let results = parse_and_analyze_with_config(code, &config);
-    assert!(
-        results.iter().all(|r| r.name != "test_something"),
-        "Ignored function should not appear in results"
-    );
-    assert!(
-        results.iter().any(|r| r.name == "real_function"),
-        "Non-ignored function should appear in results"
-    );
-}
-
-#[test]
 fn test_nested_module() {
     let code = r#"
         mod inner {

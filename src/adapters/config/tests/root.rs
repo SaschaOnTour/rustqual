@@ -2,56 +2,7 @@ use crate::adapters::config::*;
 use std::fs;
 use tempfile::TempDir;
 
-// ── is_ignored_function ───────────────────────────────────────────
-
-#[test]
-fn test_ignored_exact() {
-    let cfg = Config {
-        ignore_functions: vec!["main".into()],
-        ..Config::default()
-    };
-    assert!(cfg.is_ignored_function("main"));
-}
-
-#[test]
-fn test_ignored_trailing_glob() {
-    let cfg = Config {
-        ignore_functions: vec!["test_*".into()],
-        ..Config::default()
-    };
-    assert!(cfg.is_ignored_function("test_foo"));
-}
-
-#[test]
-fn test_ignored_no_match() {
-    let cfg = Config {
-        ignore_functions: vec!["test_*".into()],
-        ..Config::default()
-    };
-    assert!(!cfg.is_ignored_function("helper"));
-}
-
-#[test]
-fn test_ignored_glob_not_prefix() {
-    let cfg = Config {
-        ignore_functions: vec!["test_*".into()],
-        ..Config::default()
-    };
-    // "my_test" does NOT start with "test_", so it must not match.
-    assert!(!cfg.is_ignored_function("my_test"));
-}
-
-#[test]
-fn test_ignored_compiled_glob() {
-    let mut cfg = Config {
-        ignore_functions: vec!["test_*".into(), "main".into()],
-        ..Config::default()
-    };
-    cfg.compile();
-    assert!(cfg.is_ignored_function("test_foo"));
-    assert!(cfg.is_ignored_function("main"));
-    assert!(!cfg.is_ignored_function("helper"));
-}
+// ── exclude_files ─────────────────────────────────────────────────
 
 #[test]
 fn test_excluded_file_compiled() {
@@ -70,7 +21,6 @@ fn test_excluded_file_compiled() {
 fn test_config_loads_rustqual_toml() {
     let tmp = TempDir::new().unwrap();
     let toml_content = r#"
-ignore_functions = ["skip_me"]
 exclude_files = ["generated/**"]
 strict_closures = true
 strict_iterator_chains = true
@@ -78,13 +28,11 @@ strict_iterator_chains = true
     fs::write(tmp.path().join("rustqual.toml"), toml_content).unwrap();
 
     let mut cfg = Config::load(tmp.path()).unwrap();
-    assert_eq!(cfg.ignore_functions, vec!["skip_me"]);
     assert_eq!(cfg.exclude_files, vec!["generated/**"]);
     assert!(cfg.strict_closures);
     assert!(cfg.strict_iterator_chains);
     // Globs are compiled on demand via compile()
     cfg.compile();
-    assert!(cfg.compiled_ignore_fns.is_some());
     assert!(cfg.compiled_exclude_files.is_some());
 }
 
@@ -130,7 +78,6 @@ fn test_default_values() {
     assert!(!cfg.strict_iterator_chains);
     assert!(!cfg.allow_recursion);
     assert!(!cfg.strict_error_propagation);
-    assert!(cfg.ignore_functions.is_empty());
 }
 
 #[test]
