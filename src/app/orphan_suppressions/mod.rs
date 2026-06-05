@@ -105,6 +105,7 @@ fn orphan(
         file: file.to_string(),
         line: sup.line,
         dimensions: sup.dimensions.clone(),
+        target: sup.target.clone(),
         reason,
         kind,
     }
@@ -162,6 +163,7 @@ fn invalid_marker_orphans(
                 file: file.clone(),
                 line: *line,
                 dimensions: Vec::new(),
+                target: None,
                 reason: Some(kind.reason()),
                 kind: OrphanKind::Stale,
             })

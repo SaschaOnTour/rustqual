@@ -38,9 +38,10 @@ pub(super) fn orphan_suppression_entries(
             } else {
                 dims.join(",")
             };
+            let suffix = w.target_suffix();
             let detail = match &w.reason {
-                Some(r) => format!("orphan suppression for {scope} — {r}"),
-                None => format!("orphan suppression for {scope}"),
+                Some(r) => format!("orphan suppression for {scope}{suffix} — {r}"),
+                None => format!("orphan suppression for {scope}{suffix}"),
             };
             json!({
                 "file": w.file,

@@ -188,15 +188,18 @@ pub(crate) fn format_orphan_suppressions(
                 .join(",")
         };
         use crate::domain::findings::OrphanKind;
+        let tgt = w.target_suffix();
         let msg = match w.kind {
             OrphanKind::Stale => match &w.reason {
                 Some(r) => {
-                    format!("Stale qual:allow({dims}) marker — no finding in window. Reason: {r}")
+                    format!(
+                        "Stale qual:allow({dims}{tgt}) marker — no finding in window. Reason: {r}"
+                    )
                 }
-                None => format!("Stale qual:allow({dims}) marker — no finding in window."),
+                None => format!("Stale qual:allow({dims}{tgt}) marker — no finding in window."),
             },
             OrphanKind::PinTooLoose => format!(
-                "Too-loose qual:allow({dims}) pin — {}",
+                "Too-loose qual:allow({dims}{tgt}) pin — {}",
                 w.reason
                     .as_deref()
                     .unwrap_or("tighten the pin or remove it")

@@ -18,6 +18,10 @@ fn file_length_pin_mismatches_god_struct_is_orphan() {
         a.findings.srp.push(make_srp_struct_finding("src/x.rs", 5));
     });
     assert_eq!(out.len(), 1, "file_length pin must not match god_struct");
+    // The orphan must carry its target so reporters name which kind is stale,
+    // not just `qual:allow(srp)`.
+    assert_eq!(out[0].target_spec().as_deref(), Some("file_length=400"));
+    assert_eq!(out[0].target_suffix(), ", file_length=400");
 }
 
 #[test]
@@ -328,4 +332,32 @@ fn dry_targeted_wrong_kind_is_orphan() {
         1,
         "duplicate marker must not match a wildcard finding: {out:?}"
     );
+}
+
+#[test]
+fn orphan_target_rendering_covers_metric_boolean_and_blanket() {
+    use crate::domain::findings::{OrphanKind, OrphanSuppression};
+    use crate::domain::SuppressionTarget;
+    let mk = |target| OrphanSuppression {
+        file: "x".into(),
+        line: 1,
+        dimensions: vec![Dimension::Srp],
+        target,
+        reason: None,
+        kind: OrphanKind::Stale,
+    };
+    let metric = mk(Some(SuppressionTarget::Metric {
+        name: "file_length".into(),
+        pin: 400.0,
+    }));
+    assert_eq!(metric.target_spec().as_deref(), Some("file_length=400"));
+    assert_eq!(metric.target_suffix(), ", file_length=400");
+    let boolean = mk(Some(SuppressionTarget::Boolean {
+        name: "god_struct".into(),
+    }));
+    assert_eq!(boolean.target_spec().as_deref(), Some("god_struct"));
+    assert_eq!(boolean.target_suffix(), ", god_struct");
+    let blanket = mk(None);
+    assert_eq!(blanket.target_spec(), None);
+    assert_eq!(blanket.target_suffix(), "");
 }

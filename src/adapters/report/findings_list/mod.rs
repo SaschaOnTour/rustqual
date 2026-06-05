@@ -243,10 +243,11 @@ pub(crate) fn orphan_to_finding_entry(w: &OrphanSuppression) -> FindingEntry {
     } else {
         dims.join(",")
     };
-    let word = w.status_word();
+    let word = w.kind.status_word();
+    let suffix = w.target_suffix();
     let detail = match &w.reason {
-        Some(r) => format!("{word} qual:allow({scope}) — {r}"),
-        None => format!("{word} qual:allow({scope})"),
+        Some(r) => format!("{word} qual:allow({scope}{suffix}) — {r}"),
+        None => format!("{word} qual:allow({scope}{suffix})"),
     };
     FindingEntry::new(&w.file, w.line, "ORPHAN_SUPPRESSION", detail, String::new())
 }

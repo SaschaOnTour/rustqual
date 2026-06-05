@@ -13,6 +13,7 @@ fn sarif_reporter_emits_orphan_results_via_snapshot_view() {
         line: 42,
         dimensions: vec![crate::findings::Dimension::Srp],
         reason: Some("legacy marker".into()),
+        target: None,
         kind: crate::domain::findings::OrphanKind::Stale,
     }];
     let orphan = sarif_result_by_rule(&analysis, "ORPHAN-001");

@@ -8,7 +8,7 @@
 //! (`ReporterImpl::OrphanView` + `build_orphans`), preventing future
 //! reporters from silently omitting orphan output.
 
-use crate::domain::Dimension;
+use crate::domain::{Dimension, SuppressionTarget};
 
 /// Why a `// qual:allow(...)` marker is being reported. A *stale* marker
 /// matched no finding (or is malformed); a *too-loose* marker is a metric
@@ -27,9 +27,23 @@ pub enum OrphanKind {
     PinTooLoose,
 }
 
+impl OrphanKind {
+    /// Lead word for reports: `stale` for an unmatched/malformed marker,
+    /// `too-loose` for a metric pin above its headroom. Centralised so every
+    /// reporter renders the same word for the same kind.
+    pub fn status_word(self) -> &'static str {
+        match self {
+            OrphanKind::Stale => "stale",
+            OrphanKind::PinTooLoose => "too-loose",
+        }
+    }
+}
+
 /// A `// qual:allow(...)` marker that should be reported: a stale/misplaced
 /// suppression, or a metric pin that is looser than it needs to be.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// (No `Eq`: `target` carries a metric pin (`f64`), which is `PartialEq` only.)
+#[derive(Debug, Clone, PartialEq)]
 pub struct OrphanSuppression {
     pub file: String,
     /// 1-based line of the marker (already shifted to the last line
@@ -40,6 +54,11 @@ pub struct OrphanSuppression {
     /// unclosed parens); a real parsed `Suppression` always carries at least
     /// one dimension, so this is non-empty for stale/too-loose orphans.
     pub dimensions: Vec<Dimension>,
+    /// The marker's target, when it was a *targeted* `allow(dim, target[=N])`.
+    /// Carried so reporters render which finding-kind is stale/too-loose
+    /// (`qual:allow(srp, file_length=400)`), not just the dimension — vital
+    /// when a file has several markers of the same dimension.
+    pub target: Option<SuppressionTarget>,
     /// Optional human-readable rationale attached to the marker (for a
     /// too-loose pin, this carries the tighten-to-~value advice instead).
     pub reason: Option<String>,
@@ -48,13 +67,33 @@ pub struct OrphanSuppression {
 }
 
 impl OrphanSuppression {
-    /// Lead word for reports: `stale` for an unmatched/malformed marker,
-    /// `too-loose` for a metric pin above its headroom. Centralised so
-    /// every reporter renders the same word for the same kind.
-    pub fn status_word(&self) -> &'static str {
-        match self.kind {
-            OrphanKind::Stale => "stale",
-            OrphanKind::PinTooLoose => "too-loose",
-        }
+    /// The marker's target as a `qual:allow` argument — `"file_length=400"`
+    /// for a metric pin, `"god_struct"` for a boolean target, `None` for a
+    /// blanket/invalid marker. The structured form for JSON-style output.
+    pub fn target_spec(&self) -> Option<String> {
+        self.target.as_ref().map(|t| match t.pin() {
+            Some(pin) => format!("{}={}", t.name(), fmt_pin(pin)),
+            None => t.name().to_string(),
+        })
+    }
+
+    /// The target rendered as a trailing argument for the `qual:allow(<dims>…)`
+    /// spec — `""` for a blanket/invalid marker, `", file_length=400"` for a
+    /// metric pin. Reporters append this to their dimension scope so a targeted
+    /// orphan names its finding-kind.
+    pub fn target_suffix(&self) -> String {
+        self.target_spec()
+            .map(|s| format!(", {s}"))
+            .unwrap_or_default()
+    }
+}
+
+/// Render a pin without a trailing `.0` for whole numbers (mirrors the
+/// orphan-detector's `fmt_num`).
+fn fmt_pin(v: f64) -> String {
+    if v.fract() == 0.0 {
+        format!("{}", v as i64)
+    } else {
+        format!("{v}")
     }
 }

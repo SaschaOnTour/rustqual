@@ -20,7 +20,7 @@ pub(super) fn format_orphan_suppressions_section(orphans: &[OrphanSuppression]) 
 }
 
 fn render_row(w: &OrphanSuppression) -> String {
-    let scope = if w.dimensions.is_empty() {
+    let dims = if w.dimensions.is_empty() {
         "&lt;all&gt;".to_string()
     } else {
         w.dimensions
@@ -29,6 +29,8 @@ fn render_row(w: &OrphanSuppression) -> String {
             .collect::<Vec<_>>()
             .join(", ")
     };
+    // `target_suffix` already starts with ", "; escape it for the cell.
+    let scope = format!("{dims}{}", html_escape(&w.target_suffix()));
     let reason = w.reason.as_deref().map(html_escape).unwrap_or_default();
     format!(
         "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n",

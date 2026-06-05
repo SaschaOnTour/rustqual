@@ -115,6 +115,7 @@ fn github_reporter_emits_orphan_annotations_via_snapshot_view() {
         line: 42,
         dimensions: vec![crate::findings::Dimension::Srp],
         reason: Some("legacy".into()),
+        target: None,
         kind: crate::domain::findings::OrphanKind::Stale,
     }];
     let reporter = GithubReporter { summary: &summary };

@@ -72,6 +72,7 @@ pub(super) fn build_orphans(
             file: w.file.clone(),
             line: w.line,
             dimensions: w.dimensions.iter().map(|d| format!("{d}")).collect(),
+            target: w.target_spec(),
             reason: w.reason.clone(),
         })
         .collect()

@@ -253,7 +253,7 @@ pub struct TraitContract {
 ///
 /// `exclude_targets` is a glob list silencing Check-B for legitimately
 /// asymmetric target fns (setup, debug-only endpoints). Fn-level
-/// escape via `// qual:allow(architecture)`.
+/// escape via `// qual:allow(architecture, call_parity) reason: "…"`.
 #[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
 pub struct CallParityConfig {
@@ -350,8 +350,8 @@ pub struct CallParityConfig {
     /// severity tag. rustqual's default exit gate fails on **any**
     /// finding regardless of severity (use `--no-fail` for local
     /// exploration). To make a Check-C finding genuinely non-blocking
-    /// in CI, either suppress it via `// qual:allow(architecture)` or
-    /// set this field to `"off"`.
+    /// in CI, either suppress it via `// qual:allow(architecture, call_parity)
+    /// reason: "…"` or set this field to `"off"`.
     #[serde(default)]
     pub single_touchpoint: SingleTouchpointMode,
 }

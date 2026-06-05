@@ -150,6 +150,7 @@ fn text_reporter_renders_orphans_via_snapshot_view() {
             line: 42,
             dimensions: vec![Dimension::Iosp],
             reason: Some("legacy".to_string()),
+            target: None,
             kind: crate::domain::findings::OrphanKind::Stale,
         }],
         ..Default::default()

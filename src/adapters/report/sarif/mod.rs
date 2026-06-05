@@ -237,15 +237,18 @@ fn orphan_suppression_results(orphans: &[OrphanSuppression]) -> Vec<Value> {
                     .collect::<Vec<_>>()
                     .join(",")
             };
+            let tgt = w.target_suffix();
             let message = match w.kind {
                 OrphanKind::Stale => match &w.reason {
                     Some(r) => format!(
-                        "Stale qual:allow({dims}) marker — no finding in window. Reason was: {r}"
+                        "Stale qual:allow({dims}{tgt}) marker — no finding in window. Reason was: {r}"
                     ),
-                    None => format!("Stale qual:allow({dims}) marker — no finding in window."),
+                    None => {
+                        format!("Stale qual:allow({dims}{tgt}) marker — no finding in window.")
+                    }
                 },
                 OrphanKind::PinTooLoose => format!(
-                    "Too-loose qual:allow({dims}) pin — {}",
+                    "Too-loose qual:allow({dims}{tgt}) pin — {}",
                     w.reason
                         .as_deref()
                         .unwrap_or("tighten the pin or remove it")
