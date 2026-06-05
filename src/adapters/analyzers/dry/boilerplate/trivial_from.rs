@@ -4,32 +4,23 @@ use super::{self_type_of, single_return_expr, trait_name_of, BoilerplateFind};
 use crate::config::sections::BoilerplateConfig;
 
 /// Detect trivial `impl From<T> for U` that just wraps a value.
-/// Operation: per-file item scan, detection delegated to a helper in closures.
+/// Integration: delegates the per-item scan to the shared `scan_items`.
 pub(super) fn check_trivial_from(
     parsed: &[(String, String, syn::File)],
     config: &BoilerplateConfig,
 ) -> Vec<BoilerplateFind> {
-    pattern_guard!("BP-001", config);
-    let suggest = if config.suggest_crates {
-        "Consider using derive_more::From"
-    } else {
-        "Consider using a derive macro for trivial conversions"
-    };
-    parsed
-        .iter()
-        .flat_map(|(file, _, syntax)| {
-            syntax
-                .items
-                .iter()
-                .filter_map(|item| trivial_from_find(item, file, suggest))
-                .collect::<Vec<_>>()
-        })
-        .collect()
+    super::scan_items(parsed, config, "BP-001", |item, file| {
+        trivial_from_find(item, file, config)
+    })
 }
 
 /// Build a BP-001 find for a single trivial `impl From` item, or `None`.
 /// Operation: AST pattern matching; helper calls in closures.
-fn trivial_from_find(item: &syn::Item, file: &str, suggest: &str) -> Option<BoilerplateFind> {
+fn trivial_from_find(
+    item: &syn::Item,
+    file: &str,
+    config: &BoilerplateConfig,
+) -> Option<BoilerplateFind> {
     let syn::Item::Impl(imp) = item else {
         return None;
     };
@@ -51,6 +42,11 @@ fn trivial_from_find(item: &syn::Item, file: &str, suggest: &str) -> Option<Boil
     if !is_trivial_wrap(expr) {
         return None;
     }
+    let suggest = if config.suggest_crates {
+        "Consider using derive_more::From"
+    } else {
+        "Consider using a derive macro for trivial conversions"
+    };
     Some(BoilerplateFind {
         pattern_id: "BP-001".to_string(),
         file: file.to_string(),
