@@ -53,6 +53,25 @@ where
         .collect()
 }
 
+/// The `(signature, body)` of every function in an item: a free fn, or each
+/// method of an impl block. Other items yield nothing. Shared by detectors that
+/// inspect function bodies.
+/// Operation: item match + impl-method filter in a closure.
+pub(super) fn item_fns(item: &syn::Item) -> Vec<(&syn::Signature, &syn::Block)> {
+    match item {
+        syn::Item::Fn(f) => vec![(&f.sig, &f.block)],
+        syn::Item::Impl(imp) => imp
+            .items
+            .iter()
+            .filter_map(|sub| match sub {
+                syn::ImplItem::Fn(m) => Some((&m.sig, &m.block)),
+                _ => None,
+            })
+            .collect(),
+        _ => vec![],
+    }
+}
+
 // ── Helpers (called only from within closures for IOSP) ────────
 
 pub(crate) fn trait_name_of(imp: &syn::ItemImpl) -> Option<String> {
