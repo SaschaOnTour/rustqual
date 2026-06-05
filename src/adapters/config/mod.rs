@@ -219,5 +219,22 @@ pub fn validate_weights(config: &Config) -> Result<(), String> {
     Ok(())
 }
 
+/// Validate `[suppression]` settings. `pin_headroom` feeds the too-loose check
+/// `pin > value * (1 + headroom)`, so a non-finite value (`inf`/`NaN`, both
+/// accepted by TOML float parsing) would silently disable too-loose detection
+/// and a negative value would make the threshold nonsensical — mirrors the
+/// finite/non-negative guard on marker pins themselves.
+/// Operation: range check, no own calls.
+pub fn validate_suppression(config: &Config) -> Result<(), String> {
+    let h = config.suppression.pin_headroom;
+    if !h.is_finite() || h < 0.0 {
+        return Err(format!(
+            "[suppression].pin_headroom must be a finite, non-negative number, but is {h}. \
+             Check rustqual.toml."
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests;

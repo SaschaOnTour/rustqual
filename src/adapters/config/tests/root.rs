@@ -151,3 +151,25 @@ fn test_validate_weights_bad_sum() {
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("must sum to 1.0"));
 }
+
+#[test]
+fn test_validate_suppression_default_ok() {
+    assert!(validate_suppression(&Config::default()).is_ok());
+}
+
+#[test]
+fn test_validate_suppression_rejects_non_finite_and_negative() {
+    // pin_headroom feeds `pin > value * (1 + headroom)`; inf/NaN disable the
+    // too-loose check, a negative headroom makes it nonsensical. Reject all.
+    for bad in [f64::INFINITY, f64::NAN, -0.1, -1.5] {
+        let mut cfg = Config::default();
+        cfg.suppression.pin_headroom = bad;
+        let result = validate_suppression(&cfg);
+        assert!(result.is_err(), "pin_headroom {bad} must be rejected");
+        assert!(result.unwrap_err().contains("pin_headroom"));
+    }
+    // 0.0 (no headroom) is valid
+    let mut cfg = Config::default();
+    cfg.suppression.pin_headroom = 0.0;
+    assert!(validate_suppression(&cfg).is_ok());
+}

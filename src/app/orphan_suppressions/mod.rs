@@ -199,13 +199,13 @@ fn is_verifiable(
     if sup.dimensions.iter().any(|d| *d != Dimension::Coupling) {
         return true;
     }
-    // Coupling-only marker pinning a *module-global* metric (max_fan_in/out,
-    // max_instability, sdp) has no line-anchored position, so it can never
-    // match and must not be reported — unverifiable, not stale. (Were it
-    // verifiable, a coexisting structural finding would satisfy the line-anchor
-    // check below and then fail target matching, a false orphan.) The
-    // structural coupling targets (oi/sit/deh/iet) ARE line-anchored and fall
-    // through to normal verification.
+    // Coupling-only marker for a *module-global* target (the fan-in/out and
+    // instability metrics, or the boolean sdp check) has no line-anchored
+    // position, so it can never match and must not be reported — unverifiable,
+    // not stale. (Were it verifiable, a coexisting structural finding would
+    // satisfy the line-anchor check below and then fail target matching, a
+    // false orphan.) The structural coupling targets (oi/sit/deh/iet) ARE
+    // line-anchored and fall through to normal verification.
     if sup
         .target
         .as_ref()
@@ -220,8 +220,9 @@ fn is_verifiable(
         .is_some_and(|ps| ps.iter().any(|p| p.dim == Dimension::Coupling))
 }
 
-/// True if `target` is a module-global coupling metric (no line-anchored
-/// finding position), as opposed to a structural coupling target.
+/// True if `target` is a module-global coupling target (the fan-in/out and
+/// instability metrics, or the boolean sdp check — none line-anchored), as
+/// opposed to a structural coupling target.
 /// Operation: name membership test, no own calls.
 fn is_module_global_coupling(target: &str) -> bool {
     matches!(

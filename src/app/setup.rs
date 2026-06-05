@@ -16,7 +16,7 @@ pub(crate) fn setup_config(cli: &Cli) -> Result<Config, i32> {
     let mut config = load_config(cli)?;
     config.compile();
     apply_cli_overrides(&mut config, cli);
-    validate_config_weights(&config)?;
+    validate_config(&config)?;
     Ok(config)
 }
 
@@ -48,10 +48,12 @@ fn load_auto_config(path: &Path) -> Result<Config, i32> {
     Config::load(path).map_err(report_config_error)
 }
 
-/// Validate config settings that require cross-field checks.
-/// Trivial: single delegation to validate_weights.
-fn validate_config_weights(config: &Config) -> Result<(), i32> {
-    config::validate_weights(config).map_err(report_config_error)
+/// Validate config invariants (weight sum, suppression headroom).
+/// Integration: delegates to the per-section validators.
+fn validate_config(config: &Config) -> Result<(), i32> {
+    config::validate_weights(config)
+        .and_then(|()| config::validate_suppression(config))
+        .map_err(report_config_error)
 }
 
 /// Apply CLI flag overrides to config.
