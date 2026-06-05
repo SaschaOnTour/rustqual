@@ -7,11 +7,13 @@
 //!   calls it, so the coverage set is incomplete).
 //!
 //! Additionally, `cmd_debug` in the CLI adapter carries
-//! `// qual:allow(architecture)` so it emits a raw finding that must
-//! then be suppressed by the architecture-dimension suppression
+//! `// qual:allow(architecture, call_parity)` so it emits a raw finding
+//! that must then be suppressed by the architecture-dimension suppression
 //! pipeline. The end-to-end `cargo run -- examples/...` path exercises
 //! that filter; this unit test exercises the raw-finding layer so a
-//! regression in either step is localised.
+//! regression in either step is localised. A second test guards the
+//! example's markers themselves, since `examples/**` is excluded from
+//! self-analysis.
 
 use crate::adapters::analyzers::architecture::call_parity_rule::{
     self, RULE_MISSING_ADAPTER, RULE_NO_DELEGATION,
@@ -123,4 +125,27 @@ fn call_parity_golden_example_produces_expected_findings() {
         "missing_adapter must mention rest as missing, got message = {}",
         ma.message
     );
+}
+
+#[test]
+fn golden_example_has_no_invalid_suppression_markers() {
+    // `examples/**` is excluded from self-analysis and the golden test above
+    // does not parse suppressions, so a stale marker (e.g. a post-flip bare
+    // `allow(architecture)`) could rot unnoticed. Guard every `qual:allow`
+    // marker in the example here.
+    use crate::adapters::suppression::qual_allow::detect_invalid_qual_allow;
+    let root = example_root();
+    for pf in parsed_files(&root) {
+        for (i, line) in pf.content.lines().enumerate() {
+            let trimmed = line.trim();
+            if trimmed.contains("qual:allow") {
+                assert!(
+                    detect_invalid_qual_allow(trimmed).is_none(),
+                    "{}:{} is an invalid suppression marker: {trimmed}",
+                    pf.path,
+                    i + 1
+                );
+            }
+        }
+    }
 }

@@ -10,7 +10,7 @@
 # - `architecture/call_parity/missing_adapter` on application::list_items
 #   — called only from CLI and MCP, not REST (because REST went inline).
 #
-# cmd_debug in the CLI adapter carries `// qual:allow(architecture)`
+# cmd_debug in the CLI adapter carries `// qual:allow(architecture, call_parity)`
 # and therefore produces no finding despite having no peer and no
 # delegation. This is the intentional escape for legitimate asymmetric
 # features.

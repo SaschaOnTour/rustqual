@@ -12,7 +12,7 @@ pub fn cmd_list() {
     }
 }
 
-// qual:allow(architecture) — CLI-only diagnostic with no MCP / REST peer.
+// qual:allow(architecture, call_parity) reason: "CLI-only diagnostic with no MCP / REST peer"
 // Documents the legitimate asymmetric feature instead of faking a peer.
 pub fn cmd_debug() {
     println!("debug");
