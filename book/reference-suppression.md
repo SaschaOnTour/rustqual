@@ -131,7 +131,7 @@ Don't silently raise it to make the warning go away. The whole point of the cap 
 
 ## Orphan detection (`ORPHAN-001`)
 
-A `// qual:allow(...)` marker that *doesn't match a finding in its window* emits `ORPHAN-001`. This catches stale annotations after a refactor — the underlying issue is gone, but the suppression is still there.
+A `// qual:allow(...)` marker emits `ORPHAN-001` when it is *stale* — doesn't match a finding in its window — or *too-loose* (a metric pin sitting too far above the value it covers; see below). The stale case catches annotations left behind after a refactor — the underlying issue is gone, but the suppression is still there.
 
 The detector reads raw complexity metrics against config thresholds, not the `*_warning` flags that suppressions clear. So if you bump a threshold, the finding stops firing, *and* the orphan check then flags the now-redundant suppression. Coupling markers for a module-global target (the `max_fan_in`/`max_fan_out`/`max_instability` metrics or the boolean `sdp` check) are skipped — those warnings are module-global with no line anchor; the structural coupling targets (`oi`/`sit`/`deh`/`iet`) are line-anchored and orphan-checked like any other.
 

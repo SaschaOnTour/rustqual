@@ -1,8 +1,9 @@
 //! Orphan-suppression Finding type.
 //!
-//! Cross-cutting Finding produced when a `// qual:allow(...)` marker
-//! fails to match any real finding inside its annotation window
-//! (a stale or misplaced suppression). Lives in `domain::findings`
+//! Cross-cutting Finding produced when a `// qual:allow(...)` marker should
+//! be reported: it is *stale* (matched no finding in its window — a stale or
+//! misplaced suppression) or *too-loose* (a metric pin sitting further above
+//! the value it covers than `pin_headroom` allows). Lives in `domain::findings`
 //! alongside the per-dimension Finding types so the Reporter port can
 //! treat orphan rendering as a compile-time-required projection
 //! (`ReporterImpl::OrphanView` + `build_orphans`), preventing future

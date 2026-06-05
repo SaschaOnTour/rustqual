@@ -159,7 +159,7 @@ The HTML report includes:
   finding tables (IOSP, Complexity, DRY, SRP, Coupling, Test Quality,
   Architecture).
 - Per-module coupling table (afferent / efferent / instability).
-- Orphan-suppression table when stale `qual:allow` markers exist.
+- Orphan-suppression table when stale or too-loose `qual:allow` markers exist (with a Status column).
 
 The artifact is fully self-contained — no external CSS, no scripts,
 no sortable/filterable interactions. Open it in a browser or embed

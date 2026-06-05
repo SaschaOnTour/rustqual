@@ -45,7 +45,8 @@ pub(crate) struct JsonArchitectureFinding {
     pub(crate) suppressed: bool,
 }
 
-/// `// qual:allow(...)` marker that matched no finding in its window.
+/// `// qual:allow(...)` marker reported as stale (matched no finding) or
+/// too-loose (a metric pin too far above the value it covers). See `kind`.
 /// `pub` (not `pub(crate)`) because it surfaces as `JsonReporter::OrphanView`
 /// — a per-reporter view type on the public `ReporterImpl` trait.
 #[derive(serde::Serialize)]

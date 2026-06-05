@@ -39,7 +39,8 @@ pub struct AnalysisResult {
     /// `Reporter` trait (in `ports::reporter`) consumes. Populated by
     /// projection adapters during analysis. Includes the cross-cutting
     /// `orphan_suppressions` field carrying `// qual:allow(...)` markers
-    /// that matched no finding in their annotation window.
+    /// that should be reported — stale (matched no finding) or too-loose
+    /// (a metric pin sitting too far above the value it covers).
     pub findings: crate::domain::AnalysisFindings,
     /// Typed state-of-codebase data — counterpart to `findings`, the
     /// payload `AnalysisReporter` consumes. Carries per-function
