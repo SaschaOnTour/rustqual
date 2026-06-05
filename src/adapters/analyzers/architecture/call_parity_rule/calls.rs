@@ -16,6 +16,7 @@
 //! See `D-3` and `D-4` in the v1.1.0 plan for the resolution order and
 //! the binding scan patterns.
 
+// qual:allow(srp, file_length=692) reason: "Complete syn-receiver-type-inference engine for one fn: scope tracking, path canonicalisation, and call resolution are one cohesive walk (LCOM4=1). Splitting into a module is the documented future refactor; the length is inherent to covering every Expr/Pat/Type shape in a single pass."
 use super::bindings::{
     canonical_from_type, extract_let_binding, normalize_alias_expansion, CanonScope,
 };
@@ -84,10 +85,6 @@ pub fn collect_canonical_calls(ctx: &FnContext<'_>) -> HashSet<String> {
     collector.calls
 }
 
-// qual:allow(srp) — LCOM4 here counts visitor methods (touch `calls`)
-// separately from scope helpers (touch `bindings`). They're the two
-// halves of a single walk; splitting them further fragments the
-// visit-order invariants the walker depends on.
 struct CanonicalCallCollector<'a> {
     file: &'a FileScope<'a>,
     /// Mod-path inside `file.path` of the fn under analysis. Read-only
@@ -596,12 +593,6 @@ impl<'a> CanonicalCallCollector<'a> {
         }
     }
 
-    fn collect_macro_body(&mut self, mac: &syn::Macro) {
-        for expr in parse_macro_tokens(mac.tokens.clone()) {
-            self.visit_expr(&expr);
-        }
-    }
-
     /// Extract pattern bindings from `pat` against a matched-type from
     /// `matched_expr`, installing them into the current scope. Path
     /// bindings go into the legacy scope, wrapper/trait-bound bindings
@@ -1044,7 +1035,11 @@ impl<'a, 'ast> Visit<'ast> for CanonicalCallCollector<'a> {
     }
 
     fn visit_macro(&mut self, mac: &'ast syn::Macro) {
-        self.collect_macro_body(mac);
+        // Walk the macro's token stream as expressions so calls inside
+        // `vec![]`, `assert!()`, etc. are still collected.
+        for expr in parse_macro_tokens(mac.tokens.clone()) {
+            self.visit_expr(&expr);
+        }
     }
 
     fn visit_expr_closure(&mut self, c: &'ast syn::ExprClosure) {
