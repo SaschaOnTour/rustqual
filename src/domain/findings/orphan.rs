@@ -103,7 +103,9 @@ impl OrphanSuppression {
 /// orphan-detector's `fmt_num`).
 fn fmt_pin(v: f64) -> String {
     if v.fract() == 0.0 {
-        format!("{}", v as i64)
+        // `{:.0}` not `as i64`: a large finite pin (e.g. 1e30) would saturate
+        // the cast to i64::MAX and misreport the target.
+        format!("{v:.0}")
     } else {
         format!("{v}")
     }

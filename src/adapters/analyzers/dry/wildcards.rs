@@ -98,9 +98,8 @@ impl<'ast> Visit<'ast> for WildcardCollector {
                     new_prefix.push(p.ident.to_string());
                     stack.push((new_prefix, &p.tree));
                 }
-                syn::UseTree::Glob(_) => {
-                    let record = !self.skip_glob(&prefix);
-                    record.then(|| self.push_glob_warning(&prefix, node.span().start().line));
+                syn::UseTree::Glob(_) if !self.skip_glob(&prefix) => {
+                    self.push_glob_warning(&prefix, node.span().start().line);
                 }
                 syn::UseTree::Group(g) => {
                     for item in &g.items {

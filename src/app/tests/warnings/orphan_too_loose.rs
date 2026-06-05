@@ -259,3 +259,40 @@ fn too_loose_uses_largest_covered_value_not_smallest() {
         "pin tight to the largest covered value is clean: {out:?}"
     );
 }
+
+#[test]
+fn orphan_target_rendering_covers_metric_boolean_and_blanket() {
+    use crate::domain::findings::{OrphanKind, OrphanSuppression};
+    use crate::domain::SuppressionTarget;
+    let mk = |target| OrphanSuppression {
+        file: "x".into(),
+        line: 1,
+        dimensions: vec![Dimension::Srp],
+        target,
+        reason: None,
+        kind: OrphanKind::Stale,
+    };
+    let metric = mk(Some(SuppressionTarget::Metric {
+        name: "file_length".into(),
+        pin: 400.0,
+    }));
+    assert_eq!(metric.target_spec().as_deref(), Some("file_length=400"));
+    assert_eq!(metric.target_suffix(), ", file_length=400");
+    // A large finite pin must not saturate (no `as i64` cast).
+    let big = mk(Some(SuppressionTarget::Metric {
+        name: "file_length".into(),
+        pin: 1e15,
+    }));
+    assert_eq!(
+        big.target_spec().as_deref(),
+        Some("file_length=1000000000000000")
+    );
+    let boolean = mk(Some(SuppressionTarget::Boolean {
+        name: "god_struct".into(),
+    }));
+    assert_eq!(boolean.target_spec().as_deref(), Some("god_struct"));
+    assert_eq!(boolean.target_suffix(), ", god_struct");
+    let blanket = mk(None);
+    assert_eq!(blanket.target_spec(), None);
+    assert_eq!(blanket.target_suffix(), "");
+}

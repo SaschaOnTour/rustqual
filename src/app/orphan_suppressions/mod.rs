@@ -119,7 +119,8 @@ fn orphan(
 /// Operation: float formatting branch, no own calls.
 fn fmt_num(v: f64) -> String {
     if v.fract() == 0.0 {
-        format!("{}", v as i64)
+        // `{:.0}` not `as i64`: a large finite value would saturate the cast.
+        format!("{v:.0}")
     } else {
         format!("{v}")
     }
