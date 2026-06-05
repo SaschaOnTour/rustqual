@@ -115,7 +115,7 @@ use crate::adapters::b;
 // …
 ```
 
-The `//!` form attaches to the module, not to a single item. The pin re-fires if instability climbs past it. Note that targeted coupling markers are module-global and have no line-anchored finding, so they are *not* orphan- or too-loose-checked (a deliberate blind spot — see Orphan detection).
+The `//!` form attaches to the module, not to a single item. The pin re-fires if instability climbs past it. A coupling marker pinning a **module-global** metric (`max_fan_in`/`max_fan_out`/`max_instability`/`sdp`) has no line-anchored finding, so it is *not* orphan- or too-loose-checked (a deliberate blind spot — see Orphan detection). The **structural** coupling targets (`oi`/`sit`/`deh`/`iet`) are line-anchored and *are* orphan-checked like any other target.
 
 ## Suppression ratio (`SUP-001`)
 
@@ -133,7 +133,7 @@ Don't silently raise it to make the warning go away. The whole point of the cap 
 
 A `// qual:allow(...)` marker that *doesn't match a finding in its window* emits `ORPHAN-001`. This catches stale annotations after a refactor — the underlying issue is gone, but the suppression is still there.
 
-The detector reads raw complexity metrics against config thresholds, not the `*_warning` flags that suppressions clear. So if you bump a threshold, the finding stops firing, *and* the orphan check then flags the now-redundant suppression. Coupling-only markers are skipped because coupling warnings are module-global.
+The detector reads raw complexity metrics against config thresholds, not the `*_warning` flags that suppressions clear. So if you bump a threshold, the finding stops firing, *and* the orphan check then flags the now-redundant suppression. Coupling markers pinning a module-global metric (`max_fan_in`/`max_fan_out`/`max_instability`/`sdp`) are skipped — those warnings are module-global with no line anchor; the structural coupling targets (`oi`/`sit`/`deh`/`iet`) are line-anchored and orphan-checked like any other.
 
 **Target-aware.** A *targeted* marker is checked against a finding of its **own** kind: a `// qual:allow(srp, file_length=400)` parked next to a god-struct finding (but no module-length finding) is still an orphan — the unrelated finding doesn't satisfy it. A blanket marker (where the dimension allows one, i.e. `iosp`) still matches any finding of its dimension.
 

@@ -149,9 +149,9 @@ impl InvalidQualAllow {
             Self::BooleanTakesNoValue { dim, target } => format!(
                 "invalid qual:allow — {dim} target '{target}' is a boolean finding and takes no value"
             ),
-            Self::BadPinValue { target, value } => {
-                format!("invalid qual:allow — pin value '{value}' for '{target}' is not a number")
-            }
+            Self::BadPinValue { target, value } => format!(
+                "invalid qual:allow — pin value '{value}' for '{target}' must be a finite, non-negative number"
+            ),
             Self::TargetNeedsReason { dim, target } => format!(
                 "invalid qual:allow — targeted suppression ({dim}, {target}) requires a reason: \"…\""
             ),
@@ -318,11 +318,18 @@ fn classify_metric(
             target: name.to_string(),
         });
     };
-    let Ok(pin) = value.parse::<f64>() else {
-        return AllowParse::Invalid(InvalidQualAllow::BadPinValue {
-            target: name.to_string(),
-            value: value.to_string(),
-        });
+    // A pin must be a finite, non-negative number. `inf` parses but makes
+    // `value <= pin` always true (the pin would never re-fire — its whole
+    // point); `NaN` silences nothing; a negative pin is meaningless for the
+    // non-negative metrics. All rejected as a bad pin value.
+    let pin = match value.parse::<f64>() {
+        Ok(p) if p.is_finite() && p >= 0.0 => p,
+        _ => {
+            return AllowParse::Invalid(InvalidQualAllow::BadPinValue {
+                target: name.to_string(),
+                value: value.to_string(),
+            });
+        }
     };
     if reason.is_none() {
         return AllowParse::Invalid(InvalidQualAllow::TargetNeedsReason {

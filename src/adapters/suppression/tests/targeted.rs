@@ -129,6 +129,30 @@ fn test_bad_pin_value() {
 }
 
 #[test]
+fn test_non_finite_and_negative_pins_rejected() {
+    // `inf` parses as f64 but `v <= inf` is always true → the pin would never
+    // re-fire, breaking its core promise. `NaN` silences nothing, and a
+    // negative pin is meaningless for a non-negative metric. All rejected.
+    for bad in ["inf", "-inf", "NaN", "-1", "-0.5"] {
+        let line = format!("// qual:allow(srp, file_length={bad}) reason: \"x\"");
+        assert!(
+            parse_suppression(1, &line).is_none(),
+            "pin {bad} must be rejected"
+        );
+        assert_eq!(
+            detect_invalid_qual_allow(&line),
+            Some(InvalidQualAllow::BadPinValue {
+                target: "file_length".into(),
+                value: bad.into(),
+            }),
+            "pin {bad}"
+        );
+    }
+    // a finite, non-negative pin still parses
+    assert!(parse_suppression(1, "// qual:allow(srp, file_length=0) reason: \"x\"").is_some());
+}
+
+#[test]
 fn test_unknown_target_lists_valid_targets() {
     match detect_invalid_qual_allow("// qual:allow(complexity, max_lines=5) reason: \"x\"") {
         Some(InvalidQualAllow::UnknownTarget { dim, target, valid }) => {
