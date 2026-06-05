@@ -187,11 +187,20 @@ pub(crate) fn format_orphan_suppressions(
                 .collect::<Vec<_>>()
                 .join(",")
         };
-        let msg = match &w.reason {
-            Some(r) => {
-                format!("Stale qual:allow({dims}) marker — no finding in window. Reason: {r}")
-            }
-            None => format!("Stale qual:allow({dims}) marker — no finding in window."),
+        use crate::domain::findings::OrphanKind;
+        let msg = match w.kind {
+            OrphanKind::Stale => match &w.reason {
+                Some(r) => {
+                    format!("Stale qual:allow({dims}) marker — no finding in window. Reason: {r}")
+                }
+                None => format!("Stale qual:allow({dims}) marker — no finding in window."),
+            },
+            OrphanKind::PinTooLoose => format!(
+                "Too-loose qual:allow({dims}) pin — {}",
+                w.reason
+                    .as_deref()
+                    .unwrap_or("tighten the pin or remove it")
+            ),
         };
         out.push_str(&located("warning", &w.file, w.line, &msg));
     });

@@ -11,7 +11,7 @@ pub use init::{generate_default_config, generate_tailored_config};
 use sections::DEFAULT_MAX_SUPPRESSION_RATIO;
 pub use sections::{
     BoilerplateConfig, ComplexityConfig, CouplingConfig, DuplicatesConfig, ReportConfig, SrpConfig,
-    StructuralConfig, TestConfig, TestsConfig, WeightsConfig,
+    StructuralConfig, SuppressionConfig, TestConfig, TestsConfig, WeightsConfig,
 };
 
 /// Configuration for the rustqual analyzer.
@@ -69,6 +69,9 @@ pub struct Config {
     /// Architecture-Dimension configuration (v1.0).
     pub architecture: ArchitectureConfig,
 
+    /// Suppression-marker quality settings (e.g. too-loose pin headroom).
+    pub suppression: SuppressionConfig,
+
     /// Quality score dimension weights.
     pub weights: WeightsConfig,
 
@@ -99,6 +102,7 @@ impl Default for Config {
             test_quality: TestConfig::default(),
             tests: TestsConfig::default(),
             architecture: ArchitectureConfig::default(),
+            suppression: SuppressionConfig::default(),
             weights: WeightsConfig::default(),
             report: ReportConfig::default(),
             compiled_exclude_files: None,

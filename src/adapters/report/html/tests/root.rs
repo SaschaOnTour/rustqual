@@ -221,6 +221,7 @@ fn html_reporter_renders_orphans_via_snapshot_view() {
         line: 42,
         dimensions: vec![crate::findings::Dimension::Iosp],
         reason: Some("legacy".into()),
+        kind: crate::domain::findings::OrphanKind::Stale,
     }];
     // Reporter struct WITHOUT the orphan_suppressions field — the
     // bypass path is gone; only the trait-driven snapshot view is left.

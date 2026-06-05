@@ -4,6 +4,11 @@ use serde::Deserialize;
 
 pub const DEFAULT_MAX_SUPPRESSION_RATIO: f64 = 0.05;
 
+/// How far above the actual metric value a `allow(dim, target=N)` pin may
+/// sit before it is reported as a too-loose orphan. 0.10 = the pin may be
+/// at most 10% above the value it covers; beyond that, tighten it to ~value.
+pub const DEFAULT_PIN_HEADROOM: f64 = 0.10;
+
 // Complexity
 pub const DEFAULT_COMPLEXITY_ENABLED: bool = true;
 pub const DEFAULT_MAX_COGNITIVE: usize = 15;
@@ -220,6 +225,31 @@ pub struct TestsConfig {
     pub max_function_lines: Option<usize>,
     /// Overrides `[srp].file_length` for test files (SRP_MODULE).
     pub file_length: Option<usize>,
+}
+
+/// Configuration for suppression-marker quality checks.
+///
+/// Today this holds a single knob, `pin_headroom`: a metric pin
+/// `// qual:allow(dim, target=N)` is reported as a too-loose orphan when
+/// `N` exceeds the actual value it covers by more than this fraction. A pin
+/// at or below `value × (1 + pin_headroom)` is accepted; above it, the
+/// author is told to tighten the pin to ~value or remove it. This keeps
+/// pins honest — a pin parked far above the real metric silently absorbs
+/// future regressions up to its ceiling.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(default, deny_unknown_fields)]
+pub struct SuppressionConfig {
+    /// Maximum fraction a metric pin may exceed the value it covers
+    /// before being flagged too-loose. Default `0.10` (10%).
+    pub pin_headroom: f64,
+}
+
+impl Default for SuppressionConfig {
+    fn default() -> Self {
+        Self {
+            pin_headroom: DEFAULT_PIN_HEADROOM,
+        }
+    }
 }
 
 /// Configuration for coupling analysis.

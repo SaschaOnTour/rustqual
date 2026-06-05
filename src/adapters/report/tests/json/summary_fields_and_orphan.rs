@@ -95,6 +95,7 @@ fn json_reporter_includes_orphan_suppressions_via_snapshot_view() {
         line: 42,
         dimensions: vec![crate::findings::Dimension::Srp],
         reason: Some("legacy".into()),
+        kind: crate::domain::findings::OrphanKind::Stale,
     }];
     let parsed = json_value(&analysis);
     let arr = parsed["orphan_suppressions"].as_array().unwrap();

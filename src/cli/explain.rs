@@ -28,10 +28,11 @@ Every targeted suppression needs a reason:\n\
 Valid targets per dimension:\n";
 
 const GUIDE_FOOTER: &str =
-    "\nA metric pin re-fires once the value grows past it, and is flagged stale\n\
-(orphan) when the pin sits more than 10% above the current value — so a pin\n\
-can never silently mask a growing problem. Fix the finding first; suppression\n\
-is the last resort.\n";
+    "\nA metric pin re-fires once the value grows past it, and is flagged too-loose\n\
+(orphan) when the pin sits more than [suppression].pin_headroom above the value\n\
+it covers (default 10%) — so a pin can never silently mask a growing problem. A\n\
+targeted marker is also orphaned when no finding of its kind exists. Fix the\n\
+finding first; suppression is the last resort.\n";
 
 /// Build the suppression guide as a string (so it can be tested): grammar,
 /// per-dimension targets sourced from the shared vocabulary, and the rationale.

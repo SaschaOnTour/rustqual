@@ -104,9 +104,10 @@ pub(super) fn mark_architecture_suppressions(
 
 /// Top-level rule family of an architecture finding: the first segment after
 /// `architecture/` (`architecture/layer/unmatched` → `layer`). Empty when the
-/// id has no family — then only a blanket marker can silence it.
+/// id has no family — then only a blanket marker can silence it. Shared with
+/// the orphan detector so marking and orphan-matching read the same segment.
 /// Operation: prefix strip + first segment.
-fn arch_family(rule_id: &str) -> &str {
+pub(crate) fn arch_family(rule_id: &str) -> &str {
     rule_id
         .strip_prefix("architecture/")
         .and_then(|rest| rest.split('/').next())

@@ -150,6 +150,7 @@ fn dot_reporter_intentionally_omits_orphan_rendering() {
         line: 42,
         dimensions: vec![crate::findings::Dimension::Iosp],
         reason: Some("legacy".into()),
+        kind: crate::domain::findings::OrphanKind::Stale,
     }];
     let out = DotReporter.render(&findings, &data);
     assert!(

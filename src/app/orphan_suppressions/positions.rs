@@ -1,0 +1,412 @@
+//! Finding-position enumeration for the orphan detector.
+//!
+//! Walks the seven dimensions' findings (and the raw complexity metrics) and
+//! emits one [`FindingPosition`] per suppressible finding-kind, tagged with
+//! its suppression target and — for pinnable metrics — its value. The
+//! decision layer in the parent module matches markers against these
+//! positions and judges pin headroom; this module only *enumerates*.
+
+use std::collections::HashMap;
+
+use crate::adapters::analyzers::iosp::Classification;
+use crate::app::suppression_windows as windows;
+
+use super::complexity_predicates;
+
+/// How a finding position is matched against a suppression marker.
+/// Mirrors the actual semantics of the per-dimension `mark_*`
+/// functions so an orphan marker is only reported when no real
+/// suppression site would accept it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum MatchMode {
+    /// Line-proximity match: the finding's line must satisfy
+    /// `sup.line <= line && line - sup.line <= n`.
+    LineWindow(usize),
+    /// File-global match: any marker anywhere in the file accepts.
+    /// Used for SRP module warnings (line 1, file-level marker) — the
+    /// remaining dimensions, including Architecture, use line-window
+    /// matching that mirrors their `mark_*_suppressions` semantics.
+    FileScope,
+}
+
+/// One finding's position for orphan matching.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct FindingPosition {
+    pub(super) line: usize,
+    pub(super) dim: crate::findings::Dimension,
+    pub(super) mode: MatchMode,
+    /// The suppression-target name this finding is silenced by (e.g.
+    /// `"max_cognitive"`, `"file_length"`, `"god_struct"`), so a targeted
+    /// marker only matches findings of its own kind. `None` for findings
+    /// that carry no suppressible target (e.g. IOSP violations, SRP
+    /// structural BTC/SLM/NMS) — those are matched only by a blanket marker.
+    pub(super) target: Option<&'static str>,
+    /// The metric value for a pinnable target (cognitive count, line count,
+    /// parameter count, …), used by the too-loose-pin check. `None` for
+    /// boolean targets and untargeted positions.
+    pub(super) value: Option<f64>,
+}
+
+/// Enumerate every finding's position across all seven dimensions.
+/// Findings with empty `file` (global coupling / SDP / cycle reports)
+/// are skipped — they have no point-location a line-scoped
+/// suppression could target. Coupling is handled at the is_verifiable
+/// layer, not here.
+/// Integration: delegates per-dimension collection to small helpers.
+pub(super) fn enumerate_finding_positions(
+    analysis: &crate::report::AnalysisResult,
+    config: &crate::config::Config,
+) -> HashMap<String, Vec<FindingPosition>> {
+    let mut out: HashMap<String, Vec<FindingPosition>> = HashMap::new();
+    let mut push = |file: &str, pos: FindingPosition| {
+        if !file.is_empty() {
+            out.entry(file.to_string()).or_default().push(pos);
+        }
+    };
+    collect_iosp_complexity_positions(analysis, config, &mut push);
+    collect_dry_positions(analysis, config, &mut push);
+    collect_srp_positions(analysis, config, &mut push);
+    collect_tq_positions(analysis, config, &mut push);
+    collect_structural_positions(analysis, config, &mut push);
+    collect_architecture_positions(analysis, config, &mut push);
+    out
+}
+
+/// Positions for IOSP violations + Complexity warnings. Reads the raw
+/// complexity metrics against config thresholds (not the
+/// `*_warning` flags), so a suppressed `// qual:allow(complexity)`
+/// marker — which clears those flags — still registers as a matching
+/// target for the orphan checker. Mirrors the same config-gated
+/// predicates that `apply_extended_warnings` uses (`detect_unsafe`,
+/// `detect_error_handling`, `allow_expect`, `detect_magic_numbers`,
+/// `is_test` skip for length / error-handling / magic numbers), so a
+/// marker is only counted as non-orphan if the corresponding check is
+/// actually enabled in the active config.
+/// Operation: threshold checks pushing per-flag positions.
+fn collect_iosp_complexity_positions<F>(
+    analysis: &crate::report::AnalysisResult,
+    config: &crate::config::Config,
+    push: &mut F,
+) where
+    F: FnMut(&str, FindingPosition),
+{
+    use crate::findings::Dimension;
+    let mode = MatchMode::LineWindow(windows::DEFAULT);
+    let mk = |line, dim, target, value| FindingPosition {
+        line,
+        dim,
+        mode,
+        target,
+        value,
+    };
+    let complexity_enabled = config.complexity.enabled;
+    let test_max_lines = config
+        .tests
+        .max_function_lines
+        .unwrap_or(config.complexity.max_function_lines);
+    analysis.results.iter().for_each(|f| {
+        if matches!(f.classification, Classification::Violation { .. }) {
+            push(&f.file, mk(f.line, Dimension::Iosp, None, None));
+        }
+        if !complexity_enabled {
+            return;
+        }
+        if let Some(c) = &f.complexity {
+            for (target, value) in
+                complexity_predicates::triggered_targets(f, c, &config.complexity, test_max_lines)
+            {
+                push(
+                    &f.file,
+                    mk(f.line, Dimension::Complexity, Some(target), value),
+                );
+            }
+            push_magic_numbers(f, c, &config.complexity, push);
+        }
+    });
+}
+
+/// Push complexity positions for every magic-number occurrence on the
+/// function, honoring `detect_magic_numbers` and the test-function skip.
+/// Operation: iteration + conditional push.
+fn push_magic_numbers<F>(
+    f: &crate::adapters::analyzers::iosp::FunctionAnalysis,
+    c: &crate::adapters::analyzers::iosp::ComplexityMetrics,
+    cx: &crate::config::sections::ComplexityConfig,
+    push: &mut F,
+) where
+    F: FnMut(&str, FindingPosition),
+{
+    if f.is_test || !cx.detect_magic_numbers {
+        return;
+    }
+    let mode = MatchMode::LineWindow(windows::DEFAULT);
+    c.magic_numbers.iter().for_each(|m| {
+        push(
+            &f.file,
+            FindingPosition {
+                line: m.line,
+                dim: crate::findings::Dimension::Complexity,
+                mode,
+                target: Some("magic_numbers"),
+                value: None,
+            },
+        )
+    });
+}
+
+/// Positions for DRY findings (duplicates, dead code, fragments,
+/// boilerplate, wildcards, repeated matches).
+/// Operation: iterates DRY finding arrays pushing each entry.
+fn collect_dry_positions<F>(
+    analysis: &crate::report::AnalysisResult,
+    config: &crate::config::Config,
+    push: &mut F,
+) where
+    F: FnMut(&str, FindingPosition),
+{
+    use crate::findings::Dimension;
+    // DRY findings come from two top-level config toggles:
+    // `duplicates.enabled` (DRY-001 duplicates, DRY-002 dead code,
+    // DRY-003 fragments, DRY-004 wildcard imports, DRY-005 repeated
+    // match patterns) and `boilerplate.enabled` (BP-001..BP-010
+    // pattern family). If both are off, suppressing DRY is a no-op
+    // and any qual:allow(dry) marker SHOULD surface as orphan.
+    if !config.duplicates.enabled && !config.boilerplate.enabled {
+        return;
+    }
+    // Default DRY window (duplicates, fragments, boilerplate,
+    // repeated matches). Dead-code findings are intentionally *not*
+    // included: they are not suppressible via `qual:allow(dry)` —
+    // exclusions happen via `qual:api`, `qual:test_helper`,
+    // `#[allow(dead_code)]`, or being a test function, all handled
+    // at the declaration-collection layer. Including them here
+    // would let an unrelated `qual:allow(dry)` marker falsely mask
+    // a stale suppression as non-orphan.
+    use crate::domain::findings::DryFindingKind;
+    let mode = MatchMode::LineWindow(windows::DEFAULT);
+    // Wildcards use a tighter window: `mark_wildcard_suppressions`
+    // only accepts the marker on the same line or immediately above.
+    let wildcard_mode = MatchMode::LineWindow(windows::WILDCARD);
+    analysis.findings.dry.iter().for_each(|f| {
+        let (m, target) = match f.kind {
+            DryFindingKind::DuplicateExact | DryFindingKind::DuplicateSimilar => {
+                (mode, "duplicate")
+            }
+            DryFindingKind::Fragment => (mode, "fragment"),
+            DryFindingKind::Boilerplate => (mode, "boilerplate"),
+            DryFindingKind::RepeatedMatch => (mode, "repeated_matches"),
+            DryFindingKind::Wildcard => (wildcard_mode, "wildcard_imports"),
+            // Dead-code findings are intentionally *not* included: they are
+            // not suppressible via `qual:allow(dry)` (see comment above).
+            DryFindingKind::DeadCodeUncalled | DryFindingKind::DeadCodeTestOnly => return,
+        };
+        push(
+            &f.common.file,
+            FindingPosition {
+                line: f.common.line,
+                dim: Dimension::Dry,
+                mode: m,
+                target: Some(target),
+                value: None,
+            },
+        );
+    });
+}
+
+/// Positions for SRP struct/module/param warnings. Struct and param
+/// warnings use the 5-line SRP suppression window; module warnings
+/// are file-scoped because `mark_srp_suppressions` accepts any
+/// `qual:allow(srp)` in the file as a module-level suppression.
+/// Operation: iterates SRP warning arrays pushing each entry.
+fn collect_srp_positions<F>(
+    analysis: &crate::report::AnalysisResult,
+    config: &crate::config::Config,
+    push: &mut F,
+) where
+    F: FnMut(&str, FindingPosition),
+{
+    use crate::findings::Dimension;
+    if !config.srp.enabled {
+        return;
+    }
+    let line_mode = MatchMode::LineWindow(windows::SRP_STRUCT_PARAM);
+    analysis.findings.srp.iter().for_each(|f| {
+        for (line, mode, target, value) in srp_finding_targets(f, line_mode) {
+            push(
+                &f.common.file,
+                FindingPosition {
+                    line,
+                    dim: Dimension::Srp,
+                    mode,
+                    target: Some(target),
+                    value,
+                },
+            );
+        }
+    });
+}
+
+/// The `(line, mode, target, value)` positions a single SRP finding
+/// contributes. A struct-cohesion smell maps to `god_struct`; a parameter
+/// smell to `max_parameters`; a module-length smell to *both* `file_length`
+/// and `max_independent_clusters` (either pin can silence it), each
+/// file-scoped at line 1. Structural BTC/SLM/NMS findings are handled by
+/// `collect_structural_positions` and contribute nothing here.
+/// Operation: kind/details dispatch producing position tuples.
+fn srp_finding_targets(
+    f: &crate::domain::findings::SrpFinding,
+    line_mode: MatchMode,
+) -> Vec<(usize, MatchMode, &'static str, Option<f64>)> {
+    use crate::domain::findings::{SrpFindingDetails, SrpFindingKind};
+    let scope = MatchMode::FileScope;
+    match (&f.kind, &f.details) {
+        (SrpFindingKind::StructCohesion, _) => {
+            vec![(f.common.line, line_mode, "god_struct", None)]
+        }
+        (
+            SrpFindingKind::ParameterCount,
+            SrpFindingDetails::ParameterCount {
+                parameter_count, ..
+            },
+        ) => vec![(
+            f.common.line,
+            line_mode,
+            "max_parameters",
+            Some(*parameter_count as f64),
+        )],
+        (
+            SrpFindingKind::ModuleLength,
+            SrpFindingDetails::ModuleLength {
+                production_lines,
+                independent_clusters,
+                ..
+            },
+        ) => vec![
+            (1, scope, "file_length", Some(*production_lines as f64)),
+            (
+                1,
+                scope,
+                "max_independent_clusters",
+                Some(*independent_clusters as f64),
+            ),
+        ],
+        _ => vec![],
+    }
+}
+
+/// Positions for Test-Quality warnings. TQ suppressions use a 5-line
+/// window (mark_tq_suppressions).
+/// Operation: iterates TQ warnings pushing each entry.
+fn collect_tq_positions<F>(
+    analysis: &crate::report::AnalysisResult,
+    config: &crate::config::Config,
+    push: &mut F,
+) where
+    F: FnMut(&str, FindingPosition),
+{
+    use crate::findings::Dimension;
+    if !config.test_quality.enabled {
+        return;
+    }
+    let mode = MatchMode::LineWindow(windows::TQ);
+    analysis.findings.test_quality.iter().for_each(|f| {
+        // `json_kind` (no_assertion/no_sut/untested/uncovered/untested_logic)
+        // is exactly the TQ target vocabulary, so it doubles as the target.
+        push(
+            &f.common.file,
+            FindingPosition {
+                line: f.common.line,
+                dim: Dimension::TestQuality,
+                mode,
+                target: Some(f.kind.meta().json_kind),
+                value: None,
+            },
+        );
+    });
+}
+
+/// Positions for Structural binary-check warnings; each carries its
+/// own mapped dimension (SRP or Coupling). Structural suppressions
+/// use a 5-line window (mark_structural_suppressions).
+/// Operation: iterates structural warnings pushing each entry.
+fn collect_structural_positions<F>(
+    analysis: &crate::report::AnalysisResult,
+    config: &crate::config::Config,
+    push: &mut F,
+) where
+    F: FnMut(&str, FindingPosition),
+{
+    use crate::domain::findings::{CouplingFindingKind, SrpFindingKind};
+    use crate::findings::Dimension;
+    if !config.structural.enabled {
+        return;
+    }
+    let mode = MatchMode::LineWindow(windows::STRUCTURAL);
+    // Structural binary checks (BTC/SLM/NMS on the SRP side, OI/SIT/DEH/IET
+    // on the coupling side) are not part of either dimension's suppression-
+    // target vocabulary, so they carry no target — only a blanket marker
+    // (now unconstructible via the parser) would match them.
+    let structural = |dim| {
+        move |f: &crate::domain::Finding| FindingPosition {
+            line: f.line,
+            dim,
+            mode,
+            target: None,
+            value: None,
+        }
+    };
+    analysis
+        .findings
+        .srp
+        .iter()
+        .filter(|f| matches!(f.kind, SrpFindingKind::Structural))
+        .for_each(|f| push(&f.common.file, structural(Dimension::Srp)(&f.common)));
+    analysis
+        .findings
+        .coupling
+        .iter()
+        .filter(|f| matches!(f.kind, CouplingFindingKind::Structural))
+        .for_each(|f| push(&f.common.file, structural(Dimension::Coupling)(&f.common)));
+}
+
+/// Positions for Architecture-dimension findings. Architecture
+/// suppressions are window-scoped (mark_architecture_suppressions
+/// accepts a `qual:allow(architecture)` only within the marker's
+/// annotation window above the finding) — orphan detection mirrors
+/// that semantic so a marker for one helper is reported as stale
+/// when the only architecture finding in the file lives elsewhere.
+/// Operation: iterates architecture findings pushing each entry.
+fn collect_architecture_positions<F>(
+    analysis: &crate::report::AnalysisResult,
+    config: &crate::config::Config,
+    push: &mut F,
+) where
+    F: FnMut(&str, FindingPosition),
+{
+    use crate::findings::Dimension;
+    if !config.architecture.enabled {
+        return;
+    }
+    let mode = MatchMode::LineWindow(windows::DEFAULT);
+    analysis.findings.architecture.iter().for_each(|f| {
+        // Resolve the finding's `architecture/<family>/…` segment to the
+        // canonical (`'static`) target name, so a targeted `allow(
+        // architecture, layer)` matches only layer findings. A family with
+        // no vocabulary entry leaves `target = None` (blanket-only).
+        let family = crate::app::architecture::arch_family(&f.common.rule_id);
+        let target = crate::domain::target_names(Dimension::Architecture)
+            .iter()
+            .copied()
+            .find(|n| *n == family);
+        push(
+            &f.common.file,
+            FindingPosition {
+                line: f.common.line,
+                dim: Dimension::Architecture,
+                mode,
+                target,
+                value: None,
+            },
+        );
+    });
+}

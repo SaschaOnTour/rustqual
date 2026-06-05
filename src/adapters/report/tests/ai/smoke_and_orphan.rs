@@ -86,6 +86,7 @@ fn ai_reporter_includes_orphan_entries_via_snapshot_view() {
         line: 42,
         dimensions: vec![crate::findings::Dimension::Srp],
         reason: Some("legacy".into()),
+        kind: crate::domain::findings::OrphanKind::Stale,
     }];
     let config = Config::default();
     let value = build_ai_value(&analysis, &config);

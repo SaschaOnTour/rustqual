@@ -132,6 +132,10 @@ A `// qual:allow(...)` marker that *doesn't match a finding in its window* emits
 
 The detector reads raw complexity metrics against config thresholds, not the `*_warning` flags that suppressions clear. So if you bump a threshold, the finding stops firing, *and* the orphan check then flags the now-redundant suppression. Coupling-only markers are skipped because coupling warnings are module-global.
 
+**Target-aware.** A *targeted* marker is checked against a finding of its **own** kind: a `// qual:allow(srp, file_length=400)` parked next to a god-struct finding (but no module-length finding) is still an orphan — the unrelated finding doesn't satisfy it. A blanket marker (where the dimension allows one, i.e. `iosp`) still matches any finding of its dimension.
+
+**Too-loose pins.** A metric pin that *does* cover its finding but sits too far above the actual value is reported as a too-loose orphan: *"pin N sits >10% above the actual value V — tighten to ~V or remove."* The threshold is `[suppression].pin_headroom` (default `0.10`). This stops a pin parked far above the real metric from silently absorbing regressions up to its ceiling. A pin *below* its value (one that re-fires) is left alone — it is legitimately limiting, not stale.
+
 `ORPHAN-001` is visible in every output format and counts toward `total_findings()`, `--fail-on-warnings`, and default-fail.
 
 ## Composition-root and reexport-point modules

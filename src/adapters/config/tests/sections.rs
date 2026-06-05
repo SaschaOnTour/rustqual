@@ -223,6 +223,27 @@ fn test_report_config_rejects_unknown_fields() {
 }
 
 #[test]
+fn test_suppression_config_default_pin_headroom() {
+    // A metric pin may sit at most 10% above the actual value before it
+    // is flagged as too-loose; the default headroom is 0.10.
+    let c = SuppressionConfig::default();
+    assert!((c.pin_headroom - DEFAULT_PIN_HEADROOM).abs() < f64::EPSILON);
+    assert!((c.pin_headroom - 0.10).abs() < f64::EPSILON);
+}
+
+#[test]
+fn test_suppression_config_deserialize() {
+    let c: SuppressionConfig = toml::from_str("pin_headroom = 0.25").unwrap();
+    assert!((c.pin_headroom - 0.25).abs() < f64::EPSILON);
+}
+
+#[test]
+fn test_suppression_config_rejects_unknown_field() {
+    let result: Result<SuppressionConfig, _> = toml::from_str("headroom = 0.1");
+    assert!(result.is_err(), "deny_unknown_fields must reject typos");
+}
+
+#[test]
 fn test_test_config_defaults() {
     let c = TestConfig::default();
     assert!(c.enabled);

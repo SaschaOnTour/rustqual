@@ -11,7 +11,22 @@ Minor release with one **breaking** config change. rustqual stops shipping a
 blunt name-based ignore for `main`/`run`/`visit_*` and instead makes its own
 analyzer pass every dimension on its own merits — which required teaching two
 analyzers to see code they were structurally blind to (syn-visitor dispatch and
-trait-method cohesion). The `ignore_functions` option is removed.
+trait-method cohesion). The `ignore_functions` option is removed. Suppression
+markers are also held to a higher bar: targeted pins are orphan-checked against
+their own finding-kind, and a metric pin parked too far above the value it
+covers is reported.
+
+### Added
+- **Orphan detection is now target-aware, and reports too-loose metric pins.**
+  A targeted `// qual:allow(dim, target[=N])` marker is verified against a
+  finding of *that exact kind* — a `file_length` pin no longer counts a
+  god-struct finding as a match, so a stale targeted marker surfaces even when
+  an unrelated finding of the same dimension exists nearby. On top of that, a
+  metric pin parked more than `pin_headroom` (default **10%**) above the value
+  it covers is reported as an `ORPHAN_SUPPRESSION` — *"too-loose … tighten to
+  ~value or remove"* — so a pin can no longer silently absorb regressions up to
+  a far-away ceiling. A pin that re-fires (below its value) is left untouched,
+  not flagged. New `[suppression].pin_headroom` knob (default `0.10`).
 
 ### Removed
 - **BREAKING: the `ignore_functions` config option is gone.** It excluded

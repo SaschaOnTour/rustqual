@@ -92,6 +92,17 @@ enabled = true
 # max_function_lines = 60      # overrides [complexity].max_function_lines (LONG_FN)
 # file_length        = 300     # overrides [srp].file_length (SRP_MODULE)
 
+# ── Suppression-marker quality ─────────────────────────────────────────
+#
+# A metric pin `// qual:allow(dim, target=N)` is reported as a *too-loose*
+# orphan when N exceeds the actual value it covers by more than pin_headroom
+# (a pin parked far above the real metric silently absorbs regressions up to
+# its ceiling). Default 0.10 = the pin may sit at most 10% above the value;
+# above that, tighten it to ~value or remove it.
+
+[suppression]
+# pin_headroom = 0.10
+
 # ── Quality Score Weights ──────────────────────────────────────────────
 
 [weights]

@@ -150,6 +150,27 @@ file_length_baseline = 500
 file_length_ceiling  = 1200
 ```
 
+## `[suppression]`
+
+Quality checks on the suppression markers themselves. Today one key:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `pin_headroom` | `0.10` | How far above the value it covers a metric pin may sit before it is flagged a *too-loose* orphan |
+
+A metric pin `// qual:allow(dim, target=N)` re-fires when the value climbs
+above `N`, but a pin parked far *above* the current value silently absorbs
+regressions up to its ceiling. With `pin_headroom = 0.10`, a pin is accepted
+only while `N ≤ value × 1.10`; beyond that it surfaces as an `ORPHAN_SUPPRESSION`
+("too-loose … tighten to ~value or remove"). This is separate from
+*target-awareness*: a targeted pin is matched only against findings of its own
+kind, so a `file_length` pin no longer counts a god-struct finding as a match.
+
+```toml
+[suppression]
+pin_headroom = 0.10
+```
+
 ## `[weights]`
 
 Quality-score weights. Must sum to `1.0`.
