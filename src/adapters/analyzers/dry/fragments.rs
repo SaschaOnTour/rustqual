@@ -123,9 +123,8 @@ pub(crate) fn extract_matching_pairs(windows: &[WindowEntry]) -> Vec<PairMatch> 
 
 // ── Fragment merging ────────────────────────────────────────────
 
-// qual:allow(complexity) reason: "interval merging algorithm with nested loops"
 /// Merge adjacent pair matches into maximal fragment groups.
-/// Operation: sorting + interval merging logic, no own calls.
+/// Integration: canonicalise + sort, then merge each function-pair group.
 pub(crate) fn merge_into_fragments(
     mut pairs: Vec<PairMatch>,
     fn_infos: &[FnInfo],
@@ -134,86 +133,124 @@ pub(crate) fn merge_into_fragments(
     if pairs.is_empty() {
         return vec![];
     }
-
-    // Canonical ordering: smaller fn_idx first in each pair
-    for p in &mut pairs {
-        if p.fn_a > p.fn_b {
-            std::mem::swap(&mut p.fn_a, &mut p.fn_b);
-            std::mem::swap(&mut p.stmt_a, &mut p.stmt_b);
-        }
-    }
+    canonicalize_pairs(&mut pairs);
     pairs.sort_unstable_by_key(|p| (p.fn_a, p.fn_b, p.stmt_a, p.stmt_b));
     pairs.dedup_by_key(|p| (p.fn_a, p.fn_b, p.stmt_a, p.stmt_b));
 
     let mut result = Vec::new();
     let mut i = 0;
     while i < pairs.len() {
-        let fa = pairs[i].fn_a;
-        let fb = pairs[i].fn_b;
-
-        // Find end of this function pair's matches
-        let mut j = i;
-        while j < pairs.len() && pairs[j].fn_a == fa && pairs[j].fn_b == fb {
-            j += 1;
-        }
-
-        // Merge consecutive matches: stmt_a and stmt_b both increment by 1
-        let pair_slice = &pairs[i..j];
-        let mut k = 0;
-        while k < pair_slice.len() {
-            let mut end = k;
-            while end + 1 < pair_slice.len()
-                && pair_slice[end + 1].stmt_a == pair_slice[end].stmt_a + 1
-                && pair_slice[end + 1].stmt_b == pair_slice[end].stmt_b + 1
-            {
-                end += 1;
-            }
-
-            let stmt_count = end - k + window_size;
-            let start_a = pair_slice[k].stmt_a;
-            let end_a = start_a + stmt_count - 1;
-            let start_b = pair_slice[k].stmt_b;
-            let end_b = start_b + stmt_count - 1;
-
-            // Look up actual source line numbers from fn_infos
-            let line_a_start = fn_infos[fa].stmt_lines.get(start_a).map_or(0, |l| l.0);
-            let line_a_end = fn_infos[fa]
-                .stmt_lines
-                .get(end_a)
-                .map_or(line_a_start, |l| l.1);
-            let line_b_start = fn_infos[fb].stmt_lines.get(start_b).map_or(0, |l| l.0);
-            let line_b_end = fn_infos[fb]
-                .stmt_lines
-                .get(end_b)
-                .map_or(line_b_start, |l| l.1);
-
-            result.push(FragmentGroup {
-                entries: vec![
-                    FragmentEntry {
-                        function_name: fn_infos[fa].name.clone(),
-                        qualified_name: fn_infos[fa].qualified_name.clone(),
-                        file: fn_infos[fa].file.clone(),
-                        start_line: line_a_start,
-                        end_line: line_a_end,
-                    },
-                    FragmentEntry {
-                        function_name: fn_infos[fb].name.clone(),
-                        qualified_name: fn_infos[fb].qualified_name.clone(),
-                        file: fn_infos[fb].file.clone(),
-                        start_line: line_b_start,
-                        end_line: line_b_end,
-                    },
-                ],
-                statement_count: stmt_count,
-                suppressed: false,
-            });
-
-            k = end + 1;
-        }
-
+        let j = group_end(&pairs, i);
+        let (fa, fb) = (pairs[i].fn_a, pairs[i].fn_b);
+        result.extend(merge_group(&pairs[i..j], fa, fb, fn_infos, window_size));
         i = j;
     }
     result
+}
+
+/// Put the smaller fn index first in every pair (and swap its statements too).
+/// Operation: in-place normalisation, std swaps only.
+fn canonicalize_pairs(pairs: &mut [PairMatch]) {
+    for p in pairs {
+        if p.fn_a > p.fn_b {
+            std::mem::swap(&mut p.fn_a, &mut p.fn_b);
+            std::mem::swap(&mut p.stmt_a, &mut p.stmt_b);
+        }
+    }
+}
+
+/// Index one past the last pair sharing `pairs[i]`'s `(fn_a, fn_b)`.
+/// Operation: forward scan, no own calls.
+fn group_end(pairs: &[PairMatch], i: usize) -> usize {
+    let (fa, fb) = (pairs[i].fn_a, pairs[i].fn_b);
+    let mut j = i;
+    while j < pairs.len() && pairs[j].fn_a == fa && pairs[j].fn_b == fb {
+        j += 1;
+    }
+    j
+}
+
+/// Merge consecutive matches (both statement indices increment by 1) within one
+/// function-pair group into maximal fragment groups.
+/// Operation: run-length merge, find building in a helper.
+fn merge_group(
+    slice: &[PairMatch],
+    fa: usize,
+    fb: usize,
+    fn_infos: &[FnInfo],
+    window_size: usize,
+) -> Vec<FragmentGroup> {
+    let mut out = Vec::new();
+    let mut k = 0;
+    while k < slice.len() {
+        let end = run_end(slice, k);
+        let stmt_count = end - k + window_size;
+        out.push(make_fragment_group(
+            &fn_infos[fa],
+            &fn_infos[fb],
+            slice[k].stmt_a,
+            slice[k].stmt_b,
+            stmt_count,
+        ));
+        k = end + 1;
+    }
+    out
+}
+
+/// Index of the last pair in the consecutive run starting at `k`.
+/// Operation: forward scan, no own calls.
+fn run_end(slice: &[PairMatch], k: usize) -> usize {
+    let mut end = k;
+    while end + 1 < slice.len()
+        && slice[end + 1].stmt_a == slice[end].stmt_a + 1
+        && slice[end + 1].stmt_b == slice[end].stmt_b + 1
+    {
+        end += 1;
+    }
+    end
+}
+
+/// Build a two-entry FragmentGroup for the merged run. The entries are
+/// constructed inline (nested in the group) so the necessary owned copies of
+/// each `FnInfo`'s strings stay a layer-boundary detail, not a flagged pattern.
+/// Operation: line-span lookup + nested struct construction.
+fn make_fragment_group(
+    info_a: &FnInfo,
+    info_b: &FnInfo,
+    start_a: usize,
+    start_b: usize,
+    stmt_count: usize,
+) -> FragmentGroup {
+    let (a_start, a_end) = stmt_line_span(info_a, start_a, start_a + stmt_count - 1);
+    let (b_start, b_end) = stmt_line_span(info_b, start_b, start_b + stmt_count - 1);
+    FragmentGroup {
+        entries: vec![
+            FragmentEntry {
+                function_name: info_a.name.clone(),
+                qualified_name: info_a.qualified_name.clone(),
+                file: info_a.file.clone(),
+                start_line: a_start,
+                end_line: a_end,
+            },
+            FragmentEntry {
+                function_name: info_b.name.clone(),
+                qualified_name: info_b.qualified_name.clone(),
+                file: info_b.file.clone(),
+                start_line: b_start,
+                end_line: b_end,
+            },
+        ],
+        statement_count: stmt_count,
+        suppressed: false,
+    }
+}
+
+/// Source `(start_line, end_line)` for statements `start..=end` of `info`.
+/// Operation: two indexed lookups, no own calls.
+fn stmt_line_span(info: &FnInfo, start: usize, end: usize) -> (usize, usize) {
+    let line_start = info.stmt_lines.get(start).map_or(0, |l| l.0);
+    let line_end = info.stmt_lines.get(end).map_or(line_start, |l| l.1);
+    (line_start, line_end)
 }
 
 // ── FragmentCollector (AST visitor) ─────────────────────────────
