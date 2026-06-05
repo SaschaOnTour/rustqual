@@ -20,8 +20,10 @@ use crate::findings::Suppression;
 
 use positions::{enumerate_finding_positions, FindingPosition, MatchMode};
 
-/// Detect `// qual:allow(...)` markers that do not match any finding
-/// within their annotation window. Two input streams:
+/// Detect `// qual:allow(...)` markers worth reporting — *stale* (no matching
+/// finding in their annotation window) or *too-loose* (a metric pin sitting
+/// further above the value it covers than `pin_headroom` allows). Two input
+/// streams:
 ///
 /// - `suppression_lines`: real `Suppression` entries from the parser.
 ///   Always carry at least one recognised dimension since 1.2.3 (bare
@@ -37,7 +39,7 @@ use positions::{enumerate_finding_positions, FindingPosition, MatchMode};
 /// only pure module-global coupling / cycle / SDP reports — the
 /// marker is skipped (not reported as orphan), because we cannot
 /// verify line-scoped match against a module-scoped finding.
-/// Integration: collects finding positions, then filters unmatched markers.
+/// Integration: collects finding positions, then classifies each marker.
 pub(crate) fn detect_orphan_suppressions(
     suppression_lines: &HashMap<String, Vec<Suppression>>,
     invalid_qual_allow_lines: &HashMap<String, Vec<(usize, InvalidQualAllow)>>,
