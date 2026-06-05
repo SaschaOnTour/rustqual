@@ -22,6 +22,14 @@ trait-method cohesion). The `ignore_functions` option is removed.
   (`deny_unknown_fields`). **Migration:** delete the key. For the rare function
   that genuinely cannot be analyzed, use `// qual:allow(<dim>)`, `// qual:api`,
   `// qual:test_helper`, or `exclude_files` instead.
+- **BREAKING: a bare `// qual:allow(<dim>)` is rejected for any dimension with
+  targets** (srp, complexity, dry, coupling, architecture, test_quality). It
+  would silence *every* finding of that dimension — too blunt — so it must name
+  a target: `allow(srp, god_struct)`, `allow(complexity, max_cyclomatic=20)`,
+  `allow(srp, file_length=400)`, … The error lists the valid targets. `iosp`
+  (no targets) keeps its bare form; multi-dimension blanket markers
+  (`allow(a, b)`) are gone — use one marker per dimension. **Migration:** add the
+  target you mean (`rustqual --explain allow` lists them).
 
 ### Changed
 - **TQ-003 (untested) now models syn-visitor dispatch as real call-graph
@@ -54,6 +62,11 @@ trait-method cohesion). The `ignore_functions` option is removed.
   per-node category dispatch, and the composition root `run()` was decomposed
   into phase operations — so rustqual dogfoods its own complexity, IOSP, and
   cohesion rules on its own visitor code.
+- The two longest files were split into directory modules by concern
+  (`shared/normalize/` and `call_parity_rule/calls/`), each well under the SRP
+  file-length baseline — eliminating their blanket `allow(srp)` markers by real
+  refactoring rather than a pin. rustqual now carries **zero** production `srp`
+  suppressions.
 
 ## [1.4.2] - 2026-06-04
 
