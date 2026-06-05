@@ -74,12 +74,12 @@ enabled = true
 
 # ── Test-Code Thresholds ───────────────────────────────────────────────
 #
-# rustqual applies a curated subset of checks to test code: DRY-001/004/005,
+# rustqual applies a curated subset of checks to test code: DRY-001/003/005,
 # LONG_FN (function length), and SRP file-length (SRP_MODULE). The god-struct
 # check (SRP-001) also fires on test structs (a god-fixture is a real smell) at
-# production thresholds — no separate test knob; use `// qual:allow(srp)` for the
-# rare legitimate fixture. Everything else stays test-exempt (ERROR_HANDLING,
-# MAGIC_NUMBER, IOSP, DRY-002 dead code, DRY-003 wildcards, Coupling, all
+# production thresholds — no separate test knob; use `// qual:allow(srp, god_struct)`
+# for the rare legitimate fixture. Everything else stays test-exempt (ERROR_HANDLING,
+# MAGIC_NUMBER, IOSP, DRY-002 dead code, DRY-004 wildcards, Coupling, all
 # Structural detectors, and the SRP module-cohesion / independent-cluster check).
 # This split is fixed; only the thresholds are configurable.
 #

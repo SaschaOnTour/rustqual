@@ -149,6 +149,50 @@ fn targeted_coupling_sdp_pin_without_finding_is_not_orphan() {
     );
 }
 
+#[test]
+fn coupling_metric_pin_is_never_too_loose_checked() {
+    // Coupling metrics are module-global (no line-anchored position), so a
+    // too-loose `allow(coupling, max_instability=0.99)` over a real I=0.83 can
+    // never be flagged — a deliberate, documented blind spot. Pins the contract
+    // so a future change to `is_verifiable` is noticed.
+    let out = orphans(Dimension::Coupling, "max_instability", Some(0.99), 5, |a| {
+        a.findings
+            .coupling
+            .push(make_structural_coupling_finding("src/x.rs", 5));
+    });
+    assert!(
+        out.is_empty(),
+        "coupling metric pins are not too-loose-checked: {out:?}"
+    );
+}
+
+// ── both module-length components active ───────────────────────
+
+#[test]
+fn both_active_module_finding_emits_both_targets() {
+    // length AND cohesion both active (900 lines / score 1.5, 5 clusters > max
+    // 2): a tight file_length pin and a tight max_independent_clusters pin are
+    // each non-stale; a god_struct pin (wrong kind) is still an orphan.
+    let push = |a: &mut crate::report::AnalysisResult| {
+        a.findings
+            .srp
+            .push(srp_module_full("src/x.rs", 900, 1.5, 5));
+    };
+    assert!(orphans(Dimension::Srp, "file_length", Some(900.0), 1, push).is_empty());
+    assert!(orphans(
+        Dimension::Srp,
+        "max_independent_clusters",
+        Some(5.0),
+        1,
+        push
+    )
+    .is_empty());
+    assert_eq!(
+        orphans(Dimension::Srp, "god_struct", None, 1, push).len(),
+        1
+    );
+}
+
 // ── target-awareness for arch / dry / tq targeted markers ──────
 
 fn arch_finding(

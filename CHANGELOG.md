@@ -46,6 +46,13 @@ covers is reported.
   (no targets) keeps its bare form; multi-dimension blanket markers
   (`allow(a, b)`) are gone — use one marker per dimension. **Migration:** add the
   target you mean (`rustqual --explain allow` lists them).
+- **BREAKING (config): `[srp].file_length_baseline` / `file_length_ceiling` are
+  replaced by a single `[srp].file_length`** (default `300`, strict `>`). The
+  old baseline→ceiling score ramp was cosmetic (the SRP score is count-based);
+  `SRP-002` now simply fires above `file_length`. The matching `[tests]` knob
+  is likewise a single `file_length`. **Migration:** a `rustqual.toml` setting
+  the removed keys fails to parse (`deny_unknown_fields`) — replace them with
+  `file_length`.
 
 ### Changed
 - **TQ-003 (untested) now models syn-visitor dispatch as real call-graph
@@ -226,7 +233,7 @@ never-read `[tests].max_methods` config key.
 ## [1.4.0] - 2026-06-02
 
 Minor release: **quality checks now run on test code.** DRY (duplicate-function
-DRY-001, code-fragment DRY-004, repeated-match DRY-005), function-length
+DRY-001, code-fragment DRY-003, repeated-match DRY-005), function-length
 (LONG_FN), and SRP file-length (SRP_MODULE) previously skipped
 `#[cfg(test)]`/test files. They now analyze test code too, so duplicated test
 helpers, copy-pasted arrange/assert blocks, overlong test fns, and oversized
@@ -237,9 +244,9 @@ production values.
 - **BREAKING (config):** the `[duplicates] ignore_tests` field is **removed**.
   Because `[duplicates]` uses `deny_unknown_fields`, a `rustqual.toml` that
   still sets `ignore_tests` will now fail to parse — delete the line. There is
-  no replacement: DRY-001/004/005 always run on tests. `detect_repeated_matches`
+  no replacement: DRY-001/003/005 always run on tests. `detect_repeated_matches`
   no longer takes a config argument.
-- DRY-003 (wildcard imports) remains test-exempt by its own logic, unchanged.
+- DRY-004 (wildcard imports) remains test-exempt by its own logic, unchanged.
 - **LONG_FN now applies to test functions** at the new
   `[tests].max_function_lines` threshold (an `Option` defaulting to
   `[complexity].max_function_lines` = production, 60). Large table-driven tests
@@ -360,7 +367,7 @@ Failing-first regression tests in `src/adapters/shared/tests/cfg_test.rs`,
   `src/` (`src/foo/tests/bar.rs`, a unit-test submodule reached via
   `#[cfg(test)] mod`). All four DRY file collectors — `FunctionCollector`
   (duplicate hashing, DRY-001), `FragmentCollector` (repeated fragments,
-  DRY-004), `MatchPatternCollector` (repeated matches, DRY-005), and
+  DRY-003), `MatchPatternCollector` (repeated matches, DRY-005), and
   `WildcardCollector` (wildcard imports) — no longer apply their own
   `/tests/` path strings; they consult the shared `cfg_test_files` set
   (integration dirs + `#![cfg(test)]` + `#[cfg(test)] mod` chains), so a

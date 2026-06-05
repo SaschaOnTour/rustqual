@@ -73,8 +73,7 @@ The full `BP-*` family. Disable if your project deliberately avoids derive macro
 | `max_fan_out` | `10` | Per-struct fan-out bound |
 | `max_parameters` | `5` | `SRP-003` threshold |
 | `lcom4_threshold` | `2` | Number of disjoint clusters before LCOM4 contributes |
-| `file_length_baseline` | `300` | Soft warn for `SRP-002` (production lines) |
-| `file_length_ceiling` | `800` | Hard finding for `SRP-002` |
+| `file_length` | `300` | Production-line limit for `SRP-002` (strict `>`) |
 | `max_independent_clusters` | `2` | Max disjoint cluster count |
 | `min_cluster_statements` | `5` | Minimum statements for a cluster to count |
 
@@ -120,10 +119,10 @@ extra_assertion_macros = ["verify", "check_invariant", "expect_that"]
 ## `[tests]`
 
 Per-test-code threshold overrides. rustqual applies a **fixed, curated**
-subset of checks to test code — `DRY-001`/`DRY-004`/`DRY-005`, `LONG_FN`
+subset of checks to test code — `DRY-001`/`DRY-003`/`DRY-005`, `LONG_FN`
 (function length), and SRP **file-length** (`SRP_MODULE`). The rest stay
 test-exempt (`ERROR_HANDLING`, `MAGIC_NUMBER`, IOSP, `DRY-002` dead code,
-`DRY-003` wildcard imports, Coupling, all Structural detectors). The SRP
+`DRY-004` wildcard imports, Coupling, all Structural detectors). The SRP
 **module-cohesion** check (independent function clusters) is also
 **production-only**: a test file's many independent `#[test]` fns are its
 purpose, not a low-cohesion smell. The **god-struct** check (`SRP-001`) *does*

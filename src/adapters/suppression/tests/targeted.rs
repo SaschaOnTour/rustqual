@@ -43,6 +43,27 @@ fn test_blanket_allow_has_no_target() {
 }
 
 #[test]
+fn test_targeted_suppression_has_exactly_one_dimension() {
+    // Invariant: a target pins a finding-kind WITHIN one dimension, so any
+    // valid targeted parse must carry exactly one dimension (a target across
+    // several dimensions is meaningless). Pins the convention the type does
+    // not yet enforce structurally.
+    for line in [
+        "// qual:allow(srp, file_length=400) reason: \"x\"",
+        "// qual:allow(complexity, unsafe) reason: \"x\"",
+        "// qual:allow(test_quality, no_sut) reason: \"x\"",
+    ] {
+        let s = parse_suppression(1, line).unwrap();
+        assert!(s.target.is_some(), "{line} should be targeted");
+        assert_eq!(
+            s.dimensions.len(),
+            1,
+            "targeted marker must have one dim: {line}"
+        );
+    }
+}
+
+#[test]
 fn test_metric_target_requires_value() {
     // A value-less metric suppression would be blind forever — rejected.
     assert!(parse_suppression(1, "// qual:allow(srp, file_length) reason: \"x\"").is_none());

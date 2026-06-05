@@ -284,7 +284,16 @@ fn srp_finding_targets(
         .into_iter()
         .flatten()
         .collect(),
-        _ => vec![],
+        // Structural BTC/SLM/NMS findings are handled by
+        // `collect_structural_positions` and contribute nothing here.
+        (SrpFindingKind::Structural, _) => vec![],
+        // kind and details are paired atomically by the projection layer; a
+        // mismatch is an internal bug, so fail loudly in debug rather than
+        // silently dropping the position (which would become a false orphan).
+        (kind, _) => {
+            debug_assert!(false, "SRP kind/details mismatch for {kind:?}");
+            vec![]
+        }
     }
 }
 

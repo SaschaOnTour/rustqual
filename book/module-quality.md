@@ -16,7 +16,7 @@ rustqual checks this mechanically through SRP — Single Responsibility Principl
 | Rule | Meaning | Default threshold |
 |---|---|---|
 | `SRP-001` | Struct may violate SRP — too many fields/methods or low cohesion (LCOM4 > 2) | composite score, `max_fields = 12`, `max_methods = 20` |
-| `SRP-002` | Module file too long | warn at 300 lines, hard at 800 |
+| `SRP-002` | Module file too long | fires above 300 production lines |
 | `SRP-003` | Function has too many parameters | `max_parameters = 5` |
 
 `SRP-001` is a composite score: it weighs field count, method count, fan-out, and LCOM4 cohesion together. A struct that's slightly over on fields but cohesive elsewhere doesn't fire; one with disjoint clusters does.
@@ -40,10 +40,9 @@ The verbose output names each cluster so the refactor is mechanical:
 
 ## Module length
 
-Production-line counting excludes blank lines, single-line `//` comments, and `#[cfg(test)]` blocks. So a 1000-line file with 600 lines of tests counts as ~400 production lines. The thresholds:
+Production-line counting excludes blank lines, single-line `//` comments, and `#[cfg(test)]` blocks. So a 1000-line file with 600 lines of tests counts as ~400 production lines. The threshold:
 
-- `file_length_baseline = 300` — soft warn
-- `file_length_ceiling = 800` — hard finding
+- `file_length = 300` — `SRP-002` fires when production lines exceed it (strict `>`)
 
 Tests don't push you over the limit. Comments don't either. The number tracks production code only, which is what actually carries the maintenance cost.
 
@@ -57,8 +56,7 @@ enabled = true
 # max_fan_out = 10
 # max_parameters = 5
 # lcom4_threshold = 2
-# file_length_baseline = 300
-# file_length_ceiling = 800
+# file_length = 300
 # max_independent_clusters = 2
 # min_cluster_statements = 5
 # smell_threshold = 0.6  # composite score for SRP-001

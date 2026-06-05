@@ -1,6 +1,5 @@
 // Re-export Domain types so existing `crate::findings::{Dimension, Suppression}`
-// call sites keep working. The canonical location is `crate::domain`;
-// subsequent phases will migrate call sites to import from there directly.
+// call sites keep working. The canonical definitions live in `crate::domain`.
 use crate::domain::{target_kind, target_names, SuppressionTarget, TargetKind};
 pub use crate::domain::{Dimension, Suppression};
 
