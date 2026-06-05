@@ -99,13 +99,15 @@ pub fn analyze_srp(
     visit_all_files(parsed, &mut struct_collector);
 
     let mut methods = Vec::new();
+    let mut bridges = Vec::new();
     let mut method_collector = ImplMethodCollector {
         file: String::new(),
         methods: &mut methods,
+        bridges: &mut bridges,
     };
     visit_all_files(parsed, &mut method_collector);
 
-    let struct_warnings = cohesion::build_struct_warnings(&structs, &methods, config);
+    let struct_warnings = cohesion::build_struct_warnings(&structs, &methods, &bridges, config);
     let cfg_test_files =
         crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(parsed);
     let module_warnings = module::analyze_module_srp(
@@ -155,10 +157,54 @@ impl<'ast, 'a> Visit<'ast> for StructCollector<'a> {
     }
 }
 
-/// AST visitor that collects method field accesses and call targets from impl blocks.
+/// Trait names whose impl methods are mechanical (touch all fields to format,
+/// compare, convert, hash, or (de)serialize). Their cohesion is meaningless and
+/// would mask real god-structs, so they are excluded entirely — neither
+/// responsibility nodes nor bridges.
+const MECHANICAL_TRAITS: &[&str] = &[
+    "Display",
+    "Debug",
+    "Default",
+    "Clone",
+    "Copy",
+    "Hash",
+    "PartialEq",
+    "Eq",
+    "PartialOrd",
+    "Ord",
+    "From",
+    "Into",
+    "TryFrom",
+    "TryInto",
+    "AsRef",
+    "AsMut",
+    "Borrow",
+    "BorrowMut",
+    "Serialize",
+    "Deserialize",
+    "Drop",
+    "Deref",
+    "DerefMut",
+];
+
+/// Whether a trait path names a mechanical trait (matched on its last segment).
+/// Operation: last-segment lookup against the blacklist.
+fn is_mechanical_trait(path: &syn::Path) -> bool {
+    path.segments
+        .last()
+        .map(|s| s.ident.to_string())
+        .is_some_and(|name| MECHANICAL_TRAITS.contains(&name.as_str()))
+}
+
+/// AST visitor that collects method field accesses and call targets from impl
+/// blocks. Inherent methods become cohesion **nodes** (`methods`); non-mechanical
+/// trait methods (e.g. `Visit`) become **bridges** — their field footprint
+/// unions the inherent methods they tie together without counting as a separate
+/// responsibility (so a visitor's helpers cohere instead of fragmenting).
 struct ImplMethodCollector<'a> {
     file: String,
     methods: &'a mut Vec<MethodFieldData>,
+    bridges: &'a mut Vec<MethodFieldData>,
 }
 
 impl FileVisitor for ImplMethodCollector<'_> {
@@ -178,11 +224,17 @@ impl<'ast, 'a> Visit<'ast> for ImplMethodCollector<'a> {
             syn::visit::visit_item_impl(self, node);
             return;
         };
-        // Skip trait impls for SRP analysis (Display, Default, etc. are not "own" methods)
-        if node.trait_.is_some() {
+        // Mechanical trait impls (Display, serde, …) are excluded entirely.
+        if node
+            .trait_
+            .as_ref()
+            .is_some_and(|(_, p, _)| is_mechanical_trait(p))
+        {
             syn::visit::visit_item_impl(self, node);
             return;
         }
+        // Non-mechanical trait impls contribute bridges; inherent impls, nodes.
+        let is_bridge = node.trait_.is_some();
 
         for item in &node.items {
             if let syn::ImplItem::Fn(method) = item {
@@ -197,14 +249,19 @@ impl<'ast, 'a> Visit<'ast> for ImplMethodCollector<'a> {
                     self_method_calls: HashSet::new(),
                 };
                 body_visitor.visit_block(&method.block);
-                self.methods.push(MethodFieldData {
+                let data = MethodFieldData {
                     method_name: method.sig.ident.to_string(),
                     parent_type: type_name.clone(),
                     field_accesses: body_visitor.field_accesses,
                     call_targets: body_visitor.call_targets,
                     self_method_calls: body_visitor.self_method_calls,
                     is_constructor,
-                });
+                };
+                if is_bridge {
+                    self.bridges.push(data);
+                } else {
+                    self.methods.push(data);
+                }
             }
         }
         // Don't call default visit — we already handled methods manually

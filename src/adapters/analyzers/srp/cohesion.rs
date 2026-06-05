@@ -11,12 +11,17 @@ use super::{MethodFieldData, ResponsibilityCluster, SrpWarning, StructInfo};
 pub fn build_struct_warnings(
     structs: &[StructInfo],
     methods: &[MethodFieldData],
+    bridges: &[MethodFieldData],
     config: &SrpConfig,
 ) -> Vec<SrpWarning> {
-    // Group methods by parent type
+    // Group methods (cohesion nodes) and bridges (trait-method connectors) by type
     let mut methods_by_type: HashMap<&str, Vec<&MethodFieldData>> = HashMap::new();
     for m in methods {
         methods_by_type.entry(&m.parent_type).or_default().push(m);
+    }
+    let mut bridges_by_type: HashMap<&str, Vec<&MethodFieldData>> = HashMap::new();
+    for b in bridges {
+        bridges_by_type.entry(&b.parent_type).or_default().push(b);
     }
 
     structs
@@ -32,7 +37,14 @@ pub fn build_struct_warnings(
             }
 
             let field_idx = build_field_method_index(&method_list, &s.fields);
-            let (lcom4, clusters) = compute_lcom4(&method_list, &s.fields, &field_idx);
+            let type_bridges = bridges_by_type
+                .get(s.name.as_str())
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            let bridge_groups =
+                bridge_member_groups(type_bridges, &method_list, &s.fields, &field_idx);
+            let (lcom4, clusters) =
+                compute_lcom4(&method_list, &s.fields, &field_idx, &bridge_groups);
             let fan_out = compute_fan_out(&method_list);
             let composite =
                 compute_composite_score(lcom4, s.fields.len(), method_list.len(), fan_out, config);
@@ -104,13 +116,65 @@ pub(crate) fn build_field_method_index<'a>(
     field_to_methods
 }
 
+/// The method indices a bridge (non-mechanical trait method) ties together: all
+/// real methods that touch any field in the bridge's footprint (its direct field
+/// accesses plus the fields of the inherent methods it calls on `self`). Unioning
+/// each group lets a visitor's `visit_*` methods cohere the helpers they drive,
+/// without the bridge itself counting as a responsibility node.
+/// Operation: per-bridge footprint expansion + member collection.
+fn bridge_member_groups(
+    bridges: &[&MethodFieldData],
+    methods: &[&MethodFieldData],
+    struct_fields: &[String],
+    field_to_methods: &HashMap<&str, Vec<usize>>,
+) -> Vec<Vec<usize>> {
+    let direct_fields: HashMap<&str, &HashSet<String>> = methods
+        .iter()
+        .map(|m| (m.method_name.as_str(), &m.field_accesses))
+        .collect();
+    let struct_field_set: HashSet<&str> = struct_fields.iter().map(String::as_str).collect();
+
+    bridges
+        .iter()
+        .map(|b| {
+            let mut footprint: HashSet<&str> = b
+                .field_accesses
+                .iter()
+                .map(String::as_str)
+                .filter(|f| struct_field_set.contains(f))
+                .collect();
+            b.self_method_calls.iter().for_each(|callee| {
+                if let Some(callee_fields) = direct_fields.get(callee.as_str()) {
+                    callee_fields
+                        .iter()
+                        .map(String::as_str)
+                        .filter(|f| struct_field_set.contains(f))
+                        .for_each(|f| {
+                            footprint.insert(f);
+                        });
+                }
+            });
+            let mut members: Vec<usize> = footprint
+                .iter()
+                .filter_map(|f| field_to_methods.get(f))
+                .flatten()
+                .copied()
+                .collect();
+            members.sort_unstable();
+            members.dedup();
+            members
+        })
+        .collect()
+}
+
 /// Compute LCOM4: number of connected components in the method-field graph.
-/// Operation: Union-Find on method indices connected by shared field accesses.
-/// Uses closures to wrap UnionFind calls for IOSP lenient-mode compliance.
+/// Operation: Union-Find on method indices connected by shared field accesses
+/// and bridge groups. Uses closures to wrap UnionFind calls for IOSP lenient-mode.
 pub(crate) fn compute_lcom4(
     methods: &[&MethodFieldData],
     struct_fields: &[String],
     field_to_methods: &HashMap<&str, Vec<usize>>,
+    bridge_groups: &[Vec<usize>],
 ) -> (usize, Vec<ResponsibilityCluster>) {
     let n = methods.len();
     if n == 0 {
@@ -125,6 +189,10 @@ pub(crate) fn compute_lcom4(
     // Union methods that share fields
     field_to_methods.values().for_each(|indices| {
         indices.windows(2).for_each(|w| unite(&mut uf, w[0], w[1]));
+    });
+    // Union methods tied together by a trait-method bridge.
+    bridge_groups.iter().for_each(|group| {
+        group.windows(2).for_each(|w| unite(&mut uf, w[0], w[1]));
     });
     // Invert `field_to_methods` into a per-method field set. This
     // captures the SAME expanded view (direct accesses PLUS fields

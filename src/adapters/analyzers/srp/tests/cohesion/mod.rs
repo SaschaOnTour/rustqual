@@ -100,9 +100,11 @@ pub(super) fn collect_methods_for(code: &str) -> Vec<MethodFieldData> {
     let syntax = syn::parse_file(code).expect("parse test fixture");
     let parsed = vec![("test.rs".to_string(), code.to_string(), syntax)];
     let mut result = Vec::new();
+    let mut bridges = Vec::new();
     let mut collector = crate::adapters::analyzers::srp::ImplMethodCollector {
         file: String::new(),
         methods: &mut result,
+        bridges: &mut bridges,
     };
     crate::adapters::shared::file_visitor::visit_all_files(&parsed, &mut collector);
     result

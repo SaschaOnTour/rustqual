@@ -72,9 +72,11 @@ fn collect_structs(parsed: &[(String, String, syn::File)]) -> Vec<StructInfo> {
 /// Test helper: collect methods via visit_all_files (same as analyze_srp uses).
 fn collect_methods(parsed: &[(String, String, syn::File)]) -> Vec<MethodFieldData> {
     let mut result = Vec::new();
+    let mut bridges = Vec::new();
     let mut collector = ImplMethodCollector {
         file: String::new(),
         methods: &mut result,
+        bridges: &mut bridges,
     };
     crate::adapters::shared::file_visitor::visit_all_files(parsed, &mut collector);
     result

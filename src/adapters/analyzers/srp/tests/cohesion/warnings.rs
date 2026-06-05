@@ -7,8 +7,39 @@ fn test_build_struct_warnings_no_warning_for_small_struct() {
     let m2 = make_method("get", "Counter", &["count"], &[]);
     let methods = vec![m1, m2];
     let config = SrpConfig::default();
-    let warnings = build_struct_warnings(&structs, &methods, &config);
+    let warnings = build_struct_warnings(&structs, &methods, &[], &config);
     assert!(warnings.is_empty(), "Small cohesive struct should not warn");
+}
+
+/// A non-mechanical trait method (e.g. a `Visit` override) that calls two
+/// disjoint-field helpers BRIDGES them: with the bridge the helpers cohere
+/// (LCOM4=1, no warning); without it they fragment and the struct trips SRP.
+/// This is the visitor case — the `visit_*` methods tie the helpers together.
+#[test]
+fn test_bridge_unions_disjoint_helpers() {
+    // 12 fields so field_norm maxes out; two helpers touch disjoint fields.
+    let field_names: Vec<String> = ('a'..='l').map(|c| c.to_string()).collect();
+    let fields: Vec<&str> = field_names.iter().map(String::as_str).collect();
+    let structs = vec![make_struct("Visitor", &fields)];
+    let skip = make_method("skip", "Visitor", &["a"], &[]);
+    let push = make_method("push", "Visitor", &["b"], &[]);
+    let methods = vec![skip, push];
+    let config = SrpConfig::default();
+
+    // Without a bridge: the two helpers are disconnected → god-struct.
+    let no_bridge = build_struct_warnings(&structs, &methods, &[], &config);
+    assert!(
+        !no_bridge.is_empty(),
+        "disjoint helpers with no bridge should trip SRP"
+    );
+
+    // With a `visit_*` bridge calling both helpers: they cohere → no warning.
+    let bridge = make_method_with_self_calls("visit_expr", "Visitor", &[], &["skip", "push"]);
+    let bridged = build_struct_warnings(&structs, &methods, &[bridge], &config);
+    assert!(
+        bridged.is_empty(),
+        "a trait-method bridge tying the helpers together clears the false god-struct"
+    );
 }
 
 #[test]
@@ -18,7 +49,7 @@ fn test_build_struct_warnings_single_method_skipped() {
     let m1 = make_method("do_it", "Solo", &["x"], &[]);
     let methods = vec![m1];
     let config = SrpConfig::default();
-    let warnings = build_struct_warnings(&structs, &methods, &config);
+    let warnings = build_struct_warnings(&structs, &methods, &[], &config);
     assert!(warnings.is_empty());
 }
 
@@ -27,7 +58,7 @@ fn test_build_struct_warnings_no_methods_skipped() {
     let structs = vec![make_struct("Data", &["x", "y"])];
     let methods = vec![];
     let config = SrpConfig::default();
-    let warnings = build_struct_warnings(&structs, &methods, &config);
+    let warnings = build_struct_warnings(&structs, &methods, &[], &config);
     assert!(warnings.is_empty());
 }
 
@@ -105,6 +136,7 @@ fn test_build_struct_warnings_triggers_for_incohesive() {
     let warnings = build_struct_warnings(
         &god_object_struct(),
         &god_object_methods(),
+        &[],
         &SrpConfig::default(),
     );
     assert!(
@@ -153,7 +185,7 @@ fn test_build_struct_warnings_two_methods_analysed_not_skipped() {
         smell_threshold: 0.0,
         ..SrpConfig::default()
     };
-    let warnings = build_struct_warnings(&structs, &methods, &config);
+    let warnings = build_struct_warnings(&structs, &methods, &[], &config);
     assert_eq!(
         warnings.len(),
         1,

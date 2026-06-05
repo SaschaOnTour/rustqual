@@ -45,8 +45,12 @@ fn lcom4_scenarios() {
             .collect();
         let refs: Vec<&MethodFieldData> = methods.iter().collect();
         let fields: Vec<String> = field_names.iter().map(|s| s.to_string()).collect();
-        let (lcom4, clusters) =
-            compute_lcom4(&refs, &fields, &build_field_method_index(&refs, &fields));
+        let (lcom4, clusters) = compute_lcom4(
+            &refs,
+            &fields,
+            &build_field_method_index(&refs, &fields),
+            &[],
+        );
         assert_eq!(lcom4, *exp_lcom4, "case: {label}");
         if let Some(c) = exp_clusters {
             assert_eq!(clusters.len(), *c, "case: {label}");
