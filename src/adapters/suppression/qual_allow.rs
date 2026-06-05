@@ -124,6 +124,9 @@ pub enum InvalidQualAllow {
     BadPinValue { target: String, value: String },
     /// A targeted suppression without the mandatory `reason:`.
     TargetNeedsReason { dim: String, target: String },
+    /// A bare `allow(dim)` (no target) for a multi-kind dimension. The
+    /// targeted form is required so the suppression names what it silences.
+    BlanketNotAllowed { dim: String, valid: Vec<String> },
 }
 
 impl InvalidQualAllow {
@@ -152,6 +155,10 @@ impl InvalidQualAllow {
             }
             Self::TargetNeedsReason { dim, target } => format!(
                 "invalid qual:allow — targeted suppression ({dim}, {target}) requires a reason: \"…\""
+            ),
+            Self::BlanketNotAllowed { dim, valid } => format!(
+                "invalid qual:allow — bare ({dim}) would silence every {dim} finding; name what you mean: allow({dim}, <target>). Targets: {}",
+                valid.join(", ")
             ),
         }
     }
@@ -236,7 +243,7 @@ fn classify_entries(line: usize, inner: &str, reason: Option<String>) -> AllowPa
     };
     let extra = &entries[1..];
     if extra.is_empty() {
-        return AllowParse::Valid(Suppression::blanket(line, vec![dim0], reason));
+        return blanket_or_invalid(line, vec![dim0], reason);
     }
     // An entry is "target-like" if it pins a value or is not a dimension.
     let target_like = |e: &&str| e.contains('=') || Dimension::from_str_opt(e).is_none();
@@ -244,9 +251,23 @@ fn classify_entries(line: usize, inner: &str, reason: Option<String>) -> AllowPa
         let dims = std::iter::once(dim0)
             .chain(extra.iter().filter_map(|e| Dimension::from_str_opt(e)))
             .collect();
-        return AllowParse::Valid(Suppression::blanket(line, dims, reason));
+        return blanket_or_invalid(line, dims, reason);
     }
     classify_target(line, dim0, extra, reason)
+}
+
+/// A bare (untargeted) `allow(dim)` is valid only for dimensions with no
+/// targets (`iosp`). For a multi-kind dimension it must name a target, so the
+/// suppression says what it silences — otherwise it is rejected.
+/// Operation: target-vocabulary check, no own calls.
+fn blanket_or_invalid(line: usize, dims: Vec<Dimension>, reason: Option<String>) -> AllowParse {
+    if let Some(dim) = dims.iter().copied().find(|d| !target_names(*d).is_empty()) {
+        return AllowParse::Invalid(InvalidQualAllow::BlanketNotAllowed {
+            dim: dim.to_string(),
+            valid: target_names(dim).iter().map(|s| s.to_string()).collect(),
+        });
+    }
+    AllowParse::Valid(Suppression::blanket(line, dims, reason))
 }
 
 /// Classify a single `name` or `name=value` target against the dimension's

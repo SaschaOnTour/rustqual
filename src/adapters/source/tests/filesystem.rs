@@ -121,7 +121,7 @@ fn qual_allow_marker_line_follows_contiguous_comment_block() {
     let cases: &[(&str, &str, usize)] = &[
         (
             "contiguous 3-line block shifts to line 3",
-            "// qual:allow(srp) — rustqual false-positive LCOM4=2\n\
+            "// qual:allow(srp, god_struct) reason: \"rustqual false-positive LCOM4=2\"\n\
              // The struct's methods form one coherent data layer.\n\
              // See docs/rustqual-bugs.md.\n\
              #[derive(Default)]\n\
@@ -130,7 +130,7 @@ fn qual_allow_marker_line_follows_contiguous_comment_block() {
         ),
         (
             "blank line breaks the block; marker stays at line 1",
-            "// qual:allow(srp)\n\
+            "// qual:allow(srp, god_struct) reason: \"x\"\n\
              \n\
              #[derive(Default)]\n\
              pub struct Foo { x: i32 }\n",

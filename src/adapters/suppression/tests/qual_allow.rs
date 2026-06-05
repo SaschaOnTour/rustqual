@@ -124,9 +124,10 @@ fn test_parse_qual_allow_iosp() {
 }
 
 #[test]
-fn test_parse_qual_allow_multiple_dims() {
-    let s = parse_suppression(1, "// qual:allow(iosp, complexity)").unwrap();
-    assert_eq!(s.dimensions, vec![Dimension::Iosp, Dimension::Complexity]);
+fn test_multi_dim_blanket_rejected() {
+    // Bare multi-dimension allow is gone: a multi-kind dim must name a target,
+    // and one marker cannot target two dimensions. Use separate markers.
+    assert!(parse_suppression(1, "// qual:allow(iosp, complexity)").is_none());
 }
 
 #[test]

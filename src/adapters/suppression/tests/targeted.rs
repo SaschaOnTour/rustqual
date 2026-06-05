@@ -29,7 +29,8 @@ fn test_parse_targeted_boolean() {
 
 #[test]
 fn test_blanket_allow_has_no_target() {
-    let s = parse_suppression(1, "// qual:allow(srp)").unwrap();
+    // `iosp` is the only dimension whose bare (untargeted) form is valid.
+    let s = parse_suppression(1, "// qual:allow(iosp)").unwrap();
     assert!(s.target.is_none());
 }
 
@@ -44,6 +45,22 @@ fn test_metric_target_requires_value() {
             target: "file_length".into(),
         })
     );
+}
+
+#[test]
+fn test_bare_multikind_dim_rejected() {
+    // A bare allow(<multi-kind dim>) would silence every finding of that
+    // dimension — rejected in favour of a named target.
+    assert!(parse_suppression(1, "// qual:allow(srp)").is_none());
+    match detect_invalid_qual_allow("// qual:allow(srp)") {
+        Some(InvalidQualAllow::BlanketNotAllowed { dim, valid }) => {
+            assert_eq!(dim, "srp");
+            assert!(valid.contains(&"god_struct".to_string()), "got {valid:?}");
+        }
+        other => panic!("expected BlanketNotAllowed, got {other:?}"),
+    }
+    // `iosp` has no targets, so its bare form stays valid.
+    assert!(parse_suppression(1, "// qual:allow(iosp)").is_some());
 }
 
 #[test]

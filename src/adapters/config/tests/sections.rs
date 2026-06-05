@@ -122,7 +122,7 @@ fn test_tests_config_rejects_unknown_field() {
     assert!(result.is_err(), "deny_unknown_fields must reject typos");
 }
 
-// qual:allow(test) reason: "verifies production constant, no function/type call needed"
+// qual:allow(test_quality, no_sut) reason: "verifies production constant, no function/type call needed"
 #[test]
 fn test_quality_weights_sum_to_one() {
     let sum: f64 = DEFAULT_QUALITY_WEIGHTS.iter().sum();

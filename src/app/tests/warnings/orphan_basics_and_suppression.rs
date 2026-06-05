@@ -159,7 +159,7 @@ fn suppressed_srp_param_over_threshold_is_not_orphan() {
 fn coupling_marker_is_not_orphan_for_structural_coupling_finding() {
     // Structural binary checks (OI, SIT, DEH, IET) carry
     // `dimension == Coupling` and are line-anchored — a 5-line
-    // qual:allow(coupling) window DOES suppress them. The orphan
+    // coupling-marker window DOES suppress them. The orphan
     // checker must treat coupling-only markers as verifiable when a
     // line-anchored coupling position is available in the file.
     use crate::findings::Suppression;

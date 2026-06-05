@@ -174,7 +174,7 @@ fn test_collect_suppression_no_match() {
 
 #[test]
 fn test_collect_suppression_multiple() {
-    let source = "// qual:allow(srp)\nfn foo() {}\n// qual:allow(iosp)\nfn bar() {}";
+    let source = "// qual:allow(srp, god_struct) reason: \"x\"\nfn foo() {}\n// qual:allow(iosp)\nfn bar() {}";
     let syntax = syn::parse_file(source).unwrap();
     let parsed = vec![("test.rs".to_string(), source.to_string(), syntax)];
     let result = collect_suppression_lines(&parsed);
