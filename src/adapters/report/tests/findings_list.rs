@@ -221,6 +221,8 @@ fn findings_list_includes_orphan_suppressions_via_snapshot_view() {
         line: 42,
         dimensions: vec![crate::findings::Dimension::Srp],
         reason: Some("legacy marker".into()),
+        target: None,
+        kind: crate::domain::findings::OrphanKind::Stale,
     }];
     let findings = collect_all_findings(&analysis);
     assert_eq!(findings.len(), 1);

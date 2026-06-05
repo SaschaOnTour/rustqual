@@ -90,8 +90,12 @@ fn complexity_metric_extra_cases() -> Vec<(&'static str, usize, usize, Complexit
             },
         ),
         (
+            // The marker attaches to the function (line 6); the magic literal
+            // sits deeper in the body (line 12). The orphan position anchors at
+            // the function line, so a marker on the function — not on the
+            // literal — is the one that matches.
             "magic number",
-            10,
+            6,
             6,
             ComplexityMetrics {
                 magic_numbers: vec![MagicNumberOccurrence {
@@ -135,6 +139,7 @@ fn suppressed_srp_param_over_threshold_is_not_orphan() {
             line: 5,
             dimensions: vec![crate::findings::Dimension::Srp],
             reason: None,
+            target: None,
         }],
     );
     let mut analysis = empty_analysis();
@@ -158,7 +163,7 @@ fn suppressed_srp_param_over_threshold_is_not_orphan() {
 fn coupling_marker_is_not_orphan_for_structural_coupling_finding() {
     // Structural binary checks (OI, SIT, DEH, IET) carry
     // `dimension == Coupling` and are line-anchored — a 5-line
-    // qual:allow(coupling) window DOES suppress them. The orphan
+    // coupling-marker window DOES suppress them. The orphan
     // checker must treat coupling-only markers as verifiable when a
     // line-anchored coupling position is available in the file.
     use crate::findings::Suppression;
@@ -169,6 +174,7 @@ fn coupling_marker_is_not_orphan_for_structural_coupling_finding() {
             line: 10,
             dimensions: vec![crate::findings::Dimension::Coupling],
             reason: None,
+            target: None,
         }],
     );
     let mut analysis = empty_analysis();
@@ -202,6 +208,7 @@ fn coupling_only_marker_with_no_line_anchored_finding_is_skipped() {
             line: 5,
             dimensions: vec![crate::findings::Dimension::Coupling],
             reason: None,
+            target: None,
         }],
     );
     let analysis = empty_analysis();

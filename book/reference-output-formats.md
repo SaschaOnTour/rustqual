@@ -99,7 +99,7 @@ GitHub Actions workflow-command annotations. Inline on the PR diff:
 ```
 ::error file=src/order.rs,line=48::IOSP violation: logic=[if (line 50)], calls=[helper (line 53)]
 ::warning file=src/utils/legacy.rs,line=12::Dead code detected: legacy::unused
-::warning file=src/payment.rs,line=88::Stale qual:allow(complexity) marker — no finding in window.
+::warning file=src/payment.rs,line=88::Stale qual:allow(complexity, max_cyclomatic=20) marker — no finding in window.
 ```
 
 The annotation format is `::{level} file=<path>,line=<n>::{message}` —
@@ -159,7 +159,7 @@ The HTML report includes:
   finding tables (IOSP, Complexity, DRY, SRP, Coupling, Test Quality,
   Architecture).
 - Per-module coupling table (afferent / efferent / instability).
-- Orphan-suppression table when stale `qual:allow` markers exist.
+- Orphan-suppression table when stale or too-loose `qual:allow` markers exist (with a Status column).
 
 The artifact is fully self-contained — no external CSS, no scripts,
 no sortable/filterable interactions. Open it in a browser or embed

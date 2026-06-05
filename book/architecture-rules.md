@@ -184,11 +184,11 @@ enabled = true
 
 ## Suppression
 
-Architecture is suppression-resistant by design. The `// qual:allow(architecture)` annotation works at the import site or item, but it counts hard against `max_suppression_ratio`, and you should leave a `reason:` rationale in the comment block:
+Architecture is suppression-resistant by design. The `// qual:allow(architecture, <family>)` annotation works at the import site or item — name the rule family (`forbidden`, `layer`, `call_parity`, `pattern`, `trait_contract`) — but it counts hard against `max_suppression_ratio`, and a `reason:` is mandatory:
 
 ```rust
-// qual:allow(architecture) — port adapter must call into the registry directly
-// here for serialization round-trip; pure domain accessor would lose ordering.
+// qual:allow(architecture, forbidden) reason: "port adapter must call the registry
+// directly for serialization round-trip; a pure domain accessor would lose ordering."
 use crate::adapters::registry::lookup;
 ```
 

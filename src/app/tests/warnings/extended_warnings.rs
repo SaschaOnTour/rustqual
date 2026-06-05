@@ -115,7 +115,13 @@ fn test_nesting_depth_at_threshold_no_warning() {
         max_nesting: 4,
         ..Default::default()
     })];
-    apply_extended_warnings(&mut results, &config, &mut summary, &HashMap::new());
+    apply_extended_warnings(
+        &mut results,
+        &config,
+        &mut summary,
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     assert!(!results[0].nesting_depth_warning, "4 == threshold, no warn");
 }
 
@@ -127,7 +133,13 @@ fn test_function_length_at_threshold_no_warning() {
         function_lines: 60,
         ..Default::default()
     })];
-    apply_extended_warnings(&mut results, &config, &mut summary, &HashMap::new());
+    apply_extended_warnings(
+        &mut results,
+        &config,
+        &mut summary,
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     assert!(
         !results[0].function_length_warning,
         "60 == threshold, no warn"
@@ -143,7 +155,13 @@ fn test_error_handling_expect_allowed() {
         expect_count: 3,
         ..Default::default()
     })];
-    apply_extended_warnings(&mut results, &config, &mut summary, &HashMap::new());
+    apply_extended_warnings(
+        &mut results,
+        &config,
+        &mut summary,
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     assert!(
         !results[0].error_handling_warning,
         "expect allowed, no warn"
@@ -159,7 +177,13 @@ fn test_error_handling_expect_not_allowed() {
         expect_count: 1,
         ..Default::default()
     })];
-    apply_extended_warnings(&mut results, &config, &mut summary, &HashMap::new());
+    apply_extended_warnings(
+        &mut results,
+        &config,
+        &mut summary,
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     assert!(
         results[0].error_handling_warning,
         "expect not allowed, should warn"
@@ -179,7 +203,13 @@ fn test_suppressed_functions_skipped() {
     });
     func.suppressed = true;
     let mut results = vec![func];
-    apply_extended_warnings(&mut results, &config, &mut summary, &HashMap::new());
+    apply_extended_warnings(
+        &mut results,
+        &config,
+        &mut summary,
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     assert!(!results[0].nesting_depth_warning);
     assert!(!results[0].function_length_warning);
     assert!(!results[0].unsafe_warning);
@@ -197,7 +227,13 @@ fn test_complexity_suppressed_functions_skipped() {
     });
     func.complexity_suppressed = true;
     let mut results = vec![func];
-    apply_extended_warnings(&mut results, &config, &mut summary, &HashMap::new());
+    apply_extended_warnings(
+        &mut results,
+        &config,
+        &mut summary,
+        &HashMap::new(),
+        &HashMap::new(),
+    );
     assert!(!results[0].nesting_depth_warning);
     assert!(!results[0].function_length_warning);
 }

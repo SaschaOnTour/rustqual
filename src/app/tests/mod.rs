@@ -1,5 +1,6 @@
 mod analyze_codebase;
 mod architecture;
+mod coupling_targeted;
 mod gates;
 mod metrics;
 mod pipeline;
@@ -23,6 +24,7 @@ pub(super) fn one_suppression(
             line,
             dimensions: vec![dim],
             reason: None,
+            target: None,
         }],
     )]
     .into()

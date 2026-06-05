@@ -1,7 +1,9 @@
 use crate::adapters::analyzers::dry::dead_code::*;
 use crate::adapters::analyzers::dry::{
-    has_allow_dead_code, has_cfg_test, has_test_attr, qualify_name, DeclaredFunction, FileVisitor,
+    has_allow_dead_code, has_cfg_test, has_test_attr, qualify_name,
 };
+use crate::adapters::shared::declared_function::DeclaredFunction;
+use crate::adapters::shared::file_visitor::FileVisitor;
 use crate::config::Config;
 use std::collections::HashSet;
 use syn::visit::Visit;
@@ -43,12 +45,10 @@ fn collected_calls(code: &str) -> (HashSet<String>, HashSet<String>) {
 /// Run dead-code detection over `parsed` with the default config and no
 /// api/test-helper line markers.
 fn dead_code_warnings(parsed: &[(String, String, syn::File)]) -> Vec<DeadCodeWarning> {
-    let config = Config::default();
     let cfg_test_files =
         crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(parsed);
     detect_dead_code(
         parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &cfg_test_files,
@@ -58,10 +58,8 @@ fn dead_code_warnings(parsed: &[(String, String, syn::File)]) -> Vec<DeadCodeWar
 #[test]
 fn test_detect_dead_code_empty() {
     let parsed = parse("");
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -77,10 +75,8 @@ fn test_uncalled_function_detected() {
         fn never_called() { let y = 2; }
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -106,10 +102,8 @@ fn test_called_function_not_flagged() {
         fn main() { helper(); }
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -124,10 +118,8 @@ fn test_called_function_not_flagged() {
 fn test_main_excluded_from_dead_code() {
     let code = "fn main() {}";
     let parsed = parse(code);
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -145,10 +137,8 @@ fn test_test_function_excluded() {
         fn test_something() { let x = 1; }
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -169,10 +159,8 @@ fn test_trait_impl_excluded() {
         }
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -190,10 +178,8 @@ fn test_allow_dead_code_excluded() {
         fn intentionally_unused() { let x = 1; }
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -203,28 +189,6 @@ fn test_allow_dead_code_excluded() {
             .iter()
             .any(|w| w.function_name == "intentionally_unused"),
         "Functions with #[allow(dead_code)] should be excluded"
-    );
-}
-
-#[test]
-fn test_ignored_function_excluded() {
-    let code = r#"
-        fn visit_expr(&self) { let x = 1; }
-    "#;
-    let parsed = parse(code);
-    let mut config = Config::default();
-    config.ignore_functions = vec!["visit_*".to_string()];
-    config.compile();
-    let warnings = detect_dead_code(
-        &parsed,
-        &config,
-        &std::collections::HashMap::new(),
-        &std::collections::HashMap::new(),
-        &std::collections::HashSet::new(),
-    );
-    assert!(
-        !warnings.iter().any(|w| w.function_name == "visit_expr"),
-        "Ignored functions should be excluded"
     );
 }
 
@@ -241,10 +205,8 @@ fn test_test_only_function_detected() {
         }
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -275,10 +237,8 @@ fn testonly_suggestion_mentions_qual_api_and_test_helper() {
         }
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -307,7 +267,6 @@ fn test_dead_code_always_runs_when_called_directly() {
     config.duplicates.detect_dead_code = false;
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -328,10 +287,8 @@ fn test_method_call_detected() {
         }
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -352,10 +309,8 @@ fn test_function_reference_as_call_argument() {
         }
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -376,10 +331,8 @@ fn test_function_reference_as_method_argument() {
         }
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -402,10 +355,8 @@ fn test_qualified_function_reference_as_argument() {
         }
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -426,10 +377,8 @@ fn test_qualified_call_detected() {
         fn main() { let c = Config::load(); }
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -448,10 +397,8 @@ fn test_pub_use_reexport_not_dead_code() {
         fn main() {}
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -470,10 +417,8 @@ fn test_pub_use_rename_not_dead_code() {
         fn main() {}
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -495,10 +440,8 @@ fn test_pub_use_group_reexport_not_dead_code() {
         fn main() {}
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -521,10 +464,8 @@ fn test_private_use_does_not_count_as_reexport() {
         fn main() {}
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -550,12 +491,10 @@ fn integration_test_entry_point_in_crate_tests_dir_not_dead_code() {
         code.to_string(),
         syn::parse_file(code).expect("parse failed"),
     )];
-    let config = Config::default();
     let cfg_test_files =
         crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(&parsed);
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &cfg_test_files,
@@ -649,12 +588,10 @@ fn test_cfg_test_mod_calls_classified_as_test() {
             child_ast,
         ),
     ];
-    let config = Config::default();
     let cfg_test_files =
         crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(&parsed);
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &cfg_test_files,
@@ -695,10 +632,8 @@ fn test_serde_deserialize_with_not_dead_code() {
         }
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -722,10 +657,8 @@ fn test_serde_serialize_with_not_dead_code() {
         }
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -747,10 +680,8 @@ fn test_serde_default_fn_not_dead_code() {
         }
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -777,10 +708,8 @@ fn test_serde_qualified_path_not_dead_code() {
         }
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -809,10 +738,8 @@ fn test_serde_with_module_not_dead_code() {
         }
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -837,10 +764,8 @@ fn test_serde_default_without_value_ignored() {
         }
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -877,10 +802,8 @@ fn test_serde_default_fn_cross_file_not_dead_code() {
         ),
         ("src/config.rs".to_string(), code_b.to_string(), ast_b),
     ];
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -918,10 +841,8 @@ fn test_serde_default_fn_realistic_pattern() {
         }
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -1060,7 +981,6 @@ fn test_api_function_excluded_from_dead_code() {
         fn internal_unused() { let y = 2; }
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let mut api_lines = std::collections::HashMap::new();
     api_lines.insert(
         "test.rs".to_string(),
@@ -1070,7 +990,6 @@ fn test_api_function_excluded_from_dead_code() {
     );
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &api_lines,
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),
@@ -1113,7 +1032,6 @@ fn test_helper_marker_suppresses_testonly_dead_code() {
         }
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let mut test_helper_lines = std::collections::HashMap::new();
     test_helper_lines.insert(
         "test.rs".to_string(),
@@ -1124,7 +1042,6 @@ fn test_helper_marker_suppresses_testonly_dead_code() {
     let cfg_test_files = collect_cfg_test_file_paths(&parsed);
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &test_helper_lines,
         &cfg_test_files,
@@ -1154,7 +1071,6 @@ fn test_helper_marker_does_not_suppress_uncalled() {
         fn unmarked_and_uncalled() { let _ = 2; }
     "#;
     let parsed = parse(code);
-    let config = Config::default();
     let mut test_helper_lines = std::collections::HashMap::new();
     test_helper_lines.insert(
         "test.rs".to_string(),
@@ -1164,7 +1080,6 @@ fn test_helper_marker_does_not_suppress_uncalled() {
     );
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &test_helper_lines,
         &std::collections::HashSet::new(),
@@ -1269,10 +1184,8 @@ fn blanket_dispatch_parsed() -> Vec<(String, String, syn::File)> {
 #[test]
 fn helper_reached_via_trait_blanket_dispatch_is_not_dead_code() {
     let parsed = blanket_dispatch_parsed();
-    let config = Config::default();
     let warnings = detect_dead_code(
         &parsed,
-        &config,
         &std::collections::HashMap::new(),
         &std::collections::HashMap::new(),
         &std::collections::HashSet::new(),

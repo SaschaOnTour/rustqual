@@ -40,8 +40,7 @@ fn test_srp_config_defaults() {
     assert!((c.smell_threshold - DEFAULT_SRP_SMELL_THRESHOLD).abs() < f64::EPSILON);
     assert_eq!(c.max_fields, DEFAULT_SRP_MAX_FIELDS);
     assert_eq!(c.max_methods, DEFAULT_SRP_MAX_METHODS);
-    assert_eq!(c.file_length_baseline, DEFAULT_SRP_FILE_LENGTH_BASELINE);
-    assert_eq!(c.file_length_ceiling, DEFAULT_SRP_FILE_LENGTH_CEILING);
+    assert_eq!(c.file_length, DEFAULT_SRP_FILE_LENGTH);
 }
 
 #[test]
@@ -96,28 +95,25 @@ fn test_tests_config_defaults_inherit_production() {
     // Every override is None by default → the production threshold is used.
     let c = TestsConfig::default();
     assert_eq!(c.max_function_lines, None);
-    assert_eq!(c.file_length_baseline, None);
-    assert_eq!(c.file_length_ceiling, None);
+    assert_eq!(c.file_length, None);
 }
 
 #[test]
 fn test_tests_config_deserialize_overrides() {
     let toml_str = r#"
         max_function_lines = 120
-        file_length_baseline = 500
-        file_length_ceiling = 1200
+        file_length = 500
     "#;
     let c: TestsConfig = toml::from_str(toml_str).unwrap();
     assert_eq!(c.max_function_lines, Some(120));
-    assert_eq!(c.file_length_baseline, Some(500));
-    assert_eq!(c.file_length_ceiling, Some(1200));
+    assert_eq!(c.file_length, Some(500));
 }
 
 #[test]
 fn test_tests_config_partial_override_leaves_rest_none() {
     let c: TestsConfig = toml::from_str("max_function_lines = 90").unwrap();
     assert_eq!(c.max_function_lines, Some(90));
-    assert_eq!(c.file_length_ceiling, None);
+    assert_eq!(c.file_length, None);
 }
 
 #[test]
@@ -126,7 +122,7 @@ fn test_tests_config_rejects_unknown_field() {
     assert!(result.is_err(), "deny_unknown_fields must reject typos");
 }
 
-// qual:allow(test) reason: "verifies production constant, no function/type call needed"
+// qual:allow(test_quality, no_sut) reason: "verifies production constant, no function/type call needed"
 #[test]
 fn test_quality_weights_sum_to_one() {
     let sum: f64 = DEFAULT_QUALITY_WEIGHTS.iter().sum();
@@ -224,6 +220,27 @@ fn test_report_config_rejects_unknown_fields() {
     "#;
     let result: Result<ReportConfig, _> = toml::from_str(toml_str);
     assert!(result.is_err());
+}
+
+#[test]
+fn test_suppression_config_default_pin_headroom() {
+    // A metric pin may sit at most 10% above the actual value before it
+    // is flagged as too-loose; the default headroom is 0.10.
+    let c = SuppressionConfig::default();
+    assert!((c.pin_headroom - DEFAULT_PIN_HEADROOM).abs() < f64::EPSILON);
+    assert!((c.pin_headroom - 0.10).abs() < f64::EPSILON);
+}
+
+#[test]
+fn test_suppression_config_deserialize() {
+    let c: SuppressionConfig = toml::from_str("pin_headroom = 0.25").unwrap();
+    assert!((c.pin_headroom - 0.25).abs() < f64::EPSILON);
+}
+
+#[test]
+fn test_suppression_config_rejects_unknown_field() {
+    let result: Result<SuppressionConfig, _> = toml::from_str("headroom = 0.1");
+    assert!(result.is_err(), "deny_unknown_fields must reject typos");
 }
 
 #[test]

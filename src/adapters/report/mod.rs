@@ -1,4 +1,3 @@
-// qual:allow(coupling) reason: "report naturally depends on all analysis modules"
 mod ai;
 mod baseline;
 mod dot;
@@ -40,7 +39,8 @@ pub struct AnalysisResult {
     /// `Reporter` trait (in `ports::reporter`) consumes. Populated by
     /// projection adapters during analysis. Includes the cross-cutting
     /// `orphan_suppressions` field carrying `// qual:allow(...)` markers
-    /// that matched no finding in their annotation window.
+    /// that should be reported — stale (matched no finding) or too-loose
+    /// (a metric pin sitting too far above the value it covers).
     pub findings: crate::domain::AnalysisFindings,
     /// Typed state-of-codebase data — counterpart to `findings`, the
     /// payload `AnalysisReporter` consumes. Carries per-function
@@ -121,10 +121,10 @@ pub struct Summary {
     pub all_suppressions: usize,
     /// Whether the suppression ratio exceeds the configured maximum.
     pub suppression_ratio_exceeded: bool,
-    /// Number of `// qual:allow(...)` markers that did not match any
-    /// finding within their annotation window. Orphan markers are
-    /// typically stale suppressions (the underlying finding was fixed
-    /// or moved) or misplaced annotations.
+    /// Number of reported `// qual:allow(...)` markers: stale (matched no
+    /// finding in their annotation window — a fixed/moved finding or a
+    /// misplaced annotation) plus too-loose metric pins (sitting further
+    /// above the value they cover than `pin_headroom` allows).
     pub orphan_suppressions: usize,
 }
 

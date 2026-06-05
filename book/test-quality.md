@@ -35,7 +35,7 @@ A test is anything with `#[test]`, `#[tokio::test]`, etc. rustqual scans the fun
 If none are present, `TQ-001` fires. The fix is usually to add an assertion; if the test exists for compile-time/typecheck reasons only, mark it:
 
 ```rust
-// qual:allow(test_quality) — compile-time check only, no runtime assertion needed
+// qual:allow(test_quality, no_assertion) reason: "compile-time check only, no runtime assertion needed"
 #[test] fn signatures_compile() {
     let _: fn(&str) -> Result<Ast> = parse;
 }
@@ -63,7 +63,7 @@ pub fn parse_config(input: &str) -> Result<Config> { /* … */ }
 // qual:test_helper — used only from tests/
 pub fn build_test_session() -> Session { /* … */ }
 
-// qual:allow(test_quality) — initialised at startup, untestable in isolation
+// qual:allow(test_quality, untested) reason: "initialised at startup, untestable in isolation"
 pub fn install_signal_handlers() { /* … */ }
 ```
 
@@ -151,4 +151,4 @@ The agent self-corrects; reviewer time goes to the actual logic, not to spotting
 - [code-reuse.md](./code-reuse.md) — `DRY-002` (dead code) and `TQ-003` (untested) share the call graph
 - [ai-coding-workflow.md](./ai-coding-workflow.md) — agent instruction template that includes assertion rules
 - [reference-rules.md](./reference-rules.md) — every rule code with details
-- [reference-suppression.md](./reference-suppression.md) — `qual:api`, `qual:test_helper`, `qual:allow(test_quality)`
+- [reference-suppression.md](./reference-suppression.md) — `qual:api`, `qual:test_helper`, `qual:allow(test_quality, …)`

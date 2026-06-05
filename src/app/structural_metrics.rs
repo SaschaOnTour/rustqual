@@ -20,6 +20,16 @@ pub(super) fn compute_structural(
 /// Mark structural warnings as suppressed based on suppression comments.
 /// Operation: iteration + suppression matching, no own calls.
 /// Uses the warning's dimension (SRP or Coupling) to match suppressions.
+///
+/// Each structural check has its own boolean suppression target named by its
+/// lowercased code (`oi`/`sit`/`deh`/`iet` on the coupling side,
+/// `btc`/`slm`/`nms` on the SRP side), so a genuinely-unfixable finding (an
+/// orphan-rule-forced impl, a single-impl API boundary, a `downcast` plugin
+/// seam) can be silenced by name: `// qual:allow(coupling, oi) reason: "…"`.
+/// A targeted marker silences only its own kind — `allow(coupling, sdp)` does
+/// not touch an `OI` finding — and a metric coupling pin never silences a
+/// structural one (its `value` is `None`). This goes through `suppresses` so
+/// the marking and orphan-detection layers stay in lockstep.
 pub(super) fn mark_structural_suppressions(
     structural: Option<&mut crate::adapters::analyzers::structural::StructuralAnalysis>,
     suppression_lines: &std::collections::HashMap<String, Vec<Suppression>>,
@@ -32,7 +42,7 @@ pub(super) fn mark_structural_suppressions(
         if let Some(sups) = suppression_lines.get(&w.file) {
             w.suppressed = sups.iter().any(|sup| {
                 let in_window = sup.line <= w.line && w.line - sup.line <= window;
-                in_window && sup.covers(w.dimension)
+                in_window && sup.suppresses(w.dimension, w.kind.target_name(), None)
             });
         }
     });

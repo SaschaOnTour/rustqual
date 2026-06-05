@@ -1,8 +1,8 @@
 use crate::adapters::analyzers::iosp::classify::*;
-use crate::adapters::analyzers::iosp::scope::ProjectScope;
 use crate::adapters::analyzers::iosp::types::{
     CallOccurrence, Classification, ComplexityMetrics, LogicOccurrence,
 };
+use crate::adapters::shared::project_scope::ProjectScope;
 use crate::config::Config;
 use syn::ItemImpl;
 

@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use syn::spanned::Spanned;
 use syn::visit::Visit;
 
-use super::FileVisitor;
+use crate::adapters::shared::file_visitor::{visit_all_files, FileVisitor};
 
 /// A wildcard import warning (e.g. `use crate::module::*`).
 #[derive(Debug, Clone)]
@@ -32,7 +32,7 @@ pub fn detect_wildcard_imports(
         in_test: false,
         file_is_test: false,
     };
-    super::visit_all_files(parsed, &mut collector);
+    visit_all_files(parsed, &mut collector);
     collector.warnings
 }
 
@@ -56,6 +56,33 @@ impl FileVisitor for WildcardCollector {
     }
 }
 
+impl WildcardCollector {
+    /// Whether a glob import under `prefix` is exempt: bare `use super::*` in a
+    /// test module, any import in a test file, or a `prelude` wildcard.
+    /// Operation: boolean guard logic, no own calls.
+    fn skip_glob(&self, prefix: &[String]) -> bool {
+        (self.in_test && prefix == ["super"])
+            || self.file_is_test
+            || prefix.iter().any(|p| p == "prelude")
+    }
+
+    /// Record a wildcard-import warning for `prefix` at `line`.
+    /// Operation: path formatting + push, no own calls.
+    fn push_glob_warning(&mut self, prefix: &[String], line: usize) {
+        let module_path = if prefix.is_empty() {
+            "*".to_string()
+        } else {
+            format!("{}::*", prefix.join("::"))
+        };
+        self.warnings.push(WildcardImportWarning {
+            file: self.file.clone(),
+            line,
+            module_path,
+            suppressed: false,
+        });
+    }
+}
+
 impl<'ast> Visit<'ast> for WildcardCollector {
     fn visit_item_use(&mut self, node: &'ast syn::ItemUse) {
         // Skip `pub use` / `pub(crate) use` re-exports — they are an API design pattern, not lazy imports.
@@ -71,39 +98,8 @@ impl<'ast> Visit<'ast> for WildcardCollector {
                     new_prefix.push(p.ident.to_string());
                     stack.push((new_prefix, &p.tree));
                 }
-                syn::UseTree::Glob(_) => {
-                    // Skip the bare `use super::*` in test modules
-                    // (common pattern to pull everything from the
-                    // enclosing module into the test scope). Deeper
-                    // wildcards like `use super::foo::*` still trigger.
-                    if self.in_test && prefix.as_slice() == ["super"] {
-                        continue;
-                    }
-                    // Skip wildcard imports in test files (integration-test
-                    // binaries and `#[cfg(test)]`/companion files alike).
-                    // Classification comes from the authoritative cfg-test
-                    // file set, computed in `detect_wildcard_imports`.
-                    if self.file_is_test {
-                        continue;
-                    }
-                    // Skip any prelude wildcard: matches the bare
-                    // `prelude::*` and versioned forms like
-                    // `std::prelude::v1::*` or `crate::prelude::rust_2024::*`
-                    // where `prelude` sits in the middle of the path.
-                    if prefix.iter().any(|p| p == "prelude") {
-                        continue;
-                    }
-                    let path = if prefix.is_empty() {
-                        "*".to_string()
-                    } else {
-                        format!("{}::*", prefix.join("::"))
-                    };
-                    self.warnings.push(WildcardImportWarning {
-                        file: self.file.clone(),
-                        line: node.span().start().line,
-                        module_path: path,
-                        suppressed: false,
-                    });
+                syn::UseTree::Glob(_) if !self.skip_glob(&prefix) => {
+                    self.push_glob_warning(&prefix, node.span().start().line);
                 }
                 syn::UseTree::Group(g) => {
                     for item in &g.items {

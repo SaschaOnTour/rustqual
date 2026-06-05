@@ -4,8 +4,8 @@
 //! imports + the `empty_scope`/`visit_code`/`parse_match_arms` helpers live
 //! here and reach the sub-modules via `use super::*`.
 
-pub(super) use crate::adapters::analyzers::iosp::scope::ProjectScope;
 pub(super) use crate::adapters::analyzers::iosp::visitor::*;
+pub(super) use crate::adapters::shared::project_scope::ProjectScope;
 pub(super) use crate::config::Config;
 pub(super) use std::collections::HashMap;
 pub(super) use syn::visit::Visit;

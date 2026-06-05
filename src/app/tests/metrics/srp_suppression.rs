@@ -14,6 +14,7 @@ fn srp_sups(line: usize, dim: Dimension) -> HashMap<String, Vec<Suppression>> {
             line,
             dimensions: vec![dim],
             reason: None,
+            target: None,
         }],
     )]
     .into()
@@ -37,7 +38,11 @@ fn struct_warning(line: usize) -> SrpWarning {
 fn srp_struct_suppressed(w_line: usize, sup_line: usize, dim: Dimension) -> bool {
     let mut srp = make_srp();
     srp.struct_warnings.push(struct_warning(w_line));
-    mark_srp_suppressions(Some(&mut srp), &srp_sups(sup_line, dim));
+    mark_srp_suppressions(
+        Some(&mut srp),
+        &srp_sups(sup_line, dim),
+        &crate::config::sections::SrpConfig::default(),
+    );
     srp.struct_warnings[0].suppressed
 }
 
@@ -50,7 +55,11 @@ fn srp_param_suppressed(w_line: usize, sup_line: usize, dim: Dimension) -> bool 
         parameter_count: 6,
         suppressed: false,
     });
-    mark_srp_suppressions(Some(&mut srp), &srp_sups(sup_line, dim));
+    mark_srp_suppressions(
+        Some(&mut srp),
+        &srp_sups(sup_line, dim),
+        &crate::config::sections::SrpConfig::default(),
+    );
     srp.param_warnings[0].suppressed
 }
 

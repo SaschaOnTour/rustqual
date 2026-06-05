@@ -3,21 +3,6 @@
 # Place this file in your project root.
 
 
-# Function names (or patterns with trailing *) to exclude from analysis.
-#   - `main` / `run` — Composition-Root-Dispatcher, IOSP-Ignore
-#     (Top-Level-Entrypoints mischen zwangsläufig Branching + Delegation).
-#   - `visit_*` — syn-Visitor-Methoden mit fester extern-Signatur. Sie
-#     werden von `syn::visit::visit_file` via Trait-Dispatch aufgerufen,
-#     nicht direkt von Rustcode — daher sieht TQ-003 keinen Call-Pfad
-#     und `DimensionAnalyzer` keine eigenen Calls.
-# `test_*` entfernt: Test-Aware-Analyse (is_test) erledigt die Filterung
-# jetzt strukturell; ein Namens-Präfix ist nicht mehr nötig.
-ignore_functions = [
-    "main",
-    "run",
-    "visit_*",
-]
-
 # Glob patterns for files to exclude.
 # `examples/**` hält per-rule Fixture-Crates, die NICHT Teil rustquals sind —
 # sie werden von den Analyzer-Tests geladen, aber nicht mit-analysiert.
@@ -89,12 +74,12 @@ enabled = true
 
 # ── Test-Code Thresholds ───────────────────────────────────────────────
 #
-# rustqual applies a curated subset of checks to test code: DRY-001/004/005,
+# rustqual applies a curated subset of checks to test code: DRY-001/003/005,
 # LONG_FN (function length), and SRP file-length (SRP_MODULE). The god-struct
 # check (SRP-001) also fires on test structs (a god-fixture is a real smell) at
-# production thresholds — no separate test knob; use `// qual:allow(srp)` for the
-# rare legitimate fixture. Everything else stays test-exempt (ERROR_HANDLING,
-# MAGIC_NUMBER, IOSP, DRY-002 dead code, DRY-003 wildcards, Coupling, all
+# production thresholds — no separate test knob; use `// qual:allow(srp, god_struct)`
+# for the rare legitimate fixture. Everything else stays test-exempt (ERROR_HANDLING,
+# MAGIC_NUMBER, IOSP, DRY-002 dead code, DRY-004 wildcards, Coupling, all
 # Structural detectors, and the SRP module-cohesion / independent-cluster check).
 # This split is fixed; only the thresholds are configurable.
 #
@@ -104,9 +89,19 @@ enabled = true
 # and [srp].
 
 [tests]
-# max_function_lines   = 60      # overrides [complexity].max_function_lines (LONG_FN)
-# file_length_baseline = 300     # overrides [srp].file_length_baseline
-# file_length_ceiling  = 600     # overrides [srp].file_length_ceiling
+# max_function_lines = 60      # overrides [complexity].max_function_lines (LONG_FN)
+# file_length        = 300     # overrides [srp].file_length (SRP_MODULE)
+
+# ── Suppression-marker quality ─────────────────────────────────────────
+#
+# A metric pin `// qual:allow(dim, target=N)` is reported as a *too-loose*
+# orphan when N exceeds the actual value it covers by more than pin_headroom
+# (a pin parked far above the real metric silently absorbs regressions up to
+# its ceiling). Default 0.10 = the pin may sit at most 10% above the value;
+# above that, tighten it to ~value or remove it.
+
+[suppression]
+# pin_headroom = 0.10
 
 # ── Quality Score Weights ──────────────────────────────────────────────
 

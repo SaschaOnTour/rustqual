@@ -221,6 +221,8 @@ fn html_reporter_renders_orphans_via_snapshot_view() {
         line: 42,
         dimensions: vec![crate::findings::Dimension::Iosp],
         reason: Some("legacy".into()),
+        target: None,
+        kind: crate::domain::findings::OrphanKind::Stale,
     }];
     // Reporter struct WITHOUT the orphan_suppressions field — the
     // bypass path is gone; only the trait-driven snapshot view is left.
@@ -235,5 +237,9 @@ fn html_reporter_renders_orphans_via_snapshot_view() {
     assert!(
         html.contains("Orphan") || html.contains("ORPHAN"),
         "HTML must include orphan section heading from snapshot.orphans, got:\n{html}"
+    );
+    assert!(
+        html.contains("<th>Status</th>") && html.contains("<td>stale</td>"),
+        "HTML orphan table must carry a Status column, got:\n{html}"
     );
 }

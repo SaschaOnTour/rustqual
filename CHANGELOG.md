@@ -5,6 +5,113 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-06-05
+
+Minor release with one **breaking** config change. rustqual stops shipping a
+blunt name-based ignore for `main`/`run`/`visit_*` and instead makes its own
+analyzer pass every dimension on its own merits — which required teaching two
+analyzers to see code they were structurally blind to (syn-visitor dispatch and
+trait-method cohesion). The `ignore_functions` option is removed. Suppression
+markers are also held to a higher bar: targeted pins are orphan-checked against
+their own finding-kind, and a metric pin parked too far above the value it
+covers is reported.
+
+### Added
+- **Structural binary checks are now suppressible by name.** Each structural
+  check has its own boolean target — `oi`/`sit`/`deh`/`iet` (coupling) and
+  `btc`/`slm`/`nms` (SRP), the lowercased rule code — so a genuinely-unfixable
+  finding can be silenced: `// qual:allow(coupling, oi) reason: "orphan rules
+  force this impl away from the type"`. A targeted marker silences only its own
+  kind, and marking + orphan-detection share one `structural::target_name_for_code`
+  mapping. (Before, structural findings could be silenced by *any* targeted
+  marker of the dimension via a dimension-only `covers()` check — a silent
+  over-suppression — yet had no way to be named deliberately.)
+- **Orphan detection is now target-aware, and reports too-loose metric pins.**
+  A targeted `// qual:allow(dim, target[=N])` marker is verified against a
+  finding of *that exact kind* — a `file_length` pin no longer counts a
+  god-struct finding as a match, so a stale targeted marker surfaces even when
+  an unrelated finding of the same dimension exists nearby. On top of that, a
+  metric pin parked more than `pin_headroom` (default **10%**) above the value
+  it covers is reported as an `ORPHAN_SUPPRESSION` — *"too-loose … tighten to
+  ~value or remove"* — so a pin can no longer silently absorb regressions up to
+  a far-away ceiling. A pin that re-fires (below its value) is left untouched,
+  not flagged. New `[suppression].pin_headroom` knob (default `0.10`). Every
+  reporter projects the orphan's `kind` (stale vs too-loose) and its targeted
+  finding-kind: text/SARIF/GitHub/AI/HTML lead with the status word, and the
+  JSON output gains stable `kind` (`"stale"`/`"too_loose"`) and `target`
+  (`"file_length=400"`) fields so CI consumers branch on the remedy without
+  parsing the message.
+
+### Removed
+- **BREAKING: the `ignore_functions` config option is gone.** It excluded
+  matching functions from *every* dimension — a far broader effect than its
+  stated purpose (papering over call-graph blindness for trait-dispatched
+  methods), and the single largest hidden suppression in a project. A
+  `rustqual.toml` that still sets `ignore_functions` now fails to parse
+  (`deny_unknown_fields`). **Migration:** delete the key. For the rare function
+  that genuinely cannot be analyzed, use a targeted `// qual:allow(<dim>, <target>)`
+  (or `// qual:allow(iosp)`), `// qual:api`, `// qual:test_helper`, or
+  `exclude_files` instead.
+- **BREAKING: a bare `// qual:allow(<dim>)` is rejected for any dimension with
+  targets** (srp, complexity, dry, coupling, architecture, test_quality). It
+  would silence *every* finding of that dimension — too blunt — so it must name
+  a target: `allow(srp, god_struct)`, `allow(complexity, max_cyclomatic=20)`,
+  `allow(srp, file_length=400)`, … The error lists the valid targets. `iosp`
+  (no targets) keeps its bare form; multi-dimension blanket markers
+  (`allow(a, b)`) are gone — use one marker per dimension. **Migration:** add the
+  target you mean (`rustqual --explain allow` lists them).
+- **BREAKING (config): `[srp].file_length_baseline` / `file_length_ceiling` are
+  replaced by a single `[srp].file_length`** (default `300`, strict `>`). The
+  old baseline→ceiling score ramp was cosmetic (the SRP score is count-based);
+  `SRP-002` now simply fires above `file_length`. The matching `[tests]` knob
+  is likewise a single `file_length`. **Migration:** a `rustqual.toml` setting
+  the removed keys fails to parse (`deny_unknown_fields`) — replace them with
+  `file_length`.
+
+### Changed
+- **TQ-003 (untested) now models syn-visitor dispatch as real call-graph
+  edges.** Previously a visitor's `visit_*` overrides and their helper methods
+  looked unreachable from tests (the static call graph can't follow syn's
+  `visit_block → visit_expr` dispatch), and the gap was hidden by seeding every
+  ignored function as "implicitly tested." That blanket assumption is replaced:
+  for each visitor type the helper methods its overrides call are recorded, and
+  at each drive-site (`x.visit_block(..)`, `syn::visit::visit_*(&mut x, ..)`,
+  `visit_all_files(.., &mut x)`) the driven type is resolved locally and
+  `driver → helpers` edges are added. Testedness now flows only when a test
+  actually drives the visitor — an undriven visitor is still flagged.
+- **SRP cohesion (LCOM4) is more faithful to the canonical metric.** Two fixes,
+  both monotonic (they only *merge* components, never create new findings):
+  - Non-mechanical trait methods (e.g. a `syn::Visit` impl) now *bridge* the
+    inherent methods they tie together — via their field footprint **and** the
+    methods they call — without being counted as responsibility nodes. This
+    stops a struct whose core logic lives in a behavior trait (visitor, walker)
+    from fragmenting into false god-structs. Mechanical traits
+    (`Display`/`Debug`/`From`/`Serialize`/`PartialEq`/`Hash`/`Default`/`Clone`/…)
+    stay excluded so they can't mask genuine god-structs.
+  - Methods connected by a `self.other()` call are now unioned, matching the
+    canonical LCOM4 definition (methods cohere when they share a field **or**
+    call one another).
+
+### Internal
+- `main`, `run`, and all `visit_*` methods are no longer name-ignored; every
+  function in rustqual is analyzed by its own rules. The fat AST visitors
+  (`Normalizer`, `BodyVisitor`, and several collectors) were refactored to
+  per-node category dispatch, and the composition root `run()` was decomposed
+  into phase operations — so rustqual dogfoods its own complexity, IOSP, and
+  cohesion rules on its own visitor code.
+- The two longest files were split into directory modules by concern
+  (`shared/normalize/` and `call_parity_rule/calls/`), each well under the SRP
+  file-length baseline — eliminating their blanket `allow(srp)` markers by real
+  refactoring rather than a pin. rustqual now carries **zero** production `srp`
+  suppressions.
+- `domain::SuppressionTarget` is now a sum type (`Metric { name, pin } |
+  Boolean { name }`) so the "metric ⇒ has a pin, boolean ⇒ has none" invariant
+  is unrepresentable otherwise; `suppresses()` matches the variant directly.
+  The orphan detector was split into `orphan_suppressions/{mod,positions}.rs`
+  (decision vs. enumeration), made target-aware per finding-kind, and fixed so
+  a pin on an inactive SRP component, a module-global coupling pin, or a
+  magic-number marker is judged correctly rather than mis-reported.
+
 ## [1.4.2] - 2026-06-04
 
 Patch release: a false-positive fix found while applying 1.4.1. SIT stops
@@ -140,7 +247,7 @@ never-read `[tests].max_methods` config key.
 ## [1.4.0] - 2026-06-02
 
 Minor release: **quality checks now run on test code.** DRY (duplicate-function
-DRY-001, code-fragment DRY-004, repeated-match DRY-005), function-length
+DRY-001, code-fragment DRY-003, repeated-match DRY-005), function-length
 (LONG_FN), and SRP file-length (SRP_MODULE) previously skipped
 `#[cfg(test)]`/test files. They now analyze test code too, so duplicated test
 helpers, copy-pasted arrange/assert blocks, overlong test fns, and oversized
@@ -151,9 +258,9 @@ production values.
 - **BREAKING (config):** the `[duplicates] ignore_tests` field is **removed**.
   Because `[duplicates]` uses `deny_unknown_fields`, a `rustqual.toml` that
   still sets `ignore_tests` will now fail to parse — delete the line. There is
-  no replacement: DRY-001/004/005 always run on tests. `detect_repeated_matches`
+  no replacement: DRY-001/003/005 always run on tests. `detect_repeated_matches`
   no longer takes a config argument.
-- DRY-003 (wildcard imports) remains test-exempt by its own logic, unchanged.
+- DRY-004 (wildcard imports) remains test-exempt by its own logic, unchanged.
 - **LONG_FN now applies to test functions** at the new
   `[tests].max_function_lines` threshold (an `Option` defaulting to
   `[complexity].max_function_lines` = production, 60). Large table-driven tests
@@ -274,7 +381,7 @@ Failing-first regression tests in `src/adapters/shared/tests/cfg_test.rs`,
   `src/` (`src/foo/tests/bar.rs`, a unit-test submodule reached via
   `#[cfg(test)] mod`). All four DRY file collectors — `FunctionCollector`
   (duplicate hashing, DRY-001), `FragmentCollector` (repeated fragments,
-  DRY-004), `MatchPatternCollector` (repeated matches, DRY-005), and
+  DRY-003), `MatchPatternCollector` (repeated matches, DRY-005), and
   `WildcardCollector` (wildcard imports) — no longer apply their own
   `/tests/` path strings; they consult the shared `cfg_test_files` set
   (integration dirs + `#![cfg(test)]` + `#[cfg(test)] mod` chains), so a

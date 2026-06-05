@@ -47,9 +47,10 @@ produces exactly two findings:
    into it, but REST doesn't, so the coverage set `{cli, mcp}` is
    missing `rest`.
 
-`cmd_debug` carries `// qual:allow(architecture)` so the pipeline
-silences its would-be `no_delegation` finding. This is the explicit
-escape for intentionally asymmetric features.
+`cmd_debug` carries `// qual:allow(architecture, call_parity) reason: "…"`
+so the pipeline silences its would-be `no_delegation` finding. This is the
+explicit escape for intentionally asymmetric features (a bare
+`allow(architecture)` is rejected — the marker must name the rule family).
 
 ## Wiring
 

@@ -6,9 +6,13 @@
 //! depend on a specific analyzer.
 pub mod cfg_test;
 pub mod cfg_test_files;
+pub mod declared_function;
 pub mod file_to_module;
+pub mod file_visitor;
 pub mod macro_expansion;
 pub mod normalize;
+pub mod project_scope;
+pub mod test_references;
 pub mod use_tree;
 
 #[cfg(test)]

@@ -1,5 +1,48 @@
 use super::*;
 
+/// Three independent private algorithms (sort / search / hash) with no calls
+/// between them — a short file with 3 cohesion clusters but well under the
+/// file_length threshold. Used to exercise cohesion-only module warnings.
+const THREE_ALGO_FIXTURE: &str = r#"
+fn algo_sort(data: &mut [i32]) {
+let n = data.len();
+let mut swapped = true;
+while swapped {
+    swapped = false;
+    for i in 1..n {
+        if data[i - 1] > data[i] {
+            data.swap(i - 1, i);
+            swapped = true;
+        }
+    }
+}
+}
+fn algo_search(data: &[i32], target: i32) -> Option<usize> {
+let mut lo = 0;
+let mut hi = data.len();
+while lo < hi {
+    let mid = (lo + hi) / 2;
+    if data[mid] == target {
+        return Some(mid);
+    } else if data[mid] < target {
+        lo = mid + 1;
+    } else {
+        hi = mid;
+    }
+}
+None
+}
+fn algo_hash(data: &[u8]) -> u64 {
+let mut h: u64 = 0;
+for &b in data {
+    h = h.wrapping_mul(31).wrapping_add(b as u64);
+}
+let extra = data.len() as u64;
+let final_val = h ^ extra;
+final_val
+}
+"#;
+
 // ── Independent cluster tests ─────────────────────────────────
 
 #[test]
@@ -212,46 +255,8 @@ fn test_clusters_two_callers_two_groups() {
 
 #[test]
 fn test_cohesion_warning_without_length_warning() {
-    // File is short (below baseline) but has 3+ independent private algorithms
-    let code = r#"
-fn algo_sort(data: &mut [i32]) {
-let n = data.len();
-let mut swapped = true;
-while swapped {
-    swapped = false;
-    for i in 1..n {
-        if data[i - 1] > data[i] {
-            data.swap(i - 1, i);
-            swapped = true;
-        }
-    }
-}
-}
-fn algo_search(data: &[i32], target: i32) -> Option<usize> {
-let mut lo = 0;
-let mut hi = data.len();
-while lo < hi {
-    let mid = (lo + hi) / 2;
-    if data[mid] == target {
-        return Some(mid);
-    } else if data[mid] < target {
-        lo = mid + 1;
-    } else {
-        hi = mid;
-    }
-}
-None
-}
-fn algo_hash(data: &[u8]) -> u64 {
-let mut h: u64 = 0;
-for &b in data {
-    h = h.wrapping_mul(31).wrapping_add(b as u64);
-}
-let extra = data.len() as u64;
-let final_val = h ^ extra;
-final_val
-}
-"#;
+    // File is short (below threshold) but has 3+ independent private algorithms.
+    let code = THREE_ALGO_FIXTURE;
     let syntax = syn::parse_file(code).unwrap();
     let parsed = vec![("algos.rs".to_string(), code.to_string(), syntax)];
     // `max_*` thresholds are exclusive ("highest value that still
@@ -264,8 +269,11 @@ final_val
     };
     let call_graph = HashMap::new();
     let cfg_test_files = std::collections::HashSet::new();
-    let warnings = analyze_module_srp(&parsed, &config, &call_graph, &cfg_test_files, (300, 800));
+    let warnings = analyze_module_srp(&parsed, &config, &call_graph, &cfg_test_files, 300);
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0].independent_clusters, 3);
-    assert!((warnings[0].length_score - 0.0).abs() < f64::EPSILON);
+    // The warning is cohesion-driven, not length-driven: the short fixture
+    // sits below the file_length threshold (ratio < 1.0).
+    assert!(warnings[0].production_lines <= 300);
+    assert!(warnings[0].length_score < 1.0);
 }

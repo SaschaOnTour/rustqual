@@ -14,6 +14,7 @@ pub(super) use crate::report::Summary;
 pub(super) use std::collections::{HashMap, HashSet};
 
 mod complexity_flags;
+mod complexity_targeted;
 mod exclude_and_error_handling;
 mod extended_warnings;
 mod flag_application;
@@ -23,6 +24,9 @@ mod orphan_dry_and_disabled;
 mod orphan_mod_internals;
 mod orphan_module_tq_arch;
 mod orphan_support;
+mod orphan_target_helpers;
+mod orphan_targeting;
+mod orphan_too_loose;
 pub(super) use orphan_support::*;
 
 // ── apply_extended_warnings ───────────────────────────────────
@@ -65,7 +69,13 @@ pub(super) fn apply_warnings(
 ) -> (FunctionAnalysis, Summary) {
     let mut summary = Summary::default();
     let mut results = vec![func];
-    apply_extended_warnings(&mut results, config, &mut summary, unsafe_lines);
+    apply_extended_warnings(
+        &mut results,
+        config,
+        &mut summary,
+        unsafe_lines,
+        &HashMap::new(),
+    );
     (results.into_iter().next().unwrap(), summary)
 }
 
@@ -127,6 +137,7 @@ pub(super) fn complexity_sup_orphans(
             line: sup_line,
             dimensions: vec![crate::findings::Dimension::Complexity],
             reason: None,
+            target: None,
         }],
     );
     let mut analysis = empty_analysis();

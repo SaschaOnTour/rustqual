@@ -67,13 +67,18 @@ impl Fixture {
     }
 }
 
+/// External-crate layer mappings for a layer-rule test run (exact + glob).
+struct Externals<'a> {
+    exact: &'a HashMap<String, String>,
+    glob: &'a [(GlobMatcher, String)],
+}
+
 fn run(
     fixture: &Fixture,
     layers: &LayerDefinitions,
     reexport: &GlobSet,
     unmatched: UnmatchedBehavior,
-    external_exact: &HashMap<String, String>,
-    external_glob: &[(GlobMatcher, String)],
+    externals: Externals,
 ) -> Vec<MatchLocation> {
     let refs = fixture.refs();
     check_layer_rule(
@@ -82,8 +87,8 @@ fn run(
             layers,
             reexport_points: reexport,
             unmatched_behavior: unmatched,
-            external_exact,
-            external_glob,
+            external_exact: externals.exact,
+            external_glob: externals.glob,
         },
     )
 }
@@ -94,8 +99,10 @@ fn run_simple(fixture: &Fixture) -> Vec<MatchLocation> {
         &default_layers(),
         &glob_set(&[]),
         UnmatchedBehavior::CompositionRoot,
-        &HashMap::new(),
-        &[],
+        Externals {
+            exact: &HashMap::new(),
+            glob: &[],
+        },
     )
 }
 
@@ -251,8 +258,10 @@ fn external_exact_match_enforced() {
         &default_layers(),
         &glob_set(&[]),
         UnmatchedBehavior::CompositionRoot,
-        &ext,
-        &[],
+        Externals {
+            exact: &ext,
+            glob: &[],
+        },
     );
     assert_eq!(hits.len(), 1, "{hits:?}");
     match &hits[0].kind {
@@ -278,8 +287,10 @@ fn external_glob_match_enforced() {
         &default_layers(),
         &glob_set(&[]),
         UnmatchedBehavior::CompositionRoot,
-        &HashMap::new(),
-        &ext_glob,
+        Externals {
+            exact: &HashMap::new(),
+            glob: &ext_glob,
+        },
     );
     assert_eq!(hits.len(), 1, "{hits:?}");
 }
@@ -296,8 +307,10 @@ fn external_exact_wins_over_glob() {
         &default_layers(),
         &glob_set(&[]),
         UnmatchedBehavior::CompositionRoot,
-        &ext_exact,
-        &ext_glob,
+        Externals {
+            exact: &ext_exact,
+            glob: &ext_glob,
+        },
     );
     assert!(hits.is_empty(), "exact must win: {hits:?}");
 }
@@ -322,8 +335,10 @@ fn reexport_point_bypasses_rule() {
         &default_layers(),
         &reexport,
         UnmatchedBehavior::CompositionRoot,
-        &HashMap::new(),
-        &[],
+        Externals {
+            exact: &HashMap::new(),
+            glob: &[],
+        },
     );
     assert!(hits.is_empty(), "re-export point must bypass: {hits:?}");
 }
@@ -340,8 +355,10 @@ fn unmatched_composition_root_bypasses() {
         &default_layers(),
         &glob_set(&[]),
         UnmatchedBehavior::CompositionRoot,
-        &HashMap::new(),
-        &[],
+        Externals {
+            exact: &HashMap::new(),
+            glob: &[],
+        },
     );
     assert!(hits.is_empty(), "unmatched composition root: {hits:?}");
 }
@@ -354,8 +371,10 @@ fn unmatched_strict_error_emits_one_violation() {
         &default_layers(),
         &glob_set(&[]),
         UnmatchedBehavior::StrictError,
-        &HashMap::new(),
-        &[],
+        Externals {
+            exact: &HashMap::new(),
+            glob: &[],
+        },
     );
     assert_eq!(hits.len(), 1);
     match &hits[0].kind {
@@ -375,8 +394,10 @@ fn strict_error_does_not_flag_reexport_points() {
         &default_layers(),
         &reexport,
         UnmatchedBehavior::StrictError,
-        &HashMap::new(),
-        &[],
+        Externals {
+            exact: &HashMap::new(),
+            glob: &[],
+        },
     );
     assert!(hits.is_empty(), "{hits:?}");
 }

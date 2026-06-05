@@ -86,6 +86,8 @@ fn ai_reporter_includes_orphan_entries_via_snapshot_view() {
         line: 42,
         dimensions: vec![crate::findings::Dimension::Srp],
         reason: Some("legacy".into()),
+        target: None,
+        kind: crate::domain::findings::OrphanKind::Stale,
     }];
     let config = Config::default();
     let value = build_ai_value(&analysis, &config);
@@ -105,4 +107,12 @@ fn ai_reporter_includes_orphan_entries_via_snapshot_view() {
         .find(|e| e["category"] == "orphan_suppression")
         .expect("orphan entry under src/foo.rs");
     assert_eq!(orphan["line"], 42);
+    assert_eq!(orphan["kind"], "stale", "AI must project the orphan kind");
+    assert!(
+        orphan["detail"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("stale"),
+        "AI detail must lead with the status word, got {orphan}"
+    );
 }

@@ -1,9 +1,8 @@
 use crate::adapters::analyzers::dry::dead_code::DeadCodeWarning;
-use crate::adapters::analyzers::dry::DeclaredFunction;
 use crate::adapters::analyzers::tq::build_reaches_prod_set;
 use crate::adapters::analyzers::tq::untested::*;
 use crate::adapters::analyzers::tq::{TqWarning, TqWarningKind};
-use crate::config::Config;
+use crate::adapters::shared::declared_function::DeclaredFunction;
 use std::collections::{HashMap, HashSet};
 
 fn make_declared(name: &str, is_test: bool) -> DeclaredFunction {
@@ -40,7 +39,7 @@ fn untested_via_graph(
         .map(|(f, t)| (f.to_string(), vec![t.to_string()]))
         .collect();
     let tested = build_transitive_tested_set(&test_calls, &call_graph);
-    detect_untested_functions(&declared, &prod_calls, &tested, &[], &Config::default())
+    detect_untested_functions(&declared, &prod_calls, &tested, &[])
 }
 
 #[test]
@@ -48,9 +47,8 @@ fn test_untested_prod_fn_emits_warning() {
     let declared = vec![make_declared("process", false)];
     let prod_calls: HashSet<String> = ["process".to_string()].into();
     let tested = HashSet::new();
-    let config = Config::default();
 
-    let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
+    let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[]);
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0].kind, TqWarningKind::Untested);
     assert_eq!(warnings[0].function_name, "process");
@@ -61,9 +59,8 @@ fn test_tested_fn_no_warning() {
     let declared = vec![make_declared("process", false)];
     let prod_calls: HashSet<String> = ["process".to_string()].into();
     let tested: HashSet<String> = ["process".to_string()].into();
-    let config = Config::default();
 
-    let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
+    let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[]);
     assert!(warnings.is_empty());
 }
 
@@ -72,9 +69,8 @@ fn test_uncalled_fn_no_warning() {
     let declared = vec![make_declared("unused", false)];
     let prod_calls: HashSet<String> = HashSet::new();
     let tested = HashSet::new();
-    let config = Config::default();
 
-    let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
+    let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[]);
     assert!(
         warnings.is_empty(),
         "functions not called from prod are not TQ-003"
@@ -86,9 +82,8 @@ fn test_test_fn_excluded() {
     let declared = vec![make_declared("test_helper", true)];
     let prod_calls: HashSet<String> = ["test_helper".to_string()].into();
     let tested = HashSet::new();
-    let config = Config::default();
 
-    let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
+    let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[]);
     assert!(warnings.is_empty());
 }
 
@@ -98,9 +93,8 @@ fn test_main_fn_excluded() {
     declared[0].is_main = true;
     let prod_calls: HashSet<String> = ["main".to_string()].into();
     let tested = HashSet::new();
-    let config = Config::default();
 
-    let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
+    let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[]);
     assert!(warnings.is_empty());
 }
 
@@ -110,9 +104,8 @@ fn test_api_fn_excluded() {
     declared[0].is_api = true;
     let prod_calls: HashSet<String> = ["handle_overview".to_string()].into();
     let tested = HashSet::new();
-    let config = Config::default();
 
-    let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
+    let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[]);
     assert!(
         warnings.is_empty(),
         "qual:api functions should be excluded from TQ-003"
@@ -125,9 +118,8 @@ fn test_test_helper_fn_excluded() {
     declared[0].is_test_helper = true;
     let prod_calls: HashSet<String> = ["shared_asserter".to_string()].into();
     let tested = HashSet::new();
-    let config = Config::default();
 
-    let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
+    let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[]);
     assert!(
         warnings.is_empty(),
         "qual:test_helper functions should be excluded from TQ-003"
@@ -140,9 +132,8 @@ fn test_trait_impl_excluded() {
     declared[0].is_trait_impl = true;
     let prod_calls: HashSet<String> = ["fmt".to_string()].into();
     let tested = HashSet::new();
-    let config = Config::default();
 
-    let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
+    let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[]);
     assert!(warnings.is_empty());
 }
 
@@ -161,9 +152,8 @@ fn test_dead_code_excluded() {
             suggestion: String::new(),
         },
     ];
-    let config = Config::default();
 
-    let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &dead, &config);
+    let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &dead);
     assert!(warnings.is_empty());
 }
 
@@ -212,9 +202,8 @@ fn test_empty_call_graph_falls_back_to_direct() {
     let declared = vec![make_declared("a", false), make_declared("b", false)];
     let prod_calls: HashSet<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
     let tested: HashSet<String> = ["a".to_string()].into();
-    let config = Config::default();
 
-    let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[], &config);
+    let warnings = detect_untested_functions(&declared, &prod_calls, &tested, &[]);
     assert_eq!(warnings.len(), 1);
     assert_eq!(warnings[0].function_name, "b");
 }

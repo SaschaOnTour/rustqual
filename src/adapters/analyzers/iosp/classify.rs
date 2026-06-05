@@ -1,7 +1,7 @@
 use syn::visit::Visit;
 use syn::ItemImpl;
 
-use crate::adapters::analyzers::iosp::scope::ProjectScope;
+use crate::adapters::shared::project_scope::ProjectScope;
 use crate::config::Config;
 
 use super::types::{CallOccurrence, Classification, ComplexityMetrics, LogicOccurrence};

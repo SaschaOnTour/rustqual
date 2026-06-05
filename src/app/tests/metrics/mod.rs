@@ -17,6 +17,7 @@ pub(super) use crate::adapters::analyzers::iosp::{
 };
 pub(super) use crate::app::dry_suppressions::{mark_dry_suppressions, mark_inverse_suppressions};
 pub(super) use crate::app::metrics::*;
+pub(super) use crate::app::srp_suppressions::mark_srp_suppressions;
 pub(super) use crate::config::sections::SrpConfig;
 pub(super) use crate::findings::Suppression;
 pub(super) use crate::report::Summary;
@@ -25,6 +26,7 @@ mod counters;
 mod dry_detection;
 mod param_warnings;
 mod srp_suppression;
+mod srp_targeted;
 mod suppression;
 
 pub(super) fn make_func(name: &str, param_count: usize, trait_impl: bool) -> FunctionAnalysis {
@@ -72,6 +74,7 @@ pub(super) fn dry_suppression_at(
             line,
             dimensions: vec![crate::findings::Dimension::Dry],
             reason: None,
+            target: None,
         }],
     )]
     .into()

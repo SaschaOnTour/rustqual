@@ -1,8 +1,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::adapters::analyzers::dry::dead_code::DeadCodeWarning;
-use crate::adapters::analyzers::dry::DeclaredFunction;
-use crate::config::Config;
+use crate::adapters::shared::declared_function::DeclaredFunction;
 
 use super::{TqWarning, TqWarningKind};
 
@@ -33,7 +32,6 @@ pub(crate) fn detect_untested_functions(
     prod_calls: &HashSet<String>,
     transitive_tested: &HashSet<String>,
     dead_code: &[DeadCodeWarning],
-    config: &Config,
 ) -> Vec<TqWarning> {
     // Dead code functions are already flagged — skip them for TQ-003
     let dead_names: HashSet<&str> = dead_code.iter().map(|d| d.function_name.as_str()).collect();
@@ -47,7 +45,6 @@ pub(crate) fn detect_untested_functions(
                 && !f.is_api
                 && !f.is_test_helper
                 && !f.is_trait_impl
-                && !config.is_ignored_function(&f.name)
                 && !dead_names.contains(f.name.as_str())
                 && prod_calls.contains(&f.name)
                 && !transitive_tested.contains(&f.name)

@@ -31,7 +31,8 @@ pub fn prepare_init_content(path: &Path) -> String {
 /// into `ProjectMetrics`.
 /// Integration: orchestrates parsing, scope build, analysis, extraction.
 fn compute_project_metrics(files: &[std::path::PathBuf], path: &Path) -> ProjectMetrics {
-    use crate::adapters::analyzers::iosp::{scope::ProjectScope, Analyzer};
+    use crate::adapters::analyzers::iosp::Analyzer;
+    use crate::adapters::shared::project_scope::ProjectScope;
     use crate::adapters::source::filesystem::read_and_parse_files;
     use crate::config::Config;
 
@@ -85,15 +86,6 @@ pub fn generate_default_config() -> &'static str {
 #
 # Place this file in your project root.
 # Run `rustqual --init` to generate this file.
-
-# ── Function Classification ──────────────────────────────────────────────
-
-# Function names (or glob patterns) to exclude from analysis.
-# Examples: "main", "test_*", "visit_*"
-ignore_functions = [
-    "main",
-    "test_*",
-]
 
 # Glob patterns for files to exclude from analysis.
 # Examples: "generated/**", "tests/**"
@@ -166,8 +158,7 @@ max_methods = 20
 max_fan_out = 10
 lcom4_threshold = 2
 weights = [0.4, 0.25, 0.15, 0.2]
-file_length_baseline = 300
-file_length_ceiling = 800
+file_length = 300
 max_independent_clusters = 2
 min_cluster_statements = 5
 # Maximum number of parameters before a function triggers SRP-004.
@@ -198,8 +189,7 @@ enabled = true
 
 [tests]
 # max_function_lines   = 60      # overrides [complexity].max_function_lines
-# file_length_baseline = 300     # overrides [srp].file_length_baseline
-# file_length_ceiling  = 600     # overrides [srp].file_length_ceiling
+# file_length          = 300     # overrides [srp].file_length
 
 # ── Quality Score Weights ──────────────────────────────────────────────
 # Weights for each dimension in the overall quality score.
@@ -241,9 +231,6 @@ fn format_tailored_config(m: &ProjectMetrics, thresholds: &[usize; 4]) -> String
 # Thresholds are set to your current maximums + 20% headroom.
 # Tighten them over time as you improve code quality.
 
-# ── Function Classification ──────────────────────────────────────────────
-
-ignore_functions = ["main", "test_*"]
 exclude_files = []
 strict_closures = false
 strict_iterator_chains = false
@@ -298,8 +285,7 @@ max_methods = 20
 max_fan_out = 10
 lcom4_threshold = 2
 weights = [0.4, 0.25, 0.15, 0.2]
-file_length_baseline = 300
-file_length_ceiling = 800
+file_length = 300
 max_independent_clusters = 2
 min_cluster_statements = 5
 max_parameters = 5
@@ -326,8 +312,7 @@ enabled = true
 
 [tests]
 # max_function_lines   = 60      # overrides [complexity].max_function_lines
-# file_length_baseline = 300     # overrides [srp].file_length_baseline
-# file_length_ceiling  = 600     # overrides [srp].file_length_ceiling
+# file_length          = 300     # overrides [srp].file_length
 
 # ── Quality Score Weights ──────────────────────────────────────────────
 # Must sum to approximately 1.0.

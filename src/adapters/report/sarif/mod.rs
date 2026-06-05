@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use crate::domain::analysis_data::{FunctionRecord, ModuleCouplingRecord};
 use crate::domain::findings::{
     ArchitectureFinding, ComplexityFinding, ComplexityFindingKind, CouplingFinding,
-    CouplingFindingDetails, DryFinding, DryFindingDetails, DryFindingKind, IospFinding,
+    CouplingFindingDetails, DryFinding, DryFindingDetails, DryFindingKind, IospFinding, OrphanKind,
     OrphanSuppression, SrpFinding, SrpFindingDetails, SrpFindingKind, TqFinding, TqFindingKind,
 };
 use crate::ports::reporter::{ReporterImpl, Snapshot};
@@ -237,11 +237,22 @@ fn orphan_suppression_results(orphans: &[OrphanSuppression]) -> Vec<Value> {
                     .collect::<Vec<_>>()
                     .join(",")
             };
-            let message = match &w.reason {
-                Some(r) => format!(
-                    "Stale qual:allow({dims}) marker — no finding in window. Reason was: {r}"
+            let tgt = w.target_suffix();
+            let message = match w.kind {
+                OrphanKind::Stale => match &w.reason {
+                    Some(r) => format!(
+                        "Stale qual:allow({dims}{tgt}) marker — no finding in window. Reason was: {r}"
+                    ),
+                    None => {
+                        format!("Stale qual:allow({dims}{tgt}) marker — no finding in window.")
+                    }
+                },
+                OrphanKind::PinTooLoose => format!(
+                    "Too-loose qual:allow({dims}{tgt}) pin — {}",
+                    w.reason
+                        .as_deref()
+                        .unwrap_or("tighten the pin or remove it")
                 ),
-                None => format!("Stale qual:allow({dims}) marker — no finding in window."),
             };
             json!({
                 "ruleId": "ORPHAN-001",

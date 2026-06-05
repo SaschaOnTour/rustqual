@@ -19,56 +19,41 @@ pub(super) fn compute_coupling(
     ))
 }
 
-/// Mark coupling metrics as suppressed based on `// qual:allow(coupling)` comments.
-/// Operation: iteration + suppression check logic, no own calls.
-/// A module is suppressed if ANY of its files contains a coupling suppression.
-pub(super) fn mark_coupling_suppressions(
-    analysis: Option<&mut crate::adapters::analyzers::coupling::CouplingAnalysis>,
-    suppression_lines: &std::collections::HashMap<String, Vec<Suppression>>,
-) {
-    let Some(analysis) = analysis else { return };
-
-    // Collect module names that have coupling suppressions in any of their files
-    let suppressed_modules: std::collections::HashSet<String> = suppression_lines
-        .iter()
-        .filter(|(_, sups)| {
-            sups.iter()
-                .any(|s| s.covers(crate::findings::Dimension::Coupling))
-        })
-        .map(|(path, _)| crate::adapters::shared::file_to_module::file_to_module(path))
-        .collect();
-
-    for m in &mut analysis.metrics {
-        if suppressed_modules.contains(&m.module_name) {
-            m.suppressed = true;
-        }
-    }
-}
-
-/// Count coupling warnings and update summary.
-/// Operation: iteration + threshold comparison logic, no own calls.
-/// Leaf modules (afferent=0) are excluded from instability warnings
-/// because I=1.0 is the natural, harmless state for leaf modules.
-/// Suppressed modules are excluded from all coupling warnings.
+/// Count coupling warnings and update summary. Each module-level metric
+/// (instability / fan-in / fan-out) is gated by a blanket or targeted
+/// `allow(coupling, …)`; leaf modules (afferent=0) are instability-exempt.
+/// Operation: iterates metrics, delegating the per-module decision.
 pub(super) fn count_coupling_warnings(
     analysis: Option<&mut crate::adapters::analyzers::coupling::CouplingAnalysis>,
     config: &crate::config::sections::CouplingConfig,
+    sups: &crate::app::coupling_suppressions::ModuleCouplingSuppressions,
     summary: &mut Summary,
 ) {
     let Some(analysis) = analysis else { return };
     for m in &mut analysis.metrics {
-        m.warning = false;
-        if m.suppressed {
-            continue;
-        }
-        let instability_exceeded = m.afferent > 0 && m.instability > config.max_instability;
-        if instability_exceeded || m.afferent > config.max_fan_in || m.efferent > config.max_fan_out
-        {
-            m.warning = true;
+        m.warning = module_coupling_warns(m, config, sups);
+        if m.warning {
             summary.coupling_warnings += 1;
         }
     }
     summary.coupling_cycles = analysis.cycles.len();
+}
+
+/// Whether a module has any unsuppressed coupling metric breach.
+/// Operation: per-metric checks reaching the suppression helper.
+fn module_coupling_warns(
+    m: &crate::adapters::analyzers::coupling::CouplingMetrics,
+    config: &crate::config::sections::CouplingConfig,
+    sups: &crate::app::coupling_suppressions::ModuleCouplingSuppressions,
+) -> bool {
+    let inst = m.afferent > 0
+        && m.instability > config.max_instability
+        && !sups.suppresses(&m.module_name, "max_instability", Some(m.instability));
+    let fan_in = m.afferent > config.max_fan_in
+        && !sups.suppresses(&m.module_name, "max_fan_in", Some(m.afferent as f64));
+    let fan_out = m.efferent > config.max_fan_out
+        && !sups.suppresses(&m.module_name, "max_fan_out", Some(m.efferent as f64));
+    inst || fan_in || fan_out
 }
 
 /// Run a detection pass if enabled, returning empty vec when disabled.
@@ -126,7 +111,6 @@ pub(super) fn run_dry_detection(
             }
             crate::adapters::analyzers::dry::dead_code::detect_dead_code(
                 p,
-                c,
                 annotation_lines.api,
                 annotation_lines.test_helper,
                 cfg_test_files,
@@ -202,48 +186,6 @@ pub(super) fn count_dry_findings(
         .sum();
 }
 
-/// Mark SRP warnings as suppressed based on `// qual:allow(srp)` comments.
-/// Operation: iteration + suppression matching via closures (no own calls).
-pub(super) fn mark_srp_suppressions(
-    srp: Option<&mut crate::adapters::analyzers::srp::SrpAnalysis>,
-    suppression_lines: &std::collections::HashMap<String, Vec<Suppression>>,
-) {
-    let Some(srp) = srp else { return };
-
-    // Struct suppressions: comment may be several lines above due to #[derive(...)] attributes
-    // Window width shared with the orphan detector, see
-    // `app::suppression_windows::SRP_STRUCT_PARAM`.
-    const SRP_STRUCT_SUPPRESSION_WINDOW: usize = super::suppression_windows::SRP_STRUCT_PARAM;
-    let srp_dim = crate::findings::Dimension::Srp;
-
-    srp.struct_warnings.iter_mut().for_each(|w| {
-        if let Some(sups) = suppression_lines.get(&w.file) {
-            w.suppressed = sups.iter().any(|sup| {
-                let in_window =
-                    sup.line <= w.line && w.line - sup.line <= SRP_STRUCT_SUPPRESSION_WINDOW;
-                in_window && sup.covers(srp_dim)
-            });
-        }
-    });
-
-    srp.module_warnings.iter_mut().for_each(|w| {
-        if let Some(sups) = suppression_lines.get(&w.file) {
-            w.suppressed = sups.iter().any(|sup| sup.covers(srp_dim));
-        }
-    });
-
-    // Param suppressions: proximity-based like struct warnings (attributes above fn)
-    srp.param_warnings.iter_mut().for_each(|w| {
-        if let Some(sups) = suppression_lines.get(&w.file) {
-            w.suppressed = sups.iter().any(|sup| {
-                let in_window =
-                    sup.line <= w.line && w.line - sup.line <= SRP_STRUCT_SUPPRESSION_WINDOW;
-                in_window && sup.covers(srp_dim)
-            });
-        }
-    });
-}
-
 /// Mark wildcard import warnings as suppressed based on `// qual:allow(dry)` comments.
 /// Operation: iteration + suppression check, no own calls.
 pub(super) fn mark_wildcard_suppressions(
@@ -257,7 +199,9 @@ pub(super) fn mark_wildcard_suppressions(
     warnings.iter_mut().for_each(|w| {
         if let Some(sups) = suppression_lines.get(&w.file) {
             w.suppressed = sups.iter().any(|sup| {
-                sup.line <= w.line && w.line - sup.line <= window && sup.covers(dry_dim)
+                sup.line <= w.line
+                    && w.line - sup.line <= window
+                    && sup.suppresses(dry_dim, "wildcard_imports", None)
             });
         }
     });
@@ -305,21 +249,12 @@ pub(super) fn compute_srp(
     if !config.srp.enabled {
         return None;
     }
-    let test_length_thresholds = (
-        config
-            .tests
-            .file_length_baseline
-            .unwrap_or(config.srp.file_length_baseline),
-        config
-            .tests
-            .file_length_ceiling
-            .unwrap_or(config.srp.file_length_ceiling),
-    );
+    let test_file_length = config.tests.file_length.unwrap_or(config.srp.file_length);
     Some(crate::adapters::analyzers::srp::analyze_srp(
         parsed,
         &config.srp,
         file_call_graph,
-        test_length_thresholds,
+        test_file_length,
     ))
 }
 

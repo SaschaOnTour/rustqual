@@ -17,6 +17,7 @@ fn marker(file: &str, line: usize, dims: &[Dimension]) -> HashMap<String, Vec<Su
             line,
             dimensions: dims.to_vec(),
             reason: None,
+            target: None,
         }],
     );
     sups

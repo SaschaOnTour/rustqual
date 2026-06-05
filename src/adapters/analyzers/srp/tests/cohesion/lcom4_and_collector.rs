@@ -54,7 +54,8 @@ fn lcom4_constructor_and_transitive_connections() {
         );
         let refs: Vec<&MethodFieldData> = owned.iter().collect();
         let fields: Vec<String> = struct_fields.iter().map(|s| s.to_string()).collect();
-        let (lcom4, _) = compute_lcom4(&refs, &fields, &build_field_method_index(&refs, &fields));
+        let idx = build_field_method_index(&refs, &fields);
+        let (lcom4, _) = compute_lcom4(&refs, &fields, &idx, &[]);
         assert_eq!(lcom4, *expected, "case {label}");
     }
 }
@@ -69,6 +70,7 @@ fn test_cluster_contains_correct_fields() {
         &methods,
         &fields,
         &build_field_method_index(&methods, &fields),
+        &[],
     );
     assert_eq!(clusters.len(), 2);
     // Each cluster should have exactly one method and one field
@@ -94,6 +96,7 @@ fn test_lcom4_self_method_call_resolves_field_access() {
         &methods,
         &fields,
         &build_field_method_index(&methods, &fields),
+        &[],
     );
     assert_eq!(
         lcom4, 1,
@@ -161,7 +164,7 @@ fn lcom4_unites_methods_linked_via_debug_assert_macro() {
             ..SrpConfig::default()
         },
         &HashMap::new(),
-        (300, 800),
+        300,
     );
     let w = analysis
         .struct_warnings

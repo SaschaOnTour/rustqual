@@ -101,11 +101,19 @@ fn test_invalid_qual_allow_reason_distinguishes_kinds() {
 }
 
 #[test]
-fn test_detect_invalid_qual_allow_passes_partial_recognized_dims() {
-    // At least one recognized dim → partially valid → not flagged
-    // here (the parser keeps the recognized parts as a real
-    // Suppression).
-    assert!(detect_invalid_qual_allow("// qual:allow(srp, srp_params)").is_none());
+fn test_detect_invalid_qual_allow_flags_unknown_target() {
+    // `srp` is a valid dim, but the second entry is no longer silently
+    // dropped — it is read as a *target*, and `srp_params` is not a known
+    // srp target, so the marker surfaces as invalid with the valid list.
+    // This is exactly what stops an agent inventing a non-existent target.
+    match detect_invalid_qual_allow("// qual:allow(srp, srp_params)") {
+        Some(InvalidQualAllow::UnknownTarget { dim, target, valid }) => {
+            assert_eq!(dim, "srp");
+            assert_eq!(target, "srp_params");
+            assert!(valid.contains(&"file_length".to_string()));
+        }
+        other => panic!("expected UnknownTarget, got {other:?}"),
+    }
 }
 
 #[test]
@@ -116,9 +124,10 @@ fn test_parse_qual_allow_iosp() {
 }
 
 #[test]
-fn test_parse_qual_allow_multiple_dims() {
-    let s = parse_suppression(1, "// qual:allow(iosp, complexity)").unwrap();
-    assert_eq!(s.dimensions, vec![Dimension::Iosp, Dimension::Complexity]);
+fn test_multi_dim_blanket_rejected() {
+    // Bare multi-dimension allow is gone: a multi-kind dim must name a target,
+    // and one marker cannot target two dimensions. Use separate markers.
+    assert!(parse_suppression(1, "// qual:allow(iosp, complexity)").is_none());
 }
 
 #[test]

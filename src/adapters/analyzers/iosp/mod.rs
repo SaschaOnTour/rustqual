@@ -1,5 +1,4 @@
 pub(crate) mod classify;
-pub(crate) mod scope;
 pub mod types;
 pub(crate) mod visitor;
 
@@ -7,8 +6,8 @@ pub use classify::classify_function;
 use syn::{File, ImplItem, Item, ItemFn, TraitItem};
 pub use types::*;
 
+use crate::adapters::shared::project_scope::ProjectScope;
 use crate::config::Config;
-use scope::ProjectScope;
 
 use classify::extract_type_name;
 
@@ -51,18 +50,31 @@ fn count_non_self_params(sig: &syn::Signature) -> usize {
         .count()
 }
 
-/// Construct a FunctionAnalysis with pre-computed qualified_name and severity.
-/// Operation: string formatting + severity computation logic, no own calls.
-// qual:allow(srp) reason: "factory function — parameters map 1:1 to struct fields"
-fn build_function_analysis(
+/// Raw inputs for assembling a `FunctionAnalysis`. Groups the seven fields that
+/// map 1:1 into the record so the factory takes one cohesive value instead of a
+/// long parameter list.
+struct FunctionParts {
     name: String,
-    file_path: &str,
+    file: String,
     line: usize,
     classification: Classification,
     parent_type: Option<String>,
     complexity: Option<ComplexityMetrics>,
     own_calls: Vec<String>,
-) -> FunctionAnalysis {
+}
+
+/// Construct a FunctionAnalysis with pre-computed qualified_name and severity.
+/// Operation: string formatting + severity computation logic, no own calls.
+fn build_function_analysis(parts: FunctionParts) -> FunctionAnalysis {
+    let FunctionParts {
+        name,
+        file,
+        line,
+        classification,
+        parent_type,
+        complexity,
+        own_calls,
+    } = parts;
     let qualified_name = parent_type
         .as_ref()
         .map(|parent| format!("{parent}::{name}"))
@@ -86,7 +98,7 @@ fn build_function_analysis(
     };
     FunctionAnalysis {
         name,
-        file: file_path.to_string(),
+        file,
         line,
         classification,
         parent_type,
@@ -144,10 +156,7 @@ impl<'a> Analyzer<'a> {
         file.items
             .iter()
             .flat_map(|item| match item {
-                Item::Fn(f) => self
-                    .analyze_item_fn(f, file_path, None, file_in_test)
-                    .into_iter()
-                    .collect::<Vec<_>>(),
+                Item::Fn(f) => vec![self.analyze_item_fn(f, file_path, None, file_in_test)],
                 Item::Impl(i) => {
                     let test =
                         file_in_test || crate::adapters::shared::cfg_test::has_cfg_test(&i.attrs);
@@ -178,35 +187,32 @@ impl<'a> Analyzer<'a> {
         let (classification, complexity, own_calls) =
             classify_function(body, self.config, self.scope, &name, type_ctx);
         let line = sig.ident.span().start().line;
-        build_function_analysis(
+        build_function_analysis(FunctionParts {
             name,
-            file_path,
+            file: file_path.to_string(),
             line,
             classification,
             parent_type,
             complexity,
             own_calls,
-        )
+        })
     }
 
     /// Analyze a single function item.
-    /// Integration: orchestrates is_ignored_function check + classify_and_build (in closure).
+    /// Integration: orchestrates classify_and_build + test-flag resolution.
     fn analyze_item_fn(
         &self,
         item_fn: &ItemFn,
         file_path: &str,
         parent_type: Option<String>,
         in_test: bool,
-    ) -> Option<FunctionAnalysis> {
+    ) -> FunctionAnalysis {
         let name = item_fn.sig.ident.to_string();
-        (!self.config.is_ignored_function(&name)).then(|| {
-            let mut fa =
-                self.classify_and_build(name, file_path, &item_fn.block, parent_type, &item_fn.sig);
-            fa.parameter_count = count_non_self_params(&item_fn.sig);
-            fa.is_test =
-                in_test || crate::adapters::shared::cfg_test::has_test_attr(&item_fn.attrs);
-            fa
-        })
+        let mut fa =
+            self.classify_and_build(name, file_path, &item_fn.block, parent_type, &item_fn.sig);
+        fa.parameter_count = count_non_self_params(&item_fn.sig);
+        fa.is_test = in_test || crate::adapters::shared::cfg_test::has_test_attr(&item_fn.attrs);
+        fa
     }
 
     /// Analyze all methods in an impl block.
@@ -225,9 +231,6 @@ impl<'a> Analyzer<'a> {
             .filter_map(|impl_item| {
                 if let ImplItem::Fn(method) = impl_item {
                     let name = method.sig.ident.to_string();
-                    if self.config.is_ignored_function(&name) {
-                        return None;
-                    }
                     let mut fa = self.classify_and_build(
                         name,
                         file_path,
@@ -262,9 +265,6 @@ impl<'a> Analyzer<'a> {
                 if let TraitItem::Fn(method) = trait_item {
                     let block = method.default.as_ref()?;
                     let name = method.sig.ident.to_string();
-                    if self.config.is_ignored_function(&name) {
-                        return None;
-                    }
                     let mut fa = self.classify_and_build(
                         name,
                         file_path,
@@ -300,10 +300,9 @@ impl<'a> Analyzer<'a> {
                 items
                     .iter()
                     .flat_map(|item| match item {
-                        Item::Fn(f) => self
-                            .analyze_item_fn(f, file_path, None, mod_is_test)
-                            .into_iter()
-                            .collect::<Vec<_>>(),
+                        Item::Fn(f) => {
+                            vec![self.analyze_item_fn(f, file_path, None, mod_is_test)]
+                        }
                         Item::Impl(i) => {
                             let test = mod_is_test
                                 || crate::adapters::shared::cfg_test::has_cfg_test(&i.attrs);

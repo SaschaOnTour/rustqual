@@ -25,6 +25,53 @@ macro_rules! pattern_guard {
     };
 }
 
+/// Run a per-item finder over every item in every file, honouring the pattern
+/// enable-list. Shared by the detectors that emit at most one find per item, so
+/// each one is just its `*_find` predicate plus a one-line delegation here.
+/// Operation: enable check + per-file item scan via closures.
+pub(super) fn scan_items<F>(
+    parsed: &[(String, String, syn::File)],
+    config: &BoilerplateConfig,
+    id: &str,
+    find: F,
+) -> Vec<BoilerplateFind>
+where
+    F: Fn(&syn::Item, &str) -> Option<BoilerplateFind>,
+{
+    if !config.patterns.is_empty() && config.patterns.iter().all(|p| p != id) {
+        return vec![];
+    }
+    parsed
+        .iter()
+        .flat_map(|(file, _, syntax)| {
+            syntax
+                .items
+                .iter()
+                .filter_map(|item| find(item, file))
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+/// The `(signature, body)` of every function in an item: a free fn, or each
+/// method of an impl block. Other items yield nothing. Shared by detectors that
+/// inspect function bodies.
+/// Operation: item match + impl-method filter in a closure.
+pub(super) fn item_fns(item: &syn::Item) -> Vec<(&syn::Signature, &syn::Block)> {
+    match item {
+        syn::Item::Fn(f) => vec![(&f.sig, &f.block)],
+        syn::Item::Impl(imp) => imp
+            .items
+            .iter()
+            .filter_map(|sub| match sub {
+                syn::ImplItem::Fn(m) => Some((&m.sig, &m.block)),
+                _ => None,
+            })
+            .collect(),
+        _ => vec![],
+    }
+}
+
 // ── Helpers (called only from within closures for IOSP) ────────
 
 pub(crate) fn trait_name_of(imp: &syn::ItemImpl) -> Option<String> {

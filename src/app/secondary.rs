@@ -9,12 +9,16 @@ use crate::adapters::analyzers::iosp::FunctionAnalysis;
 use crate::config::Config;
 use crate::report::Summary;
 
+use super::coupling_suppressions::{
+    mark_coupling_blanket, mark_sdp_target_suppressions, ModuleCouplingSuppressions,
+};
 use super::dry_suppressions;
 use super::metrics::{
     self, apply_parameter_warnings, build_file_call_graph, compute_coupling, compute_srp,
-    count_coupling_warnings, count_dry_findings, count_srp_warnings, mark_coupling_suppressions,
-    mark_srp_suppressions, run_dry_detection, run_guarded_detection,
+    count_coupling_warnings, count_dry_findings, count_srp_warnings, run_dry_detection,
+    run_guarded_detection,
 };
+use super::srp_suppressions::mark_srp_suppressions;
 use super::structural_metrics::{
     compute_structural, count_structural_warnings, mark_structural_suppressions,
 };
@@ -91,14 +95,16 @@ fn run_coupling_pass(
     summary: &mut Summary,
 ) -> Option<crate::adapters::analyzers::coupling::CouplingAnalysis> {
     let mut coupling = compute_coupling(ctx.parsed, ctx.config);
-    mark_coupling_suppressions(coupling.as_mut(), ctx.suppression_lines);
-    // Populate SDP violations AFTER suppressions are marked on metrics
-    // so each violation inherits the correct `suppressed` state at
-    // creation time (no separate mark pass needed).
+    let sups = ModuleCouplingSuppressions::build(ctx.suppression_lines);
+    // Blanket flag first (drives leaf handling + SDP inheritance), then
+    // populate SDP (inherits the blanket state), then add the targeted-sdp
+    // suppressions on top.
+    mark_coupling_blanket(coupling.as_mut(), &sups);
     if let Some(ca) = coupling.as_mut() {
         crate::adapters::analyzers::coupling::populate_sdp_violations(ca);
+        mark_sdp_target_suppressions(ca, &sups);
     }
-    count_coupling_warnings(coupling.as_mut(), &ctx.config.coupling, summary);
+    count_coupling_warnings(coupling.as_mut(), &ctx.config.coupling, &sups, summary);
     coupling
 }
 
@@ -145,7 +151,7 @@ fn run_srp_pass(
     let file_call_graph = build_file_call_graph(ctx.all_results);
     let mut srp = compute_srp(ctx.parsed, ctx.config, &file_call_graph);
     apply_parameter_warnings(ctx.all_results, srp.as_mut(), &ctx.config.srp);
-    mark_srp_suppressions(srp.as_mut(), ctx.suppression_lines);
+    mark_srp_suppressions(srp.as_mut(), ctx.suppression_lines, &ctx.config.srp);
     count_srp_warnings(srp.as_ref(), summary);
     srp
 }

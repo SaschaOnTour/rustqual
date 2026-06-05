@@ -95,14 +95,40 @@ fn json_reporter_includes_orphan_suppressions_via_snapshot_view() {
         line: 42,
         dimensions: vec![crate::findings::Dimension::Srp],
         reason: Some("legacy".into()),
+        target: None,
+        kind: crate::domain::findings::OrphanKind::Stale,
     }];
     let parsed = json_value(&analysis);
     let arr = parsed["orphan_suppressions"].as_array().unwrap();
     assert_eq!(arr.len(), 1);
     assert_eq!(arr[0]["file"], "src/foo.rs");
     assert_eq!(arr[0]["line"], 42);
+    assert_eq!(arr[0]["kind"], "stale");
     assert_eq!(arr[0]["dimensions"][0], "srp");
     assert_eq!(arr[0]["reason"], "legacy");
+}
+
+#[test]
+fn json_orphan_projects_too_loose_kind_and_target() {
+    // The structured format must carry the remedy (stale vs too_loose) and the
+    // pinned target, so CI consumers don't have to parse the human message.
+    use crate::domain::findings::{OrphanKind, OrphanSuppression};
+    use crate::domain::SuppressionTarget;
+    let mut analysis = make_analysis(vec![]);
+    analysis.findings.orphan_suppressions = vec![OrphanSuppression {
+        file: "src/foo.rs".into(),
+        line: 7,
+        dimensions: vec![crate::findings::Dimension::Srp],
+        target: Some(SuppressionTarget::Metric {
+            name: "file_length".into(),
+            pin: 400.0,
+        }),
+        reason: Some("tighten to ~305".into()),
+        kind: OrphanKind::PinTooLoose,
+    }];
+    let o = &json_value(&analysis)["orphan_suppressions"][0];
+    assert_eq!(o["kind"], "too_loose");
+    assert_eq!(o["target"], "file_length=400");
 }
 
 #[test]

@@ -1,36 +1,49 @@
 //! Config-gated predicates mirroring `apply_extended_warnings`.
 //!
-//! These helpers tell the orphan checker whether a function's raw
-//! complexity metrics would trigger a warning under the active
-//! config — needed because a `// qual:allow(complexity)` marker
-//! clears the `*_warning` flags on the `FunctionAnalysis` before the
-//! orphan pass sees it. Reading raw metrics + config lets us
-//! recognize those markers as non-orphan.
+//! These helpers tell the orphan checker which suppression-targets a
+//! function's raw complexity metrics trip under the active config — needed
+//! because a `// qual:allow(complexity, …)` marker clears the `*_warning`
+//! flags on the `FunctionAnalysis` before the orphan pass sees it. Reading
+//! raw metrics + config lets us recognize those markers as non-orphan, and
+//! lets the too-loose-pin check compare a pin against the actual value.
 
 use crate::adapters::analyzers::iosp::{ComplexityMetrics, FunctionAnalysis};
 use crate::config::sections::ComplexityConfig;
 
-/// True if the raw complexity metrics of a function would trigger any
-/// complexity warning under the active config.
-/// Integration: delegates to per-aspect predicates.
-pub(super) fn would_trigger(
+/// The complexity suppression-targets a function trips under the active
+/// config, each paired with its raw value (`None` for the boolean targets
+/// `unsafe` / `error_handling`). Drives orphan target-matching and the
+/// too-loose-pin check: a `allow(complexity, max_cognitive=…)` marker is
+/// non-stale only when `max_cognitive` is in this list, and its pin is
+/// judged against the paired value. Magic numbers are handled separately
+/// (per-occurrence lines), not here.
+/// Operation: per-aspect threshold checks collecting (target, value) pairs.
+pub(super) fn triggered_targets(
     f: &FunctionAnalysis,
     c: &ComplexityMetrics,
     cx: &ComplexityConfig,
     test_max_lines: usize,
-) -> bool {
-    exceeds_basic_thresholds(c, cx)
-        || exceeds_length(f, c, cx, test_max_lines)
-        || exceeds_unsafe(c, cx)
-        || exceeds_error_handling(f, c, cx)
-}
-
-/// True if cognitive / cyclomatic / nesting exceed their thresholds.
-/// Operation: comparison logic.
-fn exceeds_basic_thresholds(c: &ComplexityMetrics, cx: &ComplexityConfig) -> bool {
-    c.cognitive_complexity > cx.max_cognitive
-        || c.cyclomatic_complexity > cx.max_cyclomatic
-        || c.max_nesting > cx.max_nesting_depth
+) -> Vec<(&'static str, Option<f64>)> {
+    let mut out = Vec::new();
+    if c.cognitive_complexity > cx.max_cognitive {
+        out.push(("max_cognitive", Some(c.cognitive_complexity as f64)));
+    }
+    if c.cyclomatic_complexity > cx.max_cyclomatic {
+        out.push(("max_cyclomatic", Some(c.cyclomatic_complexity as f64)));
+    }
+    if c.max_nesting > cx.max_nesting_depth {
+        out.push(("max_nesting_depth", Some(c.max_nesting as f64)));
+    }
+    if exceeds_length(f, c, cx, test_max_lines) {
+        out.push(("max_function_lines", Some(c.function_lines as f64)));
+    }
+    if exceeds_unsafe(c, cx) {
+        out.push(("unsafe", None));
+    }
+    if exceeds_error_handling(f, c, cx) {
+        out.push(("error_handling", None));
+    }
+    out
 }
 
 /// True if the function exceeds its length cap — test fns use `test_max_lines`

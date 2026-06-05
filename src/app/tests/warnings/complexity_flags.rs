@@ -15,7 +15,12 @@ fn cx_config(max_cognitive: usize, max_cyclomatic: usize) -> Config {
 fn apply_cx(metrics: ComplexityMetrics, config: &Config) -> (bool, bool, usize, usize) {
     let mut fa = make_func_with_metrics(metrics);
     let mut summary = Summary::from_results(&[]);
-    apply_complexity_warnings(std::slice::from_mut(&mut fa), config, &mut summary);
+    apply_complexity_warnings(
+        std::slice::from_mut(&mut fa),
+        config,
+        &mut summary,
+        &std::collections::HashMap::new(),
+    );
     (
         fa.cognitive_warning,
         fa.cyclomatic_warning,

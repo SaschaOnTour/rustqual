@@ -34,6 +34,35 @@ fn tq_suppression_window_and_dimension() {
     assert!(!tq_suppressed(2, 5, t)); // below the warning
 }
 
+fn tq_targeted(w_line: usize, kind: TqWarningKind, target: &str) -> bool {
+    let mut tq = TqAnalysis {
+        warnings: vec![warning(w_line, kind, false)],
+    };
+    let sups: std::collections::HashMap<String, Vec<crate::findings::Suppression>> = [(
+        "test.rs".to_string(),
+        vec![crate::findings::Suppression {
+            line: w_line,
+            dimensions: vec![Dimension::TestQuality],
+            reason: Some("r".to_string()),
+            target: Some(crate::domain::SuppressionTarget::Boolean {
+                name: target.to_string(),
+            }),
+        }],
+    )]
+    .into();
+    mark_tq_suppressions(Some(&mut tq), &sups);
+    tq.warnings[0].suppressed
+}
+
+#[test]
+fn tq_targeted_suppression_is_per_kind() {
+    // A no_assertion target silences a NoAssertion warning, but not another kind.
+    assert!(tq_targeted(5, TqWarningKind::NoAssertion, "no_assertion"));
+    assert!(!tq_targeted(5, TqWarningKind::NoAssertion, "untested"));
+    // An untested target silences an Untested warning.
+    assert!(tq_targeted(5, TqWarningKind::Untested, "untested"));
+}
+
 #[test]
 fn count_tq_warnings_splits_by_kind() {
     // One unsuppressed warning of each kind → each summary counter is 1. Pins

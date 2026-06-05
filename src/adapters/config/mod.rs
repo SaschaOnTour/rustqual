@@ -11,7 +11,7 @@ pub use init::{generate_default_config, generate_tailored_config};
 use sections::DEFAULT_MAX_SUPPRESSION_RATIO;
 pub use sections::{
     BoilerplateConfig, ComplexityConfig, CouplingConfig, DuplicatesConfig, ReportConfig, SrpConfig,
-    StructuralConfig, TestConfig, TestsConfig, WeightsConfig,
+    StructuralConfig, SuppressionConfig, TestConfig, TestsConfig, WeightsConfig,
 };
 
 /// Configuration for the rustqual analyzer.
@@ -20,9 +20,6 @@ pub use sections::{
 #[derive(Debug, Deserialize, Clone)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
-    /// Function name patterns to ignore entirely (e.g. test helpers, macros).
-    pub ignore_functions: Vec<String>,
-
     /// Glob patterns for files to exclude from analysis.
     pub exclude_files: Vec<String>,
 
@@ -72,15 +69,14 @@ pub struct Config {
     /// Architecture-Dimension configuration (v1.0).
     pub architecture: ArchitectureConfig,
 
+    /// Suppression-marker quality settings (e.g. too-loose pin headroom).
+    pub suppression: SuppressionConfig,
+
     /// Quality score dimension weights.
     pub weights: WeightsConfig,
 
     /// Rustqual-wide report aggregation settings (workspace mode).
     pub report: ReportConfig,
-
-    /// Pre-compiled glob set for ignore_functions patterns.
-    #[serde(skip)]
-    compiled_ignore_fns: Option<GlobSet>,
 
     /// Pre-compiled glob set for exclude_files patterns.
     #[serde(skip)]
@@ -90,7 +86,6 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            ignore_functions: vec![],
             exclude_files: vec![],
             strict_closures: false,
             strict_iterator_chains: false,
@@ -107,9 +102,9 @@ impl Default for Config {
             test_quality: TestConfig::default(),
             tests: TestsConfig::default(),
             architecture: ArchitectureConfig::default(),
+            suppression: SuppressionConfig::default(),
             weights: WeightsConfig::default(),
             report: ReportConfig::default(),
-            compiled_ignore_fns: None,
             compiled_exclude_files: None,
         }
     }
@@ -179,7 +174,6 @@ impl Config {
     /// Compile glob patterns into GlobSets for fast matching.
     /// Call this after loading or constructing a Config.
     pub fn compile(&mut self) {
-        self.compiled_ignore_fns = Some(build_globset(&self.ignore_functions));
         self.compiled_exclude_files = Some(build_globset(&self.exclude_files));
     }
 
@@ -204,13 +198,6 @@ impl Config {
             .unwrap_or_else(|| Ok(Self::default()))
     }
 
-    /// Check if a function call path looks like an external/allowed call.
-    /// Check if a function name should be ignored (supports full glob patterns).
-    /// Trivial: single delegation to match_any_pattern.
-    pub fn is_ignored_function(&self, name: &str) -> bool {
-        match_any_pattern(&self.ignore_functions, &self.compiled_ignore_fns, name)
-    }
-
     /// Check if a file path matches any exclude_files pattern.
     /// Trivial: single delegation to match_any_pattern.
     pub fn is_excluded_file(&self, path: &str) -> bool {
@@ -227,6 +214,23 @@ pub fn validate_weights(config: &Config) -> Result<(), String> {
         return Err(format!(
             "Quality weights must sum to 1.0, but sum is {sum:.4}. \
              Check [weights] in rustqual.toml."
+        ));
+    }
+    Ok(())
+}
+
+/// Validate `[suppression]` settings. `pin_headroom` feeds the too-loose check
+/// `pin > value * (1 + headroom)`, so a non-finite value (`inf`/`NaN`, both
+/// accepted by TOML float parsing) would silently disable too-loose detection
+/// and a negative value would make the threshold nonsensical — mirrors the
+/// finite/non-negative guard on marker pins themselves.
+/// Operation: range check, no own calls.
+pub fn validate_suppression(config: &Config) -> Result<(), String> {
+    let h = config.suppression.pin_headroom;
+    if !h.is_finite() || h < 0.0 {
+        return Err(format!(
+            "[suppression].pin_headroom must be a finite, non-negative number, but is {h}. \
+             Check rustqual.toml."
         ));
     }
     Ok(())

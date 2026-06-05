@@ -79,36 +79,31 @@ struct MutationChecker {
 
 impl<'ast> Visit<'ast> for MutationChecker {
     fn visit_expr(&mut self, expr: &'ast syn::Expr) {
-        // Track self references
-        if is_self_ref(expr) {
-            self.has_self_ref = true;
-        }
-        // Check for mutations: self.field = ..., self.field[i] = ...,
-        // self.field -= ..., self.field.method(), &mut self.field
-        match expr {
-            syn::Expr::Assign(a) if is_self_target(&a.left) => {
-                self.has_mutation = true;
-            }
-            // Compound assignments: +=, -=, *=, etc.
-            syn::Expr::Binary(b) if is_compound_assign(&b.op) && is_self_target(&b.left) => {
-                self.has_mutation = true;
-            }
-            // Any method call on self.field or self.field[i] is conservatively a mutation
-            syn::Expr::MethodCall(mc)
-                if is_self_field(&mc.receiver)
-                    || is_self_path(&mc.receiver)
-                    || is_self_indexed_field(&mc.receiver) =>
-            {
-                self.has_mutation = true;
-            }
-            syn::Expr::Reference(r) if r.mutability.is_some() && is_self_target(&r.expr) => {
-                self.has_mutation = true;
-            }
-            _ => {}
-        }
+        self.has_self_ref |= is_self_ref(expr);
+        self.has_mutation |= is_self_mutation(expr);
         if !self.has_mutation {
             syn::visit::visit_expr(self, expr);
         }
+    }
+}
+
+/// Whether `expr` mutates `self`: `self.field = …`, `self.field[i] = …`,
+/// compound assignment to `self.field`, a method call on `self.field`, or
+/// `&mut self.field`. Conservative — any method call on a self field counts.
+/// Operation: pattern matching against self-target shapes, no own calls counted.
+fn is_self_mutation(expr: &syn::Expr) -> bool {
+    match expr {
+        syn::Expr::Assign(a) => is_self_target(&a.left),
+        // Compound assignments: +=, -=, *=, etc.
+        syn::Expr::Binary(b) => is_compound_assign(&b.op) && is_self_target(&b.left),
+        // Any method call on self.field or self.field[i] is conservatively a mutation
+        syn::Expr::MethodCall(mc) => {
+            is_self_field(&mc.receiver)
+                || is_self_path(&mc.receiver)
+                || is_self_indexed_field(&mc.receiver)
+        }
+        syn::Expr::Reference(r) => r.mutability.is_some() && is_self_target(&r.expr),
+        _ => false,
     }
 }
 

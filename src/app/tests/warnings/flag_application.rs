@@ -15,6 +15,7 @@ fn file_suppressed(fa_line: usize, sup_line: usize, dim: Dimension) -> (bool, bo
         line: sup_line,
         dimensions: vec![dim],
         reason: None,
+        target: None,
     };
     apply_file_suppressions(&mut fa, &[sup]);
     (fa.suppressed, fa.complexity_suppressed)

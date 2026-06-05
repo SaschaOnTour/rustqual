@@ -80,10 +80,7 @@ pub(super) fn srp_category_detail(f: &SrpFinding, config: &Config) -> (&'static 
             independent_clusters,
             ..
         } => {
-            let length_part = format!(
-                "{production_lines} lines (max {})",
-                config.srp.file_length_baseline
-            );
+            let length_part = format!("{production_lines} lines (max {})", config.srp.file_length);
             let cluster_part = if *independent_clusters > config.srp.max_independent_clusters {
                 format!(
                     ", {independent_clusters} independent clusters (max {})",

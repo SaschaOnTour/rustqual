@@ -4,7 +4,8 @@ Annotation forms, ordered from most-restricted to least:
 
 | Annotation | Scope | Counts against `max_suppression_ratio` |
 |---|---|---|
-| `// qual:allow(<dim>)` | One dimension (`iosp`, `complexity`, `dry`, `srp`, `coupling`, `test_quality`, `architecture`) | Yes |
+| `// qual:allow(<dim>, <target>[=N]) reason: "…"` | One finding-kind within a multi-kind dimension (`complexity`, `dry`, `srp`, `coupling`, `test_quality`, `architecture`) | Yes |
+| `// qual:allow(iosp)` | The whole `iosp` dimension (its only form — `iosp` has no targets) | Yes |
 | `// qual:allow(unsafe)` | `CX-006` only | No |
 | `// qual:api` | Excludes from `DRY-002`, `TQ-003` | No |
 | `// qual:test_helper` | Excludes from `DRY-002` (testonly), `TQ-003` | No |
@@ -13,30 +14,32 @@ Annotation forms, ordered from most-restricted to least:
 
 Each annotation lives in a `//`-comment block immediately above the item it applies to. The block extends upward until a blank line or a non-`//` line breaks it. `#[derive(...)]` and other attributes between the comment block and the item are fine — they don't break the block.
 
-**Removed in 1.2.3:** the bare `// qual:allow` (no parens) and `// qual:allow()` forms no longer suppress anything — they're silently ignored. Authors must spell out the targeted dimension(s) explicitly. Typos like `// qual:allow(srp_params)` (no recognised dimension in the parens) are surfaced as `ORPHAN_SUPPRESSION` findings so they don't quietly hide nothing.
+**Removed in 1.2.3:** the bare `// qual:allow` (no parens) and `// qual:allow()` forms no longer suppress anything — they're silently ignored.
 
-## `// qual:allow(<dim>)` — suppress one dimension
+**Breaking in 1.5.0 ("the flip"):** a bare `// qual:allow(<dim>)` is **rejected** for every dimension that has targets (`complexity`, `dry`, `srp`, `coupling`, `test_quality`, `architecture`) — it would silence *every* finding of that dimension, too blunt. You must name a target; the error lists the valid ones. Only `iosp` (no targets) keeps its bare form. Multi-dimension blanket markers (`allow(a, b)`) are gone — use one marker per dimension. Typos like `// qual:allow(srp_params)` (no recognised dimension) surface as `ORPHAN_SUPPRESSION` so they don't quietly hide nothing.
+
+## `// qual:allow(<dim>, <target>[=N])` — suppress one finding-kind
+
+Each multi-kind dimension exposes a **vocabulary of targets** (`rustqual --explain allow` lists them all). A *boolean* target takes no value; a *metric* target requires a pinned ceiling `=N` and re-fires once the value climbs above it. Every targeted suppression needs a `reason:`.
 
 ```rust
+// qual:allow(complexity, max_cyclomatic=12) reason: "Kosaraju three-pass is inherently branchy"
+fn detect_cycles(g: &Graph) -> Vec<Cycle> { /* … */ }
+
+// qual:allow(srp, file_length=400) reason: "long but cohesive single normalizer"
+mod normalizer { /* … */ }
+
+// qual:allow(architecture, forbidden) reason: "audited port→registry edge for round-trip ordering"
+use crate::adapters::registry::lookup;
+
+// iosp is the one single-kind dimension — bare form only:
 // qual:allow(iosp) — match dispatcher; arms intentionally inlined
 fn dispatch(cmd: Command) -> Result<()> {
-    match cmd {
-        Command::Sync => sync_handler(),
-        Command::Diff => diff_handler(),
-    }
+    match cmd { Command::Sync => sync_handler(), Command::Diff => diff_handler() }
 }
-
-// qual:allow(complexity) — large lookup table; splitting hurts readability
-fn rule_table() -> &'static [Rule] { /* … */ }
-
-// qual:allow(architecture) — port adapter must call registry directly here
-// for serialization round-trip; pure domain accessor would lose ordering.
-use crate::adapters::registry::lookup;
 ```
 
-Always pair with a rationale (`— <reason>`). Reviewers and future-you need to know *why* the rule is being bypassed.
-
-Legacy `// iosp:allow` is an alias for `// qual:allow(iosp)`.
+The `reason:` is mandatory for every targeted marker — reviewers and future-you need to know *why*, and a metric pin parked too far above the real value is itself reported (see Orphan detection). Legacy `// iosp:allow` is an alias for `// qual:allow(iosp)`.
 
 ## `// qual:allow(unsafe)` — for `CX-006` specifically
 
@@ -72,7 +75,7 @@ pub fn assert_in_range(actual: f64, expected: f64, tol: f64) {
 
 Same exclusions as `qual:api` (`DRY-002`, `TQ-003`). Use when a helper lives in `src/` so it's importable from integration tests in `tests/`, but isn't called from any production code.
 
-Differs from `ignore_functions` in `rustqual.toml`: `ignore_functions` silences *every* dimension on a function, while `qual:test_helper` only silences DRY-002 and TQ-003 — complexity / SRP / IOSP all still apply.
+Unlike a blanket exclusion, `qual:test_helper` only silences DRY-002 and TQ-003 — complexity / SRP / IOSP all still apply. (rustqual has no function-name ignore list; the blunt `ignore_functions` option was removed in 1.5.0.)
 
 ## `// qual:inverse(<fn>)` — inverse method pairs
 
@@ -102,17 +105,17 @@ Removes self-calls from `own_calls` before the leaf-reclassification pass. Usefu
 
 ## Module-level suppression
 
-For *coupling* findings (which are module-global, not function-local), use the inner-doc form:
+*Coupling* findings are module-global, not function-local, so a coupling marker applies to the whole module. Use the inner-doc form, and — since coupling has targets — name the metric you mean (a bare `allow(coupling)` is rejected by the flip):
 
 ```rust
-//! qual:allow(coupling) — orchestration layer, intentionally depends on every adapter.
+//! qual:allow(coupling, max_instability=0.95) reason: "orchestration layer, intentionally depends on every adapter."
 
 use crate::adapters::a;
 use crate::adapters::b;
 // …
 ```
 
-The `//!` form attaches to the module, not to a single item.
+The `//!` form attaches to the module, not to a single item. The pin re-fires if instability climbs past it. A coupling marker for a **module-global** target — the `max_fan_in`/`max_fan_out`/`max_instability` metrics or the boolean `sdp` check — has no line-anchored finding, so it is *not* orphan- or too-loose-checked (a deliberate blind spot — see Orphan detection). The **structural** coupling targets (`oi`/`sit`/`deh`/`iet`) are line-anchored and *are* orphan-checked like any other target.
 
 ## Suppression ratio (`SUP-001`)
 
@@ -128,9 +131,13 @@ Don't silently raise it to make the warning go away. The whole point of the cap 
 
 ## Orphan detection (`ORPHAN-001`)
 
-A `// qual:allow(...)` marker that *doesn't match a finding in its window* emits `ORPHAN-001`. This catches stale annotations after a refactor — the underlying issue is gone, but the suppression is still there.
+A `// qual:allow(...)` marker emits `ORPHAN-001` when it is *stale* — doesn't match a finding in its window — or *too-loose* (a metric pin sitting too far above the value it covers; see below). The stale case catches annotations left behind after a refactor — the underlying issue is gone, but the suppression is still there.
 
-The detector reads raw complexity metrics against config thresholds, not the `*_warning` flags that suppressions clear. So if you bump a threshold, the finding stops firing, *and* the orphan check then flags the now-redundant suppression. Coupling-only markers are skipped because coupling warnings are module-global.
+The detector reads raw complexity metrics against config thresholds, not the `*_warning` flags that suppressions clear. So if you bump a threshold, the finding stops firing, *and* the orphan check then flags the now-redundant suppression. Coupling markers for a module-global target (the `max_fan_in`/`max_fan_out`/`max_instability` metrics or the boolean `sdp` check) are skipped — those warnings are module-global with no line anchor; the structural coupling targets (`oi`/`sit`/`deh`/`iet`) are line-anchored and orphan-checked like any other.
+
+**Target-aware.** A *targeted* marker is checked against a finding of its **own** kind: a `// qual:allow(srp, file_length=400)` parked next to a god-struct finding (but no module-length finding) is still an orphan — the unrelated finding doesn't satisfy it. A blanket marker (where the dimension allows one, i.e. `iosp`) still matches any finding of its dimension.
+
+**Too-loose pins.** A metric pin that *does* cover its finding but sits too far above the actual value is reported as a too-loose orphan: *"pin N sits >10% above the actual value V — tighten to ~V or remove."* The threshold is `[suppression].pin_headroom` (default `0.10`). This stops a pin parked far above the real metric from silently absorbing regressions up to its ceiling. A pin *below* its value (one that re-fires) is left alone — it is legitimately limiting, not stale.
 
 `ORPHAN-001` is visible in every output format and counts toward `total_findings()`, `--fail-on-warnings`, and default-fail.
 
@@ -142,16 +149,16 @@ Files marked as reexport points in `[architecture.reexport_points]` (typically `
 
 | You want… | Use |
 |---|---|
-| To skip one finding in production code temporarily | `// qual:allow(<dim>)` with rationale |
+| To skip one finding-kind in production code | `// qual:allow(<dim>, <target>)` with `reason:` (or bare `// qual:allow(iosp)`) |
 | To mark a function as exposed externally | `// qual:api` |
 | To mark a `src/` helper used only from `tests/` | `// qual:test_helper` |
 | To accept structurally-similar inverse pairs | `// qual:inverse(<peer>)` |
 | To allow a recursive helper through IOSP | `// qual:recursive` |
 | To accept FFI / `unsafe` blocks | `// qual:allow(unsafe)` |
-| To exempt a whole module from coupling | `//! qual:allow(coupling)` |
+| To exempt a module's coupling metric | `//! qual:allow(coupling, max_instability=N)` with `reason:` |
 
 ## Related
 
 - [reference-rules.md](./reference-rules.md) — every rule code each annotation can suppress
-- [reference-configuration.md](./reference-configuration.md) — `max_suppression_ratio`, `ignore_functions`, layer rules
+- [reference-configuration.md](./reference-configuration.md) — `max_suppression_ratio`, `exclude_files`, layer rules
 - [legacy-adoption.md](./legacy-adoption.md) — adoption patterns using suppressions vs baselines

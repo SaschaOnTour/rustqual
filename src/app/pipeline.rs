@@ -1,4 +1,3 @@
-// qual:allow(coupling) reason: "orchestrator module — high instability is expected"
 use super::architecture::collect_architecture_findings;
 use super::secondary::{run_secondary_analysis, SecondaryContext, SecondaryResults};
 use super::warnings;
@@ -10,8 +9,8 @@ use crate::adapters::source::filesystem::{
 
 use std::path::Path;
 
-use crate::adapters::analyzers::iosp::scope::ProjectScope;
 use crate::adapters::analyzers::iosp::{Analyzer, FunctionAnalysis};
+use crate::adapters::shared::project_scope::ProjectScope;
 use crate::config::Config;
 use crate::report::{AnalysisResult, Summary};
 
@@ -61,9 +60,15 @@ fn run_primary_analysis(
     warnings::apply_recursive_annotations(&mut all_results, &recursive_lines);
     warnings::apply_leaf_reclassification(&mut all_results);
     let mut summary = Summary::from_results(&all_results);
-    apply_complexity_warnings(&mut all_results, config, &mut summary);
+    apply_complexity_warnings(&mut all_results, config, &mut summary, &suppression_lines);
     let unsafe_allow_lines = discovery::collect_unsafe_allow_lines(parsed);
-    apply_extended_warnings(&mut all_results, config, &mut summary, &unsafe_allow_lines);
+    apply_extended_warnings(
+        &mut all_results,
+        config,
+        &mut summary,
+        &unsafe_allow_lines,
+        &suppression_lines,
+    );
     PrimaryResults {
         all_results,
         summary,

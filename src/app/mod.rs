@@ -1,4 +1,3 @@
-// qual:allow(coupling) reason: "application layer orchestrates adapters + ports — high instability is expected"
 //! Application layer — use-cases that orchestrate adapters through ports.
 //!
 //! The Application layer is rustqual's business-logic tier. Each use-case
@@ -9,6 +8,8 @@
 
 pub mod analyze_codebase;
 mod architecture;
+pub(crate) mod complexity_suppressions;
+pub(crate) mod coupling_suppressions;
 pub(crate) mod dry_suppressions;
 pub(crate) mod exit_gates;
 pub(crate) mod metrics;
@@ -17,6 +18,7 @@ pub(crate) mod pipeline;
 pub(crate) mod projection;
 pub(crate) mod secondary;
 pub(crate) mod setup;
+pub(crate) mod srp_suppressions;
 pub(crate) mod structural_metrics;
 pub(crate) mod suppression_windows;
 pub(crate) mod tq_metrics;

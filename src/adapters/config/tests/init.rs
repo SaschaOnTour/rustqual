@@ -39,7 +39,7 @@ fn test_generate_default_config_is_valid_toml() {
 #[test]
 fn test_generate_default_config_contents() {
     let content = generate_default_config();
-    assert!(content.contains("ignore_functions"));
+    assert!(content.contains("exclude_files"));
     assert!(content.contains("strict_closures"));
     assert!(content.contains("allow_recursion"));
     assert!(content.contains("strict_error_propagation"));

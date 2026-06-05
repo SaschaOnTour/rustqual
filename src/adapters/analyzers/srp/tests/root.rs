@@ -65,18 +65,20 @@ fn collect_structs(parsed: &[(String, String, syn::File)]) -> Vec<StructInfo> {
         file: String::new(),
         structs: &mut result,
     };
-    crate::adapters::analyzers::dry::visit_all_files(parsed, &mut collector);
+    crate::adapters::shared::file_visitor::visit_all_files(parsed, &mut collector);
     result
 }
 
 /// Test helper: collect methods via visit_all_files (same as analyze_srp uses).
 fn collect_methods(parsed: &[(String, String, syn::File)]) -> Vec<MethodFieldData> {
     let mut result = Vec::new();
+    let mut bridges = Vec::new();
     let mut collector = ImplMethodCollector {
         file: String::new(),
         methods: &mut result,
+        bridges: &mut bridges,
     };
-    crate::adapters::analyzers::dry::visit_all_files(parsed, &mut collector);
+    crate::adapters::shared::file_visitor::visit_all_files(parsed, &mut collector);
     result
 }
 
@@ -89,7 +91,7 @@ fn struct_warnings_for(path: &str, code: &str) -> Vec<SrpWarning> {
         &parsed,
         &SrpConfig::default(),
         &std::collections::HashMap::new(),
-        (300, 800),
+        300,
     )
     .struct_warnings
 }
@@ -209,7 +211,7 @@ fn test_analyze_srp_empty() {
     let parsed: Vec<(String, String, syn::File)> = vec![];
     let config = SrpConfig::default();
     let call_graph = std::collections::HashMap::new();
-    let analysis = analyze_srp(&parsed, &config, &call_graph, (300, 800));
+    let analysis = analyze_srp(&parsed, &config, &call_graph, 300);
     assert!(analysis.struct_warnings.is_empty());
     assert!(analysis.module_warnings.is_empty());
 }
@@ -243,7 +245,7 @@ fn test_analyze_srp_multiple_files() {
     ];
     let config = SrpConfig::default();
     let call_graph = std::collections::HashMap::new();
-    let analysis = analyze_srp(&parsed, &config, &call_graph, (300, 800));
+    let analysis = analyze_srp(&parsed, &config, &call_graph, 300);
     // Both structs are simple → no warnings
     assert!(analysis.struct_warnings.is_empty());
 }
@@ -254,7 +256,7 @@ fn test_analyze_srp_returns_empty_param_warnings() {
     let parsed: Vec<(String, String, syn::File)> = vec![];
     let config = SrpConfig::default();
     let call_graph = std::collections::HashMap::new();
-    let analysis = analyze_srp(&parsed, &config, &call_graph, (300, 800));
+    let analysis = analyze_srp(&parsed, &config, &call_graph, 300);
     assert!(analysis.param_warnings.is_empty());
 }
 

@@ -70,25 +70,29 @@ fn run_architecture_dimension(
     findings
 }
 
-/// Mark findings whose annotation window contains a
-/// `// qual:allow(architecture)` suppression.
+/// Mark findings whose annotation window contains a matching
+/// `// qual:allow(architecture[, family])` suppression.
 ///
 /// Window-scoped (not file-scoped): a suppression at line N covers
 /// findings at lines `N..=N+ANNOTATION_WINDOW`. Otherwise a single
 /// `qual:allow(architecture)` for one helper would silence unrelated
 /// call-parity, layer, or forbidden-edge findings elsewhere in the
-/// same file. Operation: per-finding lookup over the suppression map.
+/// same file. A blanket `allow(architecture)` silences any family; a
+/// targeted `allow(architecture, layer)` silences only that family (the
+/// `architecture/<family>/…` segment of the finding's rule id).
+/// Operation: per-finding lookup over the suppression map.
 pub(super) fn mark_architecture_suppressions(
     findings: &mut [Finding],
     suppression_lines: &HashMap<String, Vec<Suppression>>,
 ) {
     findings.iter_mut().for_each(|f| {
+        let family = arch_family(&f.rule_id);
         let suppressed = suppression_lines
             .get(&f.file)
             .map(|sups| {
                 sups.iter().any(|s| {
-                    s.covers(Dimension::Architecture)
-                        && crate::findings::is_within_window(s.line, f.line)
+                    crate::findings::is_within_window(s.line, f.line)
+                        && s.suppresses(Dimension::Architecture, family, None)
                 })
             })
             .unwrap_or(false);
@@ -96,4 +100,18 @@ pub(super) fn mark_architecture_suppressions(
             f.suppressed = true;
         }
     });
+}
+
+/// Top-level rule family of an architecture finding: the first segment after
+/// `architecture/` (`architecture/layer/unmatched` → `layer`). Empty when the
+/// id has no family — then only a blanket marker could silence it, but a bare
+/// `allow(architecture)` is no longer constructible via the parser (the flip),
+/// so such a finding is effectively unsuppressible. Shared with the orphan
+/// detector so marking and orphan-matching read the same segment.
+/// Operation: prefix strip + first segment.
+pub(crate) fn arch_family(rule_id: &str) -> &str {
+    rule_id
+        .strip_prefix("architecture/")
+        .and_then(|rest| rest.split('/').next())
+        .unwrap_or("")
 }

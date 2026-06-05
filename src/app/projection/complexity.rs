@@ -36,72 +36,73 @@ fn push_threshold_findings(
     config: &Config,
 ) {
     let metrics = f.complexity.as_ref();
-    push_metric_threshold(
-        out,
-        f,
-        f.cognitive_warning,
-        ComplexityFindingKind::Cognitive,
-        metrics.map_or(0, |m| m.cognitive_complexity),
-        config.complexity.max_cognitive,
-        None,
-    );
-    push_metric_threshold(
-        out,
-        f,
-        f.cyclomatic_warning,
-        ComplexityFindingKind::Cyclomatic,
-        metrics.map_or(0, |m| m.cyclomatic_complexity),
-        config.complexity.max_cyclomatic,
-        None,
-    );
-    push_metric_threshold(
-        out,
-        f,
-        f.nesting_depth_warning,
-        ComplexityFindingKind::NestingDepth,
-        metrics.map_or(0, |m| m.max_nesting),
-        config.complexity.max_nesting_depth,
-        nesting_hotspot(metrics),
-    );
-    push_metric_threshold(
-        out,
-        f,
-        f.function_length_warning,
-        ComplexityFindingKind::FunctionLength,
-        metrics.map_or(0, |m| m.function_lines),
-        config.complexity.max_function_lines,
-        None,
-    );
-    push_metric_threshold(
-        out,
-        f,
-        f.unsafe_warning,
-        ComplexityFindingKind::Unsafe,
-        metrics.map_or(0, |m| m.unsafe_blocks),
-        0,
-        None,
-    );
-    push_metric_threshold(
-        out,
-        f,
-        f.error_handling_warning,
-        ComplexityFindingKind::ErrorHandling,
-        metrics.map_or(0, error_handling_count),
-        0,
-        None,
-    );
+    let cx = &config.complexity;
+    let specs = [
+        (
+            f.cognitive_warning,
+            ComplexityFindingKind::Cognitive,
+            metrics.map_or(0, |m| m.cognitive_complexity),
+            cx.max_cognitive,
+            None,
+        ),
+        (
+            f.cyclomatic_warning,
+            ComplexityFindingKind::Cyclomatic,
+            metrics.map_or(0, |m| m.cyclomatic_complexity),
+            cx.max_cyclomatic,
+            None,
+        ),
+        (
+            f.nesting_depth_warning,
+            ComplexityFindingKind::NestingDepth,
+            metrics.map_or(0, |m| m.max_nesting),
+            cx.max_nesting_depth,
+            nesting_hotspot(metrics),
+        ),
+        (
+            f.function_length_warning,
+            ComplexityFindingKind::FunctionLength,
+            metrics.map_or(0, |m| m.function_lines),
+            cx.max_function_lines,
+            None,
+        ),
+        (
+            f.unsafe_warning,
+            ComplexityFindingKind::Unsafe,
+            metrics.map_or(0, |m| m.unsafe_blocks),
+            0,
+            None,
+        ),
+        (
+            f.error_handling_warning,
+            ComplexityFindingKind::ErrorHandling,
+            metrics.map_or(0, error_handling_count),
+            0,
+            None,
+        ),
+    ];
+    for spec in specs {
+        push_metric_threshold(out, f, spec);
+    }
 }
 
-// qual:allow(srp) reason: "single-purpose accumulator: gate-test + push the typed finding; parameters are inherent to the per-metric uniform pattern"
+/// One metric's threshold-finding spec: `(flag, kind, metric_value,
+/// threshold_value, hotspot)`. A tuple (not a struct) keeps this uniform
+/// per-metric data table clear of BP-009 (same-type struct-update boilerplate).
+type MetricThreshold = (
+    bool,
+    ComplexityFindingKind,
+    usize,
+    usize,
+    Option<ComplexityHotspotDetail>,
+);
+
 fn push_metric_threshold(
     out: &mut Vec<ComplexityFinding>,
     f: &FunctionAnalysis,
-    flag: bool,
-    kind: ComplexityFindingKind,
-    metric_value: usize,
-    threshold_value: usize,
-    hotspot: Option<ComplexityHotspotDetail>,
+    spec: MetricThreshold,
 ) {
+    let (flag, kind, metric_value, threshold_value, hotspot) = spec;
     if flag {
         out.push(threshold(f, kind, metric_value, threshold_value, hotspot));
     }

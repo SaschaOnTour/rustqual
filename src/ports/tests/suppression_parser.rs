@@ -31,6 +31,7 @@ fn fake_parser_returns_injected_suppressions() {
         line: FIXTURE_LINE,
         dimensions: vec![Dimension::Architecture],
         reason: Some("migration".into()),
+        target: None,
     };
     let parser = FakeParser {
         returns: vec![sup.clone()],
@@ -40,7 +41,7 @@ fn fake_parser_returns_injected_suppressions() {
     assert_eq!(parsed, vec![sup]);
 }
 
-// qual:allow(test_quality) reason: "contract test verifying Display on Error variants does not call a SUT method by design"
+// qual:allow(test_quality, no_sut) reason: "contract test verifying Display on Error variants does not call a SUT method by design"
 #[test]
 fn parse_error_variants_carry_diagnostic_information() {
     let e = SuppressionParseError::Malformed {

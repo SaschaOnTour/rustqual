@@ -91,7 +91,7 @@ By default, the dead-code analysis treats a package's `tests/**` files as call-s
 Replace with explicit imports. If a `prelude::*` is unavoidable (some crates require it), suppress narrowly:
 
 ```rust
-// qual:allow(dry) — diesel requires this prelude for query DSL
+// qual:allow(dry, wildcard_imports) reason: "diesel requires this prelude for query DSL"
 use diesel::prelude::*;
 ```
 
@@ -142,7 +142,7 @@ Most thresholds are tuned to be opinionated by default. Loosen them via `--init`
 For genuine cases where suppression is right:
 
 ```rust
-// qual:allow(dry) — keeping this duplicate temporarily; consolidating in PR-345
+// qual:allow(dry, duplicate) reason: "keeping this duplicate temporarily; consolidating in PR-345"
 fn old_path() { /* … */ }
 
 // qual:api — public-API entry, callers outside this crate
@@ -155,7 +155,7 @@ pub fn build_test_config() -> Config { /* … */ }
 fn encode(v: &Value) -> Vec<u8> { /* … */ }
 ```
 
-`qual:api`, `qual:test_helper`, and `qual:inverse` don't count against `max_suppression_ratio`. `qual:allow(dry)` does.
+`qual:api`, `qual:test_helper`, and `qual:inverse` don't count against `max_suppression_ratio`. `qual:allow(dry, …)` does.
 
 Full annotation reference: [reference-suppression.md](./reference-suppression.md).
 

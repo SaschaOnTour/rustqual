@@ -38,13 +38,16 @@ pub(super) fn orphan_suppression_entries(
             } else {
                 dims.join(",")
             };
+            let suffix = w.target_suffix();
+            let word = w.kind.status_word();
             let detail = match &w.reason {
-                Some(r) => format!("orphan suppression for {scope} — {r}"),
-                None => format!("orphan suppression for {scope}"),
+                Some(r) => format!("{word} orphan suppression for {scope}{suffix} — {r}"),
+                None => format!("{word} orphan suppression for {scope}{suffix}"),
             };
             json!({
                 "file": w.file,
                 "category": "orphan_suppression",
+                "kind": w.kind.json_kind(),
                 "line": w.line,
                 "fn": "",
                 "detail": detail,

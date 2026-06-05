@@ -4,6 +4,11 @@ use serde::Deserialize;
 
 pub const DEFAULT_MAX_SUPPRESSION_RATIO: f64 = 0.05;
 
+/// How far above the actual metric value a `allow(dim, target=N)` pin may
+/// sit before it is reported as a too-loose orphan. 0.10 = the pin may be
+/// at most 10% above the value it covers; beyond that, tighten it to ~value.
+pub const DEFAULT_PIN_HEADROOM: f64 = 0.10;
+
 // Complexity
 pub const DEFAULT_COMPLEXITY_ENABLED: bool = true;
 pub const DEFAULT_MAX_COGNITIVE: usize = 15;
@@ -35,8 +40,10 @@ pub const DEFAULT_SRP_MAX_FIELDS: usize = 12;
 pub const DEFAULT_SRP_MAX_METHODS: usize = 20;
 pub const DEFAULT_SRP_MAX_FAN_OUT: usize = 10;
 pub const DEFAULT_SRP_LCOM4_THRESHOLD: usize = 2;
-pub const DEFAULT_SRP_FILE_LENGTH_BASELINE: usize = 300;
-pub const DEFAULT_SRP_FILE_LENGTH_CEILING: usize = 800;
+/// Highest production line count a file may have before SRP_MODULE fires.
+/// A single threshold (no baseline/ceiling ramp): a file is flagged when
+/// its production lines strictly exceed this value.
+pub const DEFAULT_SRP_FILE_LENGTH: usize = 300;
 // Highest cluster count that still passes. A file with more than
 // this many independent function clusters is flagged as having
 // multiple responsibilities. Default `2` means 3+ clusters trigger
@@ -170,8 +177,7 @@ pub struct SrpConfig {
     pub max_fan_out: usize,
     pub lcom4_threshold: usize,
     pub weights: [f64; 4],
-    pub file_length_baseline: usize,
-    pub file_length_ceiling: usize,
+    pub file_length: usize,
     pub max_independent_clusters: usize,
     pub min_cluster_statements: usize,
     pub max_parameters: usize,
@@ -187,8 +193,7 @@ impl Default for SrpConfig {
             max_fan_out: DEFAULT_SRP_MAX_FAN_OUT,
             lcom4_threshold: DEFAULT_SRP_LCOM4_THRESHOLD,
             weights: [0.4, 0.25, 0.15, 0.2],
-            file_length_baseline: DEFAULT_SRP_FILE_LENGTH_BASELINE,
-            file_length_ceiling: DEFAULT_SRP_FILE_LENGTH_CEILING,
+            file_length: DEFAULT_SRP_FILE_LENGTH,
             max_independent_clusters: DEFAULT_SRP_MAX_INDEPENDENT_CLUSTERS,
             min_cluster_statements: DEFAULT_SRP_MIN_CLUSTER_STATEMENTS,
             max_parameters: DEFAULT_SRP_MAX_PARAMETERS,
@@ -198,13 +203,14 @@ impl Default for SrpConfig {
 
 /// Per-test-code threshold overrides.
 ///
-/// rustqual applies a curated subset of checks to test code — DRY-001/004/005
+/// rustqual applies a curated subset of checks to test code — DRY-001/003/005
 /// (duplicate fns / fragments / repeated matches), LONG_FN (function length),
 /// and SRP file-length (SRP_MODULE). The god-struct check (SRP-001) also fires
 /// on test structs — a god-fixture is a real smell — but at production
-/// thresholds, with no separate test knob (`// qual:allow(srp)` covers the rare
-/// legitimate fixture). The remaining checks stay test-exempt: ERROR_HANDLING,
-/// MAGIC_NUMBER, IOSP, DRY-002 dead code, DRY-003 wildcard imports, Coupling,
+/// thresholds, with no separate test knob (`// qual:allow(srp, god_struct)`
+/// covers the rare legitimate fixture). The remaining checks stay test-exempt:
+/// ERROR_HANDLING, MAGIC_NUMBER, IOSP, DRY-002 dead code, DRY-004 wildcard
+/// imports, Coupling,
 /// all Structural detectors, and the SRP *module*-cohesion (independent-cluster)
 /// check — a test file's independent `#[test]` fns are its purpose, not a smell.
 /// **This split is fixed — only the thresholds below are configurable.**
@@ -218,10 +224,33 @@ impl Default for SrpConfig {
 pub struct TestsConfig {
     /// Overrides `[complexity].max_function_lines` for test fns (LONG_FN).
     pub max_function_lines: Option<usize>,
-    /// Overrides `[srp].file_length_baseline` for test files.
-    pub file_length_baseline: Option<usize>,
-    /// Overrides `[srp].file_length_ceiling` for test files.
-    pub file_length_ceiling: Option<usize>,
+    /// Overrides `[srp].file_length` for test files (SRP_MODULE).
+    pub file_length: Option<usize>,
+}
+
+/// Configuration for suppression-marker quality checks.
+///
+/// Today this holds a single knob, `pin_headroom`: a metric pin
+/// `// qual:allow(dim, target=N)` is reported as a too-loose orphan when
+/// `N` exceeds the actual value it covers by more than this fraction. A pin
+/// at or below `value × (1 + pin_headroom)` is accepted; above it, the
+/// author is told to tighten the pin to ~value or remove it. This keeps
+/// pins honest — a pin parked far above the real metric silently absorbs
+/// future regressions up to its ceiling.
+#[derive(Debug, Deserialize, Clone)]
+#[serde(default, deny_unknown_fields)]
+pub struct SuppressionConfig {
+    /// Maximum fraction a metric pin may exceed the value it covers
+    /// before being flagged too-loose. Default `0.10` (10%).
+    pub pin_headroom: f64,
+}
+
+impl Default for SuppressionConfig {
+    fn default() -> Self {
+        Self {
+            pin_headroom: DEFAULT_PIN_HEADROOM,
+        }
+    }
 }
 
 /// Configuration for coupling analysis.

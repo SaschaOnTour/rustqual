@@ -45,14 +45,23 @@ pub(crate) struct JsonArchitectureFinding {
     pub(crate) suppressed: bool,
 }
 
-/// `// qual:allow(...)` marker that matched no finding in its window.
+/// `// qual:allow(...)` marker reported as stale (matched no finding) or
+/// too-loose (a metric pin too far above the value it covers). See `kind`.
 /// `pub` (not `pub(crate)`) because it surfaces as `JsonReporter::OrphanView`
 /// — a per-reporter view type on the public `ReporterImpl` trait.
 #[derive(serde::Serialize)]
 pub struct JsonOrphanSuppression {
     pub(crate) file: String,
     pub(crate) line: usize,
+    /// Why the marker is reported: `"stale"` (delete it) or `"too_loose"`
+    /// (tighten the pin) — a stable token so CI consumers branch on the remedy.
+    pub(crate) kind: &'static str,
     pub(crate) dimensions: Vec<String>,
+    /// The targeted finding-kind (`"file_length=400"`, `"god_struct"`), absent
+    /// for a blanket/invalid marker — so consumers see which target is being
+    /// reported (stale or, for a metric pin, too-loose).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) target: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) reason: Option<String>,
 }
