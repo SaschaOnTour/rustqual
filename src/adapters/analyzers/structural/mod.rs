@@ -1,4 +1,3 @@
-// qual:allow(coupling) reason: "leaf analysis module — high instability is expected"
 pub(crate) mod btc;
 pub(crate) mod deh;
 pub(crate) mod iet;

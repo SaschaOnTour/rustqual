@@ -1,4 +1,3 @@
-// qual:allow(coupling) reason: "leaf analysis module — high instability is expected"
 pub(crate) mod assertions;
 pub(crate) mod coverage;
 pub(crate) mod lcov;

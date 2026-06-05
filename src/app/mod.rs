@@ -1,4 +1,3 @@
-// qual:allow(coupling) reason: "application layer orchestrates adapters + ports — high instability is expected"
 //! Application layer — use-cases that orchestrate adapters through ports.
 //!
 //! The Application layer is rustqual's business-logic tier. Each use-case

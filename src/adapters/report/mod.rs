@@ -1,4 +1,3 @@
-// qual:allow(coupling) reason: "report naturally depends on all analysis modules"
 mod ai;
 mod baseline;
 mod dot;

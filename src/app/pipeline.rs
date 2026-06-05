@@ -1,4 +1,3 @@
-// qual:allow(coupling) reason: "orchestrator module — high instability is expected"
 use super::architecture::collect_architecture_findings;
 use super::secondary::{run_secondary_analysis, SecondaryContext, SecondaryResults};
 use super::warnings;
