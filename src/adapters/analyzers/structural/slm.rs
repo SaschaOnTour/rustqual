@@ -116,25 +116,15 @@ impl<'ast> Visit<'ast> for SelfRefChecker {
             }
         }
         if let syn::Expr::Macro(m) = expr {
-            if m.mac
-                .path
-                .segments
-                .last()
-                .map(|s| s.ident == "matches")
-                .unwrap_or(false)
+            // A macro body is an opaque token stream that syn's visitor never
+            // descends into, so a `self` used only inside `format!("{}", self.x)`,
+            // `matches!(self, …)`, `write!(f, "{}", self)` etc. would otherwise be
+            // invisible — falsely flagging the method as self-less. Scan the raw
+            // tokens for a `self` reference (robust for any macro grammar).
+            if crate::adapters::shared::macro_tokens::tokens_reference_ident(&m.mac.tokens, "self")
             {
-                let first_is_self = m
-                    .mac
-                    .tokens
-                    .clone()
-                    .into_iter()
-                    .next()
-                    .map(|t| t.to_string() == "self")
-                    .unwrap_or(false);
-                if first_is_self {
-                    self.has_self_ref = true;
-                    return;
-                }
+                self.has_self_ref = true;
+                return;
             }
         }
         syn::visit::visit_expr(self, expr);

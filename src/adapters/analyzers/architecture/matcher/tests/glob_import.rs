@@ -127,6 +127,27 @@ fn does_not_match_empty_file() {
 }
 
 #[test]
+fn matches_prelude_glob_at_matcher_level() {
+    // The matcher is a dumb "find ALL globs" primitive — it reports prelude
+    // globs too (`crate::prelude::*`, `dioxus::prelude::*`, …). The idiomatic
+    // exemption is a POLICY decision applied at the analyzer layer via
+    // `allow_prelude_glob` (see `run_pattern_matchers`), not here — consistent
+    // with the `self::*`/`super::*` handling above.
+    for src in [
+        "use crate::prelude::*;",
+        "use dioxus::prelude::*;",
+        "use some::nested::prelude::*;",
+    ] {
+        let hits = find(src);
+        assert_eq!(
+            hits.len(),
+            1,
+            "matcher must report the prelude glob (policy decides exemption), got {hits:?} for `{src}`"
+        );
+    }
+}
+
+#[test]
 fn line_number_points_to_glob_statement() {
     let src = "\n\n\nuse foo::*;\n";
     let hits = find(src);

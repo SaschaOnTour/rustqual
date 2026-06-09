@@ -173,16 +173,25 @@ impl<'ast> Visit<'ast> for CallTargetCollector {
     }
 
     fn visit_macro(&mut self, node: &'ast syn::Macro) {
-        // Parse macro arguments as expressions to find embedded function calls.
-        // Works for assert!(), assert_eq!(), format!(), vec![], etc.
-        use syn::punctuated::Punctuated;
-        if let Ok(args) = syn::parse::Parser::parse2(
-            Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated,
-            node.tokens.clone(),
-        ) {
-            args.iter()
-                .for_each(|expr| syn::visit::visit_expr(self, expr));
-        }
+        // Macro bodies are opaque to syn's visitor; recover embedded exprs so
+        // calls inside assert!(), format!(), vec![] — including the `;`-repeat
+        // and block-bodied forms — become call-graph edges.
+        crate::adapters::shared::macro_tokens::recover_exprs(&node.tokens)
+            .iter()
+            .for_each(|expr| syn::visit::visit_expr(self, expr));
+        // Always also harvest call/construction-position idents from the body.
+        // DSL component invocations use struct syntax (`Component { .. }`) that
+        // the structured visit parses but does NOT record as a call. Harvesting
+        // only idents in call/construction position (not prop keys or locals)
+        // keeps the over-collection tight; for reachability it only ever
+        // *suppresses* a finding, never raises a false one (a rare colliding
+        // name can mask a true positive — the accepted conservative bias).
+        let target = self.target();
+        crate::adapters::shared::macro_tokens::idents_in_call_position(&node.tokens).for_each(
+            |id| {
+                target.insert(id);
+            },
+        );
         syn::visit::visit_macro(self, node);
     }
 

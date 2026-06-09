@@ -74,15 +74,16 @@ impl<'ast> Visit<'ast> for FunctionCallVisitor<'_> {
     }
 
     fn visit_macro(&mut self, node: &'ast syn::Macro) {
-        // Macro token streams are invisible to the default visitor. Parse
-        // the token stream as comma-separated expressions so calls inside
-        // `format!("{}", Box::new(x))` are caught.
-        use syn::punctuated::Punctuated;
-        if let Ok(args) = syn::parse::Parser::parse2(
-            Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated,
-            node.tokens.clone(),
-        ) {
-            args.iter().for_each(|expr| visit::visit_expr(self, expr));
+        // Macro token streams are invisible to the default visitor. Recover the
+        // embedded exprs (comma-list, `;`-repeat, and block-bodied forms) so
+        // forbidden calls inside `format!("{}", Box::new(x))`, `vec![f(); n]`,
+        // etc. are caught. Structured-only by design: unlike the reachability
+        // consumers, a forbid-matcher must NOT use the raw positional fallback
+        // (it would manufacture false violations), so a forbidden call inside an
+        // unparseable extern-DSL body is best-effort-missed rather than risk a
+        // false positive.
+        for expr in crate::adapters::shared::macro_tokens::recover_exprs(&node.tokens) {
+            visit::visit_expr(self, &expr);
         }
         visit::visit_macro(self, node);
     }

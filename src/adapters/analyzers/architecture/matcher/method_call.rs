@@ -80,16 +80,15 @@ impl<'ast> Visit<'ast> for MethodCallVisitor<'_> {
     }
 
     fn visit_macro(&mut self, node: &'ast syn::Macro) {
-        // Macro token streams are not parsed by syn's default visitor, but
-        // we want to catch method calls inside `format!("{}", x.unwrap())`
-        // and similar. Parse the token stream as a comma-separated list of
-        // expressions (works for most function-like macros).
-        use syn::punctuated::Punctuated;
-        if let Ok(args) = syn::parse::Parser::parse2(
-            Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated,
-            node.tokens.clone(),
-        ) {
-            args.iter().for_each(|expr| visit::visit_expr(self, expr));
+        // Macro token streams are not parsed by syn's default visitor, but we
+        // want to catch method calls inside `format!("{}", x.unwrap())` and
+        // similar. Recover the embedded exprs (comma-list, `;`-repeat, and
+        // block-bodied forms) and feed them through the visitor. Structured-only
+        // by design: a forbid-matcher must NOT use the raw positional fallback
+        // (it would manufacture false violations), so a method call inside an
+        // unparseable extern-DSL body is best-effort-missed.
+        for expr in crate::adapters::shared::macro_tokens::recover_exprs(&node.tokens) {
+            visit::visit_expr(self, &expr);
         }
         visit::visit_macro(self, node);
     }

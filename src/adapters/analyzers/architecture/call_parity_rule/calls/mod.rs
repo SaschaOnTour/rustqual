@@ -122,42 +122,13 @@ mod scope;
 mod visit;
 
 /// Best-effort extraction of expressions from a macro token stream.
-/// Most macros accept comma-separated exprs (`assert!(a, b)`,
-/// `format!("{}", x)`), but block-like bodies (`tokio::select! { ... }`)
-/// and separator-`;` variants (`vec![x; n]`) don't. We try three
-/// strategies in order:
-/// 1. Comma-separated `syn::Expr` list (covers ~90% of macro calls).
-/// 2. Brace-wrapped parse as a `syn::Block` — extracts every statement
-///    expression, covering block-bodied and `;`-separated forms.
-/// 3. Single `syn::Expr` — for macros whose argument is one expression.
-///
-/// Still silent-skips on total parse failure (extern-DSL macros, custom
-/// grammar) — a documented limitation of syntax-level call-graph
-/// construction.
+/// Thin alias for the shared [`crate::adapters::shared::macro_tokens::recover_exprs`]
+/// — the single source of the comma-list / `;`-repeat / block-bodied / single-expr
+/// recovery strategy used by every macro-aware collector. Kept as a local name
+/// so the call_parity call-graph code reads in its own vocabulary.
+/// Integration: delegates to the shared helper, no logic.
 pub(super) fn parse_macro_tokens(tokens: proc_macro2::TokenStream) -> Vec<syn::Expr> {
-    use syn::parse::Parser;
-    use syn::punctuated::Punctuated;
-    use syn::Token;
-    let parser = Punctuated::<syn::Expr, Token![,]>::parse_terminated;
-    if let Ok(exprs) = parser.parse2(tokens.clone()) {
-        return exprs.into_iter().collect();
-    }
-    let braced = quote::quote! { { #tokens } };
-    if let Ok(block) = syn::parse2::<syn::Block>(braced) {
-        return block
-            .stmts
-            .into_iter()
-            .filter_map(|stmt| match stmt {
-                syn::Stmt::Expr(e, _) => Some(e),
-                syn::Stmt::Local(l) => l.init.map(|init| *init.expr),
-                _ => None,
-            })
-            .collect();
-    }
-    if let Ok(expr) = syn::parse2::<syn::Expr>(tokens) {
-        return vec![expr];
-    }
-    Vec::new()
+    crate::adapters::shared::macro_tokens::recover_exprs(&tokens)
 }
 
 /// Project an inferred receiver type to the canonical call-graph

@@ -35,6 +35,11 @@ impl GlobImportVisitor<'_> {
                 segments.pop();
             }
             syn::UseTree::Glob(g) => {
+                // Report EVERY glob (including `self::*`, `super::*`, and
+                // `*::prelude::*`). Policy decides what is allowed: path scope
+                // via `forbidden_in`/`except`, and the prelude exemption via
+                // `allow_prelude_glob`, both applied at the analyzer layer. The
+                // matcher stays a dumb "find all globs" primitive.
                 let base_path = segments.join("::");
                 let start = g.star_token.span().start();
                 self.hits.push(MatchLocation {

@@ -133,6 +133,33 @@ fn method_body_visitor_sees_self_calls_inside_debug_assert_macro() {
 }
 
 #[test]
+fn method_body_visitor_sees_self_calls_inside_repeat_form_macro() {
+    // The `;`-repeat macro body `vec![self.validate(); 1]` fails a comma-expr
+    // parse; the shared recovery's block fallback must still surface the
+    // `self.validate()` link so cohesion (LCOM4) is not under-counted.
+    let code = r#"
+        struct Storage { buf: usize, active: bool }
+        impl Storage {
+            fn validate(&self) -> bool { self.active && self.buf > 0 }
+            fn append(&mut self, n: usize) {
+                self.buf = n;
+                let _ = vec![self.validate(); 1];
+            }
+        }
+    "#;
+    let methods = collect_methods_for(code);
+    let append = methods
+        .iter()
+        .find(|m| m.method_name == "append")
+        .expect("append collected");
+    assert!(
+        append.self_method_calls.contains("validate"),
+        "append should see self.validate() inside a vec![_; n] repeat macro, got: {:?}",
+        append.self_method_calls
+    );
+}
+
+#[test]
 fn lcom4_unites_methods_linked_via_debug_assert_macro() {
     // Bug 2 reproducer. `append` only writes `extra`, which no other
     // method touches — so field-sharing alone cannot unite the clusters.

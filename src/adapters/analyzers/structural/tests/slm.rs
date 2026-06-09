@@ -102,3 +102,19 @@ fn test_matches_macro_self_not_flagged() {
         "matches!(self, ...) should count as self reference"
     );
 }
+
+#[test]
+fn test_self_in_macro_arg_not_flagged() {
+    // A method whose ONLY self-reference is a macro argument (here `format!`)
+    // genuinely uses self — it must not trip SLM. `syn::visit` treats a macro
+    // body as an opaque token stream, so the `SelfRefChecker` has to scan macro
+    // tokens for `self` (it special-cases only `matches!` today → false positive).
+    let w = detect_in(
+        "struct S { name: String } impl S { fn label(&self) -> String { format!(\"[{}]\", self.name) } }",
+    );
+    assert!(
+        w.is_empty(),
+        "self inside a macro arg (format!) must count as a self reference: {} warning(s)",
+        w.len()
+    );
+}

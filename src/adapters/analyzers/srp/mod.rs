@@ -317,21 +317,17 @@ impl<'ast> Visit<'ast> for MethodBodyVisitor {
     }
 
     fn visit_macro(&mut self, node: &'ast syn::Macro) {
-        // Parse macro arguments as comma-separated expressions and feed
-        // them through our own `visit_expr` override, so `self.field`
-        // accesses and `self.method()` calls inside `debug_assert!(...)`,
-        // `assert_eq!(...)`, `format!(...)` etc. contribute to LCOM4
-        // just like non-macro code. We must call `self.visit_expr(e)`
-        // (the override) rather than `syn::visit::visit_expr(self, e)`
-        // (the dispatcher) — the dispatcher skips our outer match arm
-        // and walks straight into sub-expressions, so the method-call
-        // ident itself would never be recorded.
-        use syn::punctuated::Punctuated;
-        if let Ok(args) = syn::parse::Parser::parse2(
-            Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated,
-            node.tokens.clone(),
-        ) {
-            args.iter().for_each(|expr| self.visit_expr(expr));
+        // Recover the macro body's expressions and feed them through our own
+        // `visit_expr` override, so `self.field` accesses and `self.method()`
+        // calls inside `debug_assert!(...)`, `assert_eq!(...)`, `format!(...)`
+        // — including the `;`-repeat and block-bodied forms — contribute to
+        // LCOM4 just like non-macro code. We must call `self.visit_expr(e)`
+        // (the override) rather than `syn::visit::visit_expr(self, e)` (the
+        // dispatcher) — the dispatcher skips our outer match arm and walks
+        // straight into sub-expressions, so the method-call ident itself
+        // would never be recorded.
+        for expr in crate::adapters::shared::macro_tokens::recover_exprs(&node.tokens) {
+            self.visit_expr(&expr);
         }
         syn::visit::visit_macro(self, node);
     }

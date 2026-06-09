@@ -233,3 +233,22 @@ fn build_reaches_prod_set_seeds_prod_and_walks_callers_backward() {
         "a test fn reaching no prod code is excluded from the seed"
     );
 }
+
+#[test]
+fn full_call_graph_recovers_repeat_form_macro_call_edge() {
+    // `caller`'s only call to `helper` is inside a `vec![helper(); 3]` repeat
+    // macro. The comma-expr parse fails on the `;`; the shared recovery's block
+    // fallback must still produce a `caller → helper` edge so TQ-003
+    // reachability flows through macro-wrapped calls.
+    let src = "fn helper() {} fn caller() { let _ = vec![helper(); 3]; }";
+    let ast = syn::parse_file(src).expect("parse");
+    let parsed = vec![("lib.rs".to_string(), src.to_string(), ast)];
+    let graph = crate::adapters::analyzers::tq::build_full_call_graph(&parsed);
+    assert!(
+        graph
+            .get("caller")
+            .is_some_and(|callees| callees.iter().any(|c| c == "helper")),
+        "caller must have a macro-embedded edge to helper, got: {:?}",
+        graph.get("caller")
+    );
+}

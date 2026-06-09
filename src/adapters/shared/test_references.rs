@@ -43,16 +43,21 @@ struct TestReferenceCollector {
 impl<'ast> Visit<'ast> for TestReferenceCollector {
     fn visit_macro(&mut self, node: &'ast syn::Macro) {
         if self.in_test_fn {
-            // Parse macro arguments (assert!, assert_eq!, vec!, etc.) as expressions
-            // to find references embedded inside macros.
-            use syn::punctuated::Punctuated;
-            if let Ok(args) = syn::parse::Parser::parse2(
-                Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated,
-                node.tokens.clone(),
-            ) {
-                args.iter()
-                    .for_each(|expr| syn::visit::visit_expr(self, expr));
-            }
+            // Macro bodies are opaque to syn's visitor; recover embedded exprs
+            // so SUT references inside assert!(), vec!(), `;`-repeat / block
+            // forms are seen as the test exercising production code.
+            crate::adapters::shared::macro_tokens::recover_exprs(&node.tokens)
+                .iter()
+                .for_each(|expr| syn::visit::visit_expr(self, expr));
+            // Always also harvest call/construction-position idents. A test that
+            // exercises the SUT by rendering a component (`rsx!{ Component { .. }
+            // }`) uses struct syntax the structured visit parses but does not
+            // record as a call. Harvesting only call/construction position (not
+            // prop keys) keeps it tight; for SUT detection it can only suppress a
+            // false NO_SUT, never raise one.
+            self.current_calls.extend(
+                crate::adapters::shared::macro_tokens::idents_in_call_position(&node.tokens),
+            );
         }
         syn::visit::visit_macro(self, node);
     }

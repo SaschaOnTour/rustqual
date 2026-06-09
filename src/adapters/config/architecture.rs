@@ -96,6 +96,12 @@ fn default_unmatched_behavior() -> String {
     "composition_root".to_string()
 }
 
+/// Serde default for `allow_prelude_glob` — prelude globs are exempt unless a
+/// project explicitly opts in to forbidding them.
+pub(crate) fn default_true() -> bool {
+    true
+}
+
 /// `[architecture.layers.<name>]` — path globs assigning files to a layer.
 #[derive(Debug, Deserialize, Clone)]
 #[serde(deny_unknown_fields)]
@@ -182,6 +188,12 @@ pub struct SymbolPattern {
     /// Match glob imports (`use foo::*`) when set to true.
     #[serde(default)]
     pub forbid_glob_import: Option<bool>,
+    /// When `forbid_glob_import` is set, still allow idiomatic `*::prelude::*`
+    /// re-export globs (the common `std`/`dioxus`/`bevy` pattern — a `prelude`
+    /// segment at any depth). Set to `false` to forbid even prelude globs.
+    /// Default `true`.
+    #[serde(default = "default_true")]
+    pub allow_prelude_glob: bool,
     /// Escape hatch: raw regex applied to AST-aware source (comments/strings masked).
     #[serde(default)]
     pub regex: Option<String>,

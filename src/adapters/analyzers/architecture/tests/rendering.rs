@@ -172,6 +172,7 @@ fn match_to_finding_projects_every_field() {
         forbid_item_kind: None,
         forbid_derive: None,
         forbid_glob_import: None,
+        allow_prelude_glob: true,
         regex: None,
         reason: "no anon fns".into(),
     };

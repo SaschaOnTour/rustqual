@@ -85,6 +85,46 @@ fn test_function_not_in_lcov_no_warning() {
 }
 
 #[test]
+fn cfg_excluded_fn_present_in_results_but_absent_from_lcov_not_flagged() {
+    // Repro for the wasm-only / cfg-gated coverage discrepancy: rustqual parses
+    // source cfg-agnostically (so `excluded_fn` IS in `all_results`), but the
+    // coverage run built a target where it was cfg'd out — so the file IS in the
+    // LCOV (its sibling `native_fn` was covered) while `excluded_fn` appears in
+    // NEITHER function_hits NOR line_hits. It must NOT be reported as Uncovered
+    // (TQ-004) or UntestedLogic (TQ-005): "not built in this target" ≠ "0 hits".
+    let native = make_func("native_fn", "src/lib.rs", 5);
+    let mut excluded = make_func("excluded_fn", "src/lib.rs", 12);
+    excluded.complexity = Some(ComplexityMetrics {
+        logic_occurrences: vec![LogicOccurrence {
+            kind: "if".to_string(),
+            line: 13,
+        }],
+        ..Default::default()
+    });
+    let results = vec![native, excluded];
+    let mut lcov = HashMap::new();
+    // Only native_fn is in the coverage artifact (hit + its line); excluded_fn
+    // and its lines are entirely absent, exactly as llvm-cov emits when the
+    // function is cfg'd out of the built target.
+    lcov.insert(
+        "src/lib.rs".to_string(),
+        make_lcov_data(&[("native_fn", 3)], &[(5, 3)]),
+    );
+    let uncovered = detect_uncovered_functions(&results, &lcov);
+    assert!(
+        !uncovered.iter().any(|w| w.function_name == "excluded_fn"),
+        "cfg-excluded fn absent from LCOV must not be Uncovered, got {uncovered:?}"
+    );
+    let untested_logic = detect_untested_logic(&results, &lcov);
+    assert!(
+        !untested_logic
+            .iter()
+            .any(|w| w.function_name == "excluded_fn"),
+        "cfg-excluded fn's logic lines absent from LCOV must not be UntestedLogic, got {untested_logic:?}"
+    );
+}
+
+#[test]
 fn test_function_excluded_by_is_test_flag() {
     // Test entry points are excluded via the analyzer-computed `is_test`
     // flag (attribute/cfg/path aware), not by a `test_` name prefix —

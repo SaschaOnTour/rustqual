@@ -41,14 +41,14 @@ impl<'ast> Visit<'ast> for MacroCallVisitor<'_> {
             }
         }
         // Descend into the macro token stream so nested macros (e.g.
-        // `vec![format!(...)]`) are caught. Matches the same parse trick
-        // the rustqual call-target collector uses.
-        use syn::punctuated::Punctuated;
-        if let Ok(args) = syn::parse::Parser::parse2(
-            Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated,
-            node.tokens.clone(),
-        ) {
-            args.iter().for_each(|expr| visit::visit_expr(self, expr));
+        // `vec![format!(...)]`) are caught — recover the embedded exprs
+        // (comma-list, `;`-repeat, and block-bodied forms) via the shared
+        // helper the rustqual call-target collector also uses. Structured-only
+        // by design: a forbid-matcher must NOT use the raw positional fallback
+        // (it would manufacture false violations), so a nested macro inside an
+        // unparseable extern-DSL body is best-effort-missed.
+        for expr in crate::adapters::shared::macro_tokens::recover_exprs(&node.tokens) {
+            visit::visit_expr(self, &expr);
         }
         visit::visit_macro(self, node);
     }

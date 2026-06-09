@@ -168,7 +168,10 @@ fn build_globset(patterns: &[String]) -> Option<GlobSet> {
 
 /// Run every active matcher of `pattern` on one parsed file.
 /// Integration: iterator-chain over matchers, collects findings.
-fn run_pattern_matchers(file: &crate::ports::ParsedFile, pattern: &SymbolPattern) -> Vec<Finding> {
+pub(super) fn run_pattern_matchers(
+    file: &crate::ports::ParsedFile,
+    pattern: &SymbolPattern,
+) -> Vec<Finding> {
     let rule_id = format!("architecture/pattern/{}", pattern.name);
     let mut out = Vec::new();
 
@@ -204,6 +207,7 @@ fn run_pattern_matchers(file: &crate::ports::ParsedFile, pattern: &SymbolPattern
         let hits = find_glob_imports(&file.path, &file.ast);
         out.extend(
             hits.into_iter()
+                .filter(|h| !pattern.allow_prelude_glob || !is_prelude_glob(h))
                 .map(|h| match_to_finding(h, &rule_id, pattern)),
         );
     }
@@ -222,6 +226,18 @@ fn run_pattern_matchers(file: &crate::ports::ParsedFile, pattern: &SymbolPattern
         );
     }
     out
+}
+
+/// True if a glob-import hit targets a `*::prelude::*` re-export (a `prelude`
+/// segment at any depth) — the idiomatic `std`/`dioxus`/`bevy` pattern exempted
+/// by `allow_prelude_glob`. The matcher reports every glob; this policy predicate
+/// decides which are forgiven. Operation: kind match + segment scan, no own calls.
+fn is_prelude_glob(hit: &MatchLocation) -> bool {
+    matches!(
+        &hit.kind,
+        ViolationKind::GlobImport { base_path }
+            if base_path.split("::").any(|seg| seg == "prelude")
+    )
 }
 
 // ── layer rule ─────────────────────────────────────────────────────────
