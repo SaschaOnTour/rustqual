@@ -22,7 +22,8 @@ forms; they now share one recovery helper.
 - **`adapters/shared/macro_tokens.rs`** — the single source of macro-body
   recovery. `recover_exprs` escalates comma-list → braced-block (handles
   `vec![x; n]` repeat and `;`-separated bodies, lifting trailing `Stmt::Macro`
-  back to an `Expr::Macro`) → single-expr. `idents_in_call_position` /
+  back to an `Expr::Macro` and keeping a `let … else { … }` diverging branch) →
+  single-expr. `idents_in_call_position` /
   `tokens_reference_ident` are the raw, never-fail fallback for DSL bodies
   (`rsx!{ Component { .. } }`) that parse as no structured expression.
 - **`[[architecture.pattern]] allow_prelude_glob` (bool, default `true`).** When

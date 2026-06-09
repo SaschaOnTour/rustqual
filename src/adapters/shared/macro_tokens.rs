@@ -47,7 +47,7 @@ pub fn recover_exprs(tokens: &TokenStream) -> Vec<syn::Expr> {
     }
     let braced = quote::quote! { { #tokens } };
     if let Ok(block) = syn::parse2::<syn::Block>(braced) {
-        return block.stmts.into_iter().filter_map(stmt_expr).collect();
+        return block.stmts.into_iter().flat_map(stmt_exprs).collect();
     }
     if let Ok(expr) = syn::parse2::<syn::Expr>(tokens.clone()) {
         return vec![expr];
@@ -55,21 +55,32 @@ pub fn recover_exprs(tokens: &TokenStream) -> Vec<syn::Expr> {
     Vec::new()
 }
 
-/// The expression carried by a block statement, if any: a bare expression, the
-/// initialiser of a `let`, or a trailing-`;` macro statement (`format!(…);`)
-/// lifted back to an `Expr::Macro` so nested macro calls inside a `;`-separated
-/// body are not dropped. `Stmt::Item` (e.g. a `const X = f();` nested in a macro
-/// body) is deliberately dropped — an uncommon shape; its calls are recovered by
-/// the reachability consumers' positional fallback. Operation: stmt-shape match.
-fn stmt_expr(stmt: syn::Stmt) -> Option<syn::Expr> {
+/// The expressions carried by a block statement (zero or more): a bare
+/// expression; a `let`'s initialiser **plus** its `else { … }` diverging block
+/// (let-else), so a call reachable only through the diverging branch is not
+/// dropped; or a trailing-`;` macro statement (`format!(…);`) lifted back to an
+/// `Expr::Macro` so nested macro calls inside a `;`-separated body survive.
+/// `Stmt::Item` (e.g. a `const X = f();` nested in a macro body) is deliberately
+/// dropped — an uncommon shape; its calls are recovered by the reachability
+/// consumers' positional fallback. Operation: stmt-shape match, no own calls.
+fn stmt_exprs(stmt: syn::Stmt) -> Vec<syn::Expr> {
     match stmt {
-        syn::Stmt::Expr(e, _) => Some(e),
-        syn::Stmt::Local(l) => l.init.map(|init| *init.expr),
-        syn::Stmt::Macro(m) => Some(syn::Expr::Macro(syn::ExprMacro {
+        syn::Stmt::Expr(e, _) => vec![e],
+        syn::Stmt::Local(l) => l
+            .init
+            .map(|init| {
+                let mut exprs = vec![*init.expr];
+                if let Some((_, diverge)) = init.diverge {
+                    exprs.push(*diverge);
+                }
+                exprs
+            })
+            .unwrap_or_default(),
+        syn::Stmt::Macro(m) => vec![syn::Expr::Macro(syn::ExprMacro {
             attrs: m.attrs,
             mac: m.mac,
-        })),
-        _ => None,
+        })],
+        _ => Vec::new(),
     }
 }
 

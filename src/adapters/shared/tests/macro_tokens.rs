@@ -68,6 +68,19 @@ fn recover_exprs_repeat_form_recovers_nested_macro_stmt() {
 }
 
 #[test]
+fn recover_exprs_recovers_let_else_diverging_branch() {
+    // `let Some(x) = opt else { bail() };` — the block fallback parses this as a
+    // `Stmt::Local` with a let-else `diverge`. The bound initialiser (`opt`) is
+    // a path, but the diverging `else { bail() }` carries the only call; it must
+    // be recovered too, not dropped.
+    let calls = call_idents(&recover_exprs(&ts("let Some(x) = opt else { bail() };")));
+    assert!(
+        calls.contains(&"bail".to_string()),
+        "a call in the let-else diverging branch must be recovered: {calls:?}"
+    );
+}
+
+#[test]
 fn recover_exprs_single_expr_form() {
     let calls = call_idents(&recover_exprs(&ts("only_call()")));
     assert!(
