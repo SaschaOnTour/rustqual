@@ -256,6 +256,7 @@ Repeatable symbol-pattern rules.
 | `forbid_method_call` | List of method names to forbid (`unwrap`, `expect`, …) |
 | `forbid_macro_call` | List of macro names to forbid (`println`, `dbg`, …) |
 | `forbid_glob_import` | `true` to forbid `use foo::*;` |
+| `allow_prelude_glob` | When forbidding globs, still allow `*::prelude::*` re-exports (`std`/`dioxus`/`bevy`). Default `true`; set `false` to forbid even prelude globs |
 | `forbidden_in` | Globs where the rule fires |
 | `allowed_in` | Globs where the rule is exempted |
 | `except` | Globs in `forbidden_in` that are exempted |

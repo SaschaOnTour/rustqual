@@ -82,6 +82,24 @@ fn matches_macro_inside_macro_args() {
     );
 }
 
+#[test]
+fn matches_macro_inside_repeat_form_macro_args() {
+    // `vec![format!("inner"); 3]` — the `;`-repeat outer body needs the shared
+    // recovery's block fallback for the nested forbidden macro to be found.
+    let src = r#"
+        fn run() {
+            let v = vec![format!("inner"); 3];
+            let _ = v;
+        }
+    "#;
+    let hits = find(src, &["format"]);
+    assert_eq!(
+        hits.len(),
+        1,
+        "nested macro inside a vec![_; n] repeat macro must be found: {hits:?}"
+    );
+}
+
 // ── Negative matches ──────────────────────────────────────────────────
 
 #[test]

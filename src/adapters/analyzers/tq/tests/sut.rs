@@ -183,6 +183,86 @@ fn calls_prod_fn_known_only_via_declared_set() {
 }
 
 #[test]
+fn tq_no_sut_abc_triangulation() {
+    // A/B/C triangulation isolating the SUT mapper from macro blindness.
+    //   A — plain call: has a SUT → must NOT fire TQ_NO_SUT (rule baseline).
+    //   B — call only inside a comma-expr macro (`vec![target_b()]`): the SUT
+    //       collector re-parses macro tokens as an expr list, so this IS seen →
+    //       must NOT fire. (If it fired, TQ_NO_SUT would be a pure macro cascade.)
+    //   C — genuinely no SUT: TQ_NO_SUT MUST fire (rule works).
+    let declared = vec![
+        make_declared("target_a", false),
+        make_declared("target_b", false),
+    ];
+    let warnings = detect_in(
+        r#"
+        #[test]
+        fn test_a() { assert_eq!(target_a(), 7); }
+        #[test]
+        fn test_b() { assert_eq!(vec![target_b()][0], 7); }
+        #[test]
+        fn test_c() { assert_eq!(1 + 1, 2); }
+        "#,
+        &declared,
+        "fn target_a() -> i32 { 7 } fn target_b() -> i32 { 7 }",
+        &[],
+    );
+    let fired: Vec<&str> = warnings.iter().map(|w| w.function_name.as_str()).collect();
+    assert_eq!(
+        fired,
+        vec!["test_c"],
+        "only test_c (no SUT) must fire; A=plain B=comma-macro are real SUT calls, got {fired:?}"
+    );
+}
+
+#[test]
+fn tq_no_sut_satisfied_by_component_render_in_dsl_macro() {
+    // A UI test whose SUT call is rendering a component inside an `rsx!` DSL
+    // body (which parses as no structured exprs). The raw ident fallback must
+    // let the component count as the SUT, so NO_SUT does not fire — the sovard
+    // `live_log_is_a_polite_live_region` symptom.
+    let declared = vec![make_declared("LiveLogViewer", false)];
+    let warnings = detect_in(
+        r#"
+        #[test]
+        fn live_log_renders() {
+            let _ = rsx! { div { class: "log", LiveLogViewer {} } };
+        }
+        "#,
+        &declared,
+        "fn LiveLogViewer() {}",
+        &[],
+    );
+    assert!(
+        warnings.is_empty(),
+        "rendering a component inside an rsx! DSL must satisfy SUT, got {warnings:?}"
+    );
+}
+
+#[test]
+fn tq_no_sut_satisfied_by_repeat_macro_call() {
+    // Regression guard for the repeat-macro SUT blindness fixed in the
+    // macro-token sweep. The SUT mapper routes macro bodies through
+    // `recover_exprs` (in `test_references.rs`), whose block fallback handles the
+    // `;`-repeat form a comma-only parse missed. So `target()` inside
+    // `vec![target(); 1]` IS a real SUT call and TQ_NO_SUT must stay silent.
+    let declared = vec![make_declared("target", false)];
+    let warnings = detect_in(
+        r#"
+        #[test]
+        fn test_repeat() { assert_eq!(vec![target(); 1][0], 7); }
+        "#,
+        &declared,
+        "fn target() -> i32 { 7 }",
+        &[],
+    );
+    assert!(
+        warnings.is_empty(),
+        "target() called inside a vec![_; n] repeat macro is a real SUT call, got {warnings:?}"
+    );
+}
+
+#[test]
 fn calls_fn_known_only_via_scope_functions() {
     // `scope_fn` is in the analysed scope but NOT in the declared set; the
     // scope-functions branch alone must recognise it as exercising the SUT.

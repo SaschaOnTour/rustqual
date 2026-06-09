@@ -85,6 +85,7 @@ fn pattern(
         forbid_item_kind: None,
         forbid_derive: None,
         forbid_glob_import: None,
+        allow_prelude_glob: true,
         regex: None,
         reason: String::new(),
     }
@@ -228,5 +229,40 @@ fn analyze_emits_findings_for_layer_violation_only_when_enabled() {
     assert!(
         ArchitectureAnalyzer.analyze(&ctx).is_empty(),
         "disabled → empty"
+    );
+}
+
+#[test]
+fn glob_policy_prelude_exemption_is_config_gated() {
+    // `forbid_glob_import` reports ALL globs at the matcher level; the analyzer
+    // policy then forgives `*::prelude::*` iff `allow_prelude_glob` (default
+    // true). The plain `crate::guts::*` glob always fires.
+    use crate::adapters::analyzers::architecture::analyzer::run_pattern_matchers;
+    let src = "use dioxus::prelude::*;\nuse crate::guts::*;\n";
+    let file = crate::ports::ParsedFile {
+        path: "src/a.rs".into(),
+        content: src.into(),
+        ast: syn::parse_file(src).expect("parse fixture"),
+    };
+    let mut pat = pattern(None, None);
+    pat.forbid_path_prefix = None;
+    pat.forbid_glob_import = Some(true);
+
+    // Default (true): prelude glob (line 1) forgiven, only the plain glob (line 2) fires.
+    pat.allow_prelude_glob = true;
+    let exempt = run_pattern_matchers(&file, &pat);
+    assert_eq!(exempt.len(), 1, "prelude must be exempt, got {exempt:?}");
+    assert_eq!(
+        exempt[0].line, 2,
+        "the surviving finding is the non-prelude glob"
+    );
+
+    // Opt-out (false): every glob fires, including the prelude one.
+    pat.allow_prelude_glob = false;
+    let strict = run_pattern_matchers(&file, &pat);
+    assert_eq!(
+        strict.len(),
+        2,
+        "allow_prelude_glob = false forbids even prelude globs, got {strict:?}"
     );
 }

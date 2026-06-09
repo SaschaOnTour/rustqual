@@ -145,7 +145,31 @@ fn test_symbol_pattern_all_matchers_parse() {
         &vec!["Serialize".to_string()]
     );
     assert_eq!(p.forbid_glob_import, Some(true));
+    // Omitted → `default_true`: prelude globs are exempt unless opted out.
+    assert!(
+        p.allow_prelude_glob,
+        "allow_prelude_glob must default to true"
+    );
     assert_eq!(p.regex.as_deref(), Some(r"some\s+pattern"));
+}
+
+#[test]
+fn forbid_glob_import_can_opt_out_of_prelude_exemption() {
+    let toml_str = r#"
+        [[pattern]]
+        name = "no-globs-at-all"
+        forbidden_in = ["src/**"]
+        forbid_glob_import = true
+        allow_prelude_glob = false
+        reason = "strict: even prelude globs are banned"
+    "#;
+    let c: ArchitectureConfig = toml::from_str(toml_str).unwrap();
+    let p = &c.patterns[0];
+    assert_eq!(p.forbid_glob_import, Some(true));
+    assert!(
+        !p.allow_prelude_glob,
+        "explicit allow_prelude_glob = false must be honoured"
+    );
 }
 
 #[test]
@@ -318,4 +342,12 @@ fn test_call_parity_default_call_depth_is_3() {
     // string lookup, so the call-graph-based untested check can't see the
     // connection. Direct test pins the value.
     assert_eq!(default_call_depth(), 3);
+}
+
+#[test]
+fn test_allow_prelude_glob_default_is_true() {
+    // `#[serde(default = "default_true")]` is dispatched by dynamic string
+    // lookup, invisible to the call-graph-based untested check. Direct call
+    // pins the value (prelude globs exempt unless opted out).
+    assert!(default_true());
 }

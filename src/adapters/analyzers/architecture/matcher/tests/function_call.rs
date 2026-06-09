@@ -136,6 +136,24 @@ fn descends_into_macro_tokens() {
     assert_eq!(hits.len(), 1, "{hits:?}");
 }
 
+#[test]
+fn descends_into_repeat_form_macro_tokens() {
+    // `vec![Box::new(42); 3]` — the `;`-repeat body fails a comma-expr parse;
+    // the shared recovery's block fallback must still surface the forbidden
+    // call, otherwise `forbid_function_call` silently misses it.
+    let src = r#"
+        fn main() {
+            let _v = vec![Box::new(42); 3];
+        }
+    "#;
+    let hits = find(src, &["Box::new"]);
+    assert_eq!(
+        hits.len(),
+        1,
+        "forbidden call inside a vec![_; n] repeat macro must be caught: {hits:?}"
+    );
+}
+
 // ── turbofish tolerance ──────────────────────────────────────────────
 
 #[test]

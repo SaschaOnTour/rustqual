@@ -187,3 +187,21 @@ fn matches_method_call_inside_macro_arg() {
         "method inside macro arg must match: {hits:?}"
     );
 }
+
+#[test]
+fn matches_method_call_inside_repeat_form_macro() {
+    // `vec![x.unwrap(); 3]` — the `;`-repeat body needs the shared recovery's
+    // block fallback; a plain comma-expr parse would miss the forbidden method.
+    let src = r#"
+        fn run() {
+            let x: Option<i32> = Some(1);
+            let _v = vec![x.unwrap(); 3];
+        }
+    "#;
+    let hits = find(src, &["unwrap"]);
+    assert_eq!(
+        hits.len(),
+        1,
+        "method inside a vec![_; n] repeat macro must match: {hits:?}"
+    );
+}

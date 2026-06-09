@@ -88,6 +88,25 @@ fn test_excludes_custom_prelude_glob() {
 }
 
 #[test]
+fn test_excludes_extern_crate_prelude_glob() {
+    // An external crate's prelude (`dioxus::prelude::*`, `bevy::prelude::*`) is
+    // the same idiomatic re-export pattern as std/crate preludes and must be
+    // excluded too — not only `prelude::*` / `crate::prelude::*`.
+    for code in [
+        "use dioxus::prelude::*;",
+        "use bevy::prelude::*;",
+        "use some_crate::nested::prelude::*;",
+    ] {
+        let parsed = parse(code);
+        let warnings = detect_wildcard_imports(&parsed);
+        assert!(
+            warnings.is_empty(),
+            "extern-crate prelude glob must be excluded, got {warnings:?} for `{code}`"
+        );
+    }
+}
+
+#[test]
 fn test_external_glob_detected() {
     let parsed = parse("use std::collections::*;");
     let warnings = detect_wildcard_imports(&parsed);

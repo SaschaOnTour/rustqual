@@ -125,16 +125,24 @@ impl<'ast> Visit<'ast> for FullCallGraphCollector {
     }
 
     fn visit_macro(&mut self, node: &'ast syn::Macro) {
-        // Parse macro arguments as expressions so calls inside vec![], assert!(), format!()
-        // etc. become edges in the graph. Without this, TQ-003 misses reachability through
-        // macro-wrapped calls (e.g. `vec![make_unmatched(path)]`).
-        use syn::punctuated::Punctuated;
-        if let Ok(args) = syn::parse::Parser::parse2(
-            Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated,
-            node.tokens.clone(),
-        ) {
-            args.iter()
-                .for_each(|expr| syn::visit::visit_expr(self, expr));
+        // Macro bodies are opaque to syn's visitor; recover embedded exprs so
+        // calls inside vec![], assert!(), format!() — including the `;`-repeat
+        // and block-bodied forms — become edges in the graph. Without this,
+        // TQ-003 misses reachability through macro-wrapped calls
+        // (e.g. `vec![make_unmatched(path)]`).
+        crate::adapters::shared::macro_tokens::recover_exprs(&node.tokens)
+            .iter()
+            .for_each(|expr| syn::visit::visit_expr(self, expr));
+        // Always also harvest call/construction-position idents so reachability
+        // flows through component renders. DSL components use struct syntax
+        // (`Component { .. }`) the structured visit parses but does not record as
+        // a call. Harvesting only call/construction position (not prop keys)
+        // keeps it tight; for TQ-003 it can only suppress a false "untested",
+        // never raise one.
+        if self.current_fn.is_some() {
+            self.current_calls.extend(
+                crate::adapters::shared::macro_tokens::idents_in_call_position(&node.tokens),
+            );
         }
         syn::visit::visit_macro(self, node);
     }

@@ -1198,6 +1198,117 @@ fn helper_reached_via_trait_blanket_dispatch_is_not_dead_code() {
 }
 
 #[test]
+fn fn_called_only_in_repeat_macro_arg_not_dead_code() {
+    // `caller` invokes `helper()` ONLY inside a `vec![_; n]` *repeat* macro.
+    // Before the macro-token fix, `visit_macro` (call_targets.rs) re-parsed the
+    // body only as a comma-separated expr list; the `;` separator failed that
+    // parse and EVERY call edge in the macro was dropped, so `helper` was
+    // wrongly reported dead. `recover_exprs`' block fallback now recovers it.
+    //
+    // The comma-expr form `vec![helper()]` was already handled; the fix covers
+    // the forms that don't parse as an expr list — repeat (`;`) and block
+    // bodies. See the bound-local control below for the non-macro baseline.
+    let code = r#"
+        fn helper() -> i32 { 42 }
+        fn caller() -> Vec<i32> { vec![helper(); 3] }
+        #[cfg(test)]
+        mod tests {
+            #[test]
+            fn t() { let _ = super::caller(); }
+        }
+    "#;
+    let parsed = parse(code);
+    let warnings = dead_code_warnings(&parsed);
+    assert!(
+        !warnings.iter().any(|w| w.function_name == "helper"),
+        "helper() called inside a vec![_; n] repeat macro must not be flagged dead, got {warnings:?}"
+    );
+}
+
+#[test]
+fn component_referenced_only_in_dsl_macro_not_dead_code() {
+    // Dioxus-style: `LiveLogViewer` is a production component referenced only
+    // inside an `rsx!` DSL body whose nested elements + attributes parse as
+    // none of expr-list / block / expr. `recover_exprs` yields nothing, so the
+    // raw `idents_in_tokens` fallback must still register the reference —
+    // otherwise the component is wrongly flagged dead (the sovard symptom).
+    let code = r#"
+        fn LiveLogViewer() { let _ = 1; }
+        fn app() { rsx! { div { class: "log", LiveLogViewer {} } }; }
+        fn main() { app(); }
+    "#;
+    let parsed = parse(code);
+    let warnings = dead_code_warnings(&parsed);
+    assert!(
+        !warnings.iter().any(|w| w.function_name == "LiveLogViewer"),
+        "component referenced only inside an rsx! DSL macro must not be dead, got {warnings:?}"
+    );
+}
+
+#[test]
+fn fn_named_like_a_lowercase_dsl_tag_is_still_dead_code() {
+    // `view` is an unused production fn whose name also appears as a lowercase
+    // DSL element tag (`view { .. }`) in a rendered body. A lowercase tag is not
+    // a component/struct, so the positional harvest must NOT record it — `view`
+    // stays flagged dead. Guards the UpperCamelCase brace-group gate.
+    let code = r#"
+        fn view() { let _ = 1; }
+        fn app() { rsx! { view { class: "x", Widget {} } }; }
+        fn main() { app(); }
+    "#;
+    let parsed = parse(code);
+    let warnings = dead_code_warnings(&parsed);
+    assert!(
+        warnings.iter().any(|w| w.function_name == "view"),
+        "a fn matching only a lowercase DSL tag must still be flagged dead, got {warnings:?}"
+    );
+}
+
+#[test]
+fn fn_named_like_a_dsl_prop_key_is_still_dead_code() {
+    // Negative control for the positional raw harvest: `render_label` appears in
+    // the rsx! body ONLY as a prop key (`Widget { render_label: "x" }`), not in
+    // call/construction position. It must NOT be harvested as a call, so the
+    // genuinely-uncalled `render_label` stays flagged dead — guarding against
+    // the over-collection false-negative the raw-ident fallback would have had.
+    let code = r#"
+        fn render_label() { let _ = 1; }
+        fn app() { rsx! { Widget { render_label: "x" } }; }
+        fn main() { app(); }
+    "#;
+    let parsed = parse(code);
+    let warnings = dead_code_warnings(&parsed);
+    assert!(
+        warnings.iter().any(|w| w.function_name == "render_label"),
+        "a fn matching only a DSL prop key must still be flagged dead, got {warnings:?}"
+    );
+}
+
+#[test]
+fn fn_called_via_bound_local_not_dead_code_control() {
+    // Control for `fn_called_only_in_repeat_macro_arg_not_dead_code`: the same
+    // call routed through a bound local (`let h = helper(); vec![h]`) is a
+    // plain AST call expression — not buried in macro tokens — so the edge is
+    // recorded and `helper` is correctly NOT dead. Isolates the bug to macro
+    // token streams, not to `vec!` itself.
+    let code = r#"
+        fn helper() -> i32 { 42 }
+        fn caller() -> Vec<i32> { let h = helper(); vec![h] }
+        #[cfg(test)]
+        mod tests {
+            #[test]
+            fn t() { let _ = super::caller(); }
+        }
+    "#;
+    let parsed = parse(code);
+    let warnings = dead_code_warnings(&parsed);
+    assert!(
+        !warnings.iter().any(|w| w.function_name == "helper"),
+        "helper() via a bound local must not be flagged dead, got {warnings:?}"
+    );
+}
+
+#[test]
 fn test_only_called_fn_is_not_uncalled() {
     // A production fn called only from tests is TestOnly, NOT Uncalled — guards
     // the `!test_calls.contains(qualified)` term of `find_uncalled` (a `||`

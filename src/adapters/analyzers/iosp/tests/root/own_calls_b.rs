@@ -148,3 +148,38 @@ fn test_mixed_leaf_and_integration_calls_safe() {
         f.classification
     );
 }
+
+#[test]
+fn own_call_only_inside_macro_is_not_counted_deliberate_safe_direction() {
+    // DELIBERATE non-fix (macro-token-blindness sweep): IOSP own-call counting
+    // does NOT descend into macro bodies — `iosp::visitor::walk_macro` only
+    // counts panic!/todo! for error-handling, never own-calls. So `helper()`,
+    // reachable only inside `vec![helper(); 1]`, is absent from `own_calls`.
+    //
+    // This is the safe direction (under-reports, never false-positive) and is
+    // kept on purpose: descending would newly flag real macro-driven render
+    // code — e.g. a dioxus component that renders its own components inside
+    // `rsx!` while holding a conditional — as an IOSP Violation. That is a
+    // breaking behaviour change, out of scope for fixing the macro *call-graph*
+    // blindness (dead-code / TQ / SRP / architecture), which only ever removes
+    // false positives. Flipping this must be a separately-scoped decision; this
+    // test guards the boundary.
+    let code = r#"
+        fn helper() -> i32 { 42 }
+        fn renders(flag: bool) -> Vec<i32> {
+            if flag {
+                vec![helper(); 1]
+            } else {
+                vec![]
+            }
+        }
+    "#;
+    let results = parse_and_analyze(code);
+    let f = results.iter().find(|f| f.name == "renders").unwrap();
+    assert!(
+        !f.own_calls.iter().any(|c| c == "helper"),
+        "IOSP deliberately does not count an own-call hidden in a macro body; \
+         got own_calls = {:?}",
+        f.own_calls
+    );
+}

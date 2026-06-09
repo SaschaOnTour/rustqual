@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-06-09
+
+Release fixing a class of **macro-token blindness** that ran across the
+codebase, plus a new (backward-compatible) `allow_prelude_glob` architecture
+option. syn's visitor
+treats a macro body as an opaque token stream, so calls, `self` uses, and
+component renders inside `vec![…]`, `format!(…)`, and DSL macros like dioxus
+`rsx!{…}` were invisible to every analyzer that only walks the AST — producing
+false DEAD_CODE, TQ_NO_SUT, TQ_UNTESTED, and SRP-cohesion findings, and *missed*
+forbidden calls in the architecture matchers. Seven sites had each reinvented a
+weak `Punctuated<Expr, Comma>` parse blind to the `;`-repeat and block-bodied
+forms; they now share one recovery helper.
+
+### Added
+- **`adapters/shared/macro_tokens.rs`** — the single source of macro-body
+  recovery. `recover_exprs` escalates comma-list → braced-block (handles
+  `vec![x; n]` repeat and `;`-separated bodies, lifting trailing `Stmt::Macro`
+  back to an `Expr::Macro` and keeping a `let … else { … }` diverging branch) →
+  single-expr. `idents_in_call_position` /
+  `tokens_reference_ident` are the raw, never-fail fallback for DSL bodies
+  (`rsx!{ Component { .. } }`) that parse as no structured expression.
+- **`[[architecture.pattern]] allow_prelude_glob` (bool, default `true`).** When
+  a pattern sets `forbid_glob_import = true`, idiomatic `*::prelude::*` re-export
+  globs (`std`/`dioxus`/`bevy`; a `prelude` segment at any depth) are exempt by
+  default. Set `allow_prelude_glob = false` to forbid even prelude globs. The
+  `forbid_glob_import` matcher stays a "find all globs" primitive — the prelude
+  exemption is a policy decision applied at the analyzer layer, so projects keep
+  full control (unlike a hard-coded matcher exemption).
+
+### Fixed
+- **Macro-embedded calls are now seen across all call-graph / cohesion sites.**
+  Dead-code (DRY-002), TQ-SUT (TQ-002), TQ reachability (TQ-003), SRP cohesion
+  (LCOM4), and the architecture `forbid_function_call`/`forbid_method_call`/
+  `forbid_macro_call` matchers all route macro bodies through `recover_exprs`,
+  so a call inside `vec![helper(); 3]` or a method inside `format!(…)` is no
+  longer dropped. The reachability consumers additionally harvest idents in
+  *call/construction position* — a call `f(..)` (any case) or an UpperCamelCase
+  component/struct render `Component { .. }` (lowercase DSL element tags like
+  `div { .. }` and prop keys are excluded, so an unused `fn div()` is never
+  masked) — so a dioxus component referenced only via `rsx!{ Component { .. } }`
+  (struct syntax the structured parse sees but does not record as a call) is
+  recognised as used — clearing false DEAD_CODE / NO_SUT on component-heavy UI
+  crates. This is the safe direction for findings: an extra recovered reference
+  only ever *suppresses* a finding, never raises a false one (a rare colliding
+  name can mask a true positive — the accepted conservative bias). The
+  architecture `forbid_*` matchers deliberately use only the structured path,
+  never the positional fallback, since over-collection there would manufacture
+  false violations.
+- **SLM (self-less method) no longer false-fires on macro `self` use.** A `self`
+  referenced only inside `format!("{}", self.x)`, `write!(…)`, or any macro is
+  now found via a raw token scan (`tokens_reference_ident`), replacing the old
+  `matches!`-only special case.
+
+### Notes
+- **IOSP own-call counting stays deliberately macro-blind.** Counting own-calls
+  inside macro bodies would newly flag real macro-driven render code (a
+  component holding a conditional while rendering own components in `rsx!`) as
+  an IOSP Violation — a breaking change out of scope here. This is the safe
+  direction (under-reports, never false-positive) and is pinned by a
+  characterization test.
+
 ## [1.5.0] - 2026-06-05
 
 Minor release with one **breaking** config change. rustqual stops shipping a

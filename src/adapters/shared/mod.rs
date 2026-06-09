@@ -10,6 +10,7 @@ pub mod declared_function;
 pub mod file_to_module;
 pub mod file_visitor;
 pub mod macro_expansion;
+pub mod macro_tokens;
 pub mod normalize;
 pub mod project_scope;
 pub mod test_references;
