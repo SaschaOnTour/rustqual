@@ -191,3 +191,45 @@ fn test_print_report_suppressed_verbose_marks_function() {
         "verbose mode must list the function even when suppressed; got {out}"
     );
 }
+
+#[test]
+fn footer_with_findings_points_at_rule_cards_and_allow_guide() {
+    // The epilogue is the only part guaranteed to survive an agent's
+    // `| tail -30` — it must carry the next step for BOTH paths: rule
+    // lookup (--explain <RULE-ID>) and suppression syntax (--explain allow).
+    use crate::domain::{AnalysisData, AnalysisFindings};
+    use crate::ports::Reporter;
+    use crate::report::findings_list::FindingEntry;
+    let entries = [FindingEntry::new(
+        "src/x.rs",
+        1,
+        "BOILERPLATE",
+        "BP-009".into(),
+        "build_thing".into(),
+    )];
+    let summary = Summary::from_results(&[]);
+    let reporter = TextReporter {
+        summary: &summary,
+        function_analyses: &[],
+        findings_entries: &entries,
+        verbose: false,
+        suggestions_text: None,
+    };
+    let out = reporter.render(&AnalysisFindings::default(), &AnalysisData::default());
+    assert!(
+        out.contains("rustqual --explain <RULE-ID>"),
+        "footer must point at rule cards: {out}"
+    );
+    assert!(
+        out.contains("rustqual --explain allow"),
+        "footer must keep pointing at the allow guide: {out}"
+    );
+    let findings_heading = out.find("Finding").expect("findings list rendered");
+    let hint = out
+        .rfind("--explain <RULE-ID>")
+        .expect("rule-card hint rendered");
+    assert!(
+        hint > findings_heading,
+        "the explain hint must render after the findings list so tail keeps it"
+    );
+}
