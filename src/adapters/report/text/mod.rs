@@ -146,13 +146,16 @@ impl<'a> ReporterImpl for TextReporter<'a> {
 }
 
 /// Footer shown whenever findings remain: fixing is the expectation,
-/// suppression the last resort. Points at `--explain allow` (the agent reaches
-/// for the tool before the README), and deliberately prints no paste-ready
-/// suppression so silencing isn't the path of least resistance.
+/// suppression the last resort. Points at `--explain <RULE-ID>` (the rule
+/// card with fix forms) and `--explain allow` — it renders last, so it is
+/// what survives an agent's `| tail` truncation. Deliberately prints no
+/// paste-ready suppression so silencing isn't the path of least resistance.
 /// Operation: constant string.
 fn suppression_footer() -> String {
     "\n── Fix the findings above. Suppression is a last resort — it needs a written\n   \
-     reason and re-fires when the code worsens.  Syntax:  rustqual --explain allow\n"
+     reason and re-fires when the code worsens.\n   \
+     Rule details:       rustqual --explain <RULE-ID>   (e.g. rustqual --explain BP-009)\n   \
+     Suppression syntax: rustqual --explain allow\n"
         .to_string()
 }
 

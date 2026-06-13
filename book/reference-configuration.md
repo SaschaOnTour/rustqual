@@ -59,9 +59,28 @@ enabled = true
 ```toml
 [boilerplate]
 enabled = true
+# patterns = ["BP-002", "BP-007"]            # enable-list; empty = all BP-* active
+# suggest_crates = true                       # name crates (derive_more, thiserror) in suggestions
+# accepted_display_idioms = ["write_str"]     # declare the trivial-Display house idiom
 ```
 
 The full `BP-*` family. Disable if your project deliberately avoids derive macros.
+
+`accepted_display_idioms` declares which trivial-`Display` forms are your
+project's *stated policy* rather than boilerplate — useful under a
+dependency policy that rules out `derive_more`. BP-002 matches semantically
+(any branch-free, write-only `fmt` body); a body whose every used idiom is
+accepted is silent, while any other trivial form keeps firing, so the rule
+enforces the declared idiom instead of going quiet. Fixed vocabulary
+(validated fail-loud at startup — a typo is a config error, not a silent
+no-op):
+
+| Idiom | Covers |
+|---|---|
+| `write_str` | `f.write_str(…)` on the formatter |
+| `write_char` | `f.write_char(…)` on the formatter |
+| `write_macro` | `write!(f, …)` / `writeln!(f, …)` |
+| `delegation` | `Display::fmt(&self.x, f)` / `self.x.fmt(f)` |
 
 ## `[srp]`
 

@@ -6,6 +6,7 @@ pub(super) use crate::adapters::analyzers::dry::boilerplate::*;
 pub(super) use crate::config::sections::BoilerplateConfig;
 
 mod bp001_to_005;
+mod bp002_semantics;
 mod bp006_to_008;
 mod bp009_onward;
 mod bp_predicates;

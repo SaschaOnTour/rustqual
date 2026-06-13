@@ -132,7 +132,9 @@ pub(crate) struct Cli {
     #[arg(long, value_name = "LCOV_FILE")]
     pub coverage: Option<PathBuf>,
 
-    /// Diagnostic mode: explain architecture-rule classification for one file.
-    #[arg(long, value_name = "FILE")]
+    /// Explain one thing: a rule id ("BP-009" prints its rule card), "allow"
+    /// (the qual:allow suppression guide), or a .rs file (architecture-rule
+    /// classification for that file).
+    #[arg(long, value_name = "RULE-ID|allow|FILE")]
     pub explain: Option<PathBuf>,
 }

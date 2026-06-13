@@ -45,9 +45,15 @@ allow_expect = false
 enabled = true
 
 # ── Boilerplate Detection ───────────────────────────────────────────────
+#
+# BP-002 matches semantically (any branch-free, write-only fmt body).
+# accepted_display_idioms declares the house idiom as policy; vocabulary:
+# write_str, write_char, write_macro, delegation (validated fail-loud).
 
 [boilerplate]
 enabled = true
+# patterns = []                          # enable-list; empty = all BP-* active
+# accepted_display_idioms = []           # e.g. ["write_str"]
 
 # ── SRP (Single Responsibility) ─────────────────────────────────────────
 

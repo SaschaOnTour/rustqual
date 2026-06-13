@@ -283,3 +283,21 @@ fn srp_kind(kind: SrpFindingKind, suppressed: bool) -> SrpFinding {
         },
     }
 }
+
+#[test]
+fn sarif_rules_render_from_the_rule_card_registry() {
+    // Single source of truth: the SARIF rules table and the rule-card
+    // registry must agree exactly — a rule added to one but not the other
+    // would drift the catalog.
+    let rules = sarif_rules();
+    let sarif_ids: HashSet<&str> = rules.iter().filter_map(|r| r["id"].as_str()).collect();
+    let card_ids: HashSet<&str> = crate::domain::rule_cards::all_rule_cards()
+        .map(|c| c.id)
+        .collect();
+    let missing_cards: Vec<&&str> = sarif_ids.difference(&card_ids).collect();
+    let missing_sarif: Vec<&&str> = card_ids.difference(&sarif_ids).collect();
+    assert!(
+        missing_cards.is_empty() && missing_sarif.is_empty(),
+        "registry drift — sarif-only: {missing_cards:?}, cards-only: {missing_sarif:?}"
+    );
+}

@@ -140,7 +140,9 @@ fn dry_cases() -> Vec<DryCase> {
                 suggestion: "x".into(),
             },
             "BOILERPLATE",
-            "BP-007",
+            // id + registry title: the compact summary line is often the only
+            // view an agent sees, so the bare pattern id is not enough.
+            "BP-007 Error enum boilerplate (consider thiserror)",
         ),
         (
             DryFindingKind::RepeatedMatch,

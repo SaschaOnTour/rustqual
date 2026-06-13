@@ -63,12 +63,23 @@ pub(super) fn dry_category_detail(f: &DryFinding) -> (&'static str, String) {
             ("WILDCARD", module_path.clone())
         }
         (DryFindingKind::Boilerplate, DryFindingDetails::Boilerplate { pattern_id, .. }) => {
-            ("BOILERPLATE", pattern_id.clone())
+            ("BOILERPLATE", boilerplate_detail(pattern_id))
         }
         (DryFindingKind::RepeatedMatch, DryFindingDetails::RepeatedMatch { enum_name, .. }) => {
             ("REPEATED_MATCH", enum_name.clone())
         }
         _ => ("UNKNOWN", f.common.message.clone()),
+    }
+}
+
+/// `BP-009 Struct update boilerplate` — id plus registry title. The compact
+/// summary line is often the only view a consumer sees (agents tail the
+/// output), so the bare pattern id is not enough to act on.
+/// Operation: registry lookup with id fallback.
+fn boilerplate_detail(pattern_id: &str) -> String {
+    match crate::domain::rule_cards::find_rule_card(pattern_id) {
+        Some(card) => format!("{} {}", card.id, card.title),
+        None => pattern_id.to_string(),
     }
 }
 
