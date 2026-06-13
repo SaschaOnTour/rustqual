@@ -1,18 +1,61 @@
 //! CLI-level entry points for the `--explain` flag.
 //!
-//! Two entry points share this module:
-//! - `--explain <file>` → `handle_explain`, which loads the file, compiles the
-//!   architecture config, runs the rule checks on that single file, and prints
-//!   the rendered report to stdout.
+//! Three modes share this module, routed by `dispatch_explain`:
 //! - `--explain allow` → `explain_allow` / `suppression_guide`, which print the
 //!   `// qual:allow(...)` suppression guide (grammar + per-dimension targets
 //!   sourced from the shared vocabulary + the pin/orphan rationale).
+//! - `--explain <RULE-ID>` → `rule_card_text`, which renders the rule card
+//!   (detects/why/fix/suppress/config) from the domain registry,
+//!   case-insensitively (`bp-009` works like `BP-009`).
+//! - `--explain <file>` → `handle_explain`, which loads the file, compiles the
+//!   architecture config, runs the rule checks on that single file, and prints
+//!   the rendered report to stdout.
 
 use crate::adapters::analyzers::architecture::compiled::compile_architecture;
 use crate::adapters::analyzers::architecture::explain::explain_file;
 use crate::config::Config;
+use crate::domain::rule_cards::{find_rule_card, RuleCard};
 use crate::domain::{target_kind, target_names, Dimension, TargetKind};
 use std::path::Path;
+
+/// Route `--explain <arg>` to its mode: the literal `allow` → suppression
+/// guide; a known catalog rule id → rule card; anything else → file-path
+/// architecture diagnostics. Operation: mode dispatch.
+// qual:api
+pub fn dispatch_explain(target: &Path, config: &Config) -> Result<(), i32> {
+    if target.as_os_str() == "allow" {
+        explain_allow();
+        return Ok(());
+    }
+    if let Some(text) = rule_card_text(&target.to_string_lossy()) {
+        print!("{text}");
+        return Ok(());
+    }
+    handle_explain(target, config)
+}
+
+/// Render the rule card for `id` (case-insensitive), or `None` when `id` is
+/// not a catalog rule. Integration: registry lookup + render.
+pub(crate) fn rule_card_text(id: &str) -> Option<String> {
+    find_rule_card(id).map(render_rule_card)
+}
+
+/// Format one rule card for the terminal: title line + the five sections a
+/// consumer needs to act (what fired, why, fix, suppression, config knob).
+/// Operation: string assembly.
+fn render_rule_card(card: &RuleCard) -> String {
+    format!(
+        "\n{id} — {title}\n\n  Detects:  {detects}\n  Why:      {why}\n  \
+         Fix:      {fix}\n  Suppress: {suppress}\n  Config:   {config}\n",
+        id = card.id,
+        title = card.title,
+        detects = card.detects,
+        why = card.why,
+        fix = card.fix,
+        suppress = card.suppress,
+        config = card.config,
+    )
+}
 
 /// Print the `// qual:allow(...)` suppression guide (`rustqual --explain allow`).
 /// Operation: delegates to the testable builder + prints.

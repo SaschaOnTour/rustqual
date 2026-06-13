@@ -96,13 +96,7 @@ fn run_configured(cli: &Cli) -> Result<(), i32> {
 /// Operation: mode checks.
 fn try_postconfig_modes(cli: &Cli, config: &config::Config) -> Option<Result<(), i32>> {
     if let Some(ref target) = cli.explain {
-        // `--explain allow` prints the suppression guide instead of explaining
-        // a file's architecture rules.
-        if target.as_os_str() == "allow" {
-            crate::cli::explain::explain_allow();
-            return Some(Ok(()));
-        }
-        return Some(crate::cli::explain::handle_explain(target, config));
+        return Some(crate::cli::explain::dispatch_explain(target, config));
     }
     if cli.watch {
         let output_format = determine_output_format(cli);

@@ -12,6 +12,7 @@ pub mod analysis_data;
 pub mod dimension;
 pub mod finding;
 pub mod findings;
+pub mod rule_cards;
 pub mod score;
 pub mod severity;
 pub mod source_unit;
