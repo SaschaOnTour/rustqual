@@ -219,6 +219,27 @@ pub fn validate_weights(config: &Config) -> Result<(), String> {
     Ok(())
 }
 
+/// Validate `[boilerplate].accepted_display_idioms` against the fixed idiom
+/// vocabulary. Fail-loud by design: a typo like `"write_st"` would otherwise
+/// accept nothing and report nothing — declared policy must either parse or
+/// error, never silently mean something else.
+/// Operation: vocabulary scan, no own calls.
+pub fn validate_boilerplate(config: &Config) -> Result<(), String> {
+    let unknown = config
+        .boilerplate
+        .accepted_display_idioms
+        .iter()
+        .find(|idiom| !sections::DISPLAY_IDIOM_VOCABULARY.contains(&idiom.as_str()));
+    match unknown {
+        Some(bad) => Err(format!(
+            "[boilerplate].accepted_display_idioms contains unknown idiom '{bad}'. \
+             Valid idioms: {}. Check rustqual.toml.",
+            sections::DISPLAY_IDIOM_VOCABULARY.join(", ")
+        )),
+        None => Ok(()),
+    }
+}
+
 /// Validate `[suppression]` settings. `pin_headroom` feeds the too-loose check
 /// `pin > value * (1 + headroom)`, so a non-finite value (`inf`/`NaN`, both
 /// accepted by TOML float parsing) would silently disable too-loose detection

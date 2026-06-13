@@ -173,3 +173,54 @@ fn test_validate_suppression_rejects_non_finite_and_negative() {
     cfg.suppression.pin_headroom = 0.0;
     assert!(validate_suppression(&cfg).is_ok());
 }
+
+#[test]
+fn test_validate_boilerplate_default_ok() {
+    assert!(validate_boilerplate(&Config::default()).is_ok());
+}
+
+#[test]
+fn test_validate_boilerplate_rejects_unknown_idiom_fail_loud() {
+    // A typo like "write_st" would otherwise accept nothing and report
+    // nothing — the silent-config failure mode. The error must name the
+    // offender AND list the valid vocabulary so the fix is copyable.
+    let mut cfg = Config::default();
+    cfg.boilerplate.accepted_display_idioms = vec!["write_st".into()];
+    let result = validate_boilerplate(&cfg);
+    assert!(result.is_err(), "unknown idiom must be a config error");
+    let msg = result.unwrap_err();
+    assert!(msg.contains("write_st"), "must name the offender: {msg}");
+    assert!(msg.contains("write_str"), "must list the vocabulary: {msg}");
+    assert!(
+        msg.contains("delegation"),
+        "must list the vocabulary: {msg}"
+    );
+}
+
+#[test]
+fn test_validate_boilerplate_accepts_full_vocabulary() {
+    let mut cfg = Config::default();
+    cfg.boilerplate.accepted_display_idioms =
+        ["write_str", "write_char", "write_macro", "delegation"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+    assert!(validate_boilerplate(&cfg).is_ok());
+}
+
+#[test]
+fn test_boilerplate_accepted_display_idioms_parse_and_default_empty() {
+    let cfg: Config =
+        toml::from_str("[boilerplate]\naccepted_display_idioms = [\"write_str\"]\n").unwrap();
+    assert_eq!(
+        cfg.boilerplate.accepted_display_idioms,
+        vec!["write_str".to_string()]
+    );
+    assert!(
+        Config::default()
+            .boilerplate
+            .accepted_display_idioms
+            .is_empty(),
+        "default must be empty (all trivial forms flagged)"
+    );
+}

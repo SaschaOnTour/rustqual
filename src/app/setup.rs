@@ -48,11 +48,12 @@ fn load_auto_config(path: &Path) -> Result<Config, i32> {
     Config::load(path).map_err(report_config_error)
 }
 
-/// Validate config invariants (weight sum, suppression headroom).
-/// Integration: delegates to the per-section validators.
+/// Validate config invariants (weight sum, suppression headroom, boilerplate
+/// idiom vocabulary). Integration: delegates to the per-section validators.
 fn validate_config(config: &Config) -> Result<(), i32> {
     config::validate_weights(config)
         .and_then(|()| config::validate_suppression(config))
+        .and_then(|()| config::validate_boilerplate(config))
         .map_err(report_config_error)
 }
 

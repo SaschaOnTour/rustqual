@@ -147,6 +147,13 @@ impl Default for DuplicatesConfig {
     }
 }
 
+/// The fixed vocabulary for `[boilerplate].accepted_display_idioms` — the
+/// trivial-Display forms a project may declare as its house idiom (BP-002
+/// then treats them as policy, not boilerplate). Validation is fail-loud:
+/// an entry outside this list is a config error, never a silent no-op.
+pub const DISPLAY_IDIOM_VOCABULARY: &[&str] =
+    &["write_str", "write_char", "write_macro", "delegation"];
+
 /// Configuration for boilerplate detection.
 #[derive(Debug, Deserialize, Clone)]
 #[serde(default, deny_unknown_fields)]
@@ -154,6 +161,10 @@ pub struct BoilerplateConfig {
     pub enabled: bool,
     pub patterns: Vec<String>,
     pub suggest_crates: bool,
+    /// Trivial-Display forms declared as the project's house idiom; BP-002
+    /// does not flag an fmt body whose every write op is an accepted idiom.
+    /// Entries must come from [`DISPLAY_IDIOM_VOCABULARY`].
+    pub accepted_display_idioms: Vec<String>,
 }
 
 impl Default for BoilerplateConfig {
@@ -162,6 +173,7 @@ impl Default for BoilerplateConfig {
             enabled: DEFAULT_BOILERPLATE_ENABLED,
             patterns: vec![],
             suggest_crates: true,
+            accepted_display_idioms: vec![],
         }
     }
 }
