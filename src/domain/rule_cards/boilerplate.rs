@@ -27,17 +27,25 @@ pub(super) const CARDS: &[RuleCard] = &[
     RuleCard {
         id: "BP-002",
         title: "Trivial Display implementation (derivable)",
-        detects: "An impl Display whose single fmt method is one \
-            write!/writeln! call with no further logic.",
+        detects: "An impl Display whose fmt body is branch-free and consists \
+            only of formatter write ops — write!/writeln!, f.write_str, \
+            f.write_char, or Display::fmt delegation — in any number of \
+            statements. Matching is semantic, so rewriting one write! into \
+            two write_char statements is still the same finding.",
         why: "The same effect is available declaratively; N hand-rolled \
             trivial Displays drift in style and bury the one impl that \
             actually formats.",
-        fix: "derive_more::Display with #[display(\"…\")], or a project-wide \
-            dependency-free idiom (e.g. f.write_str(&self.0) for \
-            string-backed newtypes, or one local macro_rules! emitting the \
-            impl for all newtypes).",
+        fix: "Three forms — pick what your dependency policy allows: (1) \
+            derive_more::Display with #[display(\"…\")]; (2) declare the \
+            project's house idiom in [boilerplate] accepted_display_idioms \
+            (e.g. \"write_str\") so the trivial impl becomes stated policy; \
+            (3) one local macro_rules! emitting the impl for all newtypes \
+            (dependency-free, single definition point).",
         suppress: BP_SUPPRESS,
-        config: BP_CONFIG,
+        config: "[boilerplate] accepted_display_idioms (write_str, \
+            write_char, write_macro, delegation) declares house idioms; \
+            patterns can disable BP-002 entirely; suggest_crates toggles \
+            crate recommendations.",
     },
     RuleCard {
         id: "BP-003",
