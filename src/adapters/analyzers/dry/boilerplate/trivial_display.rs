@@ -150,7 +150,7 @@ fn collect_idioms(block: &syn::Block, fmt_ident: &str) -> Option<BTreeSet<&'stat
 fn classify_stmt(stmt: &syn::Stmt, fmt_ident: &str) -> Option<WriteOp> {
     match stmt {
         syn::Stmt::Expr(e, _) => classify_expr(unwrap_try(e), fmt_ident),
-        syn::Stmt::Macro(m) => classify_macro(&m.mac),
+        syn::Stmt::Macro(m) => classify_macro(&m.mac, fmt_ident),
         _ => None,
     }
 }
@@ -169,18 +169,25 @@ fn unwrap_try(expr: &syn::Expr) -> &syn::Expr {
 /// Integration: dispatch on expression shape.
 fn classify_expr(expr: &syn::Expr, fmt_ident: &str) -> Option<WriteOp> {
     match expr {
-        syn::Expr::Macro(m) => classify_macro(&m.mac),
+        syn::Expr::Macro(m) => classify_macro(&m.mac, fmt_ident),
         syn::Expr::MethodCall(mc) => classify_method_call(mc, fmt_ident),
         syn::Expr::Call(c) => classify_call(c, fmt_ident),
         _ => None,
     }
 }
 
-/// `write!` / `writeln!` → the `write_macro` idiom.
-/// Operation: path check, no own calls.
-fn classify_macro(mac: &syn::Macro) -> Option<WriteOp> {
+/// `write!(f, …)` / `writeln!(f, …)` → the `write_macro` idiom — only when
+/// the first macro argument IS the formatter. `write!(self.buf, …)` writes
+/// somewhere else: real logic, neither the idiom nor derivable.
+/// Operation: path check; arg recovery + ident test in a closure.
+fn classify_macro(mac: &syn::Macro, fmt_ident: &str) -> Option<WriteOp> {
+    let first_arg_is_fmt = || {
+        crate::adapters::shared::macro_tokens::recover_exprs(&mac.tokens)
+            .first()
+            .is_some_and(|e| is_path_ident(e, fmt_ident))
+    };
     let last = mac.path.segments.last()?;
-    if last.ident == "write" || last.ident == "writeln" {
+    if (last.ident == "write" || last.ident == "writeln") && first_arg_is_fmt() {
         Some(WriteOp::Idiom("write_macro"))
     } else {
         None

@@ -60,7 +60,28 @@ pub fn all_rule_cards() -> impl Iterator<Item = &'static RuleCard> {
 }
 
 /// Look up one card by catalog id, case-insensitively (`bp-009` resolves
-/// like `BP-009`). Integration: scans `all_rule_cards`.
+/// like `BP-009`). Dynamic hierarchical ids resolve to their **longest
+/// registered prefix**: findings emit `architecture/pattern/<name>` /
+/// `architecture/trait_contract/<check>` with user-defined sub-kinds, and
+/// every id a finding prints must be explainable — while an id with its own
+/// card (`architecture/layer/unmatched`) never falls back to its family.
+/// Integration: prefix candidates × exact lookup.
 pub fn find_rule_card(id: &str) -> Option<&'static RuleCard> {
+    id_prefixes(id).into_iter().find_map(|p| exact_card(p))
+}
+
+/// The exact-id lookup over the registry.
+/// Operation: scan with a comparison closure.
+fn exact_card(id: &str) -> Option<&'static RuleCard> {
     all_rule_cards().find(|c| c.id.eq_ignore_ascii_case(id))
+}
+
+/// `a/b/c` → `["a/b/c", "a/b", "a"]` — the id and each `/`-prefix, longest
+/// first, so exact matches always win over family fallbacks.
+/// Operation: index arithmetic, no own calls.
+fn id_prefixes(id: &str) -> Vec<&str> {
+    let mut ends: Vec<usize> = vec![id.len()];
+    ends.extend(id.match_indices('/').map(|(i, _)| i));
+    ends.sort_unstable_by(|a, b| b.cmp(a));
+    ends.into_iter().map(|e| &id[..e]).collect()
 }

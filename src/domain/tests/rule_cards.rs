@@ -113,3 +113,33 @@ fn cards_name_their_config_knob() {
         cx.config
     );
 }
+
+#[test]
+fn dynamic_architecture_sub_ids_resolve_to_their_family_card() {
+    // Findings emit dynamic hierarchical ids (architecture/pattern/<name>,
+    // architecture/trait_contract/<check>) and the footer says
+    // `--explain <RULE-ID>` — so exactly these ids must resolve, to the
+    // longest registered prefix card.
+    let pattern = find_rule_card("architecture/pattern/no_glob_imports")
+        .expect("dynamic pattern sub-id must resolve");
+    assert_eq!(pattern.id, "architecture/pattern");
+    let contract = find_rule_card("architecture/trait_contract/object_safety")
+        .expect("dynamic trait_contract sub-id must resolve");
+    assert_eq!(contract.id, "architecture/trait_contract");
+}
+
+#[test]
+fn registered_sub_ids_still_resolve_exactly() {
+    // Longest-prefix means an id with its own card never falls back to the
+    // family: layer/unmatched and the call_parity checks stay specific.
+    let unmatched = find_rule_card("architecture/layer/unmatched").unwrap();
+    assert_eq!(unmatched.id, "architecture/layer/unmatched");
+    let parity = find_rule_card("architecture/call_parity/no_delegation").unwrap();
+    assert_eq!(parity.id, "architecture/call_parity/no_delegation");
+}
+
+#[test]
+fn prefix_fallback_does_not_invent_cards() {
+    assert!(find_rule_card("not/a/rule").is_none());
+    assert!(find_rule_card("src/cli/explain.rs").is_none());
+}

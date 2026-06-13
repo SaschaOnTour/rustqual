@@ -211,3 +211,45 @@ fn test_bp002_suggestion_names_all_fix_forms() {
         bp002.suggestion
     );
 }
+
+#[test]
+fn test_bp002_write_macro_on_non_formatter_target_not_trivial() {
+    // write!(self.buf, …) writes somewhere else — real logic, not the
+    // documented write!(f, …) idiom. It must neither fire BP-002 (not
+    // derivable) nor count as `write_macro` (else
+    // accepted_display_idioms = ["write_macro"] would silently bless it).
+    let code = r#"
+        use std::fmt;
+        struct Tee { buf: String }
+        impl fmt::Display for Tee {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(self.buf, "x")
+            }
+        }
+    "#;
+    let findings = detect_boilerplate(&parse(code), &BoilerplateConfig::default());
+    assert!(
+        !findings.iter().any(|f| f.pattern_id == "BP-002"),
+        "write! on a non-formatter target is not the trivial idiom"
+    );
+}
+
+#[test]
+fn test_bp002_write_macro_checks_formatter_even_when_renamed() {
+    // The formatter param is positional, not nominal: `fmt` instead of `f`
+    // must still classify write!(fmt, …) as the write_macro idiom.
+    let code = r#"
+        use std::fmt;
+        struct Id(String);
+        impl fmt::Display for Id {
+            fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+                write!(fmt, "{}", self.0)
+            }
+        }
+    "#;
+    let findings = detect_boilerplate(&parse(code), &BoilerplateConfig::default());
+    assert!(
+        findings.iter().any(|f| f.pattern_id == "BP-002"),
+        "write!(renamed_formatter, …) is still the trivial idiom"
+    );
+}

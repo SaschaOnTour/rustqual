@@ -24,7 +24,10 @@ syntax-based matching invited evasion instead of a decision.
   equality), `--explain` renders from it, and the compact findings view takes
   its titles from it.
 - **`--explain <RULE-ID>`** prints the rule card, case-insensitively
-  (`rustqual --explain bp-009` works). The natural first guess of every
+  (`rustqual --explain bp-009` works). Dynamic hierarchical ids resolve to
+  their longest registered prefix card — `architecture/pattern/<name>` and
+  `architecture/trait_contract/<check>` are exactly what findings print, so
+  they explain as their family card. The natural first guess of every
   consumer now succeeds.
 - **`--explain` never dead-ends.** An argument that is no rule id, not
   `allow`, and not a readable file prints the three explain modes with
@@ -40,8 +43,10 @@ syntax-based matching invited evasion instead of a decision.
 
 ### Changed
 - **BP-002 matches semantically.** Any branch-free `fmt` body consisting only
-  of formatter write ops — `write!`/`writeln!`, `f.write_str`, `f.write_char`,
-  `Display::fmt` delegation — is trivial, multi-statement bodies included.
+  of formatter write ops — `write!(f, …)`/`writeln!(f, …)` (the first macro
+  argument must be the formatter; writing to any other target is real
+  logic), `f.write_str`, `f.write_char`, `Display::fmt` delegation — is
+  trivial, multi-statement bodies included.
   The evasion rewrite (two `write_char` statements) is the same finding; the
   semantically identical `f.write_str(&self.0)` newtype form no longer slips
   through unmatched. With accepted idioms declared, the rule enforces
