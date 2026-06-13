@@ -26,7 +26,7 @@ rustqual covers four families:
 | `DRY-004` | Wildcard import (`use module::*;`) |
 | `DRY-005` | Repeated match pattern across functions (≥3 arms identical, ≥3 instances) |
 | `BP-001` | Trivial `From` impl (derivable) |
-| `BP-002` | Trivial `Display` impl |
+| `BP-002` | Trivial `Display` impl — semantic: any branch-free, write-only `fmt` body; house idioms declarable via `[boilerplate].accepted_display_idioms` |
 | `BP-003` | Trivial getter/setter (consider field visibility) |
 | `BP-004` | Builder pattern — consider `derive_builder` or similar |
 | `BP-005` | Manual `Default` impl (derivable) |

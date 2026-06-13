@@ -1,7 +1,13 @@
 # Reference: rule catalog
 
-Every rule rustqual emits, grouped by dimension. Codes are stable
-identifiers — but where they actually surface differs by reporter:
+Every rule rustqual emits, grouped by dimension. For any code below,
+`rustqual --explain <RULE-ID>` (case-insensitive) prints its full rule card:
+what it detects, why it matters, the fix forms, the copyable suppression
+marker, and the governing config knob — the catalog and the cards render
+from the same registry.
+
+Codes are stable identifiers — but where they actually surface differs by
+reporter:
 
 - **SARIF**: every result carries the catalog code as `ruleId` and is
   registered in `tool.driver.rules` (architecture also registers
@@ -57,7 +63,7 @@ For dimension intent and refactor patterns, see the use-case guides linked at th
 | Code | Meaning |
 |---|---|
 | `BP-001` | Trivial `From` impl (derivable) |
-| `BP-002` | Trivial `Display` impl (derivable) |
+| `BP-002` | Trivial `Display` impl — semantic match: any branch-free, write-only `fmt` body (`write!`/`writeln!`, `f.write_str`, `f.write_char`, `Display::fmt` delegation, multi-statement included); gate forms via `[boilerplate].accepted_display_idioms` |
 | `BP-003` | Trivial getter/setter (consider field visibility) |
 | `BP-004` | Builder pattern (consider derive macro) |
 | `BP-005` | Manual `Default` impl (derivable) |

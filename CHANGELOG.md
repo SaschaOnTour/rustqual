@@ -5,6 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-06-13
+
+Release making rustqual **self-explaining for human and agent consumers**
+(rule cards, `--explain <RULE-ID>`, a never-dead-end CLI) and making **BP-002
+honest**: trivial-`Display` detection is now semantic (what the body means)
+instead of syntactic (which macro it uses), with a config-declared house-idiom
+policy. Driven by two field reports: an agent flailing through
+`--explain BP-009` → `os error 2` with no next step, and a BP-002 finding
+"fixed" by mechanically rewriting one `write!` into two `write_char` calls —
+syntax-based matching invited evasion instead of a decision.
+
+### Added
+- **Rule cards — one registry, every reporter** (`src/domain/rule_cards/`).
+  One card per catalog rule (id, title, what it detects, why it matters, fix
+  forms, the copyable suppression marker, the governing config knob). The
+  SARIF `tool.driver.rules` table renders from it (a sync test pins set
+  equality), `--explain` renders from it, and the compact findings view takes
+  its titles from it.
+- **`--explain <RULE-ID>`** prints the rule card, case-insensitively
+  (`rustqual --explain bp-009` works). The natural first guess of every
+  consumer now succeeds.
+- **`--explain` never dead-ends.** An argument that is no rule id, not
+  `allow`, and not a readable file prints the three explain modes with
+  copyable examples instead of stopping at the bare OS error; an argument
+  matching a `qual:allow` *target* name (`--explain boilerplate`) gets a hint
+  naming its dimension and the allow guide. The clap help text names all
+  three modes.
+- **`[boilerplate].accepted_display_idioms`** (fixed vocabulary: `write_str`,
+  `write_char`, `write_macro`, `delegation`; default empty) declares the
+  project's trivial-`Display` house idiom as policy. Validation is fail-loud
+  at startup: an unknown entry is a config error naming the offender and the
+  valid vocabulary — never a silent no-op.
+
+### Changed
+- **BP-002 matches semantically.** Any branch-free `fmt` body consisting only
+  of formatter write ops — `write!`/`writeln!`, `f.write_str`, `f.write_char`,
+  `Display::fmt` delegation — is trivial, multi-statement bodies included.
+  The evasion rewrite (two `write_char` statements) is the same finding; the
+  semantically identical `f.write_str(&self.0)` newtype form no longer slips
+  through unmatched. With accepted idioms declared, the rule enforces
+  house-idiom consistency (a stray `write!` still fires) instead of going
+  silent. *Projects with hand-rolled write-only Displays get new BP-002
+  findings until they pick a form — declare the idiom, derive, or generate
+  via a local `macro_rules!`.*
+- **BP-002's suggestion names all fix forms** regardless of workspace
+  dependencies (availability ≠ usability under a dependency policy): derive
+  (`derive_more::Display` when `suggest_crates`), the accepted-idiom config,
+  and a local `macro_rules!` as the dependency-free DRY option; it ends with
+  `rustqual --explain BP-002`.
+- **The findings epilogue is tail-proof.** It now names both next steps —
+  `rustqual --explain <RULE-ID>` (rule details) and `rustqual --explain allow`
+  (suppression syntax) — and renders last, so it survives an agent's
+  `| tail` truncation. Boilerplate entries in the compact findings view carry
+  the registry title (`BP-009 Struct update boilerplate`) instead of the bare
+  pattern id.
+
 ## [1.5.1] - 2026-06-09
 
 Release fixing a class of **macro-token blindness** that ran across the
