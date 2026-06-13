@@ -54,3 +54,40 @@ fn rule_card_text_is_none_for_unknown_id() {
     assert!(super::rule_card_text("BP-999").is_none());
     assert!(super::rule_card_text("src/lib.rs").is_none());
 }
+
+#[test]
+fn fallback_text_lists_all_three_modes_with_examples() {
+    // The no-match case must never dead-end: it names the argument and shows
+    // every mode with a copyable example, including where rule ids come from.
+    let g = super::explain_fallback_text("BP-999");
+    assert!(g.contains("BP-999"), "must name the unrecognized argument");
+    assert!(g.contains("--explain allow"), "must show the allow mode");
+    assert!(
+        g.contains("--explain BP-009"),
+        "must show a rule-id example: {g}"
+    );
+    assert!(
+        g.contains(".rs"),
+        "must show the file-diagnostics mode: {g}"
+    );
+    assert!(
+        g.contains("findings output"),
+        "must say where rule ids appear: {g}"
+    );
+}
+
+#[test]
+fn fallback_text_hints_when_arg_is_a_suppression_target() {
+    // `--explain boilerplate` was a real flailing agent's guess: the word is
+    // a suppression target, not a rule id — say so and point at both paths.
+    let g = super::explain_fallback_text("boilerplate");
+    assert!(
+        g.contains("suppression target"),
+        "must identify the arg as a target name: {g}"
+    );
+    assert!(g.contains("dry"), "must name the owning dimension: {g}");
+    assert!(
+        g.contains("--explain allow"),
+        "must point at the guide: {g}"
+    );
+}

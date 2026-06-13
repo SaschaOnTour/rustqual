@@ -40,6 +40,51 @@ pub(crate) fn rule_card_text(id: &str) -> Option<String> {
     find_rule_card(id).map(render_rule_card)
 }
 
+/// The `--explain` usage guide shown when the argument matches no mode — an
+/// unknown argument must never dead-end without a next step.
+/// Integration: optional target hint + the modes block.
+pub(crate) fn explain_fallback_text(arg: &str) -> String {
+    let hint = target_name_hint(arg).unwrap_or_default();
+    format!(
+        "`{arg}` is not a rule id, `allow`, or a readable file.\n{hint}{}",
+        EXPLAIN_MODES
+    )
+}
+
+const EXPLAIN_MODES: &str = "\n--explain modes:\n\
+\x20 rustqual --explain <RULE-ID>   rule card: what it detects, why, how to fix,\n\
+\x20                                suppression, config knob. Rule ids appear in\n\
+\x20                                the findings output, e.g. --explain BP-009\n\
+\x20 rustqual --explain allow       the qual:allow suppression guide\n\
+\x20                                (grammar + per-dimension targets)\n\
+\x20 rustqual --explain <file.rs>   architecture-rule diagnostics for one file\n";
+
+/// All dimensions, for vocabulary scans.
+const ALL_DIMS: [Dimension; 7] = [
+    Dimension::Iosp,
+    Dimension::Complexity,
+    Dimension::Dry,
+    Dimension::Srp,
+    Dimension::Coupling,
+    Dimension::TestQuality,
+    Dimension::Architecture,
+];
+
+/// A hint line when `arg` is a suppression *target* name (`boilerplate`,
+/// `untested`, …) — a real flailing-agent guess: the word belongs to the
+/// qual:allow vocabulary, not the rule catalog. Operation: vocabulary scan.
+fn target_name_hint(arg: &str) -> Option<String> {
+    let dim = ALL_DIMS.iter().find(|d| {
+        target_names(**d)
+            .iter()
+            .any(|t| t.eq_ignore_ascii_case(arg))
+    })?;
+    Some(format!(
+        "Note: `{arg}` is a suppression target of the `{dim}` dimension — \
+         usable as // qual:allow({dim}, {arg}); see rustqual --explain allow.\n"
+    ))
+}
+
 /// Format one rule card for the terminal: title line + the five sections a
 /// consumer needs to act (what fired, why, fix, suppression, config knob).
 /// Operation: string assembly.
@@ -85,16 +130,8 @@ finding first; suppression is the last resort.\n";
 /// Operation: header + per-dimension blocks + footer via a closure.
 pub(crate) fn suppression_guide() -> String {
     let mut out = String::from(GUIDE_HEADER);
-    let dims = [
-        Dimension::Iosp,
-        Dimension::Complexity,
-        Dimension::Dry,
-        Dimension::Srp,
-        Dimension::Coupling,
-        Dimension::TestQuality,
-        Dimension::Architecture,
-    ];
-    dims.iter()
+    ALL_DIMS
+        .iter()
         .for_each(|&dim| out.push_str(&dim_targets_block(dim)));
     out.push_str(GUIDE_FOOTER);
     out
@@ -143,6 +180,7 @@ pub fn handle_explain(target: &Path, config: &Config) -> Result<(), i32> {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Error reading {}: {e}", target.display());
+            eprintln!("{}", explain_fallback_text(&target.to_string_lossy()));
             return Err(1);
         }
     };
