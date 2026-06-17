@@ -66,6 +66,19 @@ syntax-based matching invited evasion instead of a decision.
   the registry title (`BP-009 Struct update boilerplate`) instead of the bare
   pattern id.
 
+### Fixed
+- **SRP-001 (struct cohesion) no longer pools methods across same-named
+  structs in different files / modules.** The struct collector keyed method
+  buckets by the *bare* last path segment of the type name, so two unrelated
+  `struct RunCtx` definitions in different crates shared one bucket: each was
+  scored against the other's methods, producing garbage LCOM4 / method-count
+  attributed to an innocent, cohesive struct. Both collectors now qualify the
+  pooling identity with an `owner_key` (`file::inline_mod_path::name`), so
+  methods pool only within their actual owner — mirroring the module
+  qualification the DRY `repeated_match` collector already does. (Reported as
+  RQ-1 from a downstream workspace.) The SRP analyzer's AST collectors moved
+  into `srp/collect.rs` to keep `srp/mod.rs` under the module-length cap.
+
 ## [1.5.1] - 2026-06-09
 
 Release fixing a class of **macro-token blindness** that ran across the

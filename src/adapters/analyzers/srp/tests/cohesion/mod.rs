@@ -48,6 +48,9 @@ pub(super) fn make_method(
     MethodFieldData {
         method_name: name.to_string(),
         parent_type: parent.to_string(),
+        // Bare parent as the pooling key: these helpers pool by the same bare
+        // name used for `make_struct`, so the unit tests stay file/module-free.
+        owner_key: parent.to_string(),
         field_accesses: fields.iter().map(|s| s.to_string()).collect(),
         call_targets: calls.iter().map(|s| s.to_string()).collect(),
         self_method_calls: HashSet::new(),
@@ -64,6 +67,7 @@ pub(super) fn make_method_with_self_calls(
     MethodFieldData {
         method_name: name.to_string(),
         parent_type: parent.to_string(),
+        owner_key: parent.to_string(),
         field_accesses: fields.iter().map(|s| s.to_string()).collect(),
         call_targets: HashSet::new(),
         self_method_calls: self_calls.iter().map(|s| s.to_string()).collect(),
@@ -75,6 +79,7 @@ pub(super) fn make_constructor(name: &str, parent: &str, calls: &[&str]) -> Meth
     MethodFieldData {
         method_name: name.to_string(),
         parent_type: parent.to_string(),
+        owner_key: parent.to_string(),
         field_accesses: HashSet::new(),
         call_targets: calls.iter().map(|s| s.to_string()).collect(),
         self_method_calls: HashSet::new(),
@@ -84,6 +89,7 @@ pub(super) fn make_constructor(name: &str, parent: &str, calls: &[&str]) -> Meth
 
 pub(super) fn make_struct(name: &str, fields: &[&str]) -> StructInfo {
     StructInfo {
+        owner_key: name.to_string(),
         name: name.to_string(),
         file: "test.rs".to_string(),
         line: 1,
@@ -103,6 +109,7 @@ pub(super) fn collect_methods_for(code: &str) -> Vec<MethodFieldData> {
     let mut bridges = Vec::new();
     let mut collector = crate::adapters::analyzers::srp::ImplMethodCollector {
         file: String::new(),
+        module_stack: Vec::new(),
         methods: &mut result,
         bridges: &mut bridges,
     };
