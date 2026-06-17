@@ -14,20 +14,24 @@ pub fn build_struct_warnings(
     bridges: &[MethodFieldData],
     config: &SrpConfig,
 ) -> Vec<SrpWarning> {
-    // Group methods (cohesion nodes) and bridges (trait-method connectors) by type
+    // Group methods (cohesion nodes) and bridges (trait-method connectors) by
+    // the struct's pooling identity (`owner_key` = file::module::name), NOT the
+    // bare type name — otherwise two same-named structs in different files /
+    // crates share one method bucket and get scored against each other's
+    // methods (RQ-1: garbage LCOM4 attributed to an innocent struct).
     let mut methods_by_type: HashMap<&str, Vec<&MethodFieldData>> = HashMap::new();
     for m in methods {
-        methods_by_type.entry(&m.parent_type).or_default().push(m);
+        methods_by_type.entry(&m.owner_key).or_default().push(m);
     }
     let mut bridges_by_type: HashMap<&str, Vec<&MethodFieldData>> = HashMap::new();
     for b in bridges {
-        bridges_by_type.entry(&b.parent_type).or_default().push(b);
+        bridges_by_type.entry(&b.owner_key).or_default().push(b);
     }
 
     structs
         .iter()
         .filter_map(|s| {
-            let type_methods = methods_by_type.get(s.name.as_str());
+            let type_methods = methods_by_type.get(s.owner_key.as_str());
             let method_list: Vec<&MethodFieldData> =
                 type_methods.map(|v| v.to_vec()).unwrap_or_default();
 
@@ -38,7 +42,7 @@ pub fn build_struct_warnings(
 
             let field_idx = build_field_method_index(&method_list, &s.fields);
             let type_bridges = bridges_by_type
-                .get(s.name.as_str())
+                .get(s.owner_key.as_str())
                 .map(Vec::as_slice)
                 .unwrap_or(&[]);
             let bridge_groups =

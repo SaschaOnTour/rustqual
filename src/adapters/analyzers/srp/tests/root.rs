@@ -63,6 +63,7 @@ fn collect_structs(parsed: &[(String, String, syn::File)]) -> Vec<StructInfo> {
     let mut result = Vec::new();
     let mut collector = StructCollector {
         file: String::new(),
+        module_stack: Vec::new(),
         structs: &mut result,
     };
     crate::adapters::shared::file_visitor::visit_all_files(parsed, &mut collector);
@@ -75,6 +76,7 @@ fn collect_methods(parsed: &[(String, String, syn::File)]) -> Vec<MethodFieldDat
     let mut bridges = Vec::new();
     let mut collector = ImplMethodCollector {
         file: String::new(),
+        module_stack: Vec::new(),
         methods: &mut result,
         bridges: &mut bridges,
     };
