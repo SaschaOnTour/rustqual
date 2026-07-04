@@ -32,24 +32,27 @@ fn struct_owner_segments(module_stack: &[String], name: &str) -> Vec<String> {
     segments
 }
 
-/// Resolve an impl's self-type path (`Foo`, `inner::Foo`, `super::Foo`,
-/// `self::Foo`, `crate::a::Foo`) against the impl's inline-module stack into the
+/// Resolve an impl's *relative* self-type path (`Foo`, `inner::Foo`,
+/// `super::Foo`, `self::Foo`) against the impl's inline-module stack into the
 /// SAME module-qualified segments `struct_owner_segments` produced for the type
 /// — otherwise a qualified `impl inner::Foo` keys differently from its struct
-/// and their methods stop pooling (false-negative god-structs). `crate::` resets
-/// to the inline root; each leading `super::` climbs one module; `self::` and a
-/// bare/relative path extend the current stack. A `crate::`/out-of-line path to
-/// a type defined in another file stays unmatched by design — that is the
-/// documented cross-file split-impl under-report.
+/// and their methods stop pooling (false-negative god-structs). A leading
+/// `self::` is dropped and each `super::` climbs one inline module; a bare or
+/// `inner::`-relative path extends the current stack.
+///
+/// Absolute paths (`crate::a::Foo`, `::ext::Foo`) are deliberately NOT resolved:
+/// they name the *crate* module hierarchy, which the `file + inline-stack` key
+/// does not model (a file-backed module's crate path is the file path, not a
+/// stack entry), and deriving it would need the fragile file-path→module
+/// mapping rustqual avoids. The leading `crate`/`::` segments are kept as-is, so
+/// the key simply never matches a struct and the impl does not pool — a
+/// safe-direction under-report (never a false positive), like a cross-file
+/// split impl. Pinned by `impl_with_crate_absolute_path_is_accepted_under_report`.
 /// Operation: path-prefix match + stack arithmetic, no own calls.
 fn impl_owner_segments(module_stack: &[String], self_ty_path: &[String]) -> Vec<String> {
     let mut stack = module_stack.to_vec();
     let mut rest = self_ty_path;
     match rest.first().map(String::as_str) {
-        Some("crate") => {
-            stack.clear();
-            rest = &rest[1..];
-        }
         Some("self") => rest = &rest[1..],
         Some("super") => {
             while rest.first().map(String::as_str) == Some("super") {
