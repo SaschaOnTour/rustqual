@@ -12,17 +12,55 @@ use crate::adapters::shared::file_visitor::FileVisitor;
 
 use super::{MethodFieldData, StructInfo};
 
-/// Build the pooling identity for a type from its file, enclosing inline-module
-/// stack, and bare name: `file::mod1::mod2::Name` (no module → `file::Name`).
-/// This is what keeps same-named structs in different files / inline modules
-/// from sharing a method bucket. Out-of-line `mod name;` bodies live in their
-/// own file, so the file segment already separates them.
+/// Join a type's file and module-qualified segments into its pooling identity:
+/// `file::mod1::mod2::Name` (no module → `file::Name`). This is what keeps
+/// same-named structs in different files / inline modules from sharing a method
+/// bucket. Out-of-line `mod name;` bodies live in their own file, so the file
+/// segment already separates them.
 /// Operation: string join, no own calls.
-fn owner_key(file: &str, module_stack: &[String], name: &str) -> String {
-    let mut segments: Vec<&str> = vec![file];
-    segments.extend(module_stack.iter().map(String::as_str));
-    segments.push(name);
-    segments.join("::")
+fn join_owner_key(file: &str, segments: &[String]) -> String {
+    let mut all: Vec<&str> = vec![file];
+    all.extend(segments.iter().map(String::as_str));
+    all.join("::")
+}
+
+/// A struct's owner segments: its enclosing inline-module stack plus its name.
+/// Operation: clone + push, no own calls.
+fn struct_owner_segments(module_stack: &[String], name: &str) -> Vec<String> {
+    let mut segments = module_stack.to_vec();
+    segments.push(name.to_string());
+    segments
+}
+
+/// Resolve an impl's self-type path (`Foo`, `inner::Foo`, `super::Foo`,
+/// `self::Foo`, `crate::a::Foo`) against the impl's inline-module stack into the
+/// SAME module-qualified segments `struct_owner_segments` produced for the type
+/// — otherwise a qualified `impl inner::Foo` keys differently from its struct
+/// and their methods stop pooling (false-negative god-structs). `crate::` resets
+/// to the inline root; each leading `super::` climbs one module; `self::` and a
+/// bare/relative path extend the current stack. A `crate::`/out-of-line path to
+/// a type defined in another file stays unmatched by design — that is the
+/// documented cross-file split-impl under-report.
+/// Operation: path-prefix match + stack arithmetic, no own calls.
+fn impl_owner_segments(module_stack: &[String], self_ty_path: &[String]) -> Vec<String> {
+    let mut stack = module_stack.to_vec();
+    let mut rest = self_ty_path;
+    match rest.first().map(String::as_str) {
+        Some("crate") => {
+            stack.clear();
+            rest = &rest[1..];
+        }
+        Some("self") => rest = &rest[1..],
+        Some("super") => {
+            while rest.first().map(String::as_str) == Some("super") {
+                stack.pop();
+                rest = &rest[1..];
+            }
+        }
+        _ => {}
+    }
+    stack.extend(rest.iter().cloned());
+    stack
 }
 
 /// AST visitor that collects struct definitions with their named fields.
@@ -50,8 +88,9 @@ impl<'ast, 'a> Visit<'ast> for StructCollector<'a> {
         // Only track named-field structs (skip tuple structs and unit structs)
         if !fields.is_empty() {
             let name = node.ident.to_string();
+            let segments = struct_owner_segments(&self.module_stack, &name);
             self.structs.push(StructInfo {
-                owner_key: owner_key(&self.file, &self.module_stack, &name),
+                owner_key: join_owner_key(&self.file, &segments),
                 name,
                 file: self.file.clone(),
                 line: node.ident.span().start().line,
@@ -150,12 +189,19 @@ impl<'ast, 'a> Visit<'ast> for ImplMethodCollector<'a> {
     }
 
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
-        let type_name = if let syn::Type::Path(tp) = &*node.self_ty {
-            tp.path.segments.last().map(|s| s.ident.to_string())
+        // Full self-type path segments (`inner::Foo` → ["inner", "Foo"]), so a
+        // qualified impl resolves to the same owner key as its struct; generic
+        // args are ignored. `parent_type` keeps the bare last segment for display.
+        let self_ty_path: Vec<String> = if let syn::Type::Path(tp) = &*node.self_ty {
+            tp.path
+                .segments
+                .iter()
+                .map(|s| s.ident.to_string())
+                .collect()
         } else {
-            None
+            Vec::new()
         };
-        let Some(type_name) = type_name else {
+        let Some(type_name) = self_ty_path.last().cloned() else {
             syn::visit::visit_item_impl(self, node);
             return;
         };
@@ -170,39 +216,52 @@ impl<'ast, 'a> Visit<'ast> for ImplMethodCollector<'a> {
         }
         // Non-mechanical trait impls contribute bridges; inherent impls, nodes.
         let is_bridge = node.trait_.is_some();
-        let key = owner_key(&self.file, &self.module_stack, &type_name);
+        let segments = impl_owner_segments(&self.module_stack, &self_ty_path);
+        let key = join_owner_key(&self.file, &segments);
 
         for item in &node.items {
             if let syn::ImplItem::Fn(method) = item {
-                let is_instance = method.sig.receiver().is_some();
-                let is_constructor = !is_instance && returns_self(&method.sig.output);
-                if !is_instance && !is_constructor {
-                    continue;
-                }
-                let mut body_visitor = MethodBodyVisitor {
-                    field_accesses: HashSet::new(),
-                    call_targets: HashSet::new(),
-                    self_method_calls: HashSet::new(),
-                };
-                body_visitor.visit_block(&method.block);
-                let data = MethodFieldData {
-                    method_name: method.sig.ident.to_string(),
-                    parent_type: type_name.clone(),
-                    owner_key: key.clone(),
-                    field_accesses: body_visitor.field_accesses,
-                    call_targets: body_visitor.call_targets,
-                    self_method_calls: body_visitor.self_method_calls,
-                    is_constructor,
-                };
-                if is_bridge {
-                    self.bridges.push(data);
-                } else {
-                    self.methods.push(data);
+                if let Some(data) = method_field_data(method, &type_name, &key) {
+                    if is_bridge {
+                        self.bridges.push(data);
+                    } else {
+                        self.methods.push(data);
+                    }
                 }
             }
         }
         // Don't call default visit — we already handled methods manually
     }
+}
+
+/// Build the field/call footprint for one impl method, or `None` when it is
+/// neither an instance method nor a constructor (a plain associated fn — not a
+/// cohesion node). Operation: receiver/return classification + body walk.
+fn method_field_data(
+    method: &syn::ImplItemFn,
+    parent_type: &str,
+    owner_key: &str,
+) -> Option<MethodFieldData> {
+    let is_instance = method.sig.receiver().is_some();
+    let is_constructor = !is_instance && returns_self(&method.sig.output);
+    if !is_instance && !is_constructor {
+        return None;
+    }
+    let mut body_visitor = MethodBodyVisitor {
+        field_accesses: HashSet::new(),
+        call_targets: HashSet::new(),
+        self_method_calls: HashSet::new(),
+    };
+    body_visitor.visit_block(&method.block);
+    Some(MethodFieldData {
+        method_name: method.sig.ident.to_string(),
+        parent_type: parent_type.to_string(),
+        owner_key: owner_key.to_string(),
+        field_accesses: body_visitor.field_accesses,
+        call_targets: body_visitor.call_targets,
+        self_method_calls: body_visitor.self_method_calls,
+        is_constructor,
+    })
 }
 
 /// Visitor that walks a method body to find self.field accesses and call targets.
