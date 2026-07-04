@@ -152,3 +152,32 @@ fn impl_qualified_with_super_still_pools() {
         "an `impl super::Foo` must pool with the struct in the parent module"
     );
 }
+
+#[test]
+fn impl_with_crate_absolute_path_is_accepted_under_report() {
+    // Characterization (NOT aspiration): `crate::foo::Bar` names the CRATE
+    // module hierarchy, but the owner key is `file + inline-module stack` and
+    // does not model a file-backed module's crate path — resolving it would
+    // need a fragile file-path→module-path derivation rustqual deliberately
+    // avoids. So an absolute-path impl in a file-backed module does NOT pool
+    // with its struct: an accepted safe-direction under-report (never a false
+    // positive), pinned here so a future resolver that changes it is noticed.
+    // The bare/relative forms above are the supported cases.
+    let code = format!(
+        "struct GodFixture {{ {GOD_FIELDS} }} impl crate::foo::GodFixture {{ {GOD_METHODS} }}"
+    );
+    let parsed = vec![("src/foo.rs".to_string(), code.clone(), parse_file(&code))];
+    let warns = analyze_srp(
+        &parsed,
+        &SrpConfig::default(),
+        &std::collections::HashMap::new(),
+        300,
+    )
+    .struct_warnings
+    .iter()
+    .any(|w| w.struct_name == "GodFixture");
+    assert!(
+        !warns,
+        "absolute `crate::` path impl is an accepted under-report, not a pool"
+    );
+}
