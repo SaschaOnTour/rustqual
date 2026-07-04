@@ -76,8 +76,12 @@ syntax-based matching invited evasion instead of a decision.
   pooling identity with an `owner_key` (`file::inline_mod_path::name`), so
   methods pool only within their actual owner — mirroring the module
   qualification the DRY `repeated_match` collector already does. (Reported as
-  RQ-1 from a downstream workspace.) The SRP analyzer's AST collectors moved
-  into `srp/collect.rs` to keep `srp/mod.rs` under the module-length cap.
+  RQ-1 from a downstream workspace.) A qualified impl self-type
+  (`impl inner::Foo`, `impl super::Foo`, `self::`/`crate::`) is resolved
+  relative to the impl's module so it still keys to — and pools with — its
+  struct; only a genuinely cross-file split impl stays unmatched (the
+  documented safe-direction under-report). The SRP analyzer's AST collectors
+  moved into `srp/collect.rs` to keep `srp/mod.rs` under the module-length cap.
 
 ## [1.5.1] - 2026-06-09
 

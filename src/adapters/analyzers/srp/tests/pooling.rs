@@ -72,3 +72,83 @@ fn test_analyze_srp_does_not_pool_methods_across_same_named_structs() {
         "same-named structs in different files must not pool methods; got {warnings:?}"
     );
 }
+
+// ── Qualified-path impls must still pool with their struct ──────────────
+//
+// The owner-key must NOT diverge between a struct and an impl written with a
+// *qualified* self-type (`inner::Foo`, `super::Foo`) relative to the current
+// module. Reducing the impl's self-type to its bare last segment keyed it
+// differently from the struct, so the methods stopped pooling and a real
+// god-struct became a false negative. Shared fixture pieces (kept in consts so
+// the near-identical bodies don't trip DRY) build a clearly incohesive struct:
+// it must warn only when its methods pool with the qualified impl.
+
+const GOD_FIELDS: &str = "db: u8, cache: u8, logger: u8, metrics: u8, config: u8, \
+    state: u8, buffer: u8, queue: u8, pool: u8, handler: u8, router: u8, auth: u8";
+
+const GOD_METHODS: &str = "
+    fn read_db(&self) { query(self.db); }
+    fn write_db(&mut self) { commit(self.db); }
+    fn read_cache(&self) { get_key(self.cache); }
+    fn write_cache(&mut self) { set_key(self.cache); }
+    fn log_info(&self) { format_log(self.logger); }
+    fn log_error(&self) { format_log(self.logger); inc(self.metrics); }
+    fn route(&self) { dispatch(self.router, self.handler); }
+    fn authenticate(&self) { verify(self.auth, self.config); }
+    fn flush(&mut self) { drain(self.buffer, self.queue); }
+    fn manage_pool(&mut self) { alloc(self.pool, self.state); }
+";
+
+/// Does the god-struct `GodFixture` in `code` trip SRP-001? (True only when its
+/// methods pool with the struct — i.e. the owner keys match.)
+fn god_fixture_warns(code: &str) -> bool {
+    let parsed = vec![("t.rs".to_string(), code.to_string(), parse_file(code))];
+    analyze_srp(
+        &parsed,
+        &SrpConfig::default(),
+        &std::collections::HashMap::new(),
+        300,
+    )
+    .struct_warnings
+    .iter()
+    .any(|w| w.struct_name == "GodFixture")
+}
+
+#[test]
+fn bare_impl_god_struct_warns_baseline() {
+    // Sanity: with the impl written as a bare `impl GodFixture`, the fixture is
+    // a god-struct and SRP-001 fires — so the two qualified-path tests below
+    // are exercising pooling, not a dud fixture.
+    let code = format!("struct GodFixture {{ {GOD_FIELDS} }} impl GodFixture {{ {GOD_METHODS} }}");
+    assert!(god_fixture_warns(&code), "bare-impl god-struct must warn");
+}
+
+#[test]
+fn impl_qualified_into_inline_module_still_pools() {
+    // `mod inner { struct GodFixture … }` with `impl inner::GodFixture` at the
+    // file root: struct key is `t.rs::inner::GodFixture`; the impl's relative
+    // `inner::` path must resolve to the same key so the methods pool.
+    let code = format!(
+        "mod inner {{ pub struct GodFixture {{ {GOD_FIELDS} }} }} \
+         impl inner::GodFixture {{ {GOD_METHODS} }}"
+    );
+    assert!(
+        god_fixture_warns(&code),
+        "an `impl inner::Foo` must pool with the struct in `mod inner`"
+    );
+}
+
+#[test]
+fn impl_qualified_with_super_still_pools() {
+    // Struct at the file root, impl inside `mod ops` written as
+    // `impl super::GodFixture`: `super::` must climb back to the root so the
+    // impl keys as `t.rs::GodFixture`, matching the struct.
+    let code = format!(
+        "struct GodFixture {{ {GOD_FIELDS} }} \
+         mod ops {{ impl super::GodFixture {{ {GOD_METHODS} }} }}"
+    );
+    assert!(
+        god_fixture_warns(&code),
+        "an `impl super::Foo` must pool with the struct in the parent module"
+    );
+}
