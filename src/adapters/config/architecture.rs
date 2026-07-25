@@ -7,11 +7,11 @@
 //! expressed in rustqual.toml from day one.
 //!
 //! Rule groups:
-//! - Layer rule: [architecture.layers] + [architecture.layers.<name>] + [architecture.external_crates]
-//! - Re-export policy: [architecture.reexport_points]
-//! - Forbidden edges: [[architecture.forbidden]]
-//! - Symbol rules: [[architecture.pattern]]
-//! - Trait-signature rules: [[architecture.trait_contract]]
+//! - Layer rule: `[architecture.layers]` + `[architecture.layers.<name>]` + `[architecture.external_crates]`
+//! - Re-export policy: `[architecture.reexport_points]`
+//! - Forbidden edges: `[[architecture.forbidden]]`
+//! - Symbol rules: `[[architecture.pattern]]`
+//! - Trait-signature rules: `[[architecture.trait_contract]]`
 
 // Fields on these structs are deserialized but not yet read — the architecture
 // analyzer that consumes them is implemented progressively across Phases 1–9.
