@@ -6,8 +6,8 @@ use super::union_find::UnionFind;
 use super::{MethodFieldData, ResponsibilityCluster, SrpWarning, StructInfo};
 
 /// Build SRP warnings for structs that exceed the smell threshold.
-/// Operation: groups methods by parent type, computes LCOM4 and composite
-/// score per struct via closures (filter_map), no own calls.
+/// Operation: groups methods by qualified `owner_key`, computes LCOM4 and
+/// composite score per struct via closures (filter_map), no own calls.
 pub fn build_struct_warnings(
     structs: &[StructInfo],
     methods: &[MethodFieldData],

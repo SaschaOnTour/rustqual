@@ -1,7 +1,7 @@
 //! AST collectors for struct-SRP analysis: gather struct definitions
 //! ([`StructCollector`]) and their impl-method field/call footprints
 //! ([`ImplMethodCollector`] + [`MethodBodyVisitor`]). Both qualify a type's
-//! pooling identity with [`owner_key`] (file + inline-module path) so
+//! pooling identity with an `owner_key` (file + inline-module path) so
 //! same-named types in different files / modules never share a method bucket.
 
 use std::collections::HashSet;
