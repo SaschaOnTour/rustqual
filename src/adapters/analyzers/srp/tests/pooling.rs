@@ -9,8 +9,8 @@ fn parse_file(code: &str) -> syn::File {
     syn::parse_file(code).expect("Failed to parse test code")
 }
 
-/// RQ-1 (from the sovard project's `docs/tools/rustqual-followups.md`): `build_struct_warnings`
-/// pools methods by the BARE last path segment of the type name, so two
+/// RQ-1 — `build_struct_warnings` (before this fix) pooled methods by the BARE
+/// last path segment of the type name, so two
 /// same-named structs in different files/crates share one method bucket. Each
 /// `Dup` here is individually cohesive (every method touches its one field) —
 /// neither warns alone — but analyzed together the file-A `Dup` is scored

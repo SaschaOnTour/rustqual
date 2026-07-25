@@ -219,8 +219,8 @@ fn tq_no_sut_abc_triangulation() {
 fn tq_no_sut_satisfied_by_component_render_in_dsl_macro() {
     // A UI test whose SUT call is rendering a component inside an `rsx!` DSL
     // body (which parses as no structured exprs). The raw ident fallback must
-    // let the component count as the SUT, so NO_SUT does not fire — the sovard
-    // `live_log_is_a_polite_live_region` symptom.
+    // let the component count as the SUT, so NO_SUT does not fire — a real-world
+    // rsx! component-render symptom.
     let declared = vec![make_declared("LiveLogViewer", false)];
     let warnings = detect_in(
         r#"
