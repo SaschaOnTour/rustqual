@@ -1231,7 +1231,7 @@ fn component_referenced_only_in_dsl_macro_not_dead_code() {
     // inside an `rsx!` DSL body whose nested elements + attributes parse as
     // none of expr-list / block / expr. `recover_exprs` yields nothing, so the
     // raw `idents_in_tokens` fallback must still register the reference —
-    // otherwise the component is wrongly flagged dead (the sovard symptom).
+    // otherwise the component is wrongly flagged dead (a real-world rsx! symptom).
     let code = r#"
         fn LiveLogViewer() { let _ = 1; }
         fn app() { rsx! { div { class: "log", LiveLogViewer {} } }; }
