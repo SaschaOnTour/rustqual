@@ -24,9 +24,10 @@ fn join_owner_key(file: &str, segments: &[String]) -> String {
     all.join("::")
 }
 
-/// Prepended to a leading-colon absolute impl path so its owner key can never
-/// equal a struct's (whose segments are always valid identifiers). The angle
-/// brackets make it an illegal identifier by construction.
+/// Prefix for an unresolvable impl owner path (leading-colon extern path, or a
+/// `super::` chain climbing past the file root) so its owner key can never equal
+/// a struct's (whose segments are always valid identifiers). The angle brackets
+/// make it an illegal identifier by construction.
 const ABSOLUTE_PATH_SENTINEL: &str = "<extern>";
 
 /// A struct's owner segments: its enclosing inline-module stack plus its name.
@@ -43,7 +44,10 @@ fn struct_owner_segments(module_stack: &[String], name: &str) -> Vec<String> {
 /// — otherwise a qualified `impl inner::Foo` keys differently from its struct
 /// and their methods stop pooling (false-negative god-structs). A leading
 /// `self::` is dropped and each `super::` climbs one inline module; a bare or
-/// `inner::`-relative path extends the current stack.
+/// `inner::`-relative path extends the current stack. A `super::` chain that
+/// climbs past the file root leaves this file's inline tree (names a parent
+/// module in another file) and is treated as unresolved (see below), so it
+/// can't falsely match a same-file root struct.
 ///
 /// Absolute paths are deliberately NOT resolved: they name the *crate* module
 /// hierarchy, which the `file + inline-stack` key does not model (a file-backed
@@ -66,24 +70,37 @@ fn impl_owner_segments(
     absolute: bool,
 ) -> Vec<String> {
     if absolute {
-        let mut segments = vec![ABSOLUTE_PATH_SENTINEL.to_string()];
-        segments.extend(self_ty_path.iter().cloned());
-        return segments;
+        return unresolved_owner_segments(self_ty_path);
     }
     let mut stack = module_stack.to_vec();
     let mut rest = self_ty_path;
     match rest.first().map(String::as_str) {
         Some("self") => rest = &rest[1..],
         Some("super") => {
-            while rest.first().map(String::as_str) == Some("super") {
-                stack.pop();
-                rest = &rest[1..];
+            let climbs = rest.iter().take_while(|s| s.as_str() == "super").count();
+            // Climbing above this file's inline tree names a parent module in
+            // another file — unresolvable here, so don't pool (else e.g.
+            // `impl super::Foo` at the root would falsely match a root `Foo`).
+            if climbs > stack.len() {
+                return unresolved_owner_segments(self_ty_path);
             }
+            stack.truncate(stack.len() - climbs);
+            rest = &rest[climbs..];
         }
         _ => {}
     }
     stack.extend(rest.iter().cloned());
     stack
+}
+
+/// Owner segments for an impl path that cannot be resolved to a local type
+/// (absolute `::ext::…`, or a `super::` chain that climbs past the file root):
+/// a non-identifier sentinel prefix guarantees the key never equals a struct's,
+/// so the impl does not pool. Operation: sentinel prefix + clone.
+fn unresolved_owner_segments(self_ty_path: &[String]) -> Vec<String> {
+    let mut segments = vec![ABSOLUTE_PATH_SENTINEL.to_string()];
+    segments.extend(self_ty_path.iter().cloned());
+    segments
 }
 
 /// AST visitor that collects struct definitions with their named fields.

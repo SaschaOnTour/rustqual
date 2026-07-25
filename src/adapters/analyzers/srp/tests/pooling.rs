@@ -154,6 +154,22 @@ fn impl_qualified_with_super_still_pools() {
 }
 
 #[test]
+fn impl_super_over_climbing_root_does_not_pool() {
+    // `impl super::Foo` at the FILE ROOT climbs above this file's inline-module
+    // tree: `super` from the root names the PARENT module (another file), not
+    // this file's root `Foo`. When the leading `super` count exceeds the stack
+    // depth, the path is unresolvable here and must NOT pool with the local root
+    // struct. The struct has no methods of its own, so it warns only if the
+    // over-climbing impl wrongly pools in.
+    let code =
+        format!("struct GodFixture {{ {GOD_FIELDS} }} impl super::GodFixture {{ {GOD_METHODS} }}");
+    assert!(
+        !god_fixture_warns(&code),
+        "`impl super::Foo` at file root must not pool with the local root struct"
+    );
+}
+
+#[test]
 fn impl_with_leading_colon_absolute_path_does_not_pool() {
     // `impl ::ext::Foo` targets the EXTERN crate `ext`, not the local inline
     // `mod ext { struct Foo }`. The leading `::` makes the path absolute, so it
