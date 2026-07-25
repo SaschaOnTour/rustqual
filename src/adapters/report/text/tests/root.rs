@@ -233,3 +233,44 @@ fn footer_with_findings_points_at_rule_cards_and_allow_guide() {
         "the explain hint must render after the findings list so tail keeps it"
     );
 }
+
+#[test]
+fn orphan_not_double_counted_when_present_in_findings_entries() {
+    // Production feeds TextReporter `findings_entries = collect_all_findings(...)`,
+    // which ALREADY includes orphan entries. The compact path must not append
+    // the snapshot orphans on top, or every orphan renders twice (issue #36:
+    // 3 markers → 6 ORPHAN_SUPPRESSION lines). Reproduce faithfully: the same
+    // orphan is in BOTH findings_entries and findings.orphan_suppressions.
+    use crate::domain::findings::{OrphanKind, OrphanSuppression};
+    use crate::domain::{AnalysisData, AnalysisFindings, Dimension};
+    use crate::ports::Reporter;
+    use crate::report::findings_list::orphan_to_finding_entry;
+
+    let orphan = OrphanSuppression {
+        file: "src/lib.rs".to_string(),
+        line: 9,
+        dimensions: vec![Dimension::Dry],
+        reason: Some("intended duplication".to_string()),
+        target: None,
+        kind: OrphanKind::Stale,
+    };
+    let findings_entries = [orphan_to_finding_entry(&orphan)];
+    let summary = Summary::from_results(&[]);
+    let reporter = TextReporter {
+        summary: &summary,
+        function_analyses: &[],
+        findings_entries: &findings_entries,
+        verbose: false,
+        suggestions_text: None,
+    };
+    let findings = AnalysisFindings {
+        orphan_suppressions: vec![orphan],
+        ..Default::default()
+    };
+    let output = reporter.render(&findings, &AnalysisData::default());
+    let hits = output.matches("ORPHAN_SUPPRESSION").count();
+    assert_eq!(
+        hits, 1,
+        "orphan must render exactly once, not once per source; got {hits}:\n{output}"
+    );
+}

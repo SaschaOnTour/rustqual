@@ -106,13 +106,12 @@ impl<'a> ReporterImpl for TextReporter<'a> {
             complexity_data: (),
             coupling_data,
         } = snapshot;
-        // Compose merged-list (compact) and dedicated-section (verbose)
-        // entries from `findings_entries` (non-orphan flat list) plus
-        // `orphans` (the snapshot view). Orphan rendering flows
-        // exclusively through the snapshot view; `findings_entries`
-        // carries the other dimensions.
+        // `findings_entries` is `collect_all_findings(...)`, which ALREADY
+        // includes the orphan entries (its `publish` appends them). So the
+        // compact list and the summary use it as-is — appending `orphans`
+        // here again would double-count every orphan (issue #36). The
+        // snapshot `orphans` is used only for the verbose dedicated section.
         let mut all_entries: Vec<FindingEntry> = self.findings_entries.to_vec();
-        all_entries.extend(orphans.iter().cloned());
         all_entries.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
         let mut out = String::new();
         out.push_str(&format_summary_section(self.summary, &all_entries));
