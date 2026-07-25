@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] - 2026-07-05
+
+Bugfix release.
+
+### Fixed
+- **`ORPHAN_SUPPRESSION` findings were rendered twice in the text report**
+  (issue #36). The text reporter fed the compact findings list from
+  `collect_all_findings(...)` — which already includes orphan entries — and
+  then appended the snapshot orphans on top, so every `ORPHAN_SUPPRESSION`
+  appeared twice (e.g. 3 stale markers → 6 lines). The compact list and the
+  summary now use the collected list as-is; the snapshot orphans feed only the
+  verbose dedicated section. JSON/SARIF/AI were already correct (single
+  entries). The related concern in the same issue — a `qual:allow(dry,
+  duplicate)` marker that clears a duplicate group being flagged orphan — was
+  already resolved by the v1.5.0 targeted-suppression rework (the orphan
+  detector reads pre-suppression positions, so a marker covering a now-silenced
+  duplicate still matches its own kind); a regression test now pins it.
+- **`cargo doc` warning** in the `[architecture]` config module: TOML section
+  references like `[architecture.layers.<name>]` were read as an intra-doc link
+  plus an unclosed `<name>` HTML tag. Wrapped them in code spans.
+
 ## [1.6.0] - 2026-06-13
 
 Release making rustqual **self-explaining for human and agent consumers**

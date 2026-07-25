@@ -151,6 +151,31 @@ pub(crate) fn make_dry_wildcard_finding(
     }
 }
 
+/// A `suppressed` DUPLICATE finding — mirrors the projected state after a
+/// `qual:allow(dry, duplicate)` marker clears its group (the group stays in
+/// `findings.dry` with `suppressed = true`). The orphan detector must still
+/// see its position so the marker that cleared it is not judged stale.
+pub(crate) fn make_dry_duplicate_finding_suppressed(
+    file: &str,
+    line: usize,
+) -> crate::domain::findings::DryFinding {
+    let mut common = make_finding(
+        file,
+        line,
+        crate::findings::Dimension::Dry,
+        "dry/duplicate/exact",
+    );
+    common.suppressed = true;
+    crate::domain::findings::DryFinding {
+        common,
+        kind: crate::domain::findings::DryFindingKind::DuplicateExact,
+        details: crate::domain::findings::DryFindingDetails::Duplicate {
+            participants: vec![],
+            similarity: None,
+        },
+    }
+}
+
 pub(crate) fn make_structural_srp_finding(
     file: &str,
     line: usize,

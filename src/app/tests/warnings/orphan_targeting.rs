@@ -333,3 +333,20 @@ fn dry_targeted_wrong_kind_is_orphan() {
         "duplicate marker must not match a wildcard finding: {out:?}"
     );
 }
+
+#[test]
+fn dry_duplicate_marker_over_suppressed_group_is_not_orphan() {
+    // Issue #36: a `qual:allow(dry, duplicate)` marker that clears a duplicate
+    // group must NOT then be reported orphan. The group stays in findings.dry
+    // as suppressed; the orphan detector reads that pre-suppression position,
+    // so the marker matches a duplicate finding of its own kind → not stale.
+    let out = orphans(Dimension::Dry, "duplicate", None, 5, |a| {
+        a.findings
+            .dry
+            .push(make_dry_duplicate_finding_suppressed("src/x.rs", 5));
+    });
+    assert!(
+        out.is_empty(),
+        "a duplicate marker covering a (suppressed) duplicate finding is not orphan: {out:?}"
+    );
+}
