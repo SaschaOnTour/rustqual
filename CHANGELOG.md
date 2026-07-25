@@ -10,6 +10,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Bugfix release.
 
 ### Fixed
+- **SRP-001 (struct cohesion) no longer pools methods across same-named
+  structs in different files / modules.** The struct collector keyed method
+  buckets by the *bare* last path segment of the type name, so two unrelated
+  `struct RunCtx` definitions in different crates shared one bucket: each was
+  scored against the other's methods, producing garbage LCOM4 / method-count
+  attributed to an innocent, cohesive struct. Both collectors now qualify the
+  pooling identity with an `owner_key` (`file::inline_mod_path::name`), so
+  methods pool only within their actual owner — mirroring the module
+  qualification the DRY `repeated_match` collector already does. (Reported as
+  RQ-1 from a downstream workspace.) A *relative* qualified impl self-type
+  (`impl inner::Foo`, `impl super::Foo`, `impl self::Foo`) is resolved against
+  the impl's inline-module stack so it still keys to — and pools with — its
+  struct. Absolute paths (`crate::…`, `::ext::…`) and genuinely cross-file
+  split impls are not resolved (the `file + inline-stack` key does not model
+  the crate module hierarchy without the fragile file-path→module mapping
+  rustqual avoids); they simply do not pool — a safe-direction under-report,
+  never a false positive. The SRP analyzer's AST collectors moved into
+  `srp/collect.rs` to keep `srp/mod.rs` under the module-length cap. (Landed on
+  `main` after the v1.6.0 tag; originally mis-filed under 1.6.0.)
 - **`ORPHAN_SUPPRESSION` findings were rendered twice in the text report**
   (issue #36). The text reporter fed the compact findings list from
   `collect_all_findings(...)` — which already includes orphan entries — and
@@ -86,26 +105,6 @@ syntax-based matching invited evasion instead of a decision.
   `| tail` truncation. Boilerplate entries in the compact findings view carry
   the registry title (`BP-009 Struct update boilerplate`) instead of the bare
   pattern id.
-
-### Fixed
-- **SRP-001 (struct cohesion) no longer pools methods across same-named
-  structs in different files / modules.** The struct collector keyed method
-  buckets by the *bare* last path segment of the type name, so two unrelated
-  `struct RunCtx` definitions in different crates shared one bucket: each was
-  scored against the other's methods, producing garbage LCOM4 / method-count
-  attributed to an innocent, cohesive struct. Both collectors now qualify the
-  pooling identity with an `owner_key` (`file::inline_mod_path::name`), so
-  methods pool only within their actual owner — mirroring the module
-  qualification the DRY `repeated_match` collector already does. (Reported as
-  RQ-1 from a downstream workspace.) A *relative* qualified impl self-type
-  (`impl inner::Foo`, `impl super::Foo`, `impl self::Foo`) is resolved against
-  the impl's inline-module stack so it still keys to — and pools with — its
-  struct. Absolute paths (`crate::…`, `::ext::…`) and genuinely cross-file
-  split impls are not resolved (the `file + inline-stack` key does not model
-  the crate module hierarchy without the fragile file-path→module mapping
-  rustqual avoids); they simply do not pool — a safe-direction under-report,
-  never a false positive. The SRP analyzer's AST collectors moved into
-  `srp/collect.rs` to keep `srp/mod.rs` under the module-length cap.
 
 ## [1.5.1] - 2026-06-09
 
