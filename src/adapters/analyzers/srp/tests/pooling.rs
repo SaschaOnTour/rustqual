@@ -154,6 +154,24 @@ fn impl_qualified_with_super_still_pools() {
 }
 
 #[test]
+fn impl_with_leading_colon_absolute_path_does_not_pool() {
+    // `impl ::ext::Foo` targets the EXTERN crate `ext`, not the local inline
+    // `mod ext { struct Foo }`. The leading `::` makes the path absolute, so it
+    // must NOT resolve to (and pool with) the same-named inline-module struct —
+    // otherwise the local struct (no methods of its own) is scored against the
+    // extern impl's foreign methods, a false positive. The struct here has no
+    // inherent methods, so it warns ONLY if the extern impl wrongly pools in.
+    let code = format!(
+        "mod ext {{ pub struct GodFixture {{ {GOD_FIELDS} }} }} \
+         impl ::ext::GodFixture {{ {GOD_METHODS} }}"
+    );
+    assert!(
+        !god_fixture_warns(&code),
+        "a leading-colon `impl ::ext::Foo` must not pool with a local `mod ext` struct"
+    );
+}
+
+#[test]
 fn impl_with_crate_absolute_path_is_accepted_under_report() {
     // Characterization (NOT aspiration): `crate::foo::Bar` names the CRATE
     // module hierarchy, but the owner key is `file + inline-module stack` and

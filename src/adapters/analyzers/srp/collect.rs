@@ -24,6 +24,11 @@ fn join_owner_key(file: &str, segments: &[String]) -> String {
     all.join("::")
 }
 
+/// Prepended to a leading-colon absolute impl path so its owner key can never
+/// equal a struct's (whose segments are always valid identifiers). The angle
+/// brackets make it an illegal identifier by construction.
+const ABSOLUTE_PATH_SENTINEL: &str = "<extern>";
+
 /// A struct's owner segments: its enclosing inline-module stack plus its name.
 /// Operation: clone + push, no own calls.
 fn struct_owner_segments(module_stack: &[String], name: &str) -> Vec<String> {
@@ -40,16 +45,31 @@ fn struct_owner_segments(module_stack: &[String], name: &str) -> Vec<String> {
 /// `self::` is dropped and each `super::` climbs one inline module; a bare or
 /// `inner::`-relative path extends the current stack.
 ///
-/// Absolute paths (`crate::a::Foo`, `::ext::Foo`) are deliberately NOT resolved:
-/// they name the *crate* module hierarchy, which the `file + inline-stack` key
-/// does not model (a file-backed module's crate path is the file path, not a
-/// stack entry), and deriving it would need the fragile file-path→module
-/// mapping rustqual avoids. The leading `crate`/`::` segments are kept as-is, so
-/// the key simply never matches a struct and the impl does not pool — a
-/// safe-direction under-report (never a false positive), like a cross-file
-/// split impl. Pinned by `impl_with_crate_absolute_path_is_accepted_under_report`.
+/// Absolute paths are deliberately NOT resolved: they name the *crate* module
+/// hierarchy, which the `file + inline-stack` key does not model (a file-backed
+/// module's crate path is the file path, not a stack entry), and deriving it
+/// would need the fragile file-path→module mapping rustqual avoids. Two forms:
+/// - `crate::a::Foo` — the `crate` segment is kept as-is; since `crate` is a
+///   reserved keyword no `mod crate` exists, so the key never matches a struct.
+/// - `::ext::Foo` (leading colon, `absolute = true`) — an extern-crate path
+///   whose segments (`ext`, `Foo`) ARE valid module/type idents, so left alone
+///   it would wrongly match a local inline `mod ext { struct Foo }`. A sentinel
+///   segment (not a legal ident) is prepended so it can never match.
+///
+/// Either way the impl does not pool — a safe-direction under-report (never a
+/// false positive), like a cross-file split impl. Pinned by
+/// `impl_with_{crate,leading_colon}_...` in `tests/pooling.rs`.
 /// Operation: path-prefix match + stack arithmetic, no own calls.
-fn impl_owner_segments(module_stack: &[String], self_ty_path: &[String]) -> Vec<String> {
+fn impl_owner_segments(
+    module_stack: &[String],
+    self_ty_path: &[String],
+    absolute: bool,
+) -> Vec<String> {
+    if absolute {
+        let mut segments = vec![ABSOLUTE_PATH_SENTINEL.to_string()];
+        segments.extend(self_ty_path.iter().cloned());
+        return segments;
+    }
     let mut stack = module_stack.to_vec();
     let mut rest = self_ty_path;
     match rest.first().map(String::as_str) {
@@ -195,15 +215,20 @@ impl<'ast, 'a> Visit<'ast> for ImplMethodCollector<'a> {
         // Full self-type path segments (`inner::Foo` → ["inner", "Foo"]), so a
         // qualified impl resolves to the same owner key as its struct; generic
         // args are ignored. `parent_type` keeps the bare last segment for display.
-        let self_ty_path: Vec<String> = if let syn::Type::Path(tp) = &*node.self_ty {
-            tp.path
-                .segments
-                .iter()
-                .map(|s| s.ident.to_string())
-                .collect()
-        } else {
-            Vec::new()
-        };
+        // `absolute` captures a leading `::` (extern-crate path) — dropped by the
+        // segment list alone, but it must not resolve like a relative path.
+        let (self_ty_path, absolute): (Vec<String>, bool) =
+            if let syn::Type::Path(tp) = &*node.self_ty {
+                let segs = tp
+                    .path
+                    .segments
+                    .iter()
+                    .map(|s| s.ident.to_string())
+                    .collect();
+                (segs, tp.path.leading_colon.is_some())
+            } else {
+                (Vec::new(), false)
+            };
         let Some(type_name) = self_ty_path.last().cloned() else {
             syn::visit::visit_item_impl(self, node);
             return;
@@ -219,7 +244,7 @@ impl<'ast, 'a> Visit<'ast> for ImplMethodCollector<'a> {
         }
         // Non-mechanical trait impls contribute bridges; inherent impls, nodes.
         let is_bridge = node.trait_.is_some();
-        let segments = impl_owner_segments(&self.module_stack, &self_ty_path);
+        let segments = impl_owner_segments(&self.module_stack, &self_ty_path, absolute);
         let key = join_owner_key(&self.file, &segments);
 
         for item in &node.items {
