@@ -169,6 +169,36 @@ impl Walk<'_> {
         if let Some(name) = named {
             self.tree.pub_items.insert((scope.file.to_string(), name));
         }
+        self.associated_names(scope, item);
+    }
+
+    /// Methods, which are `ImplItem`s and `TraitItem`s rather than items — an
+    /// item-level walk never sees them, and `qual:api` sits on a method more
+    /// often than on anything else.
+    ///
+    /// A method's own `pub` is recorded without checking that its type is
+    /// nameable. That over-approximates, which is this module's stated
+    /// direction: an item wrongly called reachable costs a missed finding, one
+    /// wrongly called unreachable accuses an author of writing a marker that
+    /// could never work. Integration: shape dispatch.
+    fn associated_names(&mut self, scope: Scope<'_>, item: &syn::Item) {
+        match item {
+            syn::Item::Impl(i) => {
+                self.record_names(scope, impl_method_names(&i.items, i.trait_.is_some()));
+            }
+            syn::Item::Trait(t) if scope.inline_is_pub && is_pub(&t.vis) => {
+                self.record_names(scope, trait_method_names(&t.items));
+            }
+            _ => {}
+        }
+    }
+
+    /// Operation: bulk insert, no own calls.
+    fn record_names(&mut self, scope: Scope<'_>, names: Vec<String>) {
+        let file = scope.file.to_string();
+        self.tree
+            .pub_items
+            .extend(names.into_iter().map(|name| (file.clone(), name)));
     }
 
     /// One `mod` item: an inline block continues in the same file, an
@@ -331,6 +361,36 @@ fn public_name(item: &syn::Item) -> Option<String> {
     super::super::item_shape::item_ident_and_vis(item)
         .filter(|(_, vis)| is_pub(vis))
         .map(|(ident, _)| ident.to_string())
+}
+
+/// The methods of an `impl` block an outside consumer could name. In an
+/// inherent impl that means the `pub` ones; in a trait impl it means all of
+/// them, since they carry no visibility of their own and are reached through
+/// the trait.
+/// Operation: filter over the associated items, no own calls.
+fn impl_method_names(items: &[syn::ImplItem], is_trait_impl: bool) -> Vec<String> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            syn::ImplItem::Fn(f) => Some(f),
+            _ => None,
+        })
+        .filter(|f| is_trait_impl || is_pub(&f.vis))
+        .map(|f| f.sig.ident.to_string())
+        .collect()
+}
+
+/// A trait's methods, which carry no visibility of their own — they are as
+/// public as the trait.
+/// Operation: filter over the associated items, no own calls.
+fn trait_method_names(items: &[syn::TraitItem]) -> Vec<String> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            syn::TraitItem::Fn(f) => Some(f.sig.ident.to_string()),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Operation: visibility match, no own calls.

@@ -245,3 +245,40 @@ fn a_public_type_behind_a_private_module_is_not_reachable() {
     let reach = compute_external_reach(&parsed);
     assert!(!reach.is_externally_reachable("src/internal.rs", "Looks"));
 }
+
+#[test]
+fn public_methods_are_reachable_items_too() {
+    // A method is an `ImplItem`, not an `Item`, so an item-level walk never sees
+    // it — and `qual:api` sits on methods more often than on anything else.
+    // Missing them accused every marked method of not being nameable from
+    // outside its crate, which is the worst shape a finding can have.
+    let parsed = parse(&[
+        ("src/lib.rs", "pub mod auth;"),
+        (
+            "src/auth.rs",
+            "pub struct Provider; impl Provider { pub fn resolve(&self) {} fn hidden(&self) {} }",
+        ),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(
+        reach.is_externally_reachable("src/auth.rs", "resolve"),
+        "a pub method on a pub type in a pub module is nameable from outside"
+    );
+    assert!(!reach.is_externally_reachable("src/auth.rs", "hidden"));
+}
+
+#[test]
+fn trait_methods_are_reachable_through_their_trait() {
+    // A trait's methods carry no visibility of their own — they are as public
+    // as the trait.
+    let parsed = parse(&[
+        ("src/lib.rs", "pub mod api;"),
+        (
+            "src/api.rs",
+            "pub trait Port { fn run(&self); } trait Sealed { fn inner(&self); }",
+        ),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(reach.is_externally_reachable("src/api.rs", "run"));
+    assert!(!reach.is_externally_reachable("src/api.rs", "inner"));
+}
