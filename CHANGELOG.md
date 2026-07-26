@@ -108,10 +108,16 @@ there was nothing to verify it against.
   a test reference — the enclosing function being production says nothing about
   it. The list lives in one place (`dry/split_names.rs`), because the gap this
   closes is always the same shape — a node kind nobody thought of — and one list
-  fixes both the call graph and the reference set at once — including a bare
-  expression statement, which needs an exhaustive match over `syn::Expr` because
-  `syn` offers no shared accessor, plus a step to the first operand of an
-  assignment or binary expression, where `syn` binds the statement's attribute.
+  fixes both the call graph and the reference set at once. The list is derived
+  rather than guessed: `syn` has sixty-nine structs with an `attrs` field, and
+  they reach a visitor through those dispatches or as their own node, so every
+  attributed position an author can write is covered — down to an array element,
+  a call argument, a struct field value and a pattern field. Reaching them needs
+  exhaustive matches over `syn::Expr` and `syn::Pat` (there is no shared
+  accessor) plus a step to the first operand of an assignment, where `syn` binds
+  what rustc reads as the statement's attribute. Left out are the signature and
+  generic-parameter positions, where an attribute cannot remove a reference the
+  way `cfg` does elsewhere.
 - **SLM missed `self` inside an inline format argument.** `format!("{self:?}")`
   is one literal to `proc_macro2`, so the token scan saw no `self` and reported
   the method as self-less. Same root cause as the DRY-006 case above, same fix:

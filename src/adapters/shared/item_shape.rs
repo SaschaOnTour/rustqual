@@ -151,6 +151,34 @@ pub(crate) fn expr_attrs(expr: &syn::Expr) -> &[syn::Attribute] {
     }
 }
 
+/// The attributes of a pattern. Same story as [`expr_attrs`]: every variant
+/// owns its `attrs` and `syn` offers no shared accessor.
+///
+/// `Pat` is `#[non_exhaustive]`; an unknown variant is treated as carrying no
+/// attributes, the direction that reports rather than suppresses.
+/// Operation: shape lookup table, no own calls.
+pub(crate) fn pat_attrs(pat: &syn::Pat) -> &[syn::Attribute] {
+    match pat {
+        syn::Pat::Const(p) => &p.attrs,
+        syn::Pat::Ident(p) => &p.attrs,
+        syn::Pat::Lit(p) => &p.attrs,
+        syn::Pat::Macro(p) => &p.attrs,
+        syn::Pat::Or(p) => &p.attrs,
+        syn::Pat::Paren(p) => &p.attrs,
+        syn::Pat::Path(p) => &p.attrs,
+        syn::Pat::Range(p) => &p.attrs,
+        syn::Pat::Reference(p) => &p.attrs,
+        syn::Pat::Rest(p) => &p.attrs,
+        syn::Pat::Slice(p) => &p.attrs,
+        syn::Pat::Struct(p) => &p.attrs,
+        syn::Pat::Tuple(p) => &p.attrs,
+        syn::Pat::TupleStruct(p) => &p.attrs,
+        syn::Pat::Type(p) => &p.attrs,
+        syn::Pat::Wild(p) => &p.attrs,
+        _ => &[],
+    }
+}
+
 /// The attribute a statement carries when it is an expression. `syn` binds it
 /// to the **first operand** of an assignment or a binary expression rather than
 /// to the expression itself (`#[cfg(test)] x = 1;` puts it on the path `x`), so

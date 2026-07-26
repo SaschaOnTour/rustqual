@@ -244,51 +244,67 @@ fn scoped_by(shape: &str) -> (HashSet<String>, HashSet<String>) {
     split_refs("src/lib.rs", &format!("pub struct Fixture;\n{shape}"), &[])
 }
 
+/// Every shape that reaches the reference collector through a different
+/// dispatch. One missed dispatch means a reference from test-only code lands in
+/// the production set — where it suppresses the test-only finding entirely.
+const SCOPED_SHAPES: &[(&str, &str)] = &[
+    (
+        "free const",
+        "#[cfg(test)] const CHECK: fn(Fixture) = |_| {};",
+    ),
+    ("free struct", "#[cfg(test)] struct Holder(Fixture);"),
+    ("use item", "#[cfg(test)] use crate::inner::Fixture;"),
+    (
+        "associated const",
+        "struct H; impl H { #[cfg(test)] const C: Option<Fixture> = None; }",
+    ),
+    (
+        "associated type",
+        "trait T { #[cfg(test)] type Out = Fixture; }",
+    ),
+    ("struct field", "struct H { #[cfg(test)] f: Fixture }"),
+    ("enum variant", "enum E { #[cfg(test)] V(Fixture) }"),
+    (
+        "foreign item",
+        "extern \"C\" { #[cfg(test)] fn f(x: Fixture); }",
+    ),
+    (
+        "let statement",
+        "fn production() { #[cfg(test)] let _ = Fixture; }",
+    ),
+    (
+        "statement macro",
+        "fn production() { #[cfg(test)] println!(\"{}\", Fixture); }",
+    ),
+    (
+        "match arm",
+        "fn production(v: u8) { match v { #[cfg(test)] 0 => { let _ = Fixture; } _ => {} } }",
+    ),
+    (
+        "expression statement",
+        "fn production() { #[cfg(test)] consume(Fixture); }",
+    ),
+    (
+        "array element",
+        "fn production() { let _ = [ #[cfg(test)] Fixture ]; }",
+    ),
+    (
+        "call argument",
+        "fn production() { consume( #[cfg(test)] Fixture ); }",
+    ),
+    (
+        "struct field value",
+        "fn production() { let _ = Config { #[cfg(test)] f: Fixture }; }",
+    ),
+    (
+        "struct pattern field",
+        "fn production(c: C) { let C { #[cfg(test)] f: Fixture } = c; }",
+    ),
+];
+
 #[test]
 fn test_context_switches_on_every_attributed_node_kind() {
-    // Attributes are not an item-level thing. Each of these reaches the tree
-    // through a different dispatch, and one missed dispatch means a reference
-    // from test-only code lands in the production set — where it suppresses the
-    // test-only finding entirely rather than producing a wrong one.
-    let shapes = [
-        (
-            "free const",
-            "#[cfg(test)] const CHECK: fn(Fixture) = |_| {};",
-        ),
-        ("free struct", "#[cfg(test)] struct Holder(Fixture);"),
-        ("use item", "#[cfg(test)] use crate::inner::Fixture;"),
-        (
-            "associated const",
-            "struct H; impl H { #[cfg(test)] const C: Option<Fixture> = None; }",
-        ),
-        (
-            "associated type",
-            "trait T { #[cfg(test)] type Out = Fixture; }",
-        ),
-        ("struct field", "struct H { #[cfg(test)] f: Fixture }"),
-        ("enum variant", "enum E { #[cfg(test)] V(Fixture) }"),
-        (
-            "foreign item",
-            "extern \"C\" { #[cfg(test)] fn f(x: Fixture); }",
-        ),
-        (
-            "let statement",
-            "fn production() { #[cfg(test)] let _ = Fixture; }",
-        ),
-        (
-            "statement macro",
-            "fn production() { #[cfg(test)] println!(\"{}\", Fixture); }",
-        ),
-        (
-            "match arm",
-            "fn production(v: u8) { match v { #[cfg(test)] 0 => { let _ = Fixture; } _ => {} } }",
-        ),
-        (
-            "expression statement",
-            "fn production() { #[cfg(test)] consume(Fixture); }",
-        ),
-    ];
-    for (label, shape) in shapes {
+    for (label, shape) in SCOPED_SHAPES {
         let (production, _) = scoped_by(shape);
         assert!(
             !production.contains("Fixture"),

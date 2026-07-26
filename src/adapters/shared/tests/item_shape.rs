@@ -5,7 +5,7 @@
 //! `#[cfg(test)]` or `#[allow(dead_code)]` with it.
 
 use crate::adapters::shared::item_shape::{
-    expr_attrs, foreign_item_attrs, impl_item_attrs, item_attrs, item_ident, stmt_attrs,
+    expr_attrs, foreign_item_attrs, impl_item_attrs, item_attrs, item_ident, pat_attrs, stmt_attrs,
     trait_item_attrs,
 };
 
@@ -120,4 +120,65 @@ fn expr_attrs_reads_the_expression_itself() {
     };
     assert_eq!(expr_attrs(expr).len(), 0, "the Assign node carries none");
     assert_eq!(stmt_attrs(&f.block.stmts[0]).len(), 1, "the statement does");
+}
+
+#[test]
+fn pattern_attributes_are_reachable_for_every_shape() {
+    // Same risk as the expression table: a variant that falls into the
+    // catch-all silently drops its scope.
+    let shapes = [
+        "x", "Some(x)", "S { f }", "(a, b)", "[a, b]", "&x", "_", "1", "1..2",
+    ];
+    for shape in shapes {
+        let code = format!("fn f(v: V) {{ match v {{ #[a] {shape} => {{}} _ => {{}} }} }}");
+        let syn::Item::Fn(f) = &items(&code)[0] else {
+            panic!("expected a function")
+        };
+        let syn::Stmt::Expr(syn::Expr::Match(m), _) = &f.block.stmts[0] else {
+            panic!("expected a match")
+        };
+        // The arm carries the attribute; the pattern look-up must still reach
+        // one placed directly on a pattern.
+        assert_eq!(m.arms[0].attrs.len(), 1, "{shape}: arm attribute");
+        assert!(
+            pat_attrs(&m.arms[0].pat).is_empty(),
+            "{shape}: the arm holds it, not the pattern"
+        );
+    }
+    let code = "fn f(v: V) { let S { #[a] f: x } = v; }";
+    let syn::Item::Fn(f) = &items(code)[0] else {
+        panic!("expected a function")
+    };
+    let syn::Stmt::Local(l) = &f.block.stmts[0] else {
+        panic!("expected a let")
+    };
+    let syn::Pat::Struct(p) = &l.pat else {
+        panic!("expected a struct pattern")
+    };
+    assert_eq!(
+        p.fields[0].attrs.len(),
+        1,
+        "a field pattern carries its own"
+    );
+
+    // And one placed on the pattern itself, which is where `pat_attrs` earns
+    // its keep: a closure parameter is a bare pattern with no arm above it.
+    let closure = "fn f() { let g = | #[a] x: u8 | x; }";
+    let syn::Item::Fn(f) = &items(closure)[0] else {
+        panic!("expected a function")
+    };
+    let syn::Stmt::Local(l) = &f.block.stmts[0] else {
+        panic!("expected a let")
+    };
+    let Some(init) = &l.init else {
+        panic!("expected an initialiser")
+    };
+    let syn::Expr::Closure(c) = &*init.expr else {
+        panic!("expected a closure")
+    };
+    assert_eq!(
+        pat_attrs(&c.inputs[0]).len(),
+        1,
+        "a closure parameter pattern carries its own attribute"
+    );
 }

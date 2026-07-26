@@ -87,9 +87,16 @@ pub(crate) trait SplitCollector {
 /// does not mean. A `#[cfg(test)] let` is absent from a non-test build, so what
 /// it names is a test reference.
 ///
-/// The remaining gap is an attribute on a bare expression statement; see
-/// `item_shape::stmt_attrs` for why, and note it can only miss a
-/// classification, never invent one.
+/// The list is derived rather than guessed: `syn` has sixty-nine structs with
+/// an `attrs` field, and they reach a visitor through the dispatches named here
+/// (`Item`, `ImplItem`, `TraitItem`, `ForeignItem`, `Stmt`, `Expr`, `Pat`) or as
+/// their own node (`Field`, `Variant`, `Arm`, `FieldValue`, `FieldPat`).
+///
+/// What is left out is the signature and generic-parameter positions —
+/// `Receiver`, `BareFnArg`, `Variadic`, `ConstParam`, `LifetimeParam`. An
+/// attribute there cannot remove a reference the way `cfg` does elsewhere, and
+/// `File`'s inner attributes are already handled one level up, by the whole-file
+/// test classification.
 macro_rules! test_scoped_visits {
     () => {
         fn visit_item(&mut self, node: &'ast syn::Item) {
@@ -143,6 +150,34 @@ macro_rules! test_scoped_visits {
         fn visit_arm(&mut self, node: &'ast syn::Arm) {
             let previous = self.names.enter(&node.attrs);
             syn::visit::visit_arm(self, node);
+            self.names.leave(previous);
+        }
+
+        fn visit_expr(&mut self, node: &'ast syn::Expr) {
+            let previous = self
+                .names
+                .enter(crate::adapters::shared::item_shape::expr_attrs(node));
+            syn::visit::visit_expr(self, node);
+            self.names.leave(previous);
+        }
+
+        fn visit_pat(&mut self, node: &'ast syn::Pat) {
+            let previous = self
+                .names
+                .enter(crate::adapters::shared::item_shape::pat_attrs(node));
+            syn::visit::visit_pat(self, node);
+            self.names.leave(previous);
+        }
+
+        fn visit_field_value(&mut self, node: &'ast syn::FieldValue) {
+            let previous = self.names.enter(&node.attrs);
+            syn::visit::visit_field_value(self, node);
+            self.names.leave(previous);
+        }
+
+        fn visit_field_pat(&mut self, node: &'ast syn::FieldPat) {
+            let previous = self.names.enter(&node.attrs);
+            syn::visit::visit_field_pat(self, node);
             self.names.leave(previous);
         }
     };
