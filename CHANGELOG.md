@@ -108,9 +108,10 @@ there was nothing to verify it against.
   a test reference — the enclosing function being production says nothing about
   it. The list lives in one place (`dry/split_names.rs`), because the gap this
   closes is always the same shape — a node kind nobody thought of — and one list
-  fixes both the call graph and the reference set at once. The one node syn does
-  not expose attributes for is a bare expression statement; that can only miss a
-  test-only classification, never invent one.
+  fixes both the call graph and the reference set at once — including a bare
+  expression statement, which needs an exhaustive match over `syn::Expr` because
+  `syn` offers no shared accessor, plus a step to the first operand of an
+  assignment or binary expression, where `syn` binds the statement's attribute.
 - **SLM missed `self` inside an inline format argument.** `format!("{self:?}")`
   is one literal to `proc_macro2`, so the token scan saw no `self` and reported
   the method as self-less. Same root cause as the DRY-006 case above, same fix:

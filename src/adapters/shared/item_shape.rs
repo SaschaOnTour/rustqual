@@ -93,23 +93,93 @@ pub(crate) fn foreign_item_attrs(item: &syn::ForeignItem) -> &[syn::Attribute] {
     }
 }
 
+/// The attributes of an expression.
+///
+/// `syn` gives every variant its own `attrs` field and no shared accessor
+/// (`Expr::replace_attrs` is crate-private), so reaching them means naming the
+/// variants. It is worth the match: an attributed expression statement —
+/// `#[cfg(test)] consume(Fixture);` — is absent from a non-test build, and
+/// counting its call as production does not merely miss a finding, it lets the
+/// marker check report a working `qual:api` as spent.
+///
+/// `Expr` is `#[non_exhaustive]`; a variant added by a future `syn` falls into
+/// the catch-all and is treated as carrying no attributes, which is the
+/// direction that reports rather than suppresses.
+/// Operation: shape lookup table, no own calls.
+pub(crate) fn expr_attrs(expr: &syn::Expr) -> &[syn::Attribute] {
+    match expr {
+        syn::Expr::Array(e) => &e.attrs,
+        syn::Expr::Assign(e) => &e.attrs,
+        syn::Expr::Async(e) => &e.attrs,
+        syn::Expr::Await(e) => &e.attrs,
+        syn::Expr::Binary(e) => &e.attrs,
+        syn::Expr::Block(e) => &e.attrs,
+        syn::Expr::Break(e) => &e.attrs,
+        syn::Expr::Call(e) => &e.attrs,
+        syn::Expr::Cast(e) => &e.attrs,
+        syn::Expr::Closure(e) => &e.attrs,
+        syn::Expr::Const(e) => &e.attrs,
+        syn::Expr::Continue(e) => &e.attrs,
+        syn::Expr::Field(e) => &e.attrs,
+        syn::Expr::ForLoop(e) => &e.attrs,
+        syn::Expr::Group(e) => &e.attrs,
+        syn::Expr::If(e) => &e.attrs,
+        syn::Expr::Index(e) => &e.attrs,
+        syn::Expr::Infer(e) => &e.attrs,
+        syn::Expr::Let(e) => &e.attrs,
+        syn::Expr::Lit(e) => &e.attrs,
+        syn::Expr::Loop(e) => &e.attrs,
+        syn::Expr::Macro(e) => &e.attrs,
+        syn::Expr::Match(e) => &e.attrs,
+        syn::Expr::MethodCall(e) => &e.attrs,
+        syn::Expr::Paren(e) => &e.attrs,
+        syn::Expr::Path(e) => &e.attrs,
+        syn::Expr::Range(e) => &e.attrs,
+        syn::Expr::RawAddr(e) => &e.attrs,
+        syn::Expr::Reference(e) => &e.attrs,
+        syn::Expr::Repeat(e) => &e.attrs,
+        syn::Expr::Return(e) => &e.attrs,
+        syn::Expr::Struct(e) => &e.attrs,
+        syn::Expr::Try(e) => &e.attrs,
+        syn::Expr::TryBlock(e) => &e.attrs,
+        syn::Expr::Tuple(e) => &e.attrs,
+        syn::Expr::Unary(e) => &e.attrs,
+        syn::Expr::Unsafe(e) => &e.attrs,
+        syn::Expr::While(e) => &e.attrs,
+        syn::Expr::Yield(e) => &e.attrs,
+        _ => &[],
+    }
+}
+
+/// The attribute a statement carries when it is an expression. `syn` binds it
+/// to the **first operand** of an assignment or a binary expression rather than
+/// to the expression itself (`#[cfg(test)] x = 1;` puts it on the path `x`), so
+/// recovering what rustc sees as the statement's attribute means following that
+/// edge. Rust has no way to attribute an operand on its own, so descending
+/// cannot pick up something that was not the statement's.
+/// Operation: leftmost-operand walk, own call in the arms.
+// qual:recursive
+fn statement_expr_attrs(expr: &syn::Expr) -> &[syn::Attribute] {
+    match expr {
+        syn::Expr::Assign(e) if e.attrs.is_empty() => statement_expr_attrs(&e.left),
+        syn::Expr::Binary(e) if e.attrs.is_empty() => statement_expr_attrs(&e.left),
+        other => expr_attrs(other),
+    }
+}
+
 /// The attributes of a statement. A `#[cfg(test)]` here removes the statement
 /// from a non-test build, so it scopes just like an item does — the enclosing
 /// function being production says nothing about it.
 ///
 /// `Stmt::Item` yields nothing on purpose: the item dispatch scopes it, and
 /// counting the attributes twice would be harmless but confusing.
-/// `Stmt::Expr` is the one gap — `syn` exposes no accessor for an expression's
-/// attributes (`Expr::replace_attrs` is crate-private) and enumerating forty
-/// variants to reach a form that is rarer than the `let` it usually wraps is
-/// not worth the match. The gap only ever *misses* a test-only classification,
-/// never invents one.
-/// Operation: shape lookup table, no own calls.
+/// Trivial: shape dispatch, expression attributes delegated.
 pub(crate) fn stmt_attrs(stmt: &syn::Stmt) -> &[syn::Attribute] {
     match stmt {
         syn::Stmt::Local(s) => &s.attrs,
         syn::Stmt::Macro(s) => &s.attrs,
-        _ => &[],
+        syn::Stmt::Expr(e, _) => statement_expr_attrs(e),
+        syn::Stmt::Item(_) => &[],
     }
 }
 

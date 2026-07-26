@@ -5,7 +5,8 @@
 //! `#[cfg(test)]` or `#[allow(dead_code)]` with it.
 
 use crate::adapters::shared::item_shape::{
-    foreign_item_attrs, impl_item_attrs, item_attrs, item_ident, stmt_attrs, trait_item_attrs,
+    expr_attrs, foreign_item_attrs, impl_item_attrs, item_attrs, item_ident, stmt_attrs,
+    trait_item_attrs,
 };
 
 fn items(code: &str) -> Vec<syn::Item> {
@@ -64,7 +65,59 @@ fn statement_attributes_are_exposed_where_syn_offers_them() {
     let counts: Vec<usize> = f.block.stmts.iter().map(|s| stmt_attrs(s).len()).collect();
     assert_eq!(
         counts,
-        vec![1, 1, 0, 0],
-        "let and macro statements expose their attributes; item and expression do not"
+        vec![1, 1, 0, 1],
+        "every statement shape but an item exposes its own attributes"
     );
+}
+
+#[test]
+fn expression_attributes_are_reachable_for_every_shape_a_statement_takes() {
+    // The match is exhaustive over a `#[non_exhaustive]` enum, so the risk is a
+    // shape that silently falls into the catch-all and drops its scope. Asserted
+    // through `stmt_attrs`, because that is the contract: for an assignment or a
+    // binary expression syn binds the statement's attribute to the first
+    // operand, and recovering it is part of the answer.
+    let shapes = [
+        "consume(x);",
+        "x.consume();",
+        "if x { }",
+        "match x { _ => {} }",
+        "for _ in x { }",
+        "while x { }",
+        "{ }",
+        "unsafe { }",
+        "return;",
+        "x = 1;",
+        "x += 1;",
+        "x.field = 1;",
+        "-x;",
+        "x?;",
+        "(x);",
+    ];
+    for shape in shapes {
+        let code = format!("fn f() {{ #[a] {shape} }}");
+        let syn::Item::Fn(f) = &items(&code)[0] else {
+            panic!("expected a function")
+        };
+        assert_eq!(
+            stmt_attrs(&f.block.stmts[0]).len(),
+            1,
+            "{shape}: the statement's attribute must be reachable"
+        );
+    }
+}
+
+#[test]
+fn expr_attrs_reads_the_expression_itself() {
+    // `stmt_attrs` recovers a statement attribute syn bound to an operand;
+    // `expr_attrs` deliberately does not — it answers about the node it is
+    // given, which is what every other caller needs.
+    let syn::Item::Fn(f) = &items("fn f() { #[a] x = 1; }")[0] else {
+        panic!("expected a function")
+    };
+    let syn::Stmt::Expr(expr, _) = &f.block.stmts[0] else {
+        panic!("expected an expression statement")
+    };
+    assert_eq!(expr_attrs(expr).len(), 0, "the Assign node carries none");
+    assert_eq!(stmt_attrs(&f.block.stmts[0]).len(), 1, "the statement does");
 }

@@ -283,6 +283,10 @@ fn test_context_switches_on_every_attributed_node_kind() {
             "match arm",
             "fn production(v: u8) { match v { #[cfg(test)] 0 => { let _ = Fixture; } _ => {} } }",
         ),
+        (
+            "expression statement",
+            "fn production() { #[cfg(test)] consume(Fixture); }",
+        ),
     ];
     for (label, shape) in shapes {
         let (production, _) = scoped_by(shape);
