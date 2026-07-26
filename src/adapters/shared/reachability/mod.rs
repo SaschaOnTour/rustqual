@@ -119,6 +119,17 @@ fn module_index(
     facts.inline_modules.iter().for_each(|(key, file)| {
         index.entry(key.clone()).or_insert_with(|| file.clone());
     });
+    // `#[path]` targets: match any parsed file ending with the declared
+    // suffix. Deliberately loose — see `collect::path_attr_target`.
+    facts.path_modules.iter().for_each(|(key, suffix)| {
+        if let Some(file) = parsed
+            .iter()
+            .map(|(f, _, _)| f)
+            .find(|f| f.replace('\\', "/").ends_with(suffix.as_str()))
+        {
+            index.insert(key.clone(), file.clone());
+        }
+    });
     index
 }
 
@@ -191,7 +202,12 @@ fn resolve_globs(
         if !exposed.insert(file.clone()) {
             continue;
         }
-        queue.extend(globs.iter().filter(|g| g.file == file).flat_map(targets));
+        queue.extend(
+            globs
+                .iter()
+                .filter(|g| g.scope_is_pub && g.file == file)
+                .flat_map(targets),
+        );
     }
     exposed
 }
@@ -228,7 +244,7 @@ fn resolve_reexports(
         queue.extend(
             reexports
                 .iter()
-                .filter(|r| r.file == file && r.exported == name)
+                .filter(|r| r.scope_is_pub && r.file == file && r.exported == name)
                 .flat_map(hops),
         );
     }

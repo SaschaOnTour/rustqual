@@ -193,3 +193,42 @@ fn binary_crate_items_are_not_externally_reachable() {
         "a binary has no outside consumers"
     );
 }
+
+#[test]
+fn path_attribute_inside_a_nested_inline_module_resolves() {
+    // Rust resolves `#[path]` against the enclosing module's directory, not
+    // just the declaring file's. Appending to `src/` alone points at a file
+    // that does not exist and leaves real API unreachable.
+    let parsed = parse(&[
+        (
+            "src/lib.rs",
+            "pub mod outer {\n    #[path = \"custom.rs\"]\n    pub mod inner;\n}",
+        ),
+        ("src/outer/custom.rs", "pub fn entry() {}"),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(
+        reach.is_externally_reachable("src/outer/custom.rs", "entry"),
+        "a #[path] module inside an inline module is still public API"
+    );
+}
+
+#[test]
+fn path_attribute_with_parent_segments_resolves() {
+    // `#[path = "../shared/api.rs"]` composes to `src/module/../shared/api.rs`
+    // while the file is read as `src/shared/api.rs`; an unnormalised string
+    // never matches, so the module looks private.
+    let parsed = parse(&[
+        ("src/lib.rs", "pub mod module;"),
+        (
+            "src/module/mod.rs",
+            "#[path = \"../shared/api.rs\"]\npub mod api;",
+        ),
+        ("src/shared/api.rs", "pub fn entry() {}"),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(
+        reach.is_externally_reachable("src/shared/api.rs", "entry"),
+        "a #[path] with parent segments must still resolve"
+    );
+}

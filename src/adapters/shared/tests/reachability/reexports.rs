@@ -181,3 +181,43 @@ fn a_reexport_inside_a_public_inline_module_still_exposes() {
         "a public inline module's re-export is real public API"
     );
 }
+
+#[test]
+fn a_private_reexport_is_not_followed_on_a_later_hop() {
+    // The façade is reachable and re-exports `entry` publicly. It ALSO holds a
+    // private inline module re-exporting the same name from elsewhere. Checking
+    // the scope only at the seed lets the fixpoint follow the private one too,
+    // making an unreachable target look like public API — for the named form
+    // and the glob alike. (label, what lib re-exports, what the façade does)
+    for (label, root_use, facade_use, hidden_use) in [
+        (
+            "named re-export",
+            "pub use facade::entry;",
+            "pub use self::inner::entry;",
+            "pub use crate::secret::entry;",
+        ),
+        (
+            "glob re-export",
+            "pub use facade::*;",
+            "pub use self::inner::*;",
+            "pub use crate::secret::*;",
+        ),
+    ] {
+        let root = format!("mod facade;\nmod secret;\n{root_use}");
+        let facade = format!("mod inner;\n{facade_use}\nmod hidden {{ {hidden_use} }}");
+        let reach = compute_external_reach(&parse(&[
+            ("src/lib.rs", root.as_str()),
+            ("src/facade.rs", facade.as_str()),
+            ("src/facade/inner.rs", "pub fn entry() {}"),
+            ("src/secret.rs", "pub fn entry() {}"),
+        ]));
+        assert!(
+            reach.is_externally_reachable("src/facade/inner.rs", "entry"),
+            "case {label}: the public re-export still works"
+        );
+        assert!(
+            !reach.is_externally_reachable("src/secret.rs", "entry"),
+            "case {label}: the private inline re-export must not be followed"
+        );
+    }
+}

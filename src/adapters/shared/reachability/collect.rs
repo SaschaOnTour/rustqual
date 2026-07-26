@@ -43,6 +43,9 @@ pub(super) struct FileFacts {
     /// `(module key, declaring file)` for inline `mod x { … }` blocks, so a
     /// re-export can name a module that has no file of its own.
     pub inline_modules: Vec<(String, String)>,
+    /// `(module key, normalised path suffix)` for `#[path = "…"] mod x;` —
+    /// resolved against the parsed file set by suffix, see `path_attr_target`.
+    pub path_modules: Vec<(String, String)>,
     pub reexports: Vec<ReexportUse>,
     pub globs: Vec<GlobUse>,
 }
@@ -129,19 +132,26 @@ fn record_out_of_line_module(scope: Scope<'_>, m: &syn::ItemMod, facts: &mut Fil
         scope.mod_path.to_vec(),
         m.ident.to_string(),
     ));
-    if let Some(target) = path_attr_target(scope.file, &m.attrs) {
+    if let Some(suffix) = path_attr_target(&m.attrs) {
         let mut nested = scope.mod_path.to_vec();
         nested.push(m.ident.to_string());
         if let Some(key) = module_key(scope.file, &nested) {
-            facts.inline_modules.push((key, target));
+            facts.path_modules.push((key, suffix));
         }
     }
 }
 
-/// The file a `#[path = "…"]` attribute points at, resolved against the
-/// declaring file's directory.
-/// Operation: attribute extraction + path join.
-fn path_attr_target(declaring_file: &str, attrs: &[syn::Attribute]) -> Option<String> {
+/// The `#[path = "…"]` value, normalised to a path suffix.
+///
+/// Rust resolves the attribute against the enclosing module's directory, and
+/// the rules differ between `mod.rs` and non-`mod.rs` files. Rather than
+/// emulate them — the previous attempt got both the base directory and `..`
+/// segments wrong — the value is only lexically normalised here; the index
+/// then matches any parsed file ending with it. Over-matching is the safe
+/// direction: it can only make a module *more* reachable, never invent an
+/// "unreachable" that demands deleting a working marker.
+/// Operation: attribute extraction + lexical normalisation.
+fn path_attr_target(attrs: &[syn::Attribute]) -> Option<String> {
     let value = attrs
         .iter()
         .find(|a| a.path().is_ident("path"))
@@ -156,13 +166,23 @@ fn path_attr_target(declaring_file: &str, attrs: &[syn::Attribute]) -> Option<St
             },
             _ => None,
         })?;
-    let dir = declaring_file.replace('\\', "/");
-    let dir = dir.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
-    Some(if dir.is_empty() {
-        value
-    } else {
-        format!("{dir}/{value}")
-    })
+    Some(normalise_suffix(&value))
+}
+
+/// Collapse `.` and `..` lexically and drop leading separators, so the value
+/// can be suffix-matched against the normalised input paths.
+/// Operation: segment fold, no own calls.
+fn normalise_suffix(value: &str) -> String {
+    let normalised = value.replace('\\', "/");
+    let mut out: Vec<&str> = Vec::new();
+    normalised.split('/').for_each(|seg| match seg {
+        "" | "." => {}
+        ".." => {
+            out.pop();
+        }
+        s => out.push(s),
+    });
+    out.join("/")
 }
 
 /// Note that `path` names an inline module living in `file`.
