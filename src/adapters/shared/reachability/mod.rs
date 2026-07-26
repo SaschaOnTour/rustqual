@@ -7,10 +7,11 @@
 //! many `pub` keywords it carries — a `qual:api` there is a category error.
 //!
 //! The derivation is pure `.rs`-set analysis (no `Cargo.toml`, matching the
-//! rest of rustqual): file paths and inline `mod` blocks give module paths
-//! (`paths`), one walk gathers the visibility and `pub use` facts (`collect`),
-//! and this module closes over them — `pub mod` links, glob preludes, and
-//! re-export chains including renames.
+//! rest of rustqual): one walk starts at every crate root
+//! (`shared::crate_roots`), follows `mod` declarations through the shared
+//! layout rules (`shared::child_paths`) and gathers the visibility and
+//! `pub use` facts (`collect`); this module closes over them — `pub mod`
+//! links, glob preludes, and re-export chains including renames.
 //!
 //! **The bias is deliberate: every uncertainty resolves to *reachable*.** The
 //! consumer reports a marker as "never applied" when an item is unreachable,

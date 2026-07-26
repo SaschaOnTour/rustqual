@@ -7,6 +7,7 @@
 pub mod cfg_test;
 pub mod cfg_test_files;
 pub(crate) mod child_paths;
+pub(crate) mod crate_roots;
 pub mod declared_function;
 pub mod file_to_module;
 pub mod file_visitor;

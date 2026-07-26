@@ -65,17 +65,6 @@ fn inline_module_visibility_is_part_of_the_chain() {
 }
 
 #[test]
-fn nested_directory_modules_resolve_through_mod_rs() {
-    let parsed = parse(&[
-        ("src/lib.rs", "pub mod a;"),
-        ("src/a/mod.rs", "pub mod b;"),
-        ("src/a/b.rs", "pub fn deep() {}"),
-    ]);
-    let reach = compute_external_reach(&parsed);
-    assert!(reach.is_externally_reachable("src/a/b.rs", "deep"));
-}
-
-#[test]
 fn a_private_link_anywhere_in_the_chain_breaks_reachability() {
     let parsed = parse(&[
         ("src/lib.rs", "pub mod a;"),
@@ -195,115 +184,31 @@ fn binary_crate_items_are_not_externally_reachable() {
 }
 
 #[test]
-fn path_attribute_inside_a_nested_inline_module_resolves() {
-    // Rust resolves `#[path]` against the enclosing module's directory, not
-    // just the declaring file's. Appending to `src/` alone points at a file
-    // that does not exist and leaves real API unreachable.
-    let parsed = parse(&[
-        (
-            "src/lib.rs",
-            "pub mod outer {\n    #[path = \"custom.rs\"]\n    pub mod inner;\n}",
-        ),
-        ("src/outer/custom.rs", "pub fn entry() {}"),
-    ]);
-    let reach = compute_external_reach(&parsed);
-    assert!(
-        reach.is_externally_reachable("src/outer/custom.rs", "entry"),
-        "a #[path] module inside an inline module is still public API"
-    );
-}
-
-#[test]
-fn path_attribute_with_parent_segments_resolves() {
-    // `#[path = "../shared/api.rs"]` composes to `src/module/../shared/api.rs`
-    // while the file is read as `src/shared/api.rs`; an unnormalised string
-    // never matches, so the module looks private.
-    let parsed = parse(&[
-        ("src/lib.rs", "pub mod module;"),
-        (
-            "src/module/mod.rs",
-            "#[path = \"../shared/api.rs\"]\npub mod api;",
-        ),
-        ("src/shared/api.rs", "pub fn entry() {}"),
-    ]);
-    let reach = compute_external_reach(&parsed);
-    assert!(
-        reach.is_externally_reachable("src/shared/api.rs", "entry"),
-        "a #[path] with parent segments must still resolve"
-    );
-}
-
-#[test]
-fn path_attribute_on_a_private_module_still_resolves_for_reexports() {
-    // The module is private, so no public edge is recorded — but a `pub use`
-    // can still expose its contents. Recording the alias only for public
-    // chains leaves the re-export unable to name the module at all.
-    let parsed = parse(&[
-        (
-            "src/lib.rs",
-            "#[path = \"custom.rs\"]\nmod hidden;\npub use hidden::entry;",
-        ),
-        ("src/custom.rs", "pub fn entry() {}"),
-    ]);
-    let reach = compute_external_reach(&parsed);
-    assert!(
-        reach.is_externally_reachable("src/custom.rs", "entry"),
-        "a re-export out of a private #[path] module is public API"
-    );
-}
-
-#[test]
-fn path_attribute_binds_within_its_own_package() {
-    // Two crates both contain `src/custom.rs`. Taking the first suffix match
-    // across the whole workspace can bind crate B's module to crate A's file,
-    // leaving B's real file unreachable — a demand to delete a working marker.
-    let parsed = parse(&[
-        ("crates/a/src/lib.rs", "pub fn unrelated() {}"),
-        ("crates/a/src/custom.rs", "pub fn from_a() {}"),
-        (
-            "crates/b/src/lib.rs",
-            "#[path = \"custom.rs\"]\npub mod api;",
-        ),
-        ("crates/b/src/custom.rs", "pub fn from_b() {}"),
-    ]);
-    let reach = compute_external_reach(&parsed);
-    assert!(
-        reach.is_externally_reachable("crates/b/src/custom.rs", "from_b"),
-        "the #[path] module must bind to its own package's file"
-    );
-}
-
-#[test]
-fn path_suffix_matching_respects_segment_boundaries() {
-    // `api.rs` must not match `myapi.rs`; combined with a single-match pick
-    // that would silently bind the wrong file.
-    let parsed = parse(&[
-        ("src/lib.rs", "#[path = \"api.rs\"]\npub mod api;"),
-        ("src/myapi.rs", "pub fn wrong() {}"),
-        ("src/api.rs", "pub fn right() {}"),
-    ]);
-    let reach = compute_external_reach(&parsed);
-    assert!(
-        reach.is_externally_reachable("src/api.rs", "right"),
-        "the exact segment match wins"
-    );
-}
-
-#[test]
-fn path_attribute_may_point_outside_its_own_package() {
-    // A crate can pull a file in from anywhere: `#[path = "../../shared/…"]`.
-    // Restricting candidates to the declaring package excludes the real target
-    // and leaves genuinely public functions looking unreachable.
+fn a_shared_file_is_walked_once_per_crate() {
+    // Two packages pull the same file in at the same logical path. Keyed by
+    // file and module path alone, the first traversal claims it and the second
+    // never runs — so a file that is private in crate A stays "unreachable"
+    // even though crate B publishes it, and a `qual:api` on it is reported
+    // stale. The crate root is part of a module's identity, so it belongs in
+    // the visit key too.
     let parsed = parse(&[
         (
             "crates/a/src/lib.rs",
-            "#[path = \"../../shared/src/api.rs\"]\npub mod api;",
+            "#[path = \"../../../shared/api.rs\"]\nmod api;",
         ),
-        ("shared/src/api.rs", "pub fn entry() {}"),
+        (
+            "crates/b/src/lib.rs",
+            "#[path = \"../../../shared/api.rs\"]\npub mod api;",
+        ),
+        ("shared/api.rs", "pub fn entry() {} fn hidden() {}"),
     ]);
     let reach = compute_external_reach(&parsed);
     assert!(
-        reach.is_externally_reachable("shared/src/api.rs", "entry"),
-        "a cross-package #[path] target is still public API"
+        reach.is_externally_reachable("shared/api.rs", "entry"),
+        "crate B publishes the file; crate A's private `mod` must not hide it"
+    );
+    assert!(
+        !reach.is_externally_reachable("shared/api.rs", "hidden"),
+        "the file is walked, so a private item stays unreachable"
     );
 }

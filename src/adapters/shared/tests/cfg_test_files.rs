@@ -499,12 +499,36 @@ fn path_attribute_resolves_relative_to_parent_dir() {
 }
 
 #[test]
+fn directory_autobinary_main_is_an_autobinary_crate_root() {
+    // Cargo's second autobinary form is `src/bin/<name>/main.rs` — a directory
+    // binary. It defines a package just like `src/bin/<name>.rs`, so a sibling
+    // `tests/` holds integration tests.
+    let parsed = vec![
+        (
+            "crates/cli/src/bin/tool/main.rs".to_string(),
+            "fn main() {}".to_string(),
+            syn::parse_file("fn main() {}").unwrap(),
+        ),
+        (
+            "crates/cli/tests/it.rs".to_string(),
+            "#[test] fn it() {}".to_string(),
+            syn::parse_file("#[test] fn it() {}").unwrap(),
+        ),
+    ];
+    let result = collect_cfg_test_file_paths(&parsed);
+    assert!(
+        result.contains("crates/cli/tests/it.rs"),
+        "tests/ next to a src/bin/<name>/main.rs autobinary must be cfg-test: {result:?}"
+    );
+}
+
+#[test]
 fn nested_file_under_src_bin_is_not_an_autobinary_crate_root() {
     // Only a file DIRECTLY in `src/bin/` is an autobinary crate root; a deeper
     // `src/bin/<sub>/<name>.rs` is just a module of that binary, not a package
     // root. So a sibling `tests/` next to such a nested file must NOT be
     // classified as an integration test. (Kills the `&&` → `||` mutant in
-    // `bin_crate_root_owner`, which would accept the nested file as a root.)
+    // `crate_roots::is_autobinary_tail`, which would accept it as a root.)
     let parsed = vec![
         (
             "myapp/src/bin/sub/deep.rs".to_string(),

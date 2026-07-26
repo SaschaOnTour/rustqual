@@ -10,6 +10,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::super::child_paths::{ChildPathResolver, ParsedRefs};
+use super::super::crate_roots::{crate_root_of, CrateRootKind};
 
 /// One `pub use path::Name` (or `… as Alias`). `targets` holds every module
 /// key the path might mean — an unprefixed path can be local or crate-root
@@ -58,6 +59,10 @@ struct Scope<'a> {
     root: &'a str,
     /// Logical module path of the current (possibly inline) scope.
     mod_path: &'a [String],
+    /// How much of `mod_path` was already established when this file was
+    /// entered — the rest is the inline `mod {}` chain within it, which the
+    /// resolver needs to know where a child module's files live.
+    file_depth: usize,
     /// Whether every `mod` from the crate root down to here is `pub` — this
     /// decides whether the *file* is externally reachable.
     chain_is_pub: bool,
@@ -87,42 +92,47 @@ pub(super) fn walk_crate_tree(parsed: &[(String, String, syn::File)]) -> ModuleT
         visited: HashSet::new(),
         tree: ModuleTree::default(),
     };
-    crate_roots(&refs).into_iter().for_each(|(root, exposed)| {
-        walk.file(Scope {
-            file: root,
-            root,
-            mod_path: &[],
-            chain_is_pub: exposed,
-            inline_is_pub: true,
+    roots_to_walk(&refs)
+        .into_iter()
+        .for_each(|(root, exposed)| {
+            walk.file(Scope {
+                file: root,
+                root,
+                mod_path: &[],
+                file_depth: 0,
+                chain_is_pub: exposed,
+                inline_is_pub: true,
+            });
         });
-    });
     walk.tree
 }
 
 /// The roots to walk, each with whether its tree is externally exposed.
 /// Library roots are; binary roots are walked only so their files count as
-/// known, since nothing in a binary is nameable from outside.
-/// Operation: filter over the parsed paths, no own calls.
-fn crate_roots<'a>(refs: &ParsedRefs<'a>) -> Vec<(&'a str, bool)> {
+/// known, since nothing in a binary is nameable from outside. Which files are
+/// roots at all is the shared [`crate_root_of`] rule — a file it does not
+/// claim (say `src/bin/tools/helper.rs`) starts no walk and stays unknown.
+/// Operation: filter over the parsed paths, own call hidden in the closure.
+fn roots_to_walk<'a>(refs: &ParsedRefs<'a>) -> Vec<(&'a str, bool)> {
     refs.iter()
         .map(|(p, _)| *p)
-        .filter_map(|p| match (is_lib_root(p), is_bin_root(p)) {
-            (true, _) => Some((p, true)),
-            (_, true) => Some((p, false)),
-            _ => None,
-        })
+        .filter_map(|p| crate_root_of(p).map(|(_, kind)| (p, kind == CrateRootKind::Lib)))
         .collect()
 }
 
 impl Walk<'_> {
     /// Walk one file: register it, then its items.
+    /// The visit key carries the crate root, matching a module's identity: one
+    /// file can be pulled into two crates at the same logical path, and each
+    /// crate decides its visibility for itself.
     /// Integration: registration + item traversal.
     // qual:recursive
     fn file(&mut self, scope: Scope<'_>) {
-        if !self
-            .visited
-            .insert(format!("{}|{}", scope.file, scope.mod_path.join("::")))
-        {
+        if !self.visited.insert(format!(
+            "{}|{}",
+            module_key(scope.root, scope.mod_path),
+            scope.file
+        )) {
             return;
         }
         register_module(scope, &mut self.tree);
@@ -174,14 +184,16 @@ impl Walk<'_> {
                 self.items(inner_scope, inner);
             }
             None => {
-                if let Some(child) = self.resolver.resolve(scope.file, m) {
+                let inline = &scope.mod_path[scope.file_depth..];
+                if let Some(child) = self.resolver.resolve(scope.file, inline, m) {
                     self.file(Scope {
                         file: &child,
                         root: scope.root,
                         mod_path: &nested,
-                        chain_is_pub,
                         // A new file starts a fresh inline chain.
+                        file_depth: nested.len(),
                         inline_is_pub: true,
+                        chain_is_pub,
                     });
                 }
             }
@@ -303,21 +315,6 @@ fn candidate_paths(mod_path: &[String], prefix: &[String]) -> Vec<Vec<String>> {
 /// Operation: string join, no own calls.
 fn module_key(root: &str, path: &[String]) -> String {
     format!("{root}|{}", path.join("::"))
-}
-
-/// Operation: suffix test, no own calls.
-fn is_lib_root(file: &str) -> bool {
-    let norm = file.replace('\\', "/");
-    norm == "src/lib.rs" || norm.ends_with("/src/lib.rs")
-}
-
-/// Operation: suffix tests, no own calls.
-fn is_bin_root(file: &str) -> bool {
-    let norm = file.replace('\\', "/");
-    norm == "src/main.rs"
-        || norm.ends_with("/src/main.rs")
-        || norm.starts_with("src/bin/")
-        || norm.contains("/src/bin/")
 }
 
 /// Operation: visibility match, no own calls.

@@ -33,11 +33,12 @@ all are removed in this release.
   not `pub`, or anywhere in a binary — never applied in the first place. The
   message says why (*"cannot be called from outside the crate"*) and what to
   do: remove the marker, or call the function from production / delete it.
-  External reachability (`adapters/shared/reachability.rs`) is derived from the
-  `.rs` set alone — file path → module path, the `mod` visibility chain from a
-  library root, plus `pub use` name and glob re-exports. Every uncertainty
-  resolves to *reachable*, so an unrecognised layout can never manufacture a
-  false finding.
+  External reachability (`adapters/shared/reachability/`) is derived from the
+  `.rs` set alone: the module tree is **walked** from every crate root, so a
+  module's logical path and the file implementing it agree by construction —
+  then the `mod` visibility chain decides, plus `pub use` name and glob
+  re-exports. Every uncertainty resolves to *reachable*, so an unrecognised
+  layout can never manufacture a false finding.
 - **Markers that reach no function are reported.** Both markers only affect
   the function-level checks (DRY-002, TQ-003), so one sitting on a type, a
   constant or a `pub use` re-export provably does nothing — as does one on a
@@ -72,11 +73,33 @@ all are removed in this release.
   author to delete a marker that is still holding back a finding — so the
   detector stays silent. A qualified `Type::method` match is specific enough
   and still counts.
-- **Workspace crates no longer collide in the module index.** It was keyed by
-  the path relative to `src/`, so `crates/a/src/api.rs` and
-  `crates/b/src/api.rs` shared one key and one overwrote the other — a
-  `pub mod api` could then mark the wrong crate's file reachable. Keys are
-  package-qualified now.
+- **Workspace crates no longer collide.** A module's identity is its crate
+  root plus its logical path, so `crates/a` and `crates/b` can both have an
+  `api` module without one marking the other's file reachable — down to the
+  visit key of the walk itself, so a file pulled into two crates by `#[path]`
+  is judged separately for each and a private `mod` in one crate cannot hide
+  what the other publishes.
+- **Module files are located by rustc's own rules, in one shared place.**
+  `adapters/shared/child_paths.rs` owns them for both consumers (cfg-test
+  classification and reachability), so the two cannot drift: a module's
+  children live in its *module directory* — the declaring file's directory for
+  `mod.rs` / `lib.rs` / `main.rs`, otherwise a directory named after the file's
+  stem, extended by the surrounding inline `mod {}` blocks. `#[path]` overrides
+  the name but not the base, except at a file's top level, where rustc resolves
+  it against the file's own directory. `.` and `..` segments are resolved, since
+  `src/a/../shared/api.rs` never equals the recorded `src/shared/api.rs` as a
+  string. A `mod` that fails to resolve leaves its file unwalked — and an
+  unwalked file counts as reachable, so the mistake was invisible in the output
+  but would surface as a false "marker never applied" as soon as a second,
+  private module tree claimed the same file.
+- **Cargo's autobinary forms decide what starts a crate tree.** Both consumers
+  now share `adapters/shared/crate_roots.rs`: `src/lib.rs`, `src/main.rs`,
+  `src/bin/<name>.rs` and `src/bin/<name>/main.rs`. A deeper file such as
+  `src/bin/tools/helper.rs` is a *module* of some binary, not a root — treating
+  it as one made it "known but externally unreachable" instead of leaving it
+  unknown, which is the difference between reporting a `qual:api` on it and
+  leaving it alone. The directory form is newly recognised as a package root
+  for integration-test classification too.
 - **A `pub use` re-export excuses only the item it names.** Re-exports were
   recorded by bare name, so `pub use public_impl::run` made *every* `run` in
   the workspace look externally reachable. They resolve to the source module's

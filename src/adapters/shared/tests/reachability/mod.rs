@@ -22,5 +22,6 @@ pub(super) fn parse(files: &[(&str, &str)]) -> Vec<(String, String, syn::File)> 
         .collect()
 }
 
+mod layout;
 mod modules;
 mod reexports;

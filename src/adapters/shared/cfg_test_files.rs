@@ -6,9 +6,7 @@
 //! resulting set to classify functions as test helpers rather than
 //! production code.
 
-use std::borrow::Cow;
 use std::collections::HashSet;
-use std::path::Path;
 
 /// Borrowed workspace slice shape. The test-file detector never needs
 /// the source content (the middle `String` in the pipeline's parsed
@@ -16,6 +14,7 @@ use std::path::Path;
 /// Adapters (`collect_cfg_test_file_paths`) translate from their
 /// richer tuple shape without cloning the ASTs.
 pub(crate) use super::child_paths::{ChildPathResolver, ParsedRefs};
+use super::crate_roots::crate_root_of;
 
 /// Compute the set of source paths that are reachable only under
 /// `#[cfg(test)]`. Combines direct hits with transitive propagation
@@ -75,53 +74,16 @@ fn tests_dir_owners(path: &str) -> impl Iterator<Item = &str> + '_ {
     })
 }
 
-/// If `path` is a crate-root file, return the owning package-root
-/// directory (`""` for the analysis-root crate). Crate roots are Cargo's
-/// defining markers of a package: the default `src/lib.rs` / `src/main.rs`
-/// and autobinary `src/bin/<name>.rs`. This identifies real package roots
-/// from the parsed `.rs` set without reading any manifest. Custom
-/// `[lib] path = …` / `[[bin]] path = …` layouts are not detectable from
-/// paths alone (they would require parsing `Cargo.toml`).
-/// Integration: combines the default-root and autobinary lookups.
-fn crate_root_owner(path: &str) -> Option<&str> {
-    ["src/lib.rs", "src/main.rs"]
-        .into_iter()
-        .find_map(|tail| owner_with_tail(path, tail))
-        .or_else(|| bin_crate_root_owner(path))
-}
-
-/// Owner directory of a path ending in `<owner>/{tail}` (`""` when the
-/// path equals `tail`), or `None`. Boundary-aware via the trailing `/`.
-/// Operation: suffix matching, no own calls.
-fn owner_with_tail<'a>(path: &'a str, tail: &str) -> Option<&'a str> {
-    (path == tail)
-        .then_some("")
-        .or_else(|| path.strip_suffix(tail).and_then(|p| p.strip_suffix('/')))
-}
-
-/// Owner directory of an autobinary crate root `<owner>/src/bin/<name>.rs`
-/// (`""` for a top-level `src/bin/<name>.rs`), or `None`. Only a file
-/// directly inside `src/bin/` counts — deeper modules do not.
-/// Operation: split + filter, no own calls.
-fn bin_crate_root_owner(path: &str) -> Option<&str> {
-    path.strip_prefix("src/bin/")
-        .map(|name| ("", name))
-        .or_else(|| path.split_once("/src/bin/"))
-        .filter(|(_, name)| name.ends_with(".rs") && !name.contains('/'))
-        .map(|(owner, _)| owner)
-}
-
 /// Directory prefixes that are genuine Cargo package roots in the parsed
-/// tree: every directory that holds a crate-root file (`src/lib.rs` or
-/// `src/main.rs`). `""` denotes the analysis-root crate. Derived from the
-/// actual `.rs` set — no filesystem or manifest access — so a directory
-/// merely *containing* a `src/` subtree (without a crate root) does not
-/// qualify.
-/// Operation: filter_map over parsed paths, no own calls.
+/// tree: every directory that holds a crate-root file. `""` denotes the
+/// analysis-root crate. Which files count as roots is decided by the shared
+/// [`crate_root_of`] — so a directory merely *containing* a `src/` subtree
+/// (without a crate root) does not qualify.
+/// Operation: filter_map over parsed paths, own call hidden in the closure.
 fn package_roots(parsed: &ParsedRefs<'_>) -> HashSet<String> {
     parsed
         .iter()
-        .filter_map(|(path, _)| crate_root_owner(path).map(String::from))
+        .filter_map(|(path, _)| crate_root_of(path).map(|(owner, _)| owner.to_string()))
         .collect()
 }
 
@@ -177,7 +139,7 @@ fn direct_cfg_test_files(
                 })
                 .collect::<Vec<_>>()
         })
-        .filter_map(|(parent, m)| resolver.resolve(parent, m))
+        .filter_map(|(parent, m)| resolver.resolve(parent, &[], m))
         .collect()
 }
 
@@ -203,7 +165,9 @@ fn propagate_cfg_test_through_plain_mods(
                 file.items
                     .iter()
                     .filter_map(|item| match item {
-                        syn::Item::Mod(m) if is_any_ext_mod(m) => resolver.resolve(parent_path, m),
+                        syn::Item::Mod(m) if is_any_ext_mod(m) => {
+                            resolver.resolve(parent_path, &[], m)
+                        }
                         _ => None,
                     })
                     .collect::<Vec<_>>()
