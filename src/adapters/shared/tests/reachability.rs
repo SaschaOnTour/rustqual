@@ -287,3 +287,71 @@ fn a_reexport_inside_a_private_module_does_not_expose_anything() {
         "a re-export from a private module exposes nothing"
     );
 }
+
+#[test]
+fn reexport_from_a_private_inline_module_is_resolved() {
+    // `mod hidden { pub fn entry() }` has no file of its own, so a file-only
+    // module index drops `pub use hidden::entry` — and the function, hidden
+    // behind a private inline chain, never lands in `pub_items` either.
+    let parsed = parse(&[(
+        "src/lib.rs",
+        "mod hidden { pub fn entry() {} }\npub use hidden::entry;",
+    )]);
+    let reach = compute_external_reach(&parsed);
+    assert!(
+        reach.is_externally_reachable("src/lib.rs", "entry"),
+        "an inline module's re-exported item is public API"
+    );
+}
+
+#[test]
+fn a_renamed_reexport_chain_reaches_the_declaration() {
+    // `pub use hidden::entry as public_entry` changes the name mid-chain;
+    // following only the source name breaks the link from lib.rs.
+    let parsed = parse(&[
+        ("src/lib.rs", "mod facade;\npub use facade::public_entry;"),
+        (
+            "src/facade.rs",
+            "mod hidden;\npub use self::hidden::entry as public_entry;",
+        ),
+        ("src/facade/hidden.rs", "pub fn entry() {}"),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(
+        reach.is_externally_reachable("src/facade/hidden.rs", "entry"),
+        "a rename mid-chain must not break the link"
+    );
+}
+
+#[test]
+fn glob_chains_through_a_glob_exposed_facade_are_followed() {
+    // The prelude shape: lib globs a private facade, which globs deeper.
+    // Stopping at the first hop leaves the real declaration looking private.
+    let parsed = parse(&[
+        ("src/lib.rs", "mod facade;\npub use facade::*;"),
+        ("src/facade.rs", "mod deep;\npub use self::deep::*;"),
+        ("src/facade/deep.rs", "pub fn entry() {}"),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(
+        reach.is_externally_reachable("src/facade/deep.rs", "entry"),
+        "a glob chain must reach the declaring module"
+    );
+}
+
+#[test]
+fn a_crate_root_style_unprefixed_reexport_still_resolves() {
+    // Under uniform paths an unprefixed `use shared::entry` inside a nested
+    // module may mean the crate-root `shared`, not a local child. Resolving
+    // only relative to the current module would miss it.
+    let parsed = parse(&[
+        ("src/lib.rs", "pub mod api;\nmod shared;"),
+        ("src/api.rs", "pub use shared::entry;"),
+        ("src/shared.rs", "pub fn entry() {}"),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(
+        reach.is_externally_reachable("src/shared.rs", "entry"),
+        "a crate-root-relative unprefixed re-export must resolve"
+    );
+}

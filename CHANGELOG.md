@@ -80,9 +80,11 @@ all are removed in this release.
 - **A `pub use` re-export excuses only the item it names.** Re-exports were
   recorded by bare name, so `pub use public_impl::run` made *every* `run` in
   the workspace look externally reachable. They resolve to the source module's
-  file now — following `super::` prefixes, multi-step façade chains
-  (`lib → facade → hidden`), and only when the re-exporting file is itself
-  reachable, so a `pub use` inside a private module exposes nothing.
+  file now: `super::` prefixes, unprefixed paths (resolved both crate-root and
+  module-relative, since uniform paths allow either), inline modules that have
+  no file of their own, renames that change the name mid-chain, multi-step
+  façade chains and glob preludes — and only when the re-exporting file is
+  itself reachable, so a `pub use` in a private module exposes nothing.
 - **A name collision no longer hides a marker that never applied.** External
   reachability is decidable on its own, so the ambiguity brake now only blurs
   *spent* vs *uncalled*; the message says which part is uncertain.
