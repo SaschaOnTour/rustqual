@@ -113,6 +113,13 @@ pub(crate) fn format_arch_entry(r: AiArchRow) -> Value {
     )
 }
 
+/// One row of the AI envelope. `kind` is empty for everything but an orphan
+/// suppression, and it is present anyway: each file's entries are rendered as a
+/// TOON table, and a table needs one shape — `toon-encode` falls back to a
+/// per-entry list the moment two objects differ in their keys. The fallback is
+/// valid output, but a consumer reading the tabular form silently misses the
+/// rest, so the shape stays uniform even where a column has nothing to say.
+/// Operation: struct construction, no own calls.
 fn build_value_entry(
     file: &str,
     line: usize,
@@ -123,6 +130,7 @@ fn build_value_entry(
     json!({
         "file": file,
         "category": category,
+        "kind": "",
         "line": line,
         "fn": function_name,
         "detail": detail,

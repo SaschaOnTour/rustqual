@@ -47,6 +47,12 @@ pub(super) struct ModuleTree {
     pub reachable_files: HashSet<String>,
     pub reexports: Vec<ReexportUse>,
     pub globs: Vec<GlobUse>,
+    /// `(file, owner, method)`. A method is reachable exactly when its owner
+    /// is, which the `pub mod` chain alone cannot answer: the common façade
+    /// puts a type in a private module and re-exports it at the crate root, so
+    /// the file is in no public chain while the type — and therefore every
+    /// method on it — is callable from outside.
+    pub methods: Vec<(String, String, String)>,
 }
 
 /// Where the walk currently is.
@@ -184,21 +190,28 @@ impl Walk<'_> {
     fn associated_names(&mut self, scope: Scope<'_>, item: &syn::Item) {
         match item {
             syn::Item::Impl(i) => {
-                self.record_names(scope, impl_method_names(&i.items, i.trait_.is_some()));
+                let owner = self_type_name(&i.self_ty);
+                let names = impl_method_names(&i.items, i.trait_.is_some());
+                self.record_methods(scope, owner, names);
             }
-            syn::Item::Trait(t) if scope.inline_is_pub && is_pub(&t.vis) => {
-                self.record_names(scope, trait_method_names(&t.items));
+            syn::Item::Trait(t) => {
+                let owner = Some(t.ident.to_string());
+                self.record_methods(scope, owner, trait_method_names(&t.items));
             }
             _ => {}
         }
     }
 
-    /// Operation: bulk insert, no own calls.
-    fn record_names(&mut self, scope: Scope<'_>, names: Vec<String>) {
+    /// Operation: bulk insert against the owning type, no own calls.
+    fn record_methods(&mut self, scope: Scope<'_>, owner: Option<String>, names: Vec<String>) {
         let file = scope.file.to_string();
-        self.tree
-            .pub_items
-            .extend(names.into_iter().map(|name| (file.clone(), name)));
+        owner.into_iter().for_each(|owner| {
+            self.tree.methods.extend(
+                names
+                    .iter()
+                    .map(|name| (file.clone(), owner.clone(), name.clone())),
+            );
+        });
     }
 
     /// One `mod` item: an inline block continues in the same file, an
@@ -391,6 +404,16 @@ fn trait_method_names(items: &[syn::TraitItem]) -> Vec<String> {
             _ => None,
         })
         .collect()
+}
+
+/// The name of the type an `impl` block is for — its final path segment, the
+/// same grain everything else here works at.
+/// Operation: shape lookup, no own calls.
+fn self_type_name(ty: &syn::Type) -> Option<String> {
+    match ty {
+        syn::Type::Path(p) => p.path.segments.last().map(|s| s.ident.to_string()),
+        _ => None,
+    }
 }
 
 /// Operation: visibility match, no own calls.
