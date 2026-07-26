@@ -2,7 +2,7 @@ use crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths;
 
 // A `(path, code)` workspace and the paths expected present/absent in the
 // resulting cfg-test set.
-type ClassifyCase = (
+pub(super) type ClassifyCase = (
     &'static str,
     &'static [(&'static str, &'static str)],
     &'static [&'static str],
@@ -46,6 +46,13 @@ fn cfg_test_classification_propagates_and_honours_package_roots() {
             &["fixtures/tests/other.rs"],
         ),
     ];
+    assert_classification(cases);
+}
+
+/// Run a `(label, workspace, present, absent)` table against the classifier.
+/// Shared with the sibling inline-module cases so both describe expectations
+/// the same way.
+pub(super) fn assert_classification(cases: &[ClassifyCase]) {
     for (label, files, present, absent) in cases {
         let parsed: Vec<(String, String, syn::File)> = files
             .iter()

@@ -121,25 +121,90 @@ fn integration_test_files(parsed: &ParsedRefs<'_>) -> HashSet<String> {
         .collect()
 }
 
-/// Files referenced by an explicit `#[cfg(test)] mod foo;` in a parent file.
+/// One out-of-line `mod name;` a file declares, with what locating and
+/// classifying it needs: the inline `mod {}` chain enclosing it, and whether
+/// any block in that chain carries `#[cfg(test)]`.
+struct ExternalMod<'a> {
+    inline_stack: Vec<String>,
+    under_cfg_test: bool,
+    item: &'a syn::ItemMod,
+}
+
+/// Every out-of-line `mod name;` in a file, descending through inline
+/// `mod {}` blocks. A declaration nested in one is a real declaration: it just
+/// needs the enclosing chain to locate its file, since a module's children live
+/// in *its* directory, not the file's.
+/// Integration: per-item delegation.
+// qual:recursive
+fn external_mods<'a>(
+    items: &'a [syn::Item],
+    inline_stack: &[String],
+    under_cfg_test: bool,
+) -> Vec<ExternalMod<'a>> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            syn::Item::Mod(m) => Some(m),
+            _ => None,
+        })
+        .flat_map(|m| mod_declarations(m, inline_stack, under_cfg_test))
+        .collect()
+}
+
+/// One `mod` item: an out-of-line declaration is itself the result; an inline
+/// block contributes what its body declares, one level deeper — and passes its
+/// own `#[cfg(test)]` down, because the attribute covers everything inside.
+/// Operation: selects between the two shapes, own calls hidden in the closures.
+// qual:recursive
+fn mod_declarations<'a>(
+    m: &'a syn::ItemMod,
+    inline_stack: &[String],
+    under_cfg_test: bool,
+) -> Vec<ExternalMod<'a>> {
+    let declaration = || {
+        vec![ExternalMod {
+            inline_stack: inline_stack.to_vec(),
+            under_cfg_test,
+            item: m,
+        }]
+    };
+    let descend = |inner: &'a [syn::Item]| {
+        external_mods(
+            inner,
+            &child_stack(inline_stack, m),
+            under_cfg_test || super::cfg_test::has_cfg_test(&m.attrs),
+        )
+    };
+    m.content
+        .as_ref()
+        .map_or_else(declaration, |(_, inner)| descend(inner))
+}
+
+/// Operation: clone + push, no own calls.
+fn child_stack(inline_stack: &[String], m: &syn::ItemMod) -> Vec<String> {
+    let mut nested = inline_stack.to_vec();
+    nested.push(m.ident.to_string());
+    nested
+}
+
+/// Files referenced by an explicit `#[cfg(test)] mod foo;` in a parent file —
+/// including one nested in an inline `mod {}` block, or covered by a
+/// `#[cfg(test)]` on such a block.
 fn direct_cfg_test_files(
     parsed: &ParsedRefs<'_>,
     resolver: &ChildPathResolver<'_>,
 ) -> HashSet<String> {
-    let is_ext_cfg_test =
-        |m: &syn::ItemMod| m.content.is_none() && super::cfg_test::has_cfg_test(&m.attrs);
+    let is_cfg_test =
+        |e: &ExternalMod<'_>| e.under_cfg_test || super::cfg_test::has_cfg_test(&e.item.attrs);
     parsed
         .iter()
         .flat_map(|(path, file)| {
-            file.items
-                .iter()
-                .filter_map(move |item| match item {
-                    syn::Item::Mod(m) if is_ext_cfg_test(m) => Some((*path, m)),
-                    _ => None,
-                })
+            external_mods(&file.items, &[], false)
+                .into_iter()
+                .filter(&is_cfg_test)
+                .filter_map(|e| resolver.resolve(path, &e.inline_stack, e.item))
                 .collect::<Vec<_>>()
         })
-        .filter_map(|(parent, m)| resolver.resolve(parent, &[], m))
         .collect()
 }
 
@@ -152,7 +217,6 @@ fn propagate_cfg_test_through_plain_mods(
 ) {
     let path_to_file: std::collections::HashMap<&str, &syn::File> =
         parsed.iter().map(|(p, f)| (*p, *f)).collect();
-    let is_any_ext_mod = |m: &syn::ItemMod| m.content.is_none();
     loop {
         let new_children: Vec<String> = set
             .iter()
@@ -162,14 +226,9 @@ fn propagate_cfg_test_through_plain_mods(
                     .map(|f| (parent_path, *f))
             })
             .flat_map(|(parent_path, file)| {
-                file.items
-                    .iter()
-                    .filter_map(|item| match item {
-                        syn::Item::Mod(m) if is_any_ext_mod(m) => {
-                            resolver.resolve(parent_path, &[], m)
-                        }
-                        _ => None,
-                    })
+                external_mods(&file.items, &[], false)
+                    .into_iter()
+                    .filter_map(|e| resolver.resolve(parent_path, &e.inline_stack, e.item))
                     .collect::<Vec<_>>()
             })
             .filter(|child| !set.contains(child))

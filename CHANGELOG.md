@@ -92,6 +92,13 @@ all are removed in this release.
   unwalked file counts as reachable, so the mistake was invisible in the output
   but would surface as a false "marker never applied" as soon as a second,
   private module tree claimed the same file.
+- **cfg-test classification sees `mod` declarations inside inline blocks.** It
+  scanned only a file's top-level items, so a `#[cfg(test)] mod tests;` nested
+  in `mod helpers { … }` was never found and the test-only file it names was
+  analysed as production — the wrong direction, since that surfaces findings in
+  test code. Declarations are now collected with their inline chain (which is
+  also where their files live: `helpers/tests.rs`, not `tests.rs`), and a
+  `#[cfg(test)]` on an inline block covers everything it declares.
 - **Cargo's autobinary forms decide what starts a crate tree.** Both consumers
   now share `adapters/shared/crate_roots.rs`: `src/lib.rs`, `src/main.rs`,
   `src/bin/<name>.rs` and `src/bin/<name>/main.rs`. A deeper file such as
