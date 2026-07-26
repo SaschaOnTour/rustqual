@@ -19,6 +19,7 @@ pub(crate) mod projection;
 pub(crate) mod secondary;
 pub(crate) mod setup;
 pub(crate) mod srp_suppressions;
+pub(crate) mod stale_markers;
 pub(crate) mod structural_metrics;
 pub(crate) mod suppression_windows;
 pub(crate) mod tq_metrics;

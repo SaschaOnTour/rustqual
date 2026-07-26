@@ -64,6 +64,21 @@ Excludes from:
 
 Other dimensions still apply (complexity, IOSP, etc.). Doesn't count against `max_suppression_ratio`.
 
+**It is verified (since 1.7.0).** The marker excuses a function *production
+never calls*, so rustqual reports it as `ORPHAN_SUPPRESSION` once that stops
+being true:
+
+| Situation | What you get |
+|---|---|
+| Reachable from outside the crate, no in-crate callers | Silent — the marker is doing its job |
+| Production calls the function | *spent* — remove the marker (an `untested` finding may surface; that is the point) |
+| Item can't be named from outside (private `mod`, not `pub`, or in a binary) | *never applied* — remove the marker, and call the function from production or delete it |
+
+Reachability is derived from the sources alone: the `mod` visibility chain
+from a library root plus `pub use` re-exports. Anything rustqual cannot
+resolve counts as reachable, so an unusual layout never produces a false
+finding.
+
 ## `// qual:test_helper` — `src/` helpers used only from `tests/`
 
 ```rust
@@ -76,6 +91,12 @@ pub fn assert_in_range(actual: f64, expected: f64, tol: f64) {
 Same exclusions as `qual:api` (`DRY-002`, `TQ-003`). Use when a helper lives in `src/` so it's importable from integration tests in `tests/`, but isn't called from any production code.
 
 Unlike a blanket exclusion, `qual:test_helper` only silences DRY-002 and TQ-003 — complexity / SRP / IOSP all still apply. (rustqual has no function-name ignore list; the blunt `ignore_functions` option was removed in 1.5.0.)
+
+Verified too (since 1.7.0): if **production** calls the helper it is no longer
+test-only, and the marker is reported as *spent*. Being unreachable from
+outside the crate is normal here and never reported. A helper that *nothing*
+calls — not even a test — still surfaces as `DRY-002` dead code, because this
+marker deliberately does not silence the `uncalled` variant.
 
 ## `// qual:inverse(<fn>)` — inverse method pairs
 

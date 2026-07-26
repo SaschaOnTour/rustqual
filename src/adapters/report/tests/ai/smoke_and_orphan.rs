@@ -82,6 +82,7 @@ fn ai_reporter_includes_orphan_entries_via_snapshot_view() {
     use crate::domain::findings::OrphanSuppression;
     let mut analysis = empty_analysis();
     analysis.findings.orphan_suppressions = vec![OrphanSuppression {
+        marker: crate::domain::findings::MarkerKind::Allow,
         file: "src/foo.rs".into(),
         line: 42,
         dimensions: vec![crate::findings::Dimension::Srp],

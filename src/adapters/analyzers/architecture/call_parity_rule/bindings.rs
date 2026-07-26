@@ -128,7 +128,6 @@ pub(super) fn canonicalise_type_segments(
     )
 }
 
-// qual:api
 /// Path canonicalisation gate: resolve a path's segments to a
 /// workspace canonical, respecting Rust 2018+ `::Foo` extern-root
 /// semantics. THE single gate for "user-written `syn::Path` →

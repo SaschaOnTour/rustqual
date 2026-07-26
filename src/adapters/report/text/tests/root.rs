@@ -146,6 +146,7 @@ fn text_reporter_renders_orphans_via_snapshot_view() {
     };
     let findings = AnalysisFindings {
         orphan_suppressions: vec![OrphanSuppression {
+            marker: crate::domain::findings::MarkerKind::Allow,
             file: "src/foo.rs".to_string(),
             line: 42,
             dimensions: vec![Dimension::Iosp],
@@ -247,6 +248,7 @@ fn orphan_not_double_counted_when_present_in_findings_entries() {
     use crate::report::findings_list::orphan_to_finding_entry;
 
     let orphan = OrphanSuppression {
+        marker: crate::domain::findings::MarkerKind::Allow,
         file: "src/lib.rs".to_string(),
         line: 9,
         dimensions: vec![Dimension::Dry],

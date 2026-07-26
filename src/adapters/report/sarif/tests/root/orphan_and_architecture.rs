@@ -9,6 +9,7 @@ fn sarif_reporter_emits_orphan_results_via_snapshot_view() {
     // Trait-driven path — populate `findings.orphan_suppressions`
     // (NOT the legacy `analysis.orphan_suppressions` field).
     analysis.findings.orphan_suppressions = vec![OrphanSuppression {
+        marker: crate::domain::findings::MarkerKind::Allow,
         file: "src/foo.rs".into(),
         line: 42,
         dimensions: vec![crate::findings::Dimension::Srp],

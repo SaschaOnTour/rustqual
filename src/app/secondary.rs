@@ -39,6 +39,8 @@ pub(crate) struct SecondaryResults {
     pub(crate) srp: Option<crate::adapters::analyzers::srp::SrpAnalysis>,
     pub(crate) tq: Option<crate::adapters::analyzers::tq::TqAnalysis>,
     pub(crate) structural: Option<crate::adapters::analyzers::structural::StructuralAnalysis>,
+    /// `qual:api` / `qual:test_helper` markers that silence nothing any more.
+    pub(crate) stale_markers: Vec<crate::domain::findings::OrphanSuppression>,
 }
 
 /// Inputs the secondary passes share: parsed workspace, config,
@@ -71,7 +73,7 @@ pub(crate) fn run_secondary_analysis(
     metrics::count_sdp_violations(coupling.as_ref(), &ctx.config.coupling, summary);
 
     let srp = run_srp_pass(ctx, summary);
-    let tq = run_tq_pass(ctx, &annotation_lines, &dry.dead_code, summary);
+    let (tq, stale_markers) = run_tq_pass(ctx, &annotation_lines, &dry.dead_code, summary);
     let structural = run_structural_pass(ctx, summary);
 
     SecondaryResults {
@@ -85,6 +87,7 @@ pub(crate) fn run_secondary_analysis(
         srp,
         tq,
         structural,
+        stale_markers,
     }
 }
 
@@ -166,8 +169,11 @@ fn run_tq_pass(
     annotation_lines: &metrics::AnnotationLines<'_>,
     dead_code: &[crate::adapters::analyzers::dry::dead_code::DeadCodeWarning],
     summary: &mut Summary,
-) -> Option<crate::adapters::analyzers::tq::TqAnalysis> {
-    let mut tq = compute_tq(
+) -> (
+    Option<crate::adapters::analyzers::tq::TqAnalysis>,
+    Vec<crate::domain::findings::OrphanSuppression>,
+) {
+    let (mut tq, stale_markers) = compute_tq(
         ctx.parsed,
         ctx.config,
         ctx.all_results,
@@ -176,7 +182,7 @@ fn run_tq_pass(
     );
     mark_tq_suppressions(tq.as_mut(), ctx.suppression_lines);
     count_tq_warnings(tq.as_ref(), summary);
-    tq
+    (tq, stale_markers)
 }
 
 /// Run structural-binary checks + suppressions + count.

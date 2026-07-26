@@ -105,6 +105,7 @@ fn orphan(
     reason: Option<String>,
 ) -> OrphanSuppression {
     OrphanSuppression {
+        marker: crate::domain::findings::MarkerKind::Allow,
         file: file.to_string(),
         line: sup.line,
         dimensions: sup.dimensions.clone(),
@@ -164,6 +165,7 @@ fn invalid_marker_orphans(
         .iter()
         .flat_map(|(file, markers)| {
             markers.iter().map(move |(line, kind)| OrphanSuppression {
+                marker: crate::domain::findings::MarkerKind::Allow,
                 file: file.clone(),
                 line: *line,
                 dimensions: Vec::new(),

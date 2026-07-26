@@ -84,7 +84,6 @@ fn canon_scope<'a>(ctx: &'a ResolveContext<'a>) -> CanonScope<'a> {
     }
 }
 
-// qual:api
 /// Convert a declared / inferred `syn::Type` into a `CanonicalType`.
 /// References, parens, and the stdlib-wrapper set are peeled; type paths
 /// go through the shared canonicalisation pipeline. Integration.

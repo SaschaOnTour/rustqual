@@ -164,7 +164,6 @@ fn build_workspace_data(refs: &[(&str, &syn::File)]) -> WorkspaceData {
 /// handler pays for one BFS rather than four.
 pub(crate) type HandlerTouchpoints = HashMap<String, HashSet<String>>;
 
-// qual:api
 /// Compute the per-handler touchpoint cache. Skips deprecated
 /// handlers up front so checks needn't re-filter. The BFS walks
 /// are independent and run in parallel via rayon — each handler's

@@ -87,7 +87,6 @@ impl LayerDefinitions {
             .find_map(|c| self.layer_for_file(c))
     }
 
-    // qual:api
     /// Resolve a canonical call-target string (`crate::a::b::c`) to its
     /// layer. Non-crate prefixes (`<method>:`, `<bare>:`, `std::`, empty,
     /// etc.) yield `None` by design — only workspace-local targets carry
@@ -180,7 +179,6 @@ enum ImportTarget<'a> {
 
 /// Check every file's imports against the layer ordering.
 /// Integration: per-file iteration + flat-map of per-file hits.
-// qual:api
 pub fn check_layer_rule(
     files: &[(String, &syn::File)],
     input: &LayerRuleInput<'_>,

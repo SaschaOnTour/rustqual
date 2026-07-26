@@ -41,7 +41,6 @@ pub(crate) struct TouchpointContext<'a> {
     pub adapter_layers: &'a [String],
 }
 
-// qual:api
 /// Compute the set of target-layer canonical names reached from `handler`
 /// by a forward BFS that stops on first target-layer entry per path
 /// and refuses to descend into peer adapter layers.

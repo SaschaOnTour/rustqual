@@ -184,21 +184,18 @@ impl WorkspaceTypeIndex {
         Self::default()
     }
 
-    // qual:api
     /// Look up a struct field's canonical type. Two `&str` probes
     /// against the nested map — no allocation. Operation.
     pub fn struct_field(&self, type_canonical: &str, field: &str) -> Option<&CanonicalType> {
         self.struct_fields.get(type_canonical)?.get(field)
     }
 
-    // qual:api
     /// Look up a method's return type. Two `&str` probes against the
     /// nested map — no allocation. Operation.
     pub fn method_return(&self, receiver_canonical: &str, method: &str) -> Option<&CanonicalType> {
         self.method_returns.get(receiver_canonical)?.get(method)
     }
 
-    // qual:api
     /// Insert a `(type, field) → canonical` entry. Builds the nested
     /// map shape on demand. Operation.
     pub fn insert_struct_field(
@@ -213,7 +210,6 @@ impl WorkspaceTypeIndex {
             .insert(field.into(), ty);
     }
 
-    // qual:api
     /// Insert a `(receiver, method) → canonical` entry. Builds the
     /// nested map shape on demand. Operation.
     pub fn insert_method_return(
@@ -228,13 +224,11 @@ impl WorkspaceTypeIndex {
             .insert(method.into(), ret);
     }
 
-    // qual:api
     /// Look up a free-fn's return type. Operation.
     pub fn fn_return(&self, fn_canonical: &str) -> Option<&CanonicalType> {
         self.fn_returns.get(fn_canonical)
     }
 
-    // qual:api
     /// Look up all workspace impls of a trait. Returns an empty slice
     /// when the trait has no impls recorded. Operation.
     pub fn impls_of_trait(&self, trait_canonical: &str) -> &[String] {
@@ -244,7 +238,6 @@ impl WorkspaceTypeIndex {
             .unwrap_or(&[])
     }
 
-    // qual:api
     /// True iff `method_name` is declared on `trait_canonical`.
     /// Operation.
     pub fn trait_has_method(&self, trait_canonical: &str, method_name: &str) -> bool {
@@ -253,7 +246,6 @@ impl WorkspaceTypeIndex {
             .is_some_and(|methods| methods.contains(method_name))
     }
 
-    // qual:api
     /// Iterate every workspace trait and its declared methods. Used by
     /// the call-graph builder to mirror trait+method pairs into anchor
     /// index. Operation.
@@ -261,7 +253,6 @@ impl WorkspaceTypeIndex {
         self.trait_methods.iter()
     }
 
-    // qual:api
     /// True iff the trait method declares a default body in the trait
     /// itself. Used by the unified anchor-as-target-capability rule to
     /// distinguish callable defaults from pure signatures. Operation.
@@ -270,7 +261,6 @@ impl WorkspaceTypeIndex {
             .contains(&(trait_canonical.to_string(), method_name.to_string()))
     }
 
-    // qual:api
     /// Look up the source location of a trait-method declaration.
     /// Returns `None` for traits / methods not recorded in the index
     /// (e.g. test-only items, synthetic test fixtures). Used by the
@@ -285,7 +275,6 @@ impl WorkspaceTypeIndex {
             .get(&(trait_canonical.to_string(), method_name.to_string()))
     }
 
-    // qual:api
     /// Impls that override `method_name` on `trait_canonical`. Strict —
     /// inherited-default impls aren't included; their canonical
     /// `<Impl>::<method>` would collide with unrelated inherent methods
@@ -303,7 +292,6 @@ impl WorkspaceTypeIndex {
             .collect()
     }
 
-    // qual:api
     /// True iff `impl_type_canonical` overrides `method_name` in its
     /// `impl trait_canonical for impl_type_canonical { … }` block.
     /// Returns `true` when no override record exists — preserves the
@@ -340,7 +328,6 @@ pub struct WorkspaceIndexInputs<'a> {
     pub reexports: Option<&'a super::super::reexports::ReexportMap>,
 }
 
-// qual:api
 /// Build the workspace type index from parsed files + their pre-computed
 /// alias maps and `LocalSymbols`. Skips cfg-test files wholesale.
 /// `transparent_wrappers` seeds the user-configured wrapper list onto

@@ -146,6 +146,7 @@ fn dot_reporter_intentionally_omits_orphan_rendering() {
     let data = data_with(vec![make_record("f", FunctionClassification::Integration)]);
     let mut findings = AnalysisFindings::default();
     findings.orphan_suppressions = vec![OrphanSuppression {
+        marker: crate::domain::findings::MarkerKind::Allow,
         file: "src/foo.rs".into(),
         line: 42,
         dimensions: vec![crate::findings::Dimension::Iosp],

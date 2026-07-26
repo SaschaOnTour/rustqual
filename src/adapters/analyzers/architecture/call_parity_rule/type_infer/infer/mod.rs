@@ -40,12 +40,10 @@ pub struct FlatBindings {
 }
 
 impl FlatBindings {
-    // qual:api
     pub fn new() -> Self {
         Self::default()
     }
 
-    // qual:api
     /// Record a binding. Replaces an existing entry for the same name.
     /// Operation.
     pub fn insert(&mut self, name: &str, ty: CanonicalType) {
@@ -90,7 +88,6 @@ pub struct InferContext<'a> {
     pub reexports: Option<&'a super::super::reexports::ReexportMap>,
 }
 
-// qual:api
 /// Infer the canonical type of a `syn::Expr`. Integration: dispatches
 /// over expression variants to the `call` / `access` sub-modules.
 /// Returns `None` when the expression shape isn't supported or when

@@ -53,7 +53,6 @@ struct WalkCtx<'a> {
     type_canonicals: &'a HashSet<String>,
 }
 
-// qual:api
 /// Collect every publicly named type's canonical path across the
 /// whole non-test workspace. Integration: pre-builds the
 /// alias-chain map, then per-file delegates to the recursive

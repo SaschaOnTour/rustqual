@@ -34,7 +34,6 @@ pub struct CompiledForbiddenRule {
 
 /// Check every file/rule pair.
 /// Integration: per-file iteration + flat-map of per-file hits.
-// qual:api
 pub fn check_forbidden_rules(
     files: &[(String, &syn::File)],
     rules: &[CompiledForbiddenRule],
@@ -163,7 +162,6 @@ pub(crate) fn file_to_module_segments(path: &str) -> Vec<String> {
     parts
 }
 
-// qual:api
 /// Build a `module-segments → file-path` index over the workspace
 /// files, applying Rust's precedence rule when two files map to the
 /// same module identity.
@@ -211,7 +209,6 @@ pub(crate) fn build_module_segs_to_path_map<'a>(
     out
 }
 
-// qual:api
 /// True when `path` is the winner (or unique candidate) for its module
 /// identity in `segs_to_path` — i.e. it's the file that
 /// [`build_module_segs_to_path_map`] picked, or there was never a

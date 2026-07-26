@@ -43,7 +43,6 @@ use crate::adapters::analyzers::architecture::compiled::CompiledCallParity;
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use std::collections::{HashMap, HashSet};
 
-// qual:api
 /// Emit one `CallParityMissingAdapter` finding per target pub-fn whose
 /// boundary-reach set isn't symmetric across the configured adapters.
 /// Integration: builds per-adapter coverage + the adapter-reachable

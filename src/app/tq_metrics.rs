@@ -3,7 +3,12 @@ use crate::config::Config;
 use crate::findings::Suppression;
 use crate::report::Summary;
 
-/// Compute test quality analysis if enabled.
+/// Compute test quality analysis if enabled, plus the `qual:api` /
+/// `qual:test_helper` markers that have gone stale. Both come from one pass
+/// because the staleness rule needs exactly what TQ already built — the
+/// marked declarations and the production call set — and recomputing them
+/// would mean a second walk over every file. With TQ disabled the pass does
+/// not run, so no marker is reported (silence, never a false "delete me").
 /// Operation: conditional check + data collection + module-qualified call.
 pub(super) fn compute_tq(
     parsed: &[(String, String, syn::File)],
@@ -11,9 +16,12 @@ pub(super) fn compute_tq(
     all_results: &[FunctionAnalysis],
     dead_code: &[crate::adapters::analyzers::dry::dead_code::DeadCodeWarning],
     annotation_lines: &super::metrics::AnnotationLines<'_>,
-) -> Option<crate::adapters::analyzers::tq::TqAnalysis> {
+) -> (
+    Option<crate::adapters::analyzers::tq::TqAnalysis>,
+    Vec<crate::domain::findings::OrphanSuppression>,
+) {
     if !config.test_quality.enabled {
-        return None;
+        return (None, Vec::new());
     }
     let scope_refs: Vec<(&str, &syn::File)> = parsed
         .iter()
@@ -49,7 +57,16 @@ pub(super) fn compute_tq(
         dead_code,
         coverage_path,
     };
-    Some(crate::adapters::analyzers::tq::analyze_test_quality(&ctx))
+    let analysis = crate::adapters::analyzers::tq::analyze_test_quality(&ctx);
+    let reach = crate::adapters::shared::reachability::compute_external_reach(parsed);
+    let stale = crate::app::stale_markers::detect_stale_marker_orphans(
+        &declared_fns,
+        &prod_calls,
+        annotation_lines.api,
+        annotation_lines.test_helper,
+        &reach,
+    );
+    (Some(analysis), stale)
 }
 
 /// Mark TQ warnings as suppressed based on `// qual:allow(test_quality[, kind])`

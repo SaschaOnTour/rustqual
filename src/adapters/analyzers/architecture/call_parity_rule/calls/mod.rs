@@ -74,7 +74,6 @@ pub struct FnContext<'a> {
     pub reexports: Option<&'a super::reexports::ReexportMap>,
 }
 
-// qual:api
 /// Collect the canonical call-target set from a fn body. Entry point for
 /// Check A / Check B call-graph construction.
 pub fn collect_canonical_calls(ctx: &FnContext<'_>) -> HashSet<String> {

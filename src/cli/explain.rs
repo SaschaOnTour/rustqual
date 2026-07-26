@@ -21,7 +21,6 @@ use std::path::Path;
 /// Route `--explain <arg>` to its mode: the literal `allow` → suppression
 /// guide; a known catalog rule id → rule card; anything else → file-path
 /// architecture diagnostics. Operation: mode dispatch.
-// qual:api
 pub fn dispatch_explain(target: &Path, config: &Config) -> Result<(), i32> {
     if target.as_os_str() == "allow" {
         explain_allow();
@@ -104,7 +103,6 @@ fn render_rule_card(card: &RuleCard) -> String {
 
 /// Print the `// qual:allow(...)` suppression guide (`rustqual --explain allow`).
 /// Operation: delegates to the testable builder + prints.
-// qual:api
 pub fn explain_allow() {
     print!("{}", suppression_guide());
 }
@@ -174,7 +172,6 @@ fn targets_of_kind(dim: Dimension, kind: TargetKind) -> Vec<&'static str> {
 
 /// Handle the --explain command: print architecture-rule diagnostics for one file.
 /// Operation: orchestrates read, parse, compile, explain, render.
-// qual:api
 pub fn handle_explain(target: &Path, config: &Config) -> Result<(), i32> {
     let source = match std::fs::read_to_string(target) {
         Ok(s) => s,

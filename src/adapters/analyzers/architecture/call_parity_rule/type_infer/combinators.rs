@@ -16,7 +16,6 @@
 
 use super::canonical::CanonicalType;
 
-// qual:api
 /// Resolve a method call on a stdlib-wrapper receiver. Returns `Some(T)`
 /// when the table has an entry, `None` when the method isn't covered or
 /// depends on closure-body inference.

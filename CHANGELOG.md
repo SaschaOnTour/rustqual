@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-07-26
+
+Release closing the last blind spot in the suppression system: `// qual:api`
+and `// qual:test_helper` were **permanent, unverified silencers**. Unlike
+`qual:allow` — which re-fires and is reported as `ORPHAN_SUPPRESSION` when it
+stops covering anything — the two bare markers kept working forever once
+written. That made a marker ambiguous: it could mean "real API entry point" or
+"dead code nobody noticed", and the two are indistinguishable without checking
+every case by hand. Genuine rot hides behind the second reading indefinitely.
+
+Dogfooding found **59 spent markers in rustqual's own code** on the first run;
+all are removed in this release.
+
+### Added
+- **Stale `qual:api` / `qual:test_helper` detection.** Both markers exist to
+  excuse a function *production never calls*, so once production calls it the
+  excuse is spent and the marker is reported as `ORPHAN_SUPPRESSION`. The rule
+  deliberately does **not** also require the function to be tested: TQ-003
+  (untested) only fires for functions that already have production callers, so
+  for a genuine outside-the-crate entry point that exclusion never applied
+  anyway — requiring "and tested" would only let a spent marker keep hiding a
+  real TQ-003 finding. Removing a spent marker can therefore surface an
+  `untested` finding; the message says so up front.
+- **`qual:api` on a crate-internal item is reported as a category error.** A
+  marker on something no outside consumer can name — behind a private `mod`,
+  not `pub`, or anywhere in a binary — never applied in the first place. The
+  message says why (*"cannot be called from outside the crate"*) and what to
+  do: remove the marker, or call the function from production / delete it.
+  External reachability (`adapters/shared/reachability.rs`) is derived from the
+  `.rs` set alone — file path → module path, the `mod` visibility chain from a
+  library root, plus `pub use` name and glob re-exports. Every uncertainty
+  resolves to *reachable*, so an unrecognised layout can never manufacture a
+  false finding.
+- **`marker` field on JSON orphan entries** (`"allow"` / `"api"` /
+  `"test_helper"`). A bare `qual:api` carries no dimensions and no target, so
+  without it a consumer could not tell it from a blanket `qual:allow` — and
+  would report the wrong remedy.
+
+### Changed
+- **Orphan markers render by their real name in every reporter.** The
+  `qual:allow(...)` string was duplicated across the text, SARIF, GitHub, AI
+  and HTML reporters; all now go through one `OrphanSuppression::marker_spec`,
+  so a stale `qual:api` no longer prints as a meaningless
+  `qual:allow(<all>)`. The HTML orphan table's *Scope* column is now *Marker*.
+- **`qual:test_helper` is judged by callers only** — being unreachable from
+  outside the crate is its normal, intended state. The "helper nobody calls"
+  case stays with DRY-002, which deliberately does not suppress its `uncalled`
+  variant for this marker; reporting it here too would double-report one
+  defect.
+- **59 spent `qual:api` markers removed from rustqual's own source.** All sat
+  on crate-internal items (`mod adapters;` and friends are private, so the
+  `pub` keyword is inert there) that production already calls.
+
+### Notes
+- The check rides along with the test-quality pass, because that is where the
+  marked declarations and the production call set already exist. With
+  `[test_quality] enabled = false` it does not run.
+- A caller invisible to the call graph (dynamic dispatch, macros) reads as "no
+  production callers", so the marker is left alone — the safe direction:
+  under-report, never a false "delete me".
+
 ## [1.6.1] - 2026-07-25
 
 Bugfix release.

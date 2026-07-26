@@ -70,7 +70,6 @@ pub(crate) struct WorkspaceFilesInputs<'a> {
     pub workspace_module_paths: Option<&'a HashSet<Vec<String>>>,
 }
 
-// qual:api
 /// Pre-build a `FileScope` for every non-cfg-test workspace file.
 /// Reused by the type-index build and the call-graph collector so each
 /// file's lookup tables only get assembled once.
@@ -273,7 +272,6 @@ pub(crate) struct WorkspaceLookup<'a> {
     pub workspace_module_paths: &'a HashSet<Vec<String>>,
 }
 
-// qual:api
 /// Top-level-only name set for callers that don't track mod scope.
 /// Names declared exclusively inside nested inline `mod`s are
 /// reachable through `collect_local_symbols_scoped` only — exposing
@@ -291,7 +289,6 @@ pub(crate) fn collect_local_symbols(ast: &syn::File) -> HashSet<String> {
         .collect()
 }
 
-// qual:api
 /// Scoped variant. Returns both views in one walk so the `flat` set
 /// and the `by_name` map are always consistent. Operation.
 pub(crate) fn collect_local_symbols_scoped(ast: &syn::File) -> LocalSymbols {
@@ -325,7 +322,6 @@ fn walk_local_symbols(items: &[syn::Item], mod_stack: &mut Vec<String>, out: &mu
     }
 }
 
-// qual:api
 /// Look up the mod-path in which `name` is declared at exactly the
 /// current `mod_stack` scope. Rust resolves unqualified names against
 /// the current module only — child modules don't inherit parent

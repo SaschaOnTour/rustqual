@@ -74,14 +74,12 @@ impl CanonicalType {
         Self::Path(segments.into_iter().map(Into::into).collect())
     }
 
-    // qual:api
     /// True iff this is `Opaque` — used by the builder to decide whether
     /// to cache-populate an entry for generic-return fns. Operation.
     pub fn is_opaque(&self) -> bool {
         matches!(self, Self::Opaque)
     }
 
-    // qual:api
     /// Return the `Ok`/`Some`/`Output` inner type for the three stdlib
     /// wrappers. Used by `?` / `.await` / stdlib-combinator resolution.
     /// Returns `None` for non-wrapper variants. Operation.
@@ -92,7 +90,6 @@ impl CanonicalType {
         }
     }
 
-    // qual:api
     /// Trait-dispatch bounds regardless of origin — `Some(&bounds)` for
     /// both `TraitBound` (impl/dyn Trait) and `GenericParamBound` (bare
     /// generic-param ident). Both forms dispatch the same way through

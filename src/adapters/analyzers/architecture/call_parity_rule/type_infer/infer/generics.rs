@@ -29,7 +29,6 @@ use super::super::resolve::{resolve_type, ResolveContext};
 use super::super::self_subst::substitute_bare_self;
 use super::InferContext;
 
-// qual:api
 /// Apply turbofish substitution when the inferred return is a
 /// `GenericParamBound` (bare callee-generic-param ident return).
 /// Recurses through every multi-typed wrapper variant in
@@ -88,7 +87,6 @@ pub(super) fn turbofish_substitute(
     }
 }
 
-// qual:api
 /// Free-fn-only fallback: when the workspace index doesn't have a
 /// concrete return for a single-segment generic path call, take the
 /// turbofish's first type arg as a best-effort guess (`external_fn::<X>()`
@@ -104,7 +102,6 @@ pub(super) fn turbofish_fallback(
     turbofish.and_then(|args| resolve_type_arg_at(args, 0, ctx))
 }
 
-// qual:api
 /// Extract the turbofish arguments from a path's last segment if
 /// the path is a single-segment generic call (`get::<Session>()`).
 /// Returns `None` for multi-segment paths or segments without

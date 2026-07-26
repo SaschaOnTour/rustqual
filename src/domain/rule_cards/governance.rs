@@ -20,18 +20,27 @@ pub(super) const CARDS: &[RuleCard] = &[
     },
     RuleCard {
         id: "ORPHAN-001",
-        title: "Stale qual:allow marker: no finding in the annotation window",
+        title: "Stale suppression marker: it no longer silences anything",
         detects: "A qual:allow marker that matches no finding of its kind \
             in its comment window (stale), or a metric pin sitting more \
             than [suppression].pin_headroom above the value it covers \
-            (too-loose).",
+            (too-loose). Also covers the two bare markers: a qual:api or \
+            qual:test_helper on a function production already calls (the \
+            'nothing calls it' excuse is spent), and a qual:api on an item \
+            no outside consumer can name — behind a private mod or not pub \
+            — where the marker never applied at all.",
         why: "A stale marker silently pre-authorizes a future regression; \
             a too-loose pin absorbs growth up to its ceiling without \
-            anyone deciding that.",
+            anyone deciding that. An unverified qual:api is worse: it \
+            reads either as 'real API' or 'dead code nobody noticed', so \
+            genuine rot hides behind it indefinitely.",
         fix: "Delete the stale marker; tighten a too-loose pin to the \
             current metric value. If the marker was a typo (wrong target \
             name), write the intended one — rustqual --explain allow lists \
-            the vocabulary.",
+            the vocabulary. For a spent qual:api / qual:test_helper, remove \
+            it (an untested finding may surface — that is the point); for a \
+            qual:api that never applied, call the function from production \
+            or delete it.",
         suppress: "Not suppressible — the marker itself is the problem; \
             the only fix is editing or removing it.",
         config: "[suppression] pin_headroom (default 0.10) governs the \

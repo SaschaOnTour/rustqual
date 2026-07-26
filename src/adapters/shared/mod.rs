@@ -13,6 +13,7 @@ pub mod macro_expansion;
 pub mod macro_tokens;
 pub mod normalize;
 pub mod project_scope;
+pub(crate) mod reachability;
 pub mod test_references;
 pub mod use_tree;
 

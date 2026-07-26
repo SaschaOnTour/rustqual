@@ -118,6 +118,7 @@ fn project_data_emits_one_module_record_per_metric() {
 
 fn empty_secondary() -> SecondaryResults {
     SecondaryResults {
+        stale_markers: Vec::new(),
         coupling: None,
         duplicates: vec![],
         dead_code: vec![],

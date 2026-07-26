@@ -11,7 +11,6 @@ use super::super::canonical::CanonicalType;
 use super::super::infer::InferContext;
 use super::destructure::extract_bindings;
 
-// qual:api
 /// Extract bindings from a for-loop's `pat in iter_expr`, using the
 /// element type derived from `iter_type`. Integration: element-type
 /// derivation + delegate to the general pattern walker.

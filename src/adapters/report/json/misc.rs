@@ -69,6 +69,7 @@ pub(super) fn build_orphans(
     suppressions
         .iter()
         .map(|w| JsonOrphanSuppression {
+            marker: w.marker.json_kind(),
             file: w.file.clone(),
             line: w.line,
             kind: w.kind.json_kind(),

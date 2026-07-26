@@ -22,7 +22,6 @@ use crate::adapters::analyzers::architecture::compiled::CompiledCallParity;
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use std::collections::HashMap;
 
-// qual:api
 /// Emit one `CallParityMultiplicityMismatch` finding per target pub-fn
 /// whose handler counts differ across adapters.
 /// Integration: builds per-adapter per-target counts from the shared
