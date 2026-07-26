@@ -28,30 +28,29 @@
 //! `dry::call_targets`), so declarations alone cannot attribute a call.
 
 mod collect;
-mod paths;
 
 use std::collections::{HashMap, HashSet};
 
-use collect::{collect_file_facts, FileFacts, GlobUse, PathModule, ReexportUse};
-use paths::{is_lib_root, module_key, module_path_of};
+use collect::{walk_crate_tree, GlobUse, ModuleTree, ReexportUse};
 
 /// Which items a consumer outside the crate can name.
 pub(crate) struct ExternalReach {
-    /// Files whose module path is reachable through `pub mod` links.
+    /// Files whose module chain is `pub` all the way to a library root.
     reachable_files: HashSet<String>,
-    /// `(file, fn-name)` pairs that are `pub` through their inline-mod chain.
+    /// `(file, fn-name)` pairs that are `pub` through their whole chain.
     pub_items: HashSet<(String, String)>,
     /// `(file, name)` pairs a `pub use path::Name` exposes.
     reexported_items: HashSet<(String, String)>,
     /// Files whose `pub` items are all exposed by a `pub use path::*`.
     glob_reexported_files: HashSet<String>,
-    /// Files the layout derivation did not recognise — treated as reachable.
+    /// Files the walk never reached from any library root — no module tree
+    /// claims them, so nothing can be concluded and they count as reachable.
     unknown_files: HashSet<String>,
 }
 
 impl ExternalReach {
     /// True when `name` in `file` can be named from outside the crate.
-    /// Integration: combines the layout, visibility and re-export facts.
+    /// Integration: combines the tree, visibility and re-export facts.
     pub(crate) fn is_externally_reachable(&self, file: &str, name: &str) -> bool {
         let item = (file.to_string(), name.to_string());
         if self.unknown_files.contains(file) || self.reexported_items.contains(&item) {
@@ -66,171 +65,38 @@ impl ExternalReach {
 }
 
 /// Build the reachability facts for the whole parsed set.
-/// Integration: per-file facts, then the module / glob / re-export closures.
+/// Integration: tree walk, then the glob / re-export closures.
 pub(crate) fn compute_external_reach(parsed: &[(String, String, syn::File)]) -> ExternalReach {
-    let mut facts = FileFacts::default();
-    parsed
-        .iter()
-        .for_each(|(file, _, syntax)| collect_file_facts(file, syntax, &mut facts));
-    let modules = module_index(parsed, &facts);
-    let reachable_files = walk_reachable(parsed, &modules, &facts);
-    let glob_reexported_files = resolve_globs(&facts.globs, &modules, &reachable_files);
+    let tree = walk_crate_tree(parsed);
+    let glob_reexported_files = resolve_globs(&tree.globs, &tree.modules, &tree.reachable_files);
     let reexported_items = resolve_reexports(
-        &facts.reexports,
-        &modules,
-        &reachable_files,
+        &tree.reexports,
+        &tree.modules,
+        &tree.reachable_files,
         &glob_reexported_files,
     );
-    let unknown_files = unrecognised_files(parsed, &facts);
     ExternalReach {
-        reachable_files,
-        pub_items: facts.pub_items,
+        unknown_files: unwalked_files(parsed, &tree),
+        reachable_files: tree.reachable_files,
+        pub_items: tree.pub_items,
         reexported_items,
         glob_reexported_files,
-        unknown_files,
     }
 }
 
-/// Files whose layout the derivation does not understand — treated as
-/// reachable, so an odd layout never manufactures a finding. Includes the
-/// candidates of an ambiguous `#[path]`, where binding one of several files
-/// could leave the real one looking private.
-/// Integration: layout filter + ambiguous `#[path]` candidates.
-fn unrecognised_files(
-    parsed: &[(String, String, syn::File)],
-    facts: &FileFacts,
-) -> HashSet<String> {
-    let mut out: HashSet<String> = parsed
+/// Files no crate-root walk ever reached — a binary-only tree, an excluded
+/// layout, a file outside any `mod` chain. Nothing can be concluded about
+/// them, so they count as reachable rather than manufacturing a finding.
+/// Operation: set difference over the parsed set.
+fn unwalked_files(parsed: &[(String, String, syn::File)], tree: &ModuleTree) -> HashSet<String> {
+    let walked: HashSet<&String> = tree.modules.values().collect();
+    parsed
         .iter()
         .map(|(f, _, _)| f.clone())
-        .filter(|f| module_path_of(f).is_none())
-        .collect();
-    out.extend(resolve_path_modules(parsed, facts).1);
-    out
+        .filter(|f| !walked.contains(f))
+        .collect()
 }
 
-/// Resolve every `#[path = "…"] mod x;` to `(bindings, ambiguous candidates)`.
-///
-/// First the paths Rust would actually produce (`collect::candidate_files`);
-/// only if none of them is in the parsed set does it fall back to matching the
-/// bare value as a path suffix — across all packages, since a `#[path]` may
-/// legitimately point into another one. Exactly one match binds the module
-/// key; several leave it unbound and count as reachable instead, because
-/// picking one could leave the real file looking private, which is the
-/// direction that demands deleting a working marker.
-/// Integration: per-attribute resolution + arity dispatch.
-fn resolve_path_modules(
-    parsed: &[(String, String, syn::File)],
-    facts: &FileFacts,
-) -> (Vec<(String, String)>, HashSet<String>) {
-    let mut bindings = Vec::new();
-    let mut ambiguous = HashSet::new();
-    facts.path_modules.iter().for_each(|pm| {
-        let files = matching_files(parsed, pm);
-        match files.len() {
-            1 => bindings.push((pm.key.clone(), files[0].clone())),
-            0 => {}
-            _ => ambiguous.extend(files),
-        }
-    });
-    (bindings, ambiguous)
-}
-
-/// Parsed files a `#[path]` denotes: the resolved candidates when known,
-/// otherwise every file ending with the value at a path-segment boundary.
-/// Operation: two-stage lookup over the parsed set.
-fn matching_files(parsed: &[(String, String, syn::File)], pm: &PathModule) -> Vec<String> {
-    let files = || parsed.iter().map(|(f, _, _)| f.replace('\\', "/"));
-    let resolved: Vec<String> = files()
-        .filter(|f| pm.candidates.iter().any(|c| c == f))
-        .collect();
-    if !resolved.is_empty() {
-        return resolved;
-    }
-    files().filter(|f| suffix_matches(f, &pm.suffix)).collect()
-}
-
-/// True when `file` ends with `suffix` at a path-segment boundary.
-/// Operation: string comparison, no own calls.
-fn suffix_matches(file: &str, suffix: &str) -> bool {
-    let norm = file.replace('\\', "/");
-    norm == suffix || norm.ends_with(&format!("/{suffix}"))
-}
-
-/// Map module key → the file holding that module, for files and inline blocks.
-/// Operation: path derivation over the parsed set plus the inline blocks.
-fn module_index(
-    parsed: &[(String, String, syn::File)],
-    facts: &FileFacts,
-) -> HashMap<String, String> {
-    let mut index: HashMap<String, String> = parsed
-        .iter()
-        .filter_map(|(file, _, _)| {
-            let path = module_path_of(file)?;
-            Some((module_key(file, &path)?, file.clone()))
-        })
-        .collect();
-    // An inline `mod x { … }` lives in its declaring file, so a re-export
-    // naming it resolves to that file.
-    facts.inline_modules.iter().for_each(|(key, file)| {
-        index.entry(key.clone()).or_insert_with(|| file.clone());
-    });
-    resolve_path_modules(parsed, facts)
-        .0
-        .into_iter()
-        .for_each(|(key, file)| {
-            index.insert(key, file);
-        });
-    index
-}
-
-/// Files reachable from a library crate root through `pub mod` links.
-/// Integration: seeds the roots, then expands to a fixpoint.
-fn walk_reachable(
-    parsed: &[(String, String, syn::File)],
-    modules: &HashMap<String, String>,
-    facts: &FileFacts,
-) -> HashSet<String> {
-    let mut reachable: HashSet<String> = parsed
-        .iter()
-        .map(|(f, _, _)| f.clone())
-        .filter(|f| is_lib_root(f))
-        .collect();
-    let mut changed = true;
-    while changed {
-        let next: Vec<String> = facts
-            .pub_mod_links
-            .iter()
-            .filter(|(parent, _, _)| reachable.contains(parent))
-            .filter_map(|(parent, parent_path, child)| {
-                child_file(parent, parent_path, child, modules)
-            })
-            .collect();
-        changed = next
-            .into_iter()
-            .fold(false, |acc, f| acc | reachable.insert(f));
-    }
-    reachable
-}
-
-/// The file implementing `child`, declared in `parent` inside the scope
-/// `parent_path`. The scope matters: `pub mod outer { pub mod inner; }`
-/// implements `outer::inner`, not a top-level `inner`.
-/// Operation: path extension + index lookup.
-fn child_file(
-    parent: &str,
-    parent_path: &[String],
-    child: &str,
-    modules: &HashMap<String, String>,
-) -> Option<String> {
-    let mut path = parent_path.to_vec();
-    path.push(child.to_string());
-    modules.get(&module_key(parent, &path)?).cloned()
-}
-
-/// Files whose `pub` surface a glob exposes. Seeded from globs written in a
-/// reachable file, then followed through glob-exposed façades — the prelude
-/// shape `lib → facade::* → deep::*` needs every hop.
 /// Integration: seed + fixpoint over the glob edges.
 fn resolve_globs(
     globs: &[GlobUse],
@@ -263,10 +129,6 @@ fn resolve_globs(
     exposed
 }
 
-/// `(file, name)` pairs a `pub use` exposes. Seeded from re-exports written
-/// where an outside consumer can see them, then followed hop by hop: each hop
-/// matches the *exported* name of the previous one and carries the item's own
-/// *source* name forward, so a rename mid-chain keeps the link.
 /// Integration: seed + fixpoint over the re-export edges.
 fn resolve_reexports(
     reexports: &[ReexportUse],

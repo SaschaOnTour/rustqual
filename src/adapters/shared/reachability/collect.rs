@@ -1,11 +1,15 @@
-//! One pass over each file, recording the facts reachability is derived from:
-//! which functions are `pub` through their whole inline-module chain, which
-//! `mod` links stay public, which inline modules exist, and what every
-//! `pub use` exposes.
+//! Walking the crate's module tree to gather the facts reachability needs.
+//!
+//! The walk starts at each library root and follows `mod` declarations through
+//! [`ChildPathResolver`] — the shared owner of rustc's file-layout rules
+//! (`#[path]`, `{dir}/{name}.rs`, `{dir}/{name}/mod.rs`). Because the tree is
+//! *walked* rather than derived from file paths, a module's logical path and
+//! the file implementing it always agree: a `#[path]` redirect, a nested
+//! inline module and their children all fall out of the same traversal.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use super::paths::{is_pub, module_key, module_path_of};
+use super::super::child_paths::{ChildPathResolver, ParsedRefs};
 
 /// One `pub use path::Name` (or `… as Alias`). `targets` holds every module
 /// key the path might mean — an unprefixed path can be local or crate-root
@@ -23,15 +27,6 @@ pub(super) struct ReexportUse {
     pub source: String,
 }
 
-/// A `#[path = "…"] mod x;`: the module key it names, the files that path
-/// resolves to against Rust's bases, and the bare normalised value as a
-/// last-resort suffix when none of them is in the parsed set.
-pub(super) struct PathModule {
-    pub key: String,
-    pub candidates: Vec<String>,
-    pub suffix: String,
-}
-
 /// One `pub use path::*`.
 pub(super) struct GlobUse {
     pub file: String,
@@ -40,209 +35,169 @@ pub(super) struct GlobUse {
     pub targets: Vec<String>,
 }
 
-/// Per-file syntax facts gathered in one pass.
+/// Everything the walk observed.
 #[derive(Default)]
-pub(super) struct FileFacts {
-    /// `(file, fn-name)` for functions `pub` through their inline-mod chain.
+pub(super) struct ModuleTree {
+    /// `(file, fn-name)` for functions `pub` through their whole chain.
     pub pub_items: HashSet<(String, String)>,
-    /// `(file, parent module path, child name)` for `pub mod child;`. The
-    /// parent path matters: `pub mod outer { pub mod inner; }` implements
-    /// `outer::inner`, not a top-level `inner`.
-    pub pub_mod_links: HashSet<(String, Vec<String>, String)>,
-    /// `(module key, declaring file)` for inline `mod x { … }` blocks, so a
-    /// re-export can name a module that has no file of its own.
-    pub inline_modules: Vec<(String, String)>,
-    /// `#[path = "…"] mod x;` declarations, see `PathModule`.
-    pub path_modules: Vec<PathModule>,
+    /// Logical module key → the file implementing it.
+    pub modules: HashMap<String, String>,
+    /// Files whose module chain is `pub` all the way to a library root.
+    pub reachable_files: HashSet<String>,
     pub reexports: Vec<ReexportUse>,
     pub globs: Vec<GlobUse>,
 }
 
-/// Where the walker currently is: the file, the module path of the enclosing
-/// (possibly inline) scope, and whether that whole chain is `pub`.
+/// Where the walk currently is.
 #[derive(Clone, Copy)]
 struct Scope<'a> {
+    /// The file being walked.
     file: &'a str,
+    /// The crate root this file belongs to — module keys are prefixed with it
+    /// so two workspace crates never share a logical path.
+    root: &'a str,
+    /// Logical module path of the current (possibly inline) scope.
     mod_path: &'a [String],
+    /// Whether every `mod` from the crate root down to here is `pub` — this
+    /// decides whether the *file* is externally reachable.
     chain_is_pub: bool,
+    /// Whether the inline-module chain *within this file* is `pub`. An item
+    /// can be `pub` in its file while the file itself sits behind a private
+    /// `mod`; the two are judged separately, and combined by the caller.
+    inline_is_pub: bool,
 }
 
-/// Walk one file's items into `facts`.
-/// Operation: seeds the scope and delegates to the item walker.
-pub(super) fn collect_file_facts(file: &str, syntax: &syn::File, facts: &mut FileFacts) {
-    let base = module_path_of(file).unwrap_or_default();
-    let scope = Scope {
-        file,
-        mod_path: &base,
-        chain_is_pub: true,
+/// The walk's shared state: the parsed ASTs, the shared module resolver, the
+/// scopes already visited, and the facts gathered so far. Bundled so the
+/// traversal functions carry one context instead of five parameters.
+struct Walk<'a> {
+    asts: HashMap<&'a str, &'a syn::File>,
+    resolver: ChildPathResolver<'a>,
+    visited: HashSet<String>,
+    tree: ModuleTree,
+}
+
+/// Walk every crate's module tree.
+/// Integration: resolver setup + per-root traversal.
+pub(super) fn walk_crate_tree(parsed: &[(String, String, syn::File)]) -> ModuleTree {
+    let refs: Vec<(&str, &syn::File)> = parsed.iter().map(|(p, _, f)| (p.as_str(), f)).collect();
+    let mut walk = Walk {
+        asts: refs.iter().copied().collect(),
+        resolver: ChildPathResolver::from_parsed(&refs),
+        visited: HashSet::new(),
+        tree: ModuleTree::default(),
     };
-    walk_items(scope, &syntax.items, facts);
+    crate_roots(&refs).into_iter().for_each(|(root, exposed)| {
+        walk.file(Scope {
+            file: root,
+            root,
+            mod_path: &[],
+            chain_is_pub: exposed,
+            inline_is_pub: true,
+        });
+    });
+    walk.tree
 }
 
-/// Every item in one scope.
-/// Integration: per-item delegation.
-// qual:recursive
-fn walk_items(scope: Scope<'_>, items: &[syn::Item], facts: &mut FileFacts) {
-    items.iter().for_each(|item| walk_item(scope, item, facts));
+/// The roots to walk, each with whether its tree is externally exposed.
+/// Library roots are; binary roots are walked only so their files count as
+/// known, since nothing in a binary is nameable from outside.
+/// Operation: filter over the parsed paths, no own calls.
+fn crate_roots<'a>(refs: &ParsedRefs<'a>) -> Vec<(&'a str, bool)> {
+    refs.iter()
+        .map(|(p, _)| *p)
+        .filter_map(|p| match (is_lib_root(p), is_bin_root(p)) {
+            (true, _) => Some((p, true)),
+            (_, true) => Some((p, false)),
+            _ => None,
+        })
+        .collect()
 }
 
-/// One item: a `pub` fn is recorded, a `mod` recurses, a `pub use` is parsed.
-/// Integration: shape dispatch, each arm delegated.
-fn walk_item(scope: Scope<'_>, item: &syn::Item, facts: &mut FileFacts) {
-    match item {
-        syn::Item::Fn(f) if scope.chain_is_pub && is_pub(&f.vis) => {
-            facts
-                .pub_items
-                .insert((scope.file.to_string(), f.sig.ident.to_string()));
+impl Walk<'_> {
+    /// Walk one file: register it, then its items.
+    /// Integration: registration + item traversal.
+    // qual:recursive
+    fn file(&mut self, scope: Scope<'_>) {
+        if !self
+            .visited
+            .insert(format!("{}|{}", scope.file, scope.mod_path.join("::")))
+        {
+            return;
         }
-        syn::Item::Mod(m) => walk_module(scope, m, facts),
-        // A `pub use` inside a private module is collected too — whether it can
-        // expose anything is decided later, from the declaring file's own
-        // reachability.
-        syn::Item::Use(u) if is_pub(&u.vis) => {
-            collect_use(&u.tree, scope, &mut Vec::new(), facts);
-        }
-        _ => {}
+        register_module(scope, &mut self.tree);
+        let Some(syntax) = self.asts.get(scope.file).copied() else {
+            return;
+        };
+        self.items(scope, &syntax.items);
     }
-}
 
-/// One `mod` item: an inline block becomes an addressable module key and
-/// recurses; an out-of-line `mod x;` records a link whose visibility decides
-/// whether the implementing file stays reachable.
-/// Integration: shape dispatch + recursion.
-fn walk_module(scope: Scope<'_>, m: &syn::ItemMod, facts: &mut FileFacts) {
-    let mut nested = scope.mod_path.to_vec();
-    nested.push(m.ident.to_string());
-    let inner_scope = Scope {
-        file: scope.file,
-        mod_path: &nested,
-        chain_is_pub: scope.chain_is_pub && is_pub(&m.vis),
-    };
-    match &m.content {
-        Some((_, inner)) => {
-            record_inline_module(scope.file, &nested, facts);
-            walk_items(inner_scope, inner, facts);
+    /// The items of one scope.
+    /// Integration: per-item delegation.
+    // qual:recursive
+    fn items(&mut self, scope: Scope<'_>, items: &[syn::Item]) {
+        for item in items {
+            match item {
+                syn::Item::Fn(f) if scope.inline_is_pub && is_pub(&f.vis) => {
+                    self.tree
+                        .pub_items
+                        .insert((scope.file.to_string(), f.sig.ident.to_string()));
+                }
+                syn::Item::Mod(m) => self.module(scope, m),
+                // A `pub use` inside a private module is collected too — whether
+                // it exposes anything is decided later, from the scope's own
+                // visibility.
+                syn::Item::Use(u) if is_pub(&u.vis) => {
+                    collect_use(&u.tree, scope, &mut Vec::new(), &mut self.tree);
+                }
+                _ => {}
+            }
         }
-        // The `#[path]` alias is recorded whatever the visibility — a private
-        // module's contents can still be re-exported, and without the alias
-        // the `pub use` cannot even name the module.
-        None => {
-            record_path_alias(scope, m, facts);
-            if inner_scope.chain_is_pub {
-                facts.pub_mod_links.insert((
-                    scope.file.to_string(),
-                    scope.mod_path.to_vec(),
-                    m.ident.to_string(),
-                ));
+    }
+
+    /// One `mod` item: an inline block continues in the same file, an
+    /// out-of-line one resolves to its implementing file through the shared
+    /// resolver. Integration: shape dispatch + recursion.
+    fn module(&mut self, scope: Scope<'_>, m: &syn::ItemMod) {
+        let mut nested = scope.mod_path.to_vec();
+        nested.push(m.ident.to_string());
+        let chain_is_pub = scope.chain_is_pub && is_pub(&m.vis);
+        match &m.content {
+            Some((_, inner)) => {
+                let inner_scope = Scope {
+                    mod_path: &nested,
+                    chain_is_pub,
+                    inline_is_pub: scope.inline_is_pub && is_pub(&m.vis),
+                    ..scope
+                };
+                register_module(inner_scope, &mut self.tree);
+                self.items(inner_scope, inner);
+            }
+            None => {
+                if let Some(child) = self.resolver.resolve(scope.file, m) {
+                    self.file(Scope {
+                        file: &child,
+                        root: scope.root,
+                        mod_path: &nested,
+                        chain_is_pub,
+                        // A new file starts a fresh inline chain.
+                        inline_is_pub: true,
+                    });
+                }
             }
         }
     }
 }
 
-/// Record the module-key alias for a `#[path = "…"] mod x;`, so the module
-/// can be named even though its file does not follow the conventional layout.
-/// Operation: key build + push.
-fn record_path_alias(scope: Scope<'_>, m: &syn::ItemMod, facts: &mut FileFacts) {
-    let Some(value) = path_attr_value(&m.attrs) else {
-        return;
-    };
-    let mut nested = scope.mod_path.to_vec();
-    nested.push(m.ident.to_string());
-    let Some(key) = module_key(scope.file, &nested) else {
-        return;
-    };
-    facts.path_modules.push(PathModule {
-        key,
-        candidates: candidate_files(scope, &value),
-        suffix: normalise_path(&value),
-    });
-}
-
-/// The files a `#[path = "…"]` may denote, resolved against the bases Rust
-/// uses: the declaring file's directory, that directory plus the file's own
-/// stem (the rule for non-`mod.rs` files), and both extended by the enclosing
-/// inline-module path. Resolving beats matching by suffix: it is what Rust
-/// actually does, and it distinguishes two packages that both hold a
-/// `src/custom.rs` without excluding a legitimate cross-package target.
-/// Operation: base derivation + join, no own calls beyond the normaliser.
-fn candidate_files(scope: Scope<'_>, value: &str) -> Vec<String> {
-    let norm = scope.file.replace('\\', "/");
-    let dir = norm.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
-    let stem = norm
-        .rsplit_once('/')
-        .map(|(_, f)| f)
-        .unwrap_or(norm.as_str())
-        .trim_end_matches(".rs");
-    let inline = module_path_of(scope.file)
-        .map(|own| scope.mod_path[own.len().min(scope.mod_path.len())..].join("/"))
-        .unwrap_or_default();
-    let mut bases = vec![dir.to_string()];
-    if !matches!(stem, "lib" | "main" | "mod") {
-        bases.push(format!("{dir}/{stem}"));
-    }
-    if !inline.is_empty() {
-        bases = bases
-            .iter()
-            .flat_map(|b| [b.clone(), format!("{b}/{inline}")])
-            .collect();
-    }
-    bases
-        .iter()
-        .map(|b| normalise_path(&format!("{b}/{value}")))
-        .collect()
-}
-
-/// The `#[path = "…"]` value, normalised to a path suffix.
-///
-/// Rust resolves the attribute against the enclosing module's directory, and
-/// the rules differ between `mod.rs` and non-`mod.rs` files. Rather than
-/// emulate them — an earlier attempt got both the base directory and `..`
-/// segments wrong — the value is only lexically normalised here. The index
-/// then matches it against files of the SAME package, at a path-segment
-/// boundary, and binds only when exactly one file matches; several matches
-/// are treated as unresolvable and every candidate counts as reachable.
-/// Picking one of several would be the dangerous direction — it can leave the
-/// real file unreachable and demand deleting a working marker.
-/// Operation: attribute extraction + lexical normalisation.
-fn path_attr_value(attrs: &[syn::Attribute]) -> Option<String> {
-    let value = attrs
-        .iter()
-        .find(|a| a.path().is_ident("path"))
-        .and_then(|a| match &a.meta {
-            syn::Meta::NameValue(nv) => Some(&nv.value),
-            _ => None,
-        })
-        .and_then(|e| match e {
-            syn::Expr::Lit(l) => match &l.lit {
-                syn::Lit::Str(s) => Some(s.value()),
-                _ => None,
-            },
-            _ => None,
-        })?;
-    Some(value)
-}
-
-/// Collapse `.` and `..` lexically and drop leading separators, so the value
-/// can be suffix-matched against the normalised input paths.
-/// Operation: segment fold, no own calls.
-pub(super) fn normalise_path(value: &str) -> String {
-    let normalised = value.replace('\\', "/");
-    let mut out: Vec<&str> = Vec::new();
-    normalised.split('/').for_each(|seg| match seg {
-        "" | "." => {}
-        ".." => {
-            out.pop();
-        }
-        s => out.push(s),
-    });
-    out.join("/")
-}
-
-/// Note that `path` names an inline module living in `file`.
-/// Operation: key build + push.
-fn record_inline_module(file: &str, path: &[String], facts: &mut FileFacts) {
-    if let Some(key) = module_key(file, path) {
-        facts.inline_modules.push((key, file.to_string()));
+/// Record a module's key → file mapping and, when its chain is public, that
+/// the file is externally reachable.
+/// Operation: two inserts, no own calls.
+fn register_module(scope: Scope<'_>, tree: &mut ModuleTree) {
+    tree.modules
+        .entry(module_key(scope.root, scope.mod_path))
+        .or_insert_with(|| scope.file.to_string());
+    if scope.chain_is_pub {
+        tree.reachable_files.insert(scope.file.to_string());
     }
 }
 
@@ -251,20 +206,20 @@ fn record_inline_module(file: &str, path: &[String], facts: &mut FileFacts) {
 /// Integration: use-tree recursion accumulating the path prefix.
 // qual:recursive
 fn collect_use(
-    tree: &syn::UseTree,
+    tree_node: &syn::UseTree,
     scope: Scope<'_>,
     prefix: &mut Vec<String>,
-    facts: &mut FileFacts,
+    tree: &mut ModuleTree,
 ) {
-    match tree {
+    match tree_node {
         syn::UseTree::Path(p) => {
             prefix.push(p.ident.to_string());
-            collect_use(&p.tree, scope, prefix, facts);
+            collect_use(&p.tree, scope, prefix, tree);
             prefix.pop();
         }
         syn::UseTree::Name(n) => {
             let name = n.ident.to_string();
-            push_reexport(scope, prefix, &name, &name, facts);
+            push_reexport(scope, prefix, &name, &name, tree);
         }
         // `use hidden::entry as public_entry` publishes `public_entry` while
         // the item is still `entry` in its own module — the chain needs both.
@@ -274,18 +229,18 @@ fn collect_use(
                 prefix,
                 &r.rename.to_string(),
                 &r.ident.to_string(),
-                facts,
+                tree,
             );
         }
-        syn::UseTree::Glob(_) => facts.globs.push(GlobUse {
+        syn::UseTree::Glob(_) => tree.globs.push(GlobUse {
             file: scope.file.to_string(),
-            scope_is_pub: scope.chain_is_pub,
+            scope_is_pub: scope.inline_is_pub,
             targets: target_keys(scope, prefix),
         }),
         syn::UseTree::Group(g) => g
             .items
             .iter()
-            .for_each(|t| collect_use(t, scope, &mut prefix.clone(), facts)),
+            .for_each(|t| collect_use(t, scope, &mut prefix.clone(), tree)),
     }
 }
 
@@ -296,11 +251,11 @@ fn push_reexport(
     prefix: &[String],
     exported: &str,
     source: &str,
-    facts: &mut FileFacts,
+    tree: &mut ModuleTree,
 ) {
-    facts.reexports.push(ReexportUse {
+    tree.reexports.push(ReexportUse {
         file: scope.file.to_string(),
-        scope_is_pub: scope.chain_is_pub,
+        scope_is_pub: scope.inline_is_pub,
         targets: target_keys(scope, prefix),
         exported: exported.to_string(),
         source: source.to_string(),
@@ -311,11 +266,11 @@ fn push_reexport(
 /// are unambiguous; an unprefixed path can mean the current module's child or
 /// a crate-root item (uniform paths), so both are offered and whichever
 /// resolves wins — picking one would silently drop valid re-exports.
-/// Operation: prefix normalisation, key building delegated.
+/// Operation: candidate paths → keys.
 fn target_keys(scope: Scope<'_>, prefix: &[String]) -> Vec<String> {
     candidate_paths(scope.mod_path, prefix)
         .iter()
-        .filter_map(|p| module_key(scope.file, p))
+        .map(|p| module_key(scope.root, p))
         .collect::<HashSet<_>>()
         .into_iter()
         .collect()
@@ -341,4 +296,31 @@ fn candidate_paths(mod_path: &[String], prefix: &[String]) -> Vec<Vec<String>> {
         }
         _ => vec![local(prefix), prefix.to_vec()],
     }
+}
+
+/// A module's identity: its crate root plus its logical path, so two workspace
+/// crates with the same module names stay distinct.
+/// Operation: string join, no own calls.
+fn module_key(root: &str, path: &[String]) -> String {
+    format!("{root}|{}", path.join("::"))
+}
+
+/// Operation: suffix test, no own calls.
+fn is_lib_root(file: &str) -> bool {
+    let norm = file.replace('\\', "/");
+    norm == "src/lib.rs" || norm.ends_with("/src/lib.rs")
+}
+
+/// Operation: suffix tests, no own calls.
+fn is_bin_root(file: &str) -> bool {
+    let norm = file.replace('\\', "/");
+    norm == "src/main.rs"
+        || norm.ends_with("/src/main.rs")
+        || norm.starts_with("src/bin/")
+        || norm.contains("/src/bin/")
+}
+
+/// Operation: visibility match, no own calls.
+fn is_pub(vis: &syn::Visibility) -> bool {
+    matches!(vis, syn::Visibility::Public(_))
 }
