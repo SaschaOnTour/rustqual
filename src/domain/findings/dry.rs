@@ -1,10 +1,10 @@
 //! Typed Finding for the DRY dimension.
 //!
-//! DRY is the most heterogeneous dimension: it produces six distinct
-//! finding shapes (Duplicate, Fragment, DeadCode, Wildcard, Boilerplate,
-//! RepeatedMatch). Each variant of `DryFindingDetails` carries its own
-//! per-finding data; the wrapping `DryFinding` keeps a uniform surface
-//! for collection and rendering.
+//! DRY is the most heterogeneous dimension: it produces seven distinct
+//! finding shapes (Duplicate, Fragment, DeadCode, DeadType, Wildcard,
+//! Boilerplate, RepeatedMatch). Each variant of `DryFindingDetails` carries its
+//! own per-finding data; the wrapping `DryFinding` keeps a uniform surface for
+//! collection and rendering.
 
 use crate::domain::Finding;
 

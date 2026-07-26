@@ -1,6 +1,5 @@
-//! DRY-dimension projection: 6 sub-categories (duplicate, fragment,
-//! dead-code, wildcard, boilerplate, repeated-match) → typed
-//! `Vec<DryFinding>`.
+//! DRY-dimension projection: 7 sub-categories (duplicate, fragment, dead-code,
+//! dead-type, wildcard, boilerplate, repeated-match) → typed `Vec<DryFinding>`.
 
 use crate::adapters::analyzers::dry::boilerplate::BoilerplateFind;
 use crate::adapters::analyzers::dry::dead_code::{DeadCodeKind, DeadCodeWarning};

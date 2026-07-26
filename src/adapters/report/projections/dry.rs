@@ -56,7 +56,9 @@ pub(crate) struct WildcardRow {
     pub line: usize,
 }
 
-/// All six DRY buckets, reporter-agnostic.
+/// The DRY buckets, reporter-agnostic. Dead functions and dead types share
+/// `dead_code`: both answer "nothing refers to this", and the human-facing
+/// table tells them apart by the kind tag.
 pub(crate) struct DryBuckets {
     pub duplicate_groups: Vec<DryGroupRow>,
     pub fragment_groups: Vec<DryGroupRow>,
@@ -66,7 +68,7 @@ pub(crate) struct DryBuckets {
     pub wildcards: Vec<WildcardRow>,
 }
 
-/// Project DRY findings into the six typed buckets. Group-style
+/// Project DRY findings into the typed buckets. Group-style
 /// buckets are deduped by participant-location set so the same group
 /// only appears once even if the analyzer emitted one finding per
 /// participant.
