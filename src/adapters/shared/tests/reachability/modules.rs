@@ -282,3 +282,61 @@ fn trait_methods_are_reachable_through_their_trait() {
     assert!(reach.is_externally_reachable("src/api.rs", "run"));
     assert!(!reach.is_externally_reachable("src/api.rs", "inner"));
 }
+
+#[test]
+fn methods_of_a_reexported_type_are_reachable() {
+    // The common façade shape: a private module, its type re-exported at the
+    // crate root. The type is callable from outside, so its methods are too —
+    // but the file itself sits in no public `mod` chain, and a method's own
+    // name is not what the `pub use` publishes.
+    let parsed = parse(&[
+        ("src/lib.rs", "mod registry;\npub use registry::Registry;"),
+        (
+            "src/registry.rs",
+            "pub struct Registry; impl Registry { pub fn load() {} fn hidden() {} }",
+        ),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(reach.is_externally_reachable("src/registry.rs", "Registry"));
+    assert!(
+        reach.is_externally_reachable("src/registry.rs", "load"),
+        "a method is reachable exactly when its type is"
+    );
+    assert!(!reach.is_externally_reachable("src/registry.rs", "hidden"));
+}
+
+#[test]
+fn methods_of_an_unreachable_type_stay_unreachable() {
+    // The counterpart: no re-export, private module — the method must stay
+    // unreachable or the check stops finding anything.
+    let parsed = parse(&[
+        ("src/lib.rs", "mod registry;"),
+        (
+            "src/registry.rs",
+            "pub struct Registry; impl Registry { pub fn load() {} }",
+        ),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(!reach.is_externally_reachable("src/registry.rs", "load"));
+}
+
+#[test]
+fn methods_in_a_split_impl_find_their_owner() {
+    // An inherent impl often lives in a different file from the type — the
+    // façade shape again, one module per concern. Asking whether the owner is
+    // reachable *in the impl's file* answers no, because the type is not
+    // declared there.
+    let parsed = parse(&[
+        ("src/lib.rs", "pub mod store;\npub use store::Store;"),
+        ("src/store.rs", "mod helpers;\npub struct Store;"),
+        (
+            "src/store/helpers.rs",
+            "use super::Store; impl Store { pub fn with_fault(self) -> Self { self } }",
+        ),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(
+        reach.is_externally_reachable("src/store/helpers.rs", "with_fault"),
+        "the method's owner is reachable, even though it is declared elsewhere"
+    );
+}

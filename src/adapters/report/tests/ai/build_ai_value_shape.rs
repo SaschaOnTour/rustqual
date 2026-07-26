@@ -81,3 +81,59 @@ fn build_ai_value_skips_suppressed() {
     assert_eq!(value["findings"], 0);
     assert!(value.get("findings_by_file").is_none());
 }
+
+#[test]
+fn every_entry_has_the_same_keys() {
+    // The AI format renders each file's entries as a TOON table, and a table
+    // needs one shape: `toon-encode` falls back to a per-entry list as soon as
+    // two objects differ in their keys. That fallback is still correct output,
+    // but a consumer counting rows in the tabular form silently misses the rest
+    // — a downstream agent lost 50 of 138 findings that way. Orphan entries
+    // carry a `kind`; everything else must carry it too, empty.
+    let mut analysis = empty_analysis();
+    analysis.findings.architecture = vec![ArchitectureFinding {
+        common: Finding {
+            file: "src/a.rs".into(),
+            line: 17,
+            column: 0,
+            dimension: crate::findings::Dimension::Architecture,
+            rule_id: "architecture/call_parity/no_delegation".into(),
+            message: "m".into(),
+            severity: crate::domain::Severity::Medium,
+            suppressed: false,
+        },
+    }];
+    analysis.findings.orphan_suppressions = vec![crate::domain::findings::OrphanSuppression {
+        marker: crate::domain::findings::MarkerKind::Api,
+        file: "src/a.rs".into(),
+        line: 3,
+        dimensions: Vec::new(),
+        target: None,
+        reason: Some("r".into()),
+        kind: crate::domain::findings::OrphanKind::Stale,
+    }];
+    let value = build_ai_value(&analysis, &Config::default());
+
+    let entries = value["findings_by_file"]["src/a.rs"]
+        .as_array()
+        .expect("both entries land in one file bucket");
+    assert_eq!(entries.len(), 2);
+    let shapes: std::collections::HashSet<Vec<String>> = entries
+        .iter()
+        .map(|e| {
+            let mut keys: Vec<String> = e
+                .as_object()
+                .expect("object entry")
+                .keys()
+                .cloned()
+                .collect();
+            keys.sort();
+            keys
+        })
+        .collect();
+    assert_eq!(
+        shapes.len(),
+        1,
+        "one row shape, or the table falls back to a list: {shapes:?}"
+    );
+}

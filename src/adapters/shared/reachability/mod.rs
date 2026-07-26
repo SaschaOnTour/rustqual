@@ -47,6 +47,10 @@ pub(crate) struct ExternalReach {
     /// Files the walk never reached from any library root — no module tree
     /// claims them, so nothing can be concluded and they count as reachable.
     unknown_files: HashSet<String>,
+    /// `(file, method)` for methods whose owning type is reachable. Resolved
+    /// after the other closures, because "is the owner reachable" is the
+    /// question those answer.
+    reachable_methods: HashSet<(String, String)>,
 }
 
 impl ExternalReach {
@@ -54,7 +58,10 @@ impl ExternalReach {
     /// Integration: combines the tree, visibility and re-export facts.
     pub(crate) fn is_externally_reachable(&self, file: &str, name: &str) -> bool {
         let item = (file.to_string(), name.to_string());
-        if self.unknown_files.contains(file) || self.reexported_items.contains(&item) {
+        if self.unknown_files.contains(file)
+            || self.reexported_items.contains(&item)
+            || self.reachable_methods.contains(&item)
+        {
             return true;
         }
         let is_pub = self.pub_items.contains(&item);
@@ -76,13 +83,52 @@ pub(crate) fn compute_external_reach(parsed: &[(String, String, syn::File)]) -> 
         &tree.reachable_files,
         &glob_reexported_files,
     );
-    ExternalReach {
+    let mut reach = ExternalReach {
         unknown_files: unwalked_files(parsed, &tree),
         reachable_files: tree.reachable_files,
         pub_items: tree.pub_items,
         reexported_items,
         glob_reexported_files,
-    }
+        reachable_methods: HashSet::new(),
+    };
+    reach.reachable_methods = reachable_methods(&tree.methods, &reach);
+    reach
+}
+
+/// The methods whose owning type an outside consumer can name. Asked after the
+/// re-export closure, because a private module's type is reachable precisely
+/// when something re-exports it — and then so is every method on it.
+/// Integration: reachable-owner set, then a filter over the methods.
+fn reachable_methods(
+    methods: &[(String, String, String)],
+    reach: &ExternalReach,
+) -> HashSet<(String, String)> {
+    let owners = reachable_owner_names(reach);
+    methods
+        .iter()
+        .filter(|(_, owner, _)| owners.contains(owner.as_str()))
+        .map(|(file, _, method)| (file.clone(), method.clone()))
+        .collect()
+}
+
+/// Every type name an outside consumer can reach, without its file.
+///
+/// An inherent `impl` commonly sits in a different file from the type it is
+/// for — one module per concern, the type declared in the parent. Asking
+/// whether the owner is reachable *in the impl's file* answers no, because it
+/// is not declared there. Matching by name alone is coarser than the rest of
+/// this module and errs toward reachable, which is its stated direction: a
+/// same-named type reachable elsewhere costs a missed finding, while the
+/// file-scoped question costs a false "your marker could never work".
+/// Operation: filter over the known items, own call in the closure.
+fn reachable_owner_names(reach: &ExternalReach) -> HashSet<&str> {
+    reach
+        .pub_items
+        .iter()
+        .chain(reach.reexported_items.iter())
+        .filter(|(file, name)| reach.is_externally_reachable(file, name))
+        .map(|(_, name)| name.as_str())
+        .collect()
 }
 
 /// Files no crate-root walk ever reached — a binary-only tree, an excluded

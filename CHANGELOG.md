@@ -25,6 +25,24 @@ Bugfix release for the marker verification 1.8.0 shipped.
   documents: calling something reachable costs a missed finding, calling it
   unreachable accuses an author of writing a marker that could never work.
 
+  Two shapes needed more than the method itself. A type in a private module
+  re-exported at the crate root is callable from outside, so its methods are —
+  but the file sits in no public `mod` chain and a method's name is not what the
+  `pub use` publishes. And an inherent `impl` commonly lives in a different file
+  from its type, so asking whether the owner is reachable *in the impl's file*
+  answers no. A method is now reachable exactly when its owner is, matched by
+  name across the workspace. On a downstream workspace the class fell from 305
+  findings to 9, and those 9 check out: private-module helpers with in-crate
+  callers whose marker claims an external consumer that cannot exist.
+- **`--format ai` rendered part of its output as lists, not tables.** Orphan
+  entries carried a `kind` field the other categories did not, and `toon-encode`
+  falls back to a per-entry list as soon as two objects in an array differ in
+  their keys. Every finding was present and the header count was right, but a
+  consumer reading the tabular rows silently missed the rest — 50 of 138 in one
+  workspace, and the shape only diverges when a file has both kinds, which is
+  why it surfaced with 1.8.0's marker verification rather than before. Every
+  entry now carries the same keys.
+
 ## [1.8.0] - 2026-07-26
 
 Dead-code detection covered functions only. An unused `struct`, `enum`,
