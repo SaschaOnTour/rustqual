@@ -10,6 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Bugfix release for the marker verification 1.8.0 shipped.
 
 ### Fixed
+- **A `pub use` re-export is not a production call (TQ-003).** The call
+  collector recorded a re-exported name as production usage, which DRY-002 needs
+  — a re-exported function is not dead — but TQ-003 asks a different question:
+  does production *call* it. Treating the re-export as a call made every
+  re-exported entry point a candidate for "untested", and when the real caller
+  is a macro the tool cannot expand, the candidate became a finding. Contract
+  suites re-exported from a library crate and driven by a `run_suite!` macro hit
+  this squarely. Re-exports now live in their own set: DRY-002 and the marker
+  check still count them as usage, TQ-003 does not. A re-export inside test code
+  stays test-side, or every marker on a test-only helper would read as spent.
 - **Public methods count as externally reachable.** The reachability set was
   built from item-level declarations only, and a method is an `ImplItem`, not an
   `Item` — so every `qual:api` on a method was reported as sitting on something

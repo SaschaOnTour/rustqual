@@ -12,7 +12,7 @@ use super::split_names::{collect_split, test_scoped_visits, SplitCollector, Spli
 pub(crate) fn collect_all_calls(
     parsed: &[(String, String, syn::File)],
     cfg_test_files: &HashSet<String>,
-) -> (HashSet<String>, HashSet<String>) {
+) -> SplitNames {
     collect_split(parsed, cfg_test_files, &mut CallTargetCollector::default())
 }
 
@@ -173,7 +173,15 @@ impl<'ast> Visit<'ast> for CallTargetCollector {
         if matches!(node.vis, syn::Visibility::Inherited) {
             return;
         }
-        let target = self.names.target();
+        // A re-export is usage, not a call — it goes to its own set so the two
+        // consumers can ask their own question of it. In test context it stays
+        // with the test calls: a `pub use` inside a `#[cfg(test)]` module is
+        // test-side usage, and folding it into production would report every
+        // marker on a test-only helper as spent.
+        let target = match self.names.in_test {
+            true => &mut self.names.tests,
+            false => &mut self.names.reexported,
+        };
         // Iterative UseTree walk
         let mut stack: Vec<&syn::UseTree> = vec![&node.tree];
         while let Some(tree) = stack.pop() {

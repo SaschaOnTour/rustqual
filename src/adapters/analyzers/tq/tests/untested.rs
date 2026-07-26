@@ -252,3 +252,20 @@ fn full_call_graph_recovers_repeat_form_macro_call_edge() {
         graph.get("caller")
     );
 }
+
+#[test]
+fn a_reexport_alone_is_not_a_production_call() {
+    // `pub use suites::test_thing;` records `test_thing` as production usage so
+    // DRY-002 does not call it dead. TQ-003 asks a different question — does
+    // production *call* it — and a re-export is not a call. Treating it as one
+    // makes every re-exported entry point a candidate, and if the real caller is
+    // a macro the tool cannot expand, the candidate becomes a false "untested".
+    let declared = [make_declared("test_thing", false)];
+    let out = detect_untested_functions(
+        &declared,
+        &HashSet::new(),
+        &HashSet::new(),
+        &[] as &[DeadCodeWarning],
+    );
+    assert!(out.is_empty(), "no production call, no TQ-003: {out:?}");
+}
