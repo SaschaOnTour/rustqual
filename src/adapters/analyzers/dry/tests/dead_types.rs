@@ -211,3 +211,46 @@ fn every_declaration_kind_reaches_a_finding() {
     let kinds: HashSet<TypeItemKind> = found.iter().map(|w| w.item).collect();
     assert_eq!(kinds.len(), 6, "every kind must be reportable: {found:?}");
 }
+
+#[test]
+fn allow_dead_code_is_inherited_from_the_file() {
+    // Rust lint levels are inherited. `#![allow(dead_code)]` at the top of a
+    // file covers everything in it, and the documentation promises that
+    // `#[allow(dead_code)]` exempts a declaration from DRY-006.
+    assert!(names("#![allow(dead_code)]\nstruct Intentional;").is_empty());
+}
+
+#[test]
+fn allow_dead_code_is_inherited_from_an_enclosing_module() {
+    // The generated-code idiom: one attribute on the module, not on each item.
+    assert!(names("#[allow(dead_code)]\nmod generated { struct Generated; }").is_empty());
+}
+
+#[test]
+fn an_allow_on_a_sibling_module_does_not_leak() {
+    // The inherited context has to be restored on the way out, or one annotated
+    // module would silence the rest of the file.
+    let found = detect("#[allow(dead_code)]\nmod a { struct Kept; }\nmod b { struct Dead; }");
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].name, "Dead");
+}
+
+#[test]
+fn a_type_used_only_from_a_cfg_test_function_is_test_only() {
+    // The context switch has to happen on every attributed item, not just on
+    // modules and impl blocks — otherwise the reference counts as production
+    // use and no finding is produced at all.
+    let found = detect("pub struct Fixture;\n#[cfg(test)]\nfn helper() { let _ = Fixture; }");
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].kind, DeadTypeKind::TestOnly);
+}
+
+#[test]
+fn a_type_used_only_from_a_doc_example_is_test_only() {
+    // A doc example is code `cargo test` runs, so it is test code — the same
+    // treatment `tests/**` gets. The remedy the message names is `qual:api`.
+    let found =
+        detect("pub struct Example;\n/// ```\n/// let _ = Example;\n/// ```\npub fn docs() {}");
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].kind, DeadTypeKind::TestOnly);
+}

@@ -11,7 +11,7 @@ use std::collections::HashSet;
 
 use syn::visit::Visit;
 
-use super::has_cfg_test;
+use super::{has_cfg_test, has_test_attr};
 
 /// The two sets plus the switch between them.
 #[derive(Default)]
@@ -22,6 +22,14 @@ pub(crate) struct SplitNames {
 }
 
 impl SplitNames {
+    /// The test set, whatever the current context. Doc examples are code
+    /// `cargo test` compiles and runs, so what they name is a test reference
+    /// even though the documented item is production code.
+    /// Operation: field access, no own calls.
+    pub(crate) fn test_target(&mut self) -> &mut HashSet<String> {
+        &mut self.tests
+    }
+
     /// The set for the current context.
     /// Operation: one branch, no own calls.
     pub(crate) fn target(&mut self) -> &mut HashSet<String> {
@@ -32,13 +40,19 @@ impl SplitNames {
         }
     }
 
-    /// Enter an item that may be `#[cfg(test)]`, returning the context to
-    /// restore afterwards. Test context is sticky: an item inside an already
-    /// test-only scope stays test-only whatever its own attributes say.
-    /// Operation: attribute check + flag update, no own calls.
+    /// Enter an item that may be test-only, returning the context to restore
+    /// afterwards. Both spellings count — `#[cfg(test)]` on a module, impl or
+    /// free function, and `#[test]`-family attributes on a function — because
+    /// the switch has to happen on every attributed item: a reference from a
+    /// `#[cfg(test)] fn` that lands in the production set means a test-only
+    /// declaration produces no finding at all.
+    ///
+    /// Test context is sticky: an item inside an already test-only scope stays
+    /// test-only whatever its own attributes say.
+    /// Operation: attribute checks + flag update, no own calls.
     pub(crate) fn enter(&mut self, attrs: &[syn::Attribute]) -> bool {
         let previous = self.in_test;
-        self.in_test = previous || has_cfg_test(attrs);
+        self.in_test = previous || has_cfg_test(attrs) || has_test_attr(attrs);
         previous
     }
 

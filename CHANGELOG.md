@@ -52,11 +52,13 @@ there was nothing to verify it against.
   in a sentence keep itself alive. Format-string placeholders and doc links are
   the two ways a name hides inside text, and both now go through
   `shared/text_names.rs`.
-- **Doc tests count as uses.** A type named only inside a ``` fence in a doc
-  comment is in use — `cargo test` compiles and runs that code, and deleting the
-  type breaks the build. Doc comments reach `syn` as one `#[doc = "…"]`
-  attribute per line, so the fence is tracked across them; prose outside a fence
-  still contributes nothing but its link targets.
+- **Doc examples count as test uses.** A type named only inside a ``` fence in
+  a doc comment is in use — `cargo test` compiles and runs that code — but it is
+  *test* use, so it is reported as `type test-only` rather than silently
+  ignored. Doc comments reach `syn` as one `#[doc = "…"]` attribute per line, so
+  the fence is tracked across them. An intra-doc link stays a production
+  reference: it documents the API rather than exercising it, and prose outside a
+  fence still contributes nothing but its link targets.
 - **JSON gains a `dead_types` array.** Kept apart from `dead_code` rather than
   folded into it: a consumer reading `function_name` must not be handed a
   struct name. Human-facing output lists both in one table, told apart by the
@@ -79,6 +81,19 @@ there was nothing to verify it against.
   be noise.
 
 ### Fixed
+- **`#[allow(dead_code)]` is inherited, as Rust means it.** Both dead-code
+  checks read only a declaration's own attributes, so `#![allow(dead_code)]` at
+  the top of a file and `#[allow(dead_code)]` on a module — the generated-code
+  idiom — excused nothing. Now the lint context is tracked down the module tree
+  for DRY-002 and DRY-006 alike, so the exemption both rules document actually
+  holds. (`visit_all_files` dispatches through the trait for this, so a visitor
+  overriding `visit_file` sees a file's inner attributes.)
+- **The test-context switch happens on every attributed item.** It fired for
+  modules and `impl` blocks but not for functions, so a reference from a
+  `#[cfg(test)] fn` — or a bare `#[test] fn` — landed in the production set. A
+  declaration used only from there produced no finding at all instead of a
+  test-only one. Both spellings now switch context in the call graph and the
+  reference set.
 - **SLM missed `self` inside an inline format argument.** `format!("{self:?}")`
   is one literal to `proc_macro2`, so the token scan saw no `self` and reported
   the method as self-less. Same root cause as the DRY-006 case above, same fix:

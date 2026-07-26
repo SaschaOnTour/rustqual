@@ -1,3 +1,4 @@
+pub(crate) mod allow_scope;
 pub mod boilerplate;
 pub(crate) mod call_targets;
 pub mod dead_code;

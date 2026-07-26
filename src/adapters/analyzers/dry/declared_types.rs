@@ -9,7 +9,8 @@
 
 use syn::visit::Visit;
 
-use super::{has_allow_dead_code, has_cfg_test};
+use super::allow_scope::AllowScope;
+use super::has_cfg_test;
 use crate::adapters::shared::declared_type::{DeclaredType, TypeItemKind};
 use crate::adapters::shared::file_visitor::FileVisitor;
 
@@ -18,6 +19,7 @@ pub(crate) struct DeclaredTypeCollector {
     pub(crate) file: String,
     pub(crate) types: Vec<DeclaredType>,
     in_test: bool,
+    allow: AllowScope,
 }
 
 impl DeclaredTypeCollector {
@@ -26,6 +28,7 @@ impl DeclaredTypeCollector {
             file: String::new(),
             types: Vec::new(),
             in_test: false,
+            allow: AllowScope::default(),
         }
     }
 
@@ -38,7 +41,7 @@ impl DeclaredTypeCollector {
             file: self.file.clone(),
             line: name.span().start().line,
             is_test: self.in_test || has_cfg_test(attrs),
-            has_allow_dead_code: has_allow_dead_code(attrs),
+            has_allow_dead_code: self.allow.covers(attrs),
             is_api: false,
             is_test_helper: false,
         });
@@ -77,12 +80,19 @@ impl<'ast> Visit<'ast> for DeclaredTypeCollector {
         self.record(&node.ident, TypeItemKind::Static, &node.attrs);
     }
 
+    fn visit_file(&mut self, node: &'ast syn::File) {
+        self.allow.enter_file(&node.attrs);
+        syn::visit::visit_file(self, node);
+    }
+
     fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
         let prev_in_test = self.in_test;
+        let prev_allow = self.allow.enter(&node.attrs);
         if has_cfg_test(&node.attrs) {
             self.in_test = true;
         }
         syn::visit::visit_item_mod(self, node);
+        self.allow.leave(prev_allow);
         self.in_test = prev_in_test;
     }
 }

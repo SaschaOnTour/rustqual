@@ -85,8 +85,9 @@ fn find_test_only(
             warning(
                 d,
                 DeadTypeKind::TestOnly,
-                "only used from test code; move it to the tests, or annotate with \
-                 // qual:api (public API) or // qual:test_helper (test-only helper)",
+                "only used from test code (a doc example counts); annotate with \
+                 // qual:api if it is public API, // qual:test_helper if it serves \
+                 the tests, or move it to the tests",
             )
         })
         .collect()

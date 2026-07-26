@@ -51,11 +51,18 @@ impl TypeReferenceCollector {
             self.in_doc_fence = !self.in_doc_fence;
             return;
         }
-        let names = match self.in_doc_fence {
-            true => code_names(text),
-            false => doc_link_names(text),
-        };
-        self.target().extend(names);
+        // A doc example is test code even on a production item; an intra-doc
+        // link is documentation of the API, so it stays a production reference.
+        match self.in_doc_fence {
+            true => {
+                let names = code_names(text);
+                self.names.test_target().extend(names);
+            }
+            false => {
+                let names = doc_link_names(text);
+                self.target().extend(names);
+            }
+        }
     }
 
     /// Everything surrounding a declaration's own name: its attributes and
@@ -169,6 +176,18 @@ impl<'ast> Visit<'ast> for TypeReferenceCollector {
         self.visit_path(&node.path);
         let idents: Vec<String> = macro_tokens::all_idents(&node.tokens).collect();
         self.target().extend(idents);
+    }
+
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        let previous = self.names.enter(&node.attrs);
+        syn::visit::visit_item_fn(self, node);
+        self.names.leave(previous);
+    }
+
+    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+        let previous = self.names.enter(&node.attrs);
+        syn::visit::visit_impl_item_fn(self, node);
+        self.names.leave(previous);
     }
 
     fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {

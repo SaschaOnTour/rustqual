@@ -1323,3 +1323,32 @@ fn test_only_called_fn_is_not_uncalled() {
         "a test-only fn must not be reported as Uncalled, got {warnings:?}"
     );
 }
+
+#[test]
+fn allow_dead_code_is_inherited_by_functions_too() {
+    // DRY-002 reads the same attribute and must inherit it the same way, or the
+    // two dead-code checks would disagree about one file.
+    let cfg_test_files = HashSet::new();
+    let empty = std::collections::HashMap::new();
+    let found = detect_dead_code(
+        &parse("#![allow(dead_code)]\nfn intentional() {}"),
+        &empty,
+        &empty,
+        &cfg_test_files,
+    );
+    assert!(
+        found.is_empty(),
+        "inherited allow covers functions: {found:?}"
+    );
+
+    let in_mod = detect_dead_code(
+        &parse("#[allow(dead_code)]\nmod generated { fn generated() {} }"),
+        &empty,
+        &empty,
+        &cfg_test_files,
+    );
+    assert!(
+        in_mod.is_empty(),
+        "module-level allow covers functions: {in_mod:?}"
+    );
+}

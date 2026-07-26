@@ -174,14 +174,19 @@ fn prose_in_a_doc_comment_is_not_a_reference() {
 }
 
 #[test]
-fn a_name_used_only_in_a_doc_test_counts() {
-    // A doc test is code `cargo test` compiles and runs, so the type it names
-    // is in use — deleting it breaks the build. Doc comments arrive as one
-    // `#[doc = "…"]` attribute per line, so the fence has to be tracked across
-    // them.
-    let set =
-        refs("/// ```\n/// let x = krate::DocTested::new();\n/// ```\npub fn documented() {}");
-    assert!(set.contains("DocTested"), "doc-test code is a use: {set:?}");
+fn a_name_used_only_in_a_doc_test_is_a_test_reference() {
+    // A doc example is code `cargo test` compiles and runs, so the type it
+    // names is in use — but it is *test* use, even though the documented item
+    // is production code. Counting it as production would hide that nothing
+    // else uses the type. Doc comments arrive as one `#[doc = "…"]` attribute
+    // per line, so the fence has to be tracked across them.
+    let code = "/// ```\n/// let x = krate::DocTested::new();\n/// ```\npub fn documented() {}";
+    let (production, tests) = split_refs("src/lib.rs", code, &[]);
+    assert!(
+        tests.contains("DocTested"),
+        "doc-test code is test use: {tests:?}"
+    );
+    assert!(!production.contains("DocTested"), "not production use");
 }
 
 #[test]

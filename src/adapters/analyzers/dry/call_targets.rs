@@ -138,10 +138,7 @@ impl<'ast> Visit<'ast> for CallTargetCollector {
     }
 
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
-        // A `#[test]` fn is test context even in a production file — the
-        // attribute the shared `enter` does not know about.
-        let previous = self.names.in_test;
-        self.names.in_test = previous || super::has_test_attr(&node.attrs);
+        let previous = self.names.enter(&node.attrs);
         syn::visit::visit_item_fn(self, node);
         self.names.leave(previous);
     }

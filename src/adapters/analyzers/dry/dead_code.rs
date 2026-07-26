@@ -2,7 +2,8 @@ use std::collections::HashSet;
 
 use syn::visit::Visit;
 
-use super::{has_allow_dead_code, has_cfg_test, has_test_attr, qualify_name};
+use super::allow_scope::AllowScope;
+use super::{has_cfg_test, has_test_attr, qualify_name};
 use crate::adapters::shared::declared_function::DeclaredFunction;
 use crate::adapters::shared::file_visitor::FileVisitor;
 use crate::adapters::shared::marked_declaration::{mark_annotated, MarkerLines};
@@ -16,6 +17,7 @@ pub(crate) struct DeclaredFnCollector {
     in_test: bool,
     parent_type: Option<String>,
     is_trait_impl: bool,
+    allow: AllowScope,
 }
 
 impl DeclaredFnCollector {
@@ -26,6 +28,7 @@ impl DeclaredFnCollector {
             in_test: false,
             parent_type: None,
             is_trait_impl: false,
+            allow: AllowScope::default(),
         }
     }
 }
@@ -48,7 +51,7 @@ impl<'ast> Visit<'ast> for DeclaredFnCollector {
             is_main: name == "main",
             is_test: self.in_test || has_test_attr(&node.attrs) || has_cfg_test(&node.attrs),
             is_trait_impl: false,
-            has_allow_dead_code: has_allow_dead_code(&node.attrs),
+            has_allow_dead_code: self.allow.covers(&node.attrs),
             is_api: false,
             is_test_helper: false,
             name,
@@ -89,7 +92,7 @@ impl<'ast> Visit<'ast> for DeclaredFnCollector {
             is_main: false,
             is_test: self.in_test || has_test_attr(&node.attrs) || has_cfg_test(&node.attrs),
             is_trait_impl: self.is_trait_impl,
-            has_allow_dead_code: has_allow_dead_code(&node.attrs),
+            has_allow_dead_code: self.allow.covers(&node.attrs),
             is_api: false,
             is_test_helper: false,
             name,
@@ -117,12 +120,19 @@ impl<'ast> Visit<'ast> for DeclaredFnCollector {
         }
     }
 
+    fn visit_file(&mut self, node: &'ast syn::File) {
+        self.allow.enter_file(&node.attrs);
+        syn::visit::visit_file(self, node);
+    }
+
     fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
         let prev_in_test = self.in_test;
+        let prev_allow = self.allow.enter(&node.attrs);
         if has_cfg_test(&node.attrs) {
             self.in_test = true;
         }
         syn::visit::visit_item_mod(self, node);
+        self.allow.leave(prev_allow);
         self.in_test = prev_in_test;
     }
 }
