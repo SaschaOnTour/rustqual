@@ -118,3 +118,18 @@ fn test_self_in_macro_arg_not_flagged() {
         w.len()
     );
 }
+
+#[test]
+fn self_in_an_inline_format_arg_not_flagged() {
+    // `format!("{self:?}")` uses self just as `format!("{:?}", self)` does, but
+    // proc_macro2 lexes the whole string as ONE literal — so a token scan sees
+    // no `self` at all and the method looks self-less. Inline format arguments
+    // have been idiomatic since Rust 2021.
+    let w = detect_in(
+        "struct S { n: u8 } impl S { fn label(&self) -> String { format!(\"{self:?}\") } }",
+    );
+    assert!(
+        w.is_empty(),
+        "self interpolated into a format string is a self reference: {w:?}"
+    );
+}
