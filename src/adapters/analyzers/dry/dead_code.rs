@@ -6,6 +6,7 @@ use super::allow_scope::AllowScope;
 use super::{has_cfg_test, has_test_attr, qualify_name};
 use crate::adapters::shared::declared_function::DeclaredFunction;
 use crate::adapters::shared::file_visitor::FileVisitor;
+use crate::adapters::shared::item_shape::item_attrs;
 use crate::adapters::shared::marked_declaration::{mark_annotated, MarkerLines};
 
 // ── DeclaredFnCollector (for dead code) ─────────────────────────
@@ -125,13 +126,17 @@ impl<'ast> Visit<'ast> for DeclaredFnCollector {
         syn::visit::visit_file(self, node);
     }
 
-    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+    /// Every item goes through here, so the two scope-forming attributes are
+    /// handled once instead of on the handful of shapes that happen to need an
+    /// override: `#[cfg(test)]` on a const or a `use` scopes exactly as it does
+    /// on a function, and a lint level set on an `impl` or a function covers
+    /// what is declared inside it.
+    fn visit_item(&mut self, node: &'ast syn::Item) {
+        let attrs = item_attrs(node);
         let prev_in_test = self.in_test;
-        let prev_allow = self.allow.enter(&node.attrs);
-        if has_cfg_test(&node.attrs) {
-            self.in_test = true;
-        }
-        syn::visit::visit_item_mod(self, node);
+        let prev_allow = self.allow.enter(attrs);
+        self.in_test = prev_in_test || has_cfg_test(attrs);
+        syn::visit::visit_item(self, node);
         self.allow.leave(prev_allow);
         self.in_test = prev_in_test;
     }

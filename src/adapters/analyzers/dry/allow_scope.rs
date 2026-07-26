@@ -10,41 +10,58 @@
 //! DRY-002 (functions) and DRY-006 (types) each collect declarations with their
 //! own visitor, so the inherited context lives here rather than in either.
 
-use super::has_allow_dead_code;
+use super::dead_code_level;
 
-/// Whether `#[allow(dead_code)]` is in force, tracked down the module tree.
-#[derive(Default)]
+/// The `dead_code` lint level in force. Rust resolves levels innermost-first,
+/// so an inner `deny` really does revoke an outer `allow` — modelling the
+/// context as a one-way flag would keep suppressing what the author re-armed.
+/// Only `allow` excuses a declaration; `warn` and `deny` both mean "report it",
+/// which is what rustqual does anyway.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DeadCodeLevel {
+    Allow,
+    Report,
+}
+
+/// The level in force, tracked down the lexical scopes.
 pub(crate) struct AllowScope {
-    inherited: bool,
+    inherited: DeadCodeLevel,
+}
+
+impl Default for AllowScope {
+    fn default() -> Self {
+        Self {
+            inherited: DeadCodeLevel::Report,
+        }
+    }
 }
 
 impl AllowScope {
     /// Start a file: its inner attributes (`#![allow(dead_code)]`) apply to
     /// everything below.
-    /// Operation: attribute check, no own calls.
+    /// Operation: level lookup, own call in the argument.
     pub(crate) fn enter_file(&mut self, attrs: &[syn::Attribute]) {
-        self.inherited = has_allow_dead_code(attrs);
+        self.inherited = dead_code_level(attrs).unwrap_or(DeadCodeLevel::Report);
     }
 
-    /// Enter an item that may carry the attribute, returning the context to
-    /// restore afterwards. Inheritance is one-way: an inner scope cannot
-    /// revoke an outer `allow`.
-    /// Operation: attribute check + flag update, no own calls.
-    pub(crate) fn enter(&mut self, attrs: &[syn::Attribute]) -> bool {
+    /// Enter a scope-forming item, returning the level to restore afterwards.
+    /// An explicit level on the item wins over the inherited one.
+    /// Operation: level lookup + update, own call in the argument.
+    pub(crate) fn enter(&mut self, attrs: &[syn::Attribute]) -> DeadCodeLevel {
         let previous = self.inherited;
-        self.inherited = previous || has_allow_dead_code(attrs);
+        self.inherited = dead_code_level(attrs).unwrap_or(previous);
         previous
     }
 
-    /// Operation: flag restore, no own calls.
-    pub(crate) fn leave(&mut self, previous: bool) {
+    /// Operation: level restore, no own calls.
+    pub(crate) fn leave(&mut self, previous: DeadCodeLevel) {
         self.inherited = previous;
     }
 
-    /// Whether a declaration carrying `attrs` is excused — by its own attribute
-    /// or by one it inherits.
-    /// Operation: attribute check, no own calls.
+    /// Whether a declaration carrying `attrs` is excused — by its own level or
+    /// by the one it inherits.
+    /// Operation: level lookup, own call in the argument.
     pub(crate) fn covers(&self, attrs: &[syn::Attribute]) -> bool {
-        self.inherited || has_allow_dead_code(attrs)
+        dead_code_level(attrs).unwrap_or(self.inherited) == DeadCodeLevel::Allow
     }
 }

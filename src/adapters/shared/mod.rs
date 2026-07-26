@@ -12,7 +12,7 @@ pub mod declared_function;
 pub mod declared_type;
 pub mod file_to_module;
 pub mod file_visitor;
-pub(crate) mod item_ident;
+pub(crate) mod item_shape;
 pub mod macro_expansion;
 pub mod macro_tokens;
 pub(crate) mod marked_declaration;

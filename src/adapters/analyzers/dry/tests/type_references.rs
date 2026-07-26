@@ -237,3 +237,35 @@ fn a_name_value_attribute_still_contributes_its_value() {
         "the value expression is walked even when it is not a literal: {via_macro:?}"
     );
 }
+
+#[test]
+fn test_context_switches_on_every_item_kind() {
+    // The switch has to sit at the item dispatch, not on the handful of shapes
+    // that happened to need an override — a `#[cfg(test)]` const or struct
+    // carries references just as a function does.
+    let via_const = split_refs(
+        "src/lib.rs",
+        "pub struct Fixture;\n#[cfg(test)]\nconst CHECK: fn(Fixture) = |_| {};",
+        &[],
+    );
+    assert!(!via_const.0.contains("Fixture"), "const: {:?}", via_const.0);
+    assert!(via_const.1.contains("Fixture"));
+
+    let via_struct = split_refs(
+        "src/lib.rs",
+        "pub struct Fixture;\n#[cfg(test)]\nstruct Holder(Fixture);",
+        &[],
+    );
+    assert!(
+        !via_struct.0.contains("Fixture"),
+        "struct: {:?}",
+        via_struct.0
+    );
+
+    let via_use = split_refs(
+        "src/lib.rs",
+        "#[cfg(test)]\nuse crate::inner::Fixture;",
+        &[],
+    );
+    assert!(!via_use.0.contains("Fixture"), "use: {:?}", via_use.0);
+}

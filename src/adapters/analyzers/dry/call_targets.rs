@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use syn::visit::Visit;
 
 use super::split_names::{collect_split, SplitCollector, SplitNames};
+use crate::adapters::shared::item_shape::item_attrs;
 
 // ── Call target collection ──────────────────────────────────────
 
@@ -131,15 +132,14 @@ impl<'ast> Visit<'ast> for CallTargetCollector {
         syn::visit::visit_expr_struct(self, node);
     }
 
-    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
-        let previous = self.names.enter(&node.attrs);
-        syn::visit::visit_item_mod(self, node);
-        self.names.leave(previous);
-    }
-
-    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
-        let previous = self.names.enter(&node.attrs);
-        syn::visit::visit_item_fn(self, node);
+    /// Every item goes through here, so the two scope-forming attributes are
+    /// handled once instead of on the handful of shapes that happen to need an
+    /// override: `#[cfg(test)]` on a const or a `use` scopes exactly as it does
+    /// on a function, and a lint level set on an `impl` or a function covers
+    /// what is declared inside it.
+    fn visit_item(&mut self, node: &'ast syn::Item) {
+        let previous = self.names.enter(item_attrs(node));
+        syn::visit::visit_item(self, node);
         self.names.leave(previous);
     }
 

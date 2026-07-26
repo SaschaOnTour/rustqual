@@ -15,19 +15,16 @@ use std::collections::HashSet;
 
 use syn::visit::Visit;
 
+use super::doc_scan::{DocLine, DocScanner};
 use super::split_names::{collect_split, SplitCollector, SplitNames};
+use crate::adapters::shared::item_shape::item_attrs;
 use crate::adapters::shared::macro_tokens;
-use crate::adapters::shared::text_names::{code_names, doc_link_names, is_doc_fence};
 
 /// AST visitor collecting referenced names, split by production / test context.
 #[derive(Default)]
 pub(crate) struct TypeReferenceCollector {
     names: SplitNames,
-    /// Whether the doc lines currently arriving are inside a ``` fence. A doc
-    /// comment reaches `syn` as one `#[doc = "…"]` attribute *per line*, so the
-    /// fence can only be tracked across them. An unclosed fence would leak into
-    /// the next item — over-collection, and broken docs to begin with.
-    in_doc_fence: bool,
+    docs: DocScanner,
 }
 
 impl SplitCollector for TypeReferenceCollector {
@@ -43,25 +40,15 @@ impl TypeReferenceCollector {
         self.names.target()
     }
 
-    /// One line of a doc comment: a fence marker flips the mode, code inside a
-    /// fence contributes every name, prose contributes only its link targets.
-    /// Operation: mode dispatch, own calls hidden in the closures.
+    /// One line of a doc comment. A doc example is test code even on a
+    /// production item; an intra-doc link documents the API, so it stays a
+    /// production reference.
+    /// Integration: scanner dispatch into the matching set.
     fn absorb_doc_line(&mut self, text: &str) {
-        if is_doc_fence(text) {
-            self.in_doc_fence = !self.in_doc_fence;
-            return;
-        }
-        // A doc example is test code even on a production item; an intra-doc
-        // link is documentation of the API, so it stays a production reference.
-        match self.in_doc_fence {
-            true => {
-                let names = code_names(text);
-                self.names.test_target().extend(names);
-            }
-            false => {
-                let names = doc_link_names(text);
-                self.target().extend(names);
-            }
+        match self.docs.line(text) {
+            DocLine::Fence => {}
+            DocLine::Example(names) => self.names.test_target().extend(names),
+            DocLine::Prose(names) => self.target().extend(names),
         }
     }
 
@@ -89,9 +76,8 @@ impl TypeReferenceCollector {
     fn self_type_path(&mut self, path: &syn::Path) {
         let last = path.segments.len().saturating_sub(1);
         path.segments.iter().enumerate().for_each(|(i, seg)| {
-            if i != last {
-                self.visit_ident(&seg.ident);
-            }
+            let prefix = (i != last).then(|| seg.ident.to_string());
+            self.names.target().extend(prefix);
             self.visit_path_arguments(&seg.arguments);
         });
     }
@@ -136,14 +122,12 @@ impl<'ast> Visit<'ast> for TypeReferenceCollector {
     }
 
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
-        let previous = self.names.enter(&node.attrs);
         self.around(&node.attrs, &node.generics);
         node.trait_
             .iter()
             .for_each(|(_, path, _)| self.visit_path(path));
         self.self_type(&node.self_ty);
         node.items.iter().for_each(|i| self.visit_impl_item(i));
-        self.names.leave(previous);
     }
 
     /// A doc comment is `#[doc = "…"]` — one string per line, so what it names
@@ -178,21 +162,20 @@ impl<'ast> Visit<'ast> for TypeReferenceCollector {
         self.target().extend(idents);
     }
 
-    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
-        let previous = self.names.enter(&node.attrs);
-        syn::visit::visit_item_fn(self, node);
+    /// Every item goes through here, so the two scope-forming attributes are
+    /// handled once instead of on the handful of shapes that happen to need an
+    /// override: `#[cfg(test)]` on a const or a `use` scopes exactly as it does
+    /// on a function, and a lint level set on an `impl` or a function covers
+    /// what is declared inside it.
+    fn visit_item(&mut self, node: &'ast syn::Item) {
+        let previous = self.names.enter(item_attrs(node));
+        syn::visit::visit_item(self, node);
         self.names.leave(previous);
     }
 
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
         let previous = self.names.enter(&node.attrs);
         syn::visit::visit_impl_item_fn(self, node);
-        self.names.leave(previous);
-    }
-
-    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
-        let previous = self.names.enter(&node.attrs);
-        syn::visit::visit_item_mod(self, node);
         self.names.leave(previous);
     }
 }

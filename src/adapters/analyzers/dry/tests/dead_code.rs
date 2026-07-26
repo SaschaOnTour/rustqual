@@ -1,7 +1,5 @@
 use crate::adapters::analyzers::dry::dead_code::*;
-use crate::adapters::analyzers::dry::{
-    has_allow_dead_code, has_cfg_test, has_test_attr, qualify_name,
-};
+use crate::adapters::analyzers::dry::{has_cfg_test, has_test_attr, qualify_name};
 use crate::adapters::shared::declared_function::DeclaredFunction;
 use crate::adapters::shared::file_visitor::FileVisitor;
 use crate::config::Config;
@@ -1350,5 +1348,22 @@ fn allow_dead_code_is_inherited_by_functions_too() {
     assert!(
         in_mod.is_empty(),
         "module-level allow covers functions: {in_mod:?}"
+    );
+}
+
+#[test]
+fn allow_dead_code_is_inherited_from_an_enclosing_impl() {
+    // The common generated-code shape: one attribute on the impl block rather
+    // than one per method.
+    let empty = std::collections::HashMap::new();
+    let found = detect_dead_code(
+        &parse("struct Generated;\n#[allow(dead_code)]\nimpl Generated { fn helper() {} }"),
+        &empty,
+        &empty,
+        &HashSet::new(),
+    );
+    assert!(
+        found.iter().all(|w| w.function_name != "helper"),
+        "impl-level allow covers its methods: {found:?}"
     );
 }

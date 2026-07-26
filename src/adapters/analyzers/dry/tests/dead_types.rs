@@ -254,3 +254,20 @@ fn a_type_used_only_from_a_doc_example_is_test_only() {
     assert_eq!(found.len(), 1, "{found:?}");
     assert_eq!(found[0].kind, DeadTypeKind::TestOnly);
 }
+
+#[test]
+fn allow_dead_code_is_inherited_from_an_enclosing_function() {
+    // A lint level is in force for the whole lexical scope, so a local type in
+    // an excused function is excused too.
+    assert!(names("#[allow(dead_code)]\nfn f() { struct Local; }").is_empty());
+}
+
+#[test]
+fn an_inner_deny_overrides_an_inherited_allow() {
+    // Rust resolves lint levels innermost-first: the file-level allow does not
+    // survive a `deny` on the declaration. Modelling inheritance as a one-way
+    // flag silently kept suppressing what the author re-armed.
+    let found = detect("#![allow(dead_code)]\n#[deny(dead_code)]\nstruct MustBeUsed;");
+    assert_eq!(found.len(), 1, "the inner deny wins: {found:?}");
+    assert_eq!(found[0].name, "MustBeUsed");
+}

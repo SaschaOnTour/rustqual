@@ -13,6 +13,7 @@ use super::allow_scope::AllowScope;
 use super::has_cfg_test;
 use crate::adapters::shared::declared_type::{DeclaredType, TypeItemKind};
 use crate::adapters::shared::file_visitor::FileVisitor;
+use crate::adapters::shared::item_shape::item_attrs;
 
 /// AST visitor collecting type and constant declarations with their metadata.
 pub(crate) struct DeclaredTypeCollector {
@@ -85,13 +86,17 @@ impl<'ast> Visit<'ast> for DeclaredTypeCollector {
         syn::visit::visit_file(self, node);
     }
 
-    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+    /// Every item goes through here, so the two scope-forming attributes are
+    /// handled once instead of on the handful of shapes that happen to need an
+    /// override: `#[cfg(test)]` on a const or a `use` scopes exactly as it does
+    /// on a function, and a lint level set on an `impl` or a function covers
+    /// what is declared inside it.
+    fn visit_item(&mut self, node: &'ast syn::Item) {
+        let attrs = item_attrs(node);
         let prev_in_test = self.in_test;
-        let prev_allow = self.allow.enter(&node.attrs);
-        if has_cfg_test(&node.attrs) {
-            self.in_test = true;
-        }
-        syn::visit::visit_item_mod(self, node);
+        let prev_allow = self.allow.enter(attrs);
+        self.in_test = prev_in_test || has_cfg_test(attrs);
+        syn::visit::visit_item(self, node);
         self.allow.leave(prev_allow);
         self.in_test = prev_in_test;
     }

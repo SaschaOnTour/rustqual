@@ -350,5 +350,5 @@ pub(crate) fn scope_for_local<'a>(
 /// The declared name of an item, via the shared shape table.
 /// Trivial: delegates to `item_ident`.
 fn item_name(item: &syn::Item) -> Option<String> {
-    crate::adapters::shared::item_ident::item_ident(item).map(syn::Ident::to_string)
+    crate::adapters::shared::item_shape::item_ident(item).map(syn::Ident::to_string)
 }

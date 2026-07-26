@@ -328,7 +328,7 @@ fn module_key(root: &str, path: &[String]) -> String {
 /// a name is the shared table's answer, so this cannot forget one.
 /// Operation: shape lookup + visibility filter, own calls in the closure.
 fn public_name(item: &syn::Item) -> Option<String> {
-    super::super::item_ident::item_ident_and_vis(item)
+    super::super::item_shape::item_ident_and_vis(item)
         .filter(|(_, vis)| is_pub(vis))
         .map(|(ident, _)| ident.to_string())
 }

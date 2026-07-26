@@ -4,6 +4,7 @@ pub(crate) mod call_targets;
 pub mod dead_code;
 pub mod dead_types;
 pub(crate) mod declared_types;
+pub(crate) mod doc_scan;
 pub mod fragments;
 pub mod functions;
 pub mod match_patterns;
@@ -87,15 +88,27 @@ pub(crate) use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
 
 pub(crate) use type_references::collect_type_references;
 
-/// Check if attributes contain `#[allow(..., dead_code, ...)]`. Handles
-/// both the single-lint form (`#[allow(dead_code)]`) and the list form
-/// (`#[allow(dead_code, unused_variables)]`).
-/// Operation: attribute inspection + punctuated-path parsing.
-fn has_allow_dead_code(attrs: &[syn::Attribute]) -> bool {
-    attrs
-        .iter()
-        .filter(|a| a.path().is_ident("allow"))
-        .any(allow_contains_dead_code)
+/// The `dead_code` lint level these attributes set, or `None` when they say
+/// nothing about it and the surrounding scope decides. `warn`, `deny` and
+/// `forbid` all mean "report it" as far as this tool is concerned; what matters
+/// is that they revoke an inherited `allow`, which a plain allow-or-not flag
+/// cannot express.
+/// Operation: attribute scan by lint level, own call in the closure.
+pub(crate) fn dead_code_level(attrs: &[syn::Attribute]) -> Option<allow_scope::DeadCodeLevel> {
+    let level_of = |name: &str| match name {
+        "allow" => allow_scope::DeadCodeLevel::Allow,
+        _ => allow_scope::DeadCodeLevel::Report,
+    };
+    ["allow", "warn", "deny", "forbid"]
+        .into_iter()
+        .filter(|level| {
+            attrs
+                .iter()
+                .filter(|a| a.path().is_ident(level))
+                .any(allow_contains_dead_code)
+        })
+        .map(level_of)
+        .next_back()
 }
 
 /// True if this `#[allow(...)]` attribute's argument list contains

@@ -81,19 +81,22 @@ there was nothing to verify it against.
   be noise.
 
 ### Fixed
-- **`#[allow(dead_code)]` is inherited, as Rust means it.** Both dead-code
+- **The `dead_code` lint level is modelled as Rust defines it.** Both dead-code
   checks read only a declaration's own attributes, so `#![allow(dead_code)]` at
-  the top of a file and `#[allow(dead_code)]` on a module — the generated-code
-  idiom — excused nothing. Now the lint context is tracked down the module tree
-  for DRY-002 and DRY-006 alike, so the exemption both rules document actually
-  holds. (`visit_all_files` dispatches through the trait for this, so a visitor
-  overriding `visit_file` sees a file's inner attributes.)
-- **The test-context switch happens on every attributed item.** It fired for
-  modules and `impl` blocks but not for functions, so a reference from a
-  `#[cfg(test)] fn` — or a bare `#[test] fn` — landed in the production set. A
-  declaration used only from there produced no finding at all instead of a
-  test-only one. Both spellings now switch context in the call graph and the
-  reference set.
+  the top of a file, `#[allow(dead_code)]` on a module or an `impl` — the
+  generated-code idiom, one attribute rather than one per item — and one on an
+  enclosing function excused nothing. The level is now tracked down every
+  lexical scope for DRY-002 and DRY-006 alike, and it is a *level*, not a
+  one-way flag: an inner `#[deny(dead_code)]` revokes an inherited `allow`, as
+  it does for the compiler. (`visit_all_files` dispatches through the trait for
+  this, so a visitor overriding `visit_file` sees a file's inner attributes.)
+- **The test-context switch happens on every item.** It fired for modules,
+  `impl` blocks and functions but not for the rest, so a reference from a
+  `#[cfg(test)]` const, struct or `use` landed in the production set and a
+  declaration used only from there produced no finding at all. Both the call
+  graph and the reference set now scope at the item dispatch, where every kind
+  passes through — along with `#[test]`-family attributes, which the call graph
+  previously recognised only on free functions.
 - **SLM missed `self` inside an inline format argument.** `format!("{self:?}")`
   is one literal to `proc_macro2`, so the token scan saw no `self` and reported
   the method as self-less. Same root cause as the DRY-006 case above, same fix:
