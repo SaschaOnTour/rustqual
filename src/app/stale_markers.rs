@@ -142,21 +142,51 @@ fn marked_types<'a>(ctx: &'a MarkerContext<'a>, ambiguous: &HashSet<&str>) -> Ve
 }
 
 /// Markers a declaration claims, with the verdict for each.
-/// Operation: filter + classify, own calls hidden in the closure.
+/// Integration: nearest-owner resolution + per-owner classification.
 fn attached_orphans(
     marked: &[Marked<'_>],
     ctx: &MarkerContext<'_>,
     marker: MarkerKind,
 ) -> Vec<OrphanSuppression> {
     let lines = lines_for(ctx, marker);
+    nearest_owners(marked, lines, marker)
+        .into_iter()
+        .filter_map(|(line, m)| {
+            classify(m, ctx.reach, marker).map(|verdict| orphan(m, line, marker, verdict))
+        })
+        .collect()
+}
+
+/// One owner per marker line: the declaration closest below it.
+///
+/// The annotation window is a flat look-back, so a marker on a one-line
+/// declaration is also within reach of whatever follows it. Judging every
+/// declaration in reach would report the *further* one's verdict against a
+/// marker that is not its own — and since the two verdicts differ, that means
+/// telling the author to delete a marker that is doing its job. The marking
+/// passes are deliberately left as they are: marking one declaration too many
+/// only ever suppresses a finding.
+/// Operation: nearest-wins fold over the marked declarations.
+fn nearest_owners<'a>(
+    marked: &'a [Marked<'a>],
+    lines: &HashMap<String, HashSet<usize>>,
+    marker: MarkerKind,
+) -> Vec<(usize, &'a Marked<'a>)> {
+    let mut owners: HashMap<(&str, usize), &Marked<'_>> = HashMap::new();
     marked
         .iter()
         .filter(|m| carries(m, marker))
-        .filter_map(|m| {
-            let verdict = classify(m, ctx.reach, marker)?;
-            marker_line(lines, m.file, m.line).map(|line| orphan(m, line, marker, verdict))
-        })
-        .collect()
+        .filter_map(|m| marker_line(lines, m.file, m.line).map(|line| (m, line)))
+        .for_each(|(m, line)| {
+            let entry = owners.entry((m.file, line)).or_insert(m);
+            if m.line < entry.line {
+                *entry = m;
+            }
+        });
+    let mut out: Vec<(usize, &Marked<'_>)> =
+        owners.into_iter().map(|((_, line), m)| (line, m)).collect();
+    out.sort_by_key(|(line, m)| (m.file, *line, m.line));
+    out
 }
 
 /// Operation: marker → line index, no own calls.

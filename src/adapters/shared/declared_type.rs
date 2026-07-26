@@ -5,7 +5,7 @@
 /// What kind of declaration this is. Carried so a finding can name what it
 /// found — "struct `Foo` is never used" reads very differently from
 /// "const `MAX` is never used".
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TypeItemKind {
     Struct,
     Enum,

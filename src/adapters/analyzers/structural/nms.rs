@@ -104,7 +104,8 @@ fn is_self_mutation(expr: &syn::Expr) -> bool {
 }
 
 /// Whether the expression designates part of `self`: `self.field`,
-/// `self.a.b`, `self.field[i]`, `(self.field)`. The chain is followed to its
+/// `self.a.b`, `self.field[i]`, `(self.field)`, `(*self).field`. The chain is
+/// followed to its
 /// root, because a nested field is just as much part of `self` as a direct one
 /// — `self.inner.items.push(v)` mutates `self`, and stopping at one level
 /// reports a needless `&mut` on a method that plainly needs it.
@@ -116,6 +117,8 @@ fn is_self_target(expr: &syn::Expr) -> bool {
             syn::Expr::Field(f) => &f.base,
             syn::Expr::Index(idx) => &idx.expr,
             syn::Expr::Paren(p) => &p.expr,
+            syn::Expr::Group(g) => &g.expr,
+            syn::Expr::Unary(u) if matches!(u.op, syn::UnOp::Deref(_)) => &u.expr,
             syn::Expr::Path(p) => return p.path.is_ident("self"),
             _ => return false,
         };

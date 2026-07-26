@@ -151,3 +151,28 @@ fn a_marker_on_neither_a_function_nor_a_type_is_still_unattached() {
         "must name what it could be sitting on: {reason}"
     );
 }
+
+#[test]
+fn a_marker_belongs_to_the_nearest_declaration() {
+    // The annotation window is a flat look-back, so a marker on a short type
+    // can also fall within reach of the next declaration below it. Judging both
+    // lets the further one's verdict be reported against a marker that is not
+    // its own: here `helper` is called by production, and reporting the marker
+    // as spent would tell the author to delete a working `qual:api` on `Exposed`.
+    let out = crate::app::stale_markers::detect_stale_marker_orphans(&MarkerContext {
+        declared_fns: &[declared("helper", 4, true, false)],
+        declared_types: &[declared_type("Exposed", 2, true, false)],
+        prod_calls: &names(&["helper"]),
+        prod_refs: &HashSet::new(),
+        api_lines: &marker_lines(&[1]),
+        test_helper_lines: &HashMap::new(),
+        reach: &reach_of(&[(
+            "src/lib.rs",
+            "pub struct Exposed; pub fn helper() -> u8 { 1 }",
+        )]),
+    });
+    assert!(
+        out.is_empty(),
+        "the marker belongs to `Exposed` two lines below it, not to `helper`: {out:?}"
+    );
+}

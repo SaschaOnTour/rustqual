@@ -9,10 +9,17 @@ use std::collections::HashSet;
 
 use crate::adapters::analyzers::dry::collect_type_references;
 
-fn refs(code: &str) -> HashSet<String> {
+/// `(production, test)` reference sets for one file at `path`, with `path`
+/// itself optionally counted as a test file.
+fn split_refs(path: &str, code: &str, test_files: &[&str]) -> (HashSet<String>, HashSet<String>) {
     let syntax = syn::parse_file(code).expect("fixture must parse");
-    let parsed = vec![("src/lib.rs".to_string(), code.to_string(), syntax)];
-    collect_type_references(&parsed, &HashSet::new()).0
+    let parsed = vec![(path.to_string(), code.to_string(), syntax)];
+    let cfg_test: HashSet<String> = test_files.iter().map(|f| f.to_string()).collect();
+    collect_type_references(&parsed, &cfg_test)
+}
+
+fn refs(code: &str) -> HashSet<String> {
+    split_refs("src/lib.rs", code, &[]).0
 }
 
 #[test]
@@ -106,9 +113,7 @@ fn test_and_production_references_are_kept_apart() {
     // different finding from "used nowhere".
     let code = "fn prod() { let _ = Used::new(); }\n\
                 #[cfg(test)]\nmod tests { fn t() { let _ = OnlyInTests::new(); } }";
-    let syntax = syn::parse_file(code).expect("fixture must parse");
-    let parsed = vec![("src/lib.rs".to_string(), code.to_string(), syntax)];
-    let (production, tests) = collect_type_references(&parsed, &HashSet::new());
+    let (production, tests) = split_refs("src/lib.rs", code, &[]);
     assert!(production.contains("Used") && !production.contains("OnlyInTests"));
     assert!(tests.contains("OnlyInTests"));
 }
@@ -116,10 +121,7 @@ fn test_and_production_references_are_kept_apart() {
 #[test]
 fn a_whole_test_file_contributes_only_test_references() {
     let code = "fn helper() { let _ = Fixture::new(); }";
-    let syntax = syn::parse_file(code).expect("fixture must parse");
-    let parsed = vec![("tests/it.rs".to_string(), code.to_string(), syntax)];
-    let cfg_test: HashSet<String> = ["tests/it.rs".to_string()].into_iter().collect();
-    let (production, tests) = collect_type_references(&parsed, &cfg_test);
+    let (production, tests) = split_refs("tests/it.rs", code, &["tests/it.rs"]);
     assert!(!production.contains("Fixture"));
     assert!(tests.contains("Fixture"));
 }
@@ -169,4 +171,50 @@ fn prose_in_a_doc_comment_is_not_a_reference() {
         !set.contains("Config") && !set.contains("Parser"),
         "{set:?}"
     );
+}
+
+#[test]
+fn a_name_used_only_in_a_doc_test_counts() {
+    // A doc test is code `cargo test` compiles and runs, so the type it names
+    // is in use — deleting it breaks the build. Doc comments arrive as one
+    // `#[doc = "…"]` attribute per line, so the fence has to be tracked across
+    // them.
+    let set =
+        refs("/// ```\n/// let x = krate::DocTested::new();\n/// ```\npub fn documented() {}");
+    assert!(set.contains("DocTested"), "doc-test code is a use: {set:?}");
+}
+
+#[test]
+fn prose_outside_a_doc_fence_is_still_not_a_reference() {
+    // The fence is what separates code from prose; without it, any type named
+    // in a sentence would keep itself alive.
+    let set = refs("/// Builds a DocTested from a Parser.\npub fn documented() {}");
+    assert!(
+        !set.contains("DocTested") && !set.contains("Parser"),
+        "{set:?}"
+    );
+}
+
+#[test]
+fn a_use_path_counts_as_a_reference() {
+    // Load-bearing and easy to remove by accident: it works only because syn's
+    // default `visit_item_use` walk feeds the path idents to `visit_ident`. A
+    // "don't count imports" cleanup would turn every re-exported facade type
+    // into a finding.
+    assert!(refs("use crate::inner::Facade;").contains("Facade"));
+    assert!(refs("pub use crate::inner::Facade;").contains("Facade"));
+}
+
+#[test]
+fn test_context_stays_sticky_through_nested_modules() {
+    // A reference from a helper module nested inside `#[cfg(test)] mod` must
+    // stay a test reference. If stickiness regressed, those references would
+    // count as production and silently suppress every test-only finding.
+    let code = "#[cfg(test)]\nmod tests { mod helpers { fn f() { let _ = Fixture; } } }";
+    let (production, tests) = split_refs("src/lib.rs", code, &[]);
+    assert!(
+        !production.contains("Fixture"),
+        "nested test helper is test code"
+    );
+    assert!(tests.contains("Fixture"));
 }

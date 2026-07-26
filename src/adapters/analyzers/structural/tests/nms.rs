@@ -238,3 +238,13 @@ fn a_genuinely_read_only_method_is_still_reported() {
     assert_eq!(w.len(), 1, "read-only &mut self is still needless: {w:?}");
     assert!(matches!(w[0].kind, StructuralWarningKind::NeedlessMutSelf));
 }
+
+#[test]
+fn mutation_through_an_explicit_deref_counts() {
+    // `(*self).items.push(v)` is the same mutation as `self.items.push(v)`;
+    // the deref is a shape the chain walk has to see through.
+    let w = detect_in(
+        "struct S { items: Vec<u8> } impl S { fn add(&mut self, v: u8) { (*self).items.push(v); } }",
+    );
+    assert!(w.is_empty(), "explicit deref still mutates self: {w:?}");
+}

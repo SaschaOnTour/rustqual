@@ -17,12 +17,17 @@ use syn::visit::Visit;
 
 use super::split_names::{collect_split, SplitCollector, SplitNames};
 use crate::adapters::shared::macro_tokens;
-use crate::adapters::shared::text_names::doc_link_names;
+use crate::adapters::shared::text_names::{code_names, doc_link_names, is_doc_fence};
 
 /// AST visitor collecting referenced names, split by production / test context.
 #[derive(Default)]
 pub(crate) struct TypeReferenceCollector {
     names: SplitNames,
+    /// Whether the doc lines currently arriving are inside a ``` fence. A doc
+    /// comment reaches `syn` as one `#[doc = "…"]` attribute *per line*, so the
+    /// fence can only be tracked across them. An unclosed fence would leak into
+    /// the next item — over-collection, and broken docs to begin with.
+    in_doc_fence: bool,
 }
 
 impl SplitCollector for TypeReferenceCollector {
@@ -36,6 +41,21 @@ impl TypeReferenceCollector {
     /// Trivial: delegates to the shared split.
     fn target(&mut self) -> &mut HashSet<String> {
         self.names.target()
+    }
+
+    /// One line of a doc comment: a fence marker flips the mode, code inside a
+    /// fence contributes every name, prose contributes only its link targets.
+    /// Operation: mode dispatch, own calls hidden in the closures.
+    fn absorb_doc_line(&mut self, text: &str) {
+        if is_doc_fence(text) {
+            self.in_doc_fence = !self.in_doc_fence;
+            return;
+        }
+        let names = match self.in_doc_fence {
+            true => code_names(text),
+            false => doc_link_names(text),
+        };
+        self.target().extend(names);
     }
 
     /// Everything surrounding a declaration's own name: its attributes and
@@ -119,13 +139,16 @@ impl<'ast> Visit<'ast> for TypeReferenceCollector {
         self.names.leave(previous);
     }
 
-    /// A doc comment is `#[doc = "…"]` — one string, so an intra-doc link like
-    /// `[`MAX`]` names an item that no lexer ever turns into an identifier.
-    /// Deleting the target breaks the documentation, so the link counts.
+    /// A doc comment is `#[doc = "…"]` — one string per line, so what it names
+    /// is invisible to any walk over tokens or the AST. Two things in there are
+    /// real references: an intra-doc link, whose target must exist for the docs
+    /// to build, and the body of a ``` fence, which is code `cargo test`
+    /// compiles and runs. Prose is neither.
     fn visit_meta_name_value(&mut self, node: &'ast syn::MetaNameValue) {
         self.visit_path(&node.path);
-        let linked = doc_link_targets(node);
-        self.target().extend(linked);
+        let line = doc_text(node);
+        line.into_iter()
+            .for_each(|text| self.absorb_doc_line(&text));
     }
 
     /// An attribute's arguments are an opaque token stream too, so
@@ -152,17 +175,17 @@ impl<'ast> Visit<'ast> for TypeReferenceCollector {
     }
 }
 
-/// The items a `#[doc = "…"]` attribute links to; empty for any other
-/// name-value attribute.
-/// Operation: shape match + link extraction, own call in the arm.
-fn doc_link_targets(node: &syn::MetaNameValue) -> Vec<String> {
+/// The text of a `#[doc = "…"]` attribute; `None` for any other name-value
+/// attribute.
+/// Operation: shape match, no own calls.
+fn doc_text(node: &syn::MetaNameValue) -> Option<String> {
     let is_doc = node.path.is_ident("doc");
     match (&node.value, is_doc) {
         (syn::Expr::Lit(lit), true) => match &lit.lit {
-            syn::Lit::Str(s) => doc_link_names(&s.value()),
-            _ => Vec::new(),
+            syn::Lit::Str(s) => Some(s.value()),
+            _ => None,
         },
-        _ => Vec::new(),
+        _ => None,
     }
 }
 

@@ -52,6 +52,11 @@ there was nothing to verify it against.
   in a sentence keep itself alive. Format-string placeholders and doc links are
   the two ways a name hides inside text, and both now go through
   `shared/text_names.rs`.
+- **Doc tests count as uses.** A type named only inside a ``` fence in a doc
+  comment is in use — `cargo test` compiles and runs that code, and deleting the
+  type breaks the build. Doc comments reach `syn` as one `#[doc = "…"]`
+  attribute per line, so the fence is tracked across them; prose outside a fence
+  still contributes nothing but its link targets.
 - **JSON gains a `dead_types` array.** Kept apart from `dead_code` rather than
   folded into it: a consumer reading `function_name` must not be handed a
   struct name. Human-facing output lists both in one table, told apart by the

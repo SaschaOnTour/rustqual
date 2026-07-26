@@ -75,6 +75,21 @@ fn link_destination(rest: &[char]) -> Vec<String> {
     ident_runs(&rest[2..end])
 }
 
+/// Every identifier-shaped run in a line of code. Used for the inside of a doc
+/// test's ``` fence, where the text really is code that `cargo test` compiles —
+/// unlike prose, where a name is only a mention.
+/// Operation: character collection + run scan, own call at the end.
+pub(crate) fn code_names(text: &str) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    ident_runs(&chars)
+}
+
+/// Whether a doc line opens or closes a code fence.
+/// Operation: prefix test, no own calls.
+pub(crate) fn is_doc_fence(text: &str) -> bool {
+    text.trim_start().starts_with("```")
+}
+
 /// Identifier-shaped runs: start with a letter or `_`, continue with letters,
 /// digits or `_`.
 /// Operation: run scan, no own calls.

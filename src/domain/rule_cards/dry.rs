@@ -54,7 +54,10 @@ pub(super) const CARDS: &[RuleCard] = &[
         suppress: "// qual:api (public API) or // qual:test_helper — DRY-006 \
             is deliberately NOT suppressible via qual:allow(dry, …), matching \
             DRY-002.",
-        config: "[duplicates] detect_dead_types (default true).",
+        config: "[duplicates] detect_dead_types (default true). A file rustqual \
+            cannot parse is dropped from the analysis, so anything used only \
+            there reads as unused — check stderr for parse warnings before \
+            acting on a surprising batch of findings.",
     },
     RuleCard {
         id: "DRY-003",

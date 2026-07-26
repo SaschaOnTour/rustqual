@@ -92,6 +92,13 @@ honoured exactly as rustc honours it.
 Traits are out of scope: every `impl Trait for X` names the trait, so a trait
 with one implementation would always look used.
 
+Two limits worth knowing. A file rustqual cannot parse is dropped from the
+analysis, so anything used only there reads as unused — that affects every
+dimension, but types are numerous enough that it shows up here first, so check
+stderr for parse warnings before acting on a surprising batch of findings. And
+code generated at build time (`include!(concat!(env!("OUT_DIR"), …))`) is not in
+the `.rs` set at all; mark what it consumes with `// qual:api`.
+
 ## Code fragments and repeated matches
 
 `DRY-003` finds ≥6-line blocks repeated across functions — usually setup boilerplate that should be a helper, or assertion patterns that should be a test utility.

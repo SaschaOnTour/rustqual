@@ -136,9 +136,10 @@ fn every_kind_carries_its_own_word_in_the_suggestion() {
     // The message has to name what it found — "const `MAX` is never used"
     // reads very differently from "struct `Foo` is never used".
     let found = detect("struct S; const C: u8 = 1;");
-    let words: Vec<&str> = found.iter().map(|w| w.item.label()).collect();
-    assert_eq!(words, vec!["struct", "const"]);
-    assert!(found[0].suggestion.contains("struct"));
+    let words: HashSet<&str> = found.iter().map(|w| w.item.label()).collect();
+    assert_eq!(words, ["struct", "const"].into_iter().collect());
+    let struct_finding = found.iter().find(|w| w.name == "S").expect("S reported");
+    assert!(struct_finding.suggestion.contains("struct `S`"));
 }
 
 #[test]
@@ -156,4 +157,57 @@ fn a_constant_used_only_through_an_inline_format_arg_is_not_reported() {
     // only as `format!("{PREFIX}…")`.
     let code = "const PREFIX: &str = \"x\";\nfn f(p: u8) -> String { format!(\"{PREFIX}{p}\") }";
     assert!(names(code).is_empty(), "{:?}", detect(code));
+}
+
+#[test]
+fn a_declaration_in_a_test_file_is_not_reported() {
+    // The whole-file exemption, which the `#[cfg(test)] mod` case does not
+    // exercise — it runs through a different flag. Without it, every fixture
+    // struct in every `tests/**.rs` of every project would be a finding.
+    let code = "pub struct Fixture; fn build() -> Fixture { Fixture }";
+    let syntax = syn::parse_file(code).expect("fixture must parse");
+    let parsed = vec![("tests/it.rs".to_string(), code.to_string(), syntax)];
+    let cfg_test: HashSet<String> = ["tests/it.rs".to_string()].into_iter().collect();
+    let found = detect_dead_types(&parsed, &Markers::new(), &Markers::new(), &cfg_test);
+    assert!(
+        found.is_empty(),
+        "test-file declarations are test code: {found:?}"
+    );
+}
+
+#[test]
+fn a_production_type_used_only_from_a_test_file_is_test_only() {
+    // The counterpart: the reference set splits by file too, not just by
+    // `#[cfg(test)]` blocks.
+    let lib = "pub struct Fixture;";
+    let test = "fn build() -> Fixture { Fixture }";
+    let parsed = vec![
+        (
+            "src/lib.rs".to_string(),
+            lib.to_string(),
+            syn::parse_file(lib).expect("parse"),
+        ),
+        (
+            "tests/it.rs".to_string(),
+            test.to_string(),
+            syn::parse_file(test).expect("parse"),
+        ),
+    ];
+    let cfg_test: HashSet<String> = ["tests/it.rs".to_string()].into_iter().collect();
+    let found = detect_dead_types(&parsed, &Markers::new(), &Markers::new(), &cfg_test);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].kind, DeadTypeKind::TestOnly);
+}
+
+#[test]
+fn every_declaration_kind_reaches_a_finding() {
+    // `declared_types` proves all six kinds are collected; each also has its own
+    // self-name-skip in the reference collector, so each needs to be seen
+    // through the whole detector at least once.
+    let found = detect(
+        "struct S; enum E {} union U { a: u8 } type A = u8; \
+         const C: u8 = 1; static T: u8 = 1;",
+    );
+    let kinds: HashSet<TypeItemKind> = found.iter().map(|w| w.item).collect();
+    assert_eq!(kinds.len(), 6, "every kind must be reportable: {found:?}");
 }
