@@ -213,19 +213,18 @@ pub(crate) fn collect_test_helper_lines(
     )
 }
 
-/// Shared implementation for marker-line collectors that produce a
-/// `HashSet<usize>` per file. Applies the contiguous `//`-block
-/// end-shift so multi-line rationales preceding a marker still match
-/// items within `ANNOTATION_WINDOW` of the block's last line.
-/// Operation: collect raw marker lines, then map each to its block-end.
-/// Lines strictly *inside* a multi-line string literal. Test fixtures embed
-/// rustqual's own markers as data (`let code = r#"… // qual:api …"#;`), and a
-/// raw line scan would read those as annotations on the enclosing file —
-/// phantom markers, and once markers are verified, phantom findings.
+/// Where every string literal sits, so marker text *inside* one is not read as
+/// an annotation. Test fixtures embed rustqual's own markers as data
+/// (`let code = r#"… // qual:api …"#;`), and a raw line scan reads those as
+/// annotations on the enclosing file — phantom markers, and once markers are
+/// verified, phantom findings.
 ///
-/// Only the interior counts: the opening and closing lines carry real code,
-/// so a marker sharing a line with a literal is still collected.
-/// Integration: literal-span collection + interior expansion.
+/// Spans carry columns, not just lines: a multi-line literal's opening and
+/// closing lines hold literal text *and* real source, so containment is decided
+/// at the marker's own start column. That boundary is the whole point — a
+/// marker only counts when it starts its line, so the one way a marker-looking
+/// line can sit inside a literal is fixture content on such a line.
+/// Operation: one `syn` walk, no own calls.
 fn literal_spans(syntax: &syn::File) -> LiteralSpans {
     let mut collector = LiteralSpans::default();
     syn::visit::Visit::visit_file(&mut collector, syntax);
@@ -297,6 +296,12 @@ impl<'ast> syn::visit::Visit<'ast> for LiteralSpans {
     }
 }
 
+/// Shared implementation for marker-line collectors that produce a
+/// `HashSet<usize>` per file. Applies the contiguous `//`-block end-shift so
+/// multi-line rationales preceding a marker still match items within
+/// `ANNOTATION_WINDOW` of the block's last line, and drops markers that start
+/// inside a string literal (see [`literal_spans`]).
+/// Operation: collect raw marker lines, then map each to its block-end.
 fn collect_marker_lines<F>(
     parsed: &[(String, String, syn::File)],
     is_marker: F,
