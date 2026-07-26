@@ -115,23 +115,26 @@ fn walk_module(scope: Scope<'_>, m: &syn::ItemMod, facts: &mut FileFacts) {
             record_inline_module(scope.file, &nested, facts);
             walk_items(inner_scope, inner, facts);
         }
-        None if inner_scope.chain_is_pub => {
-            record_out_of_line_module(scope, m, facts);
+        // The `#[path]` alias is recorded whatever the visibility — a private
+        // module's contents can still be re-exported, and without the alias
+        // the `pub use` cannot even name the module.
+        None => {
+            record_path_alias(scope, m, facts);
+            if inner_scope.chain_is_pub {
+                facts.pub_mod_links.insert((
+                    scope.file.to_string(),
+                    scope.mod_path.to_vec(),
+                    m.ident.to_string(),
+                ));
+            }
         }
-        None => {}
     }
 }
 
-/// Record a `pub mod child;` link plus, when the module carries a
-/// `#[path = "…"]`, the file it really lives in — otherwise the link looks
-/// for the conventional filename and a public module reads as unreachable.
-/// Integration: link insert + optional alias.
-fn record_out_of_line_module(scope: Scope<'_>, m: &syn::ItemMod, facts: &mut FileFacts) {
-    facts.pub_mod_links.insert((
-        scope.file.to_string(),
-        scope.mod_path.to_vec(),
-        m.ident.to_string(),
-    ));
+/// Record the module-key alias for a `#[path = "…"] mod x;`, so the module
+/// can be named even though its file does not follow the conventional layout.
+/// Operation: key build + push.
+fn record_path_alias(scope: Scope<'_>, m: &syn::ItemMod, facts: &mut FileFacts) {
     if let Some(suffix) = path_attr_target(&m.attrs) {
         let mut nested = scope.mod_path.to_vec();
         nested.push(m.ident.to_string());
@@ -145,11 +148,13 @@ fn record_out_of_line_module(scope: Scope<'_>, m: &syn::ItemMod, facts: &mut Fil
 ///
 /// Rust resolves the attribute against the enclosing module's directory, and
 /// the rules differ between `mod.rs` and non-`mod.rs` files. Rather than
-/// emulate them — the previous attempt got both the base directory and `..`
-/// segments wrong — the value is only lexically normalised here; the index
-/// then matches any parsed file ending with it. Over-matching is the safe
-/// direction: it can only make a module *more* reachable, never invent an
-/// "unreachable" that demands deleting a working marker.
+/// emulate them — an earlier attempt got both the base directory and `..`
+/// segments wrong — the value is only lexically normalised here. The index
+/// then matches it against files of the SAME package, at a path-segment
+/// boundary, and binds only when exactly one file matches; several matches
+/// are treated as unresolvable and every candidate counts as reachable.
+/// Picking one of several would be the dangerous direction — it can leave the
+/// real file unreachable and demand deleting a working marker.
 /// Operation: attribute extraction + lexical normalisation.
 fn path_attr_target(attrs: &[syn::Attribute]) -> Option<String> {
     let value = attrs

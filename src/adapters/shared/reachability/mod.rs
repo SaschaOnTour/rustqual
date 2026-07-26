@@ -33,7 +33,7 @@ mod paths;
 use std::collections::{HashMap, HashSet};
 
 use collect::{collect_file_facts, FileFacts, GlobUse, ReexportUse};
-use paths::{is_lib_root, module_key, module_path_of};
+use paths::{is_lib_root, module_key, module_path_of, package_of};
 
 /// Which items a consumer outside the crate can name.
 pub(crate) struct ExternalReach {
@@ -81,24 +81,71 @@ pub(crate) fn compute_external_reach(parsed: &[(String, String, syn::File)]) -> 
         &reachable_files,
         &glob_reexported_files,
     );
+    let unknown_files = unrecognised_files(parsed, &facts);
     ExternalReach {
         reachable_files,
         pub_items: facts.pub_items,
         reexported_items,
         glob_reexported_files,
-        unknown_files: unrecognised_files(parsed),
+        unknown_files,
     }
 }
 
 /// Files whose layout the derivation does not understand — treated as
-/// reachable, so an odd layout never manufactures a finding.
-/// Operation: filter over the parsed set.
-fn unrecognised_files(parsed: &[(String, String, syn::File)]) -> HashSet<String> {
-    parsed
+/// reachable, so an odd layout never manufactures a finding. Includes the
+/// candidates of an ambiguous `#[path]`, where binding one of several files
+/// could leave the real one looking private.
+/// Integration: layout filter + ambiguous `#[path]` candidates.
+fn unrecognised_files(
+    parsed: &[(String, String, syn::File)],
+    facts: &FileFacts,
+) -> HashSet<String> {
+    let mut out: HashSet<String> = parsed
         .iter()
         .map(|(f, _, _)| f.clone())
         .filter(|f| module_path_of(f).is_none())
-        .collect()
+        .collect();
+    out.extend(resolve_path_modules(parsed, facts).1);
+    out
+}
+
+/// Resolve every `#[path = "…"] mod x;` to `(bindings, ambiguous candidates)`.
+///
+/// A candidate must live in the **same package** and match the declared suffix
+/// at a path-segment boundary (`api.rs` must not match `myapi.rs`). Exactly one
+/// match binds the module key; several are left unbound and returned as
+/// ambiguous, because picking one could leave the real file unreachable — the
+/// direction that demands deleting a working marker.
+/// Integration: per-attribute candidate search.
+fn resolve_path_modules(
+    parsed: &[(String, String, syn::File)],
+    facts: &FileFacts,
+) -> (Vec<(String, String)>, HashSet<String>) {
+    let mut bindings = Vec::new();
+    let mut ambiguous = HashSet::new();
+    facts.path_modules.iter().for_each(|(key, suffix)| {
+        let package = key.split_once('|').map(|(p, _)| p).unwrap_or_default();
+        let candidates: Vec<String> = parsed
+            .iter()
+            .map(|(f, _, _)| f)
+            .filter(|f| package_of(f).as_deref() == Some(package))
+            .filter(|f| suffix_matches(f, suffix))
+            .cloned()
+            .collect();
+        match candidates.len() {
+            1 => bindings.push((key.clone(), candidates[0].clone())),
+            0 => {}
+            _ => ambiguous.extend(candidates),
+        }
+    });
+    (bindings, ambiguous)
+}
+
+/// True when `file` ends with `suffix` at a path-segment boundary.
+/// Operation: string comparison, no own calls.
+fn suffix_matches(file: &str, suffix: &str) -> bool {
+    let norm = file.replace('\\', "/");
+    norm == suffix || norm.ends_with(&format!("/{suffix}"))
 }
 
 /// Map module key → the file holding that module, for files and inline blocks.
@@ -119,17 +166,12 @@ fn module_index(
     facts.inline_modules.iter().for_each(|(key, file)| {
         index.entry(key.clone()).or_insert_with(|| file.clone());
     });
-    // `#[path]` targets: match any parsed file ending with the declared
-    // suffix. Deliberately loose — see `collect::path_attr_target`.
-    facts.path_modules.iter().for_each(|(key, suffix)| {
-        if let Some(file) = parsed
-            .iter()
-            .map(|(f, _, _)| f)
-            .find(|f| f.replace('\\', "/").ends_with(suffix.as_str()))
-        {
-            index.insert(key.clone(), file.clone());
-        }
-    });
+    resolve_path_modules(parsed, facts)
+        .0
+        .into_iter()
+        .for_each(|(key, file)| {
+            index.insert(key, file);
+        });
     index
 }
 

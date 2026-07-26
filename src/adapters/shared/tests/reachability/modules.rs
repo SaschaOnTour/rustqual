@@ -232,3 +232,59 @@ fn path_attribute_with_parent_segments_resolves() {
         "a #[path] with parent segments must still resolve"
     );
 }
+
+#[test]
+fn path_attribute_on_a_private_module_still_resolves_for_reexports() {
+    // The module is private, so no public edge is recorded — but a `pub use`
+    // can still expose its contents. Recording the alias only for public
+    // chains leaves the re-export unable to name the module at all.
+    let parsed = parse(&[
+        (
+            "src/lib.rs",
+            "#[path = \"custom.rs\"]\nmod hidden;\npub use hidden::entry;",
+        ),
+        ("src/custom.rs", "pub fn entry() {}"),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(
+        reach.is_externally_reachable("src/custom.rs", "entry"),
+        "a re-export out of a private #[path] module is public API"
+    );
+}
+
+#[test]
+fn path_attribute_binds_within_its_own_package() {
+    // Two crates both contain `src/custom.rs`. Taking the first suffix match
+    // across the whole workspace can bind crate B's module to crate A's file,
+    // leaving B's real file unreachable — a demand to delete a working marker.
+    let parsed = parse(&[
+        ("crates/a/src/lib.rs", "pub fn unrelated() {}"),
+        ("crates/a/src/custom.rs", "pub fn from_a() {}"),
+        (
+            "crates/b/src/lib.rs",
+            "#[path = \"custom.rs\"]\npub mod api;",
+        ),
+        ("crates/b/src/custom.rs", "pub fn from_b() {}"),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(
+        reach.is_externally_reachable("crates/b/src/custom.rs", "from_b"),
+        "the #[path] module must bind to its own package's file"
+    );
+}
+
+#[test]
+fn path_suffix_matching_respects_segment_boundaries() {
+    // `api.rs` must not match `myapi.rs`; combined with a single-match pick
+    // that would silently bind the wrong file.
+    let parsed = parse(&[
+        ("src/lib.rs", "#[path = \"api.rs\"]\npub mod api;"),
+        ("src/myapi.rs", "pub fn wrong() {}"),
+        ("src/api.rs", "pub fn right() {}"),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(
+        reach.is_externally_reachable("src/api.rs", "right"),
+        "the exact segment match wins"
+    );
+}
