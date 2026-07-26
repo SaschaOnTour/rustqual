@@ -149,3 +149,24 @@ fn a_positional_placeholder_contributes_nothing() {
     let set = refs(r#"fn f() { println!("{0} {:?}", x); }"#);
     assert!(!set.contains("0"));
 }
+
+#[test]
+fn a_name_in_an_intra_doc_link_counts() {
+    // `/// see [`MAX`]` is a real reference: deleting `MAX` breaks the link and
+    // rustdoc warns about it. Only bracketed link targets count — harvesting
+    // every word of prose would let any type whose name appears in a sentence
+    // keep itself alive.
+    let set = refs("/// See [`MAX`] and [Config] and [the docs](Parser).\npub fn f() {}");
+    assert!(set.contains("MAX"), "code-span link target: {set:?}");
+    assert!(set.contains("Config"), "plain link target: {set:?}");
+    assert!(set.contains("Parser"), "link with text: {set:?}");
+}
+
+#[test]
+fn prose_in_a_doc_comment_is_not_a_reference() {
+    let set = refs("/// This parses a Config from the Parser.\npub fn f() {}");
+    assert!(
+        !set.contains("Config") && !set.contains("Parser"),
+        "{set:?}"
+    );
+}

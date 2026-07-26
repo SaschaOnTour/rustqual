@@ -288,3 +288,35 @@ fn suppressed_findings_excluded_from_json() {
         "sdp suppressed: {v}"
     );
 }
+
+#[test]
+fn dead_types_reach_their_own_json_array_and_summary_count() {
+    // A machine consumer must not have to read `function_name` to learn a
+    // struct's name, so DRY-006 gets its own array — and the summary count has
+    // to agree with it, or the two halves of the envelope contradict each other.
+    let findings = AnalysisFindings {
+        dry: vec![dry(
+            DryFindingKind::DeadTypeUnused,
+            DryFindingDetails::DeadType {
+                name: "Orphan".into(),
+                item: "struct",
+                suggestion: "struct `Orphan` is never used; consider removing".into(),
+            },
+        )],
+        ..Default::default()
+    };
+    let mut analysis = analysis_with(findings, AnalysisData::default());
+    analysis.summary.dead_type_warnings = 1;
+    let v = json_value(&analysis);
+    assert_eq!(v["dead_types"][0]["name"], "Orphan");
+    assert_eq!(v["dead_types"][0]["item"], "struct");
+    assert_eq!(v["dead_types"][0]["kind"], "unused_type");
+    assert_eq!(
+        v["summary"]["dead_type_warnings"], 1,
+        "summary count must match the array: {v}"
+    );
+    assert!(
+        v["dead_code"].is_null(),
+        "a dead type must not leak into the dead-code array: {v}"
+    );
+}

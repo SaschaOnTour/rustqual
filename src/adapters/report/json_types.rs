@@ -96,6 +96,7 @@ pub(crate) struct JsonSummary {
     pub(crate) coupling_cycles: usize,
     pub(crate) duplicate_groups: usize,
     pub(crate) dead_code_warnings: usize,
+    pub(crate) dead_type_warnings: usize,
     pub(crate) fragment_groups: usize,
     pub(crate) boilerplate_warnings: usize,
     pub(crate) srp_struct_warnings: usize,

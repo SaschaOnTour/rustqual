@@ -24,6 +24,7 @@ pub(super) fn build_summary(s: &super::super::Summary) -> JsonSummary {
         coupling_cycles: s.coupling_cycles,
         duplicate_groups: s.duplicate_groups,
         dead_code_warnings: s.dead_code_warnings,
+        dead_type_warnings: s.dead_type_warnings,
         fragment_groups: s.fragment_groups,
         boilerplate_warnings: s.boilerplate_warnings,
         srp_struct_warnings: s.srp_struct_warnings,

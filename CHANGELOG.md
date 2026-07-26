@@ -45,12 +45,22 @@ there was nothing to verify it against.
   to"). External reachability therefore records public types, constants and
   traits, not just functions; without that every legitimately public type would
   have been accused of not being nameable from outside.
+- **Intra-doc links count as references.** `/// see [`MAX`]` names an item that
+  no lexer turns into an identifier, and deleting the target breaks the
+  documentation — so a bracketed link target is a use. Only bracketed spans
+  count; harvesting every word of prose would let any type whose name appears
+  in a sentence keep itself alive. Format-string placeholders and doc links are
+  the two ways a name hides inside text, and both now go through
+  `shared/text_names.rs`.
 - **JSON gains a `dead_types` array.** Kept apart from `dead_code` rather than
   folded into it: a consumer reading `function_name` must not be handed a
   struct name. Human-facing output lists both in one table, told apart by the
   kind tag.
 
 ### Changed
+- **The JSON summary and the baseline carry `dead_type_warnings`.** The array
+  was there but the count was not, so the two halves of the envelope disagreed;
+  the baseline field is `#[serde(default)]`, so older baseline files still load.
 - **"Not attached" now names what it means.** A marker that reaches no
   declaration is still reported, but the remedy text names what it could be
   sitting on — a `pub use` re-export, a module, a trait — instead of "a type, a

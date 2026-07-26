@@ -17,6 +17,7 @@ use syn::visit::Visit;
 
 use super::split_names::{collect_split, SplitCollector, SplitNames};
 use crate::adapters::shared::macro_tokens;
+use crate::adapters::shared::text_names::doc_link_names;
 
 /// AST visitor collecting referenced names, split by production / test context.
 #[derive(Default)]
@@ -118,6 +119,15 @@ impl<'ast> Visit<'ast> for TypeReferenceCollector {
         self.names.leave(previous);
     }
 
+    /// A doc comment is `#[doc = "…"]` — one string, so an intra-doc link like
+    /// `[`MAX`]` names an item that no lexer ever turns into an identifier.
+    /// Deleting the target breaks the documentation, so the link counts.
+    fn visit_meta_name_value(&mut self, node: &'ast syn::MetaNameValue) {
+        self.visit_path(&node.path);
+        let linked = doc_link_targets(node);
+        self.target().extend(linked);
+    }
+
     /// An attribute's arguments are an opaque token stream too, so
     /// `#[derive(Serialize)]` would otherwise not count as using `Serialize`.
     fn visit_meta_list(&mut self, node: &'ast syn::MetaList) {
@@ -139,6 +149,20 @@ impl<'ast> Visit<'ast> for TypeReferenceCollector {
         let previous = self.names.enter(&node.attrs);
         syn::visit::visit_item_mod(self, node);
         self.names.leave(previous);
+    }
+}
+
+/// The items a `#[doc = "…"]` attribute links to; empty for any other
+/// name-value attribute.
+/// Operation: shape match + link extraction, own call in the arm.
+fn doc_link_targets(node: &syn::MetaNameValue) -> Vec<String> {
+    let is_doc = node.path.is_ident("doc");
+    match (&node.value, is_doc) {
+        (syn::Expr::Lit(lit), true) => match &lit.lit {
+            syn::Lit::Str(s) => doc_link_names(&s.value()),
+            _ => Vec::new(),
+        },
+        _ => Vec::new(),
     }
 }
 
