@@ -112,6 +112,15 @@ fn split_one(f: &SrpFinding, buckets: &mut SrpBuckets) {
                 .map(|cluster| cluster.join(", "))
                 .collect(),
         }),
+        _ => split_param_and_structural(f, buckets),
+    }
+}
+
+/// The parameter-count and structural arms, split out so `split_one` stays
+/// within the function-length cap.
+/// Operation: match dispatch into the matching bucket.
+fn split_param_and_structural(f: &SrpFinding, buckets: &mut SrpBuckets) {
+    match (&f.kind, &f.details) {
         (
             SrpFindingKind::ParameterCount,
             SrpFindingDetails::ParameterCount {

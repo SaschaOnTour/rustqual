@@ -20,8 +20,8 @@ pub(crate) struct ExternalReach {
     reachable_files: HashSet<String>,
     /// `(file, fn-name)` pairs that are `pub` through their inline-mod chain.
     pub_items: HashSet<(String, String)>,
-    /// Item names re-exported via `pub use path::Name`.
-    reexported_names: HashSet<String>,
+    /// `(file, name)` pairs re-exported via `pub use path::Name`.
+    reexported_items: HashSet<(String, String)>,
     /// Files whose items are all re-exported via `pub use path::*`.
     glob_reexported_files: HashSet<String>,
     /// Files the layout derivation did not recognise — treated as reachable.
@@ -32,7 +32,11 @@ impl ExternalReach {
     /// True when `name` in `file` can be named from outside the crate.
     /// Integration: combines the layout, visibility and re-export facts.
     pub(crate) fn is_externally_reachable(&self, file: &str, name: &str) -> bool {
-        if self.unknown_files.contains(file) || self.reexported_names.contains(name) {
+        if self.unknown_files.contains(file)
+            || self
+                .reexported_items
+                .contains(&(file.to_string(), name.to_string()))
+        {
             return true;
         }
         let is_pub = self
@@ -58,7 +62,7 @@ pub(crate) fn compute_external_reach(parsed: &[(String, String, syn::File)]) -> 
     ExternalReach {
         reachable_files,
         pub_items: facts.pub_items,
-        reexported_names: facts.reexported_names,
+        reexported_items: resolve_reexports(&facts.reexports, &modules),
         glob_reexported_files,
         unknown_files: parsed
             .iter()
@@ -75,8 +79,10 @@ struct FileFacts {
     pub_items: HashSet<(String, String)>,
     /// `(file, child-module-name)` for `pub mod child;` declarations.
     pub_mod_links: HashSet<(String, String)>,
-    /// Names re-exported by a `pub use …::Name;`.
-    reexported_names: HashSet<String>,
+    /// `(module key, name)` re-exported by a `pub use …::Name;` — keyed by
+    /// the source module, so one crate.s re-export cannot excuse a same-named
+    /// function somewhere else.
+    reexports: HashSet<(String, String)>,
     /// Module paths glob-re-exported by a `pub use path::*;`.
     glob_uses: HashSet<String>,
 }
@@ -125,7 +131,7 @@ fn walk_items(
                 }
             }
             syn::Item::Use(u) if chain_is_pub && is_pub(&u.vis) => {
-                collect_use(&u.tree, mod_path, &mut Vec::new(), facts);
+                collect_use(&u.tree, file, mod_path, &mut Vec::new(), facts);
             }
             _ => {}
         }
@@ -138,6 +144,7 @@ fn walk_items(
 // qual:recursive
 fn collect_use(
     tree: &syn::UseTree,
+    file: &str,
     mod_path: &[String],
     prefix: &mut Vec<String>,
     facts: &mut FileFacts,
@@ -145,30 +152,32 @@ fn collect_use(
     match tree {
         syn::UseTree::Path(p) => {
             prefix.push(p.ident.to_string());
-            collect_use(&p.tree, mod_path, prefix, facts);
+            collect_use(&p.tree, file, mod_path, prefix, facts);
             prefix.pop();
         }
         syn::UseTree::Name(n) => {
-            facts.reexported_names.insert(n.ident.to_string());
+            record_reexport(file, mod_path, prefix, &n.ident.to_string(), facts);
         }
         syn::UseTree::Rename(r) => {
             // The *source* name is what keeps the original item public.
-            facts.reexported_names.insert(r.ident.to_string());
+            record_reexport(file, mod_path, prefix, &r.ident.to_string(), facts);
         }
         syn::UseTree::Glob(_) => {
-            facts.glob_uses.insert(resolve_use_prefix(mod_path, prefix));
+            if let Some(key) = module_key(file, &resolve_use_prefix(mod_path, prefix)) {
+                facts.glob_uses.insert(key);
+            }
         }
         syn::UseTree::Group(g) => g
             .items
             .iter()
-            .for_each(|t| collect_use(t, mod_path, &mut prefix.clone(), facts)),
+            .for_each(|t| collect_use(t, file, mod_path, &mut prefix.clone(), facts)),
     }
 }
 
 /// Turn a `use` prefix into an absolute module path, resolving the
 /// `crate::`/`self::` heads against the current scope.
 /// Operation: prefix normalisation, no own calls.
-fn resolve_use_prefix(mod_path: &[String], prefix: &[String]) -> String {
+fn resolve_use_prefix(mod_path: &[String], prefix: &[String]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     let mut rest = prefix;
     match rest.first().map(String::as_str) {
@@ -180,7 +189,22 @@ fn resolve_use_prefix(mod_path: &[String], prefix: &[String]) -> String {
         _ => out.extend(mod_path.iter().cloned()),
     }
     out.extend(rest.iter().cloned());
-    out.join("::")
+    out
+}
+
+/// Record a concrete `pub use …::Name` against its SOURCE module, so the
+/// re-export excuses that one item — not every same-named function in the
+/// workspace. Operation: key build + insert.
+fn record_reexport(
+    file: &str,
+    mod_path: &[String],
+    prefix: &[String],
+    name: &str,
+    facts: &mut FileFacts,
+) {
+    if let Some(key) = module_key(file, &resolve_use_prefix(mod_path, prefix)) {
+        facts.reexports.insert((key, name.to_string()));
+    }
 }
 
 /// Map module path → file, for every file whose layout we understand.
@@ -188,7 +212,10 @@ fn resolve_use_prefix(mod_path: &[String], prefix: &[String]) -> String {
 fn module_index(parsed: &[(String, String, syn::File)]) -> HashMap<String, String> {
     parsed
         .iter()
-        .filter_map(|(file, _, _)| module_path_of(file).map(|p| (p.join("::"), file.clone())))
+        .filter_map(|(file, _, _)| {
+            let path = module_path_of(file)?;
+            Some((module_key(file, &path)?, file.clone()))
+        })
         .collect()
 }
 
@@ -218,12 +245,29 @@ fn walk_reachable(
             };
             let mut child_path = parent_path;
             child_path.push(child.clone());
-            if let Some(child_file) = modules.get(&child_path.join("::")) {
+            let Some(key) = module_key(parent, &child_path) else {
+                continue;
+            };
+            if let Some(child_file) = modules.get(&key) {
                 changed |= reachable.insert(child_file.clone());
             }
         }
     }
     reachable
+}
+
+/// Turn `(source module key, name)` re-exports into `(file, name)` pairs, so a
+/// re-export excuses exactly the item it names — not every same-named function
+/// in the workspace. A key that resolves to no known file is dropped.
+/// Operation: lookup + projection.
+fn resolve_reexports(
+    reexports: &HashSet<(String, String)>,
+    modules: &HashMap<String, String>,
+) -> HashSet<(String, String)> {
+    reexports
+        .iter()
+        .filter_map(|(key, name)| modules.get(key).map(|f| (f.clone(), name.clone())))
+        .collect()
 }
 
 /// Files covered by a `pub use <module>::*` glob.
@@ -248,19 +292,43 @@ fn is_lib_root(file: &str) -> bool {
     norm == "src/lib.rs" || norm.ends_with("/src/lib.rs")
 }
 
-/// The module path of a source file relative to its package's `src/`
-/// (`src/a/b.rs` → `["a","b"]`, `src/a/mod.rs` → `["a"]`, root → `[]`), or
-/// `None` when the layout is not recognised — those files are treated as
-/// reachable so an unusual layout never manufactures a finding.
+/// The package prefix of a source file — everything before its `src/`, so two
+/// workspace crates that both contain `src/api.rs` never share a module key.
 /// Operation: path splitting, no own calls.
-fn module_path_of(file: &str) -> Option<Vec<String>> {
+fn package_of(file: &str) -> Option<String> {
+    split_at_src(file).map(|(package, _)| package)
+}
+
+/// Split a source path at its package's `src/` into `(package prefix, path
+/// below src/)`. `None` when the layout is not recognised — the single place
+/// that decides what "inside a package" means, so the package prefix and the
+/// module path can never disagree.
+/// Operation: path splitting, no own calls.
+fn split_at_src(file: &str) -> Option<(String, String)> {
     let norm = file.replace('\\', "/");
     let idx = norm.find("src/")?;
     // Only `src/` at the start or right after a directory separator.
     if idx != 0 && !norm[..idx].ends_with('/') {
         return None;
     }
-    let rel = norm[idx + 4..].strip_suffix(".rs")?;
+    Some((norm[..idx].to_string(), norm[idx + 4..].to_string()))
+}
+
+/// A module's index key: its package prefix plus its module path, so
+/// `crates/a/src/api.rs` and `crates/b/src/api.rs` stay distinct.
+/// Operation: string join, no own calls.
+fn module_key(file: &str, path: &[String]) -> Option<String> {
+    Some(format!("{}|{}", package_of(file)?, path.join("::")))
+}
+
+/// The module path of a source file relative to its package's `src/`
+/// (`src/a/b.rs` → `["a","b"]`, `src/a/mod.rs` → `["a"]`, root → `[]`), or
+/// `None` when the layout is not recognised — those files are treated as
+/// reachable so an unusual layout never manufactures a finding.
+/// Operation: path splitting, no own calls.
+fn module_path_of(file: &str) -> Option<Vec<String>> {
+    let (_, below) = split_at_src(file)?;
+    let rel = below.strip_suffix(".rs")?;
     let mut segments: Vec<String> = rel.split('/').map(str::to_string).collect();
     match segments.last().map(String::as_str) {
         Some("lib") | Some("main") if segments.len() == 1 => return Some(Vec::new()),

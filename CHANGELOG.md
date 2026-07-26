@@ -65,14 +65,32 @@ all are removed in this release.
   `pub` keyword is inert there) that production already calls.
 
 ### Fixed
+- **Ambiguous names never mark a marker spent.** The call collector records a
+  path call by its last segment, so a production call to `module_b::handle`
+  puts a bare `handle` into the call set. When another declared function shares
+  that bare name the call cannot be attributed, and claiming it would tell the
+  author to delete a marker that is still holding back a finding — so the
+  detector stays silent. A qualified `Type::method` match is specific enough
+  and still counts.
+- **Workspace crates no longer collide in the module index.** It was keyed by
+  the path relative to `src/`, so `crates/a/src/api.rs` and
+  `crates/b/src/api.rs` shared one key and one overwrote the other — a
+  `pub mod api` could then mark the wrong crate's file reachable. Keys are
+  package-qualified now.
+- **A `pub use` re-export excuses only the item it names.** Re-exports were
+  recorded by bare name, so `pub use public_impl::run` made *every* `run` in
+  the workspace look externally reachable. They resolve to the source module's
+  file now.
 - **Markers inside string literals are no longer collected as annotations.**
   Test fixtures embed rustqual's own markers as data
   (`let code = r#"… // qual:api …"#;`); the raw line scan read those as real
   annotations on the enclosing file. Harmless while markers were never
   verified — but it would have produced phantom findings now, so marker
-  collection skips the interior of multi-line string literals (including
-  literals inside macro token streams). Only the interior is skipped, so a
-  marker sharing a line with a literal still counts.
+  collection is column-aware: a marker only counts when it starts outside
+  every string-literal span (including literals inside macro token streams).
+  A line-based filter could not do this — the closing line of a fixture holds
+  both literal text and real source, so `// qual:api example"#;` would still
+  have registered.
 
 ### Notes
 - The check rides along with the test-quality pass, because that is where the

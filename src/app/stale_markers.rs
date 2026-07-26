@@ -44,29 +44,36 @@ pub(crate) fn detect_stale_marker_orphans(
     test_helper_lines: &HashMap<String, HashSet<usize>>,
     reach: &ExternalReach,
 ) -> Vec<OrphanSuppression> {
-    let mut out: Vec<OrphanSuppression> = declared
-        .iter()
-        .filter_map(|d| classify(d, prod_calls, reach).map(|verdict| (d, verdict)))
-        .filter_map(|(d, verdict)| {
-            let (marker, lines) = if d.is_api {
-                (MarkerKind::Api, api_lines)
-            } else {
-                (MarkerKind::TestHelper, test_helper_lines)
-            };
-            marker_line(lines, &d.file, d.line).map(|line| orphan(d, line, marker, verdict))
-        })
-        .collect();
+    // A function can carry BOTH markers; each is judged on its own, or the
+    // second would sit unverified forever.
+    let ambiguous = ambiguous_names(declared);
+    let attached = |lines, marker, want: fn(&DeclaredFunction) -> bool| {
+        declared
+            .iter()
+            .filter(|d| want(d))
+            .filter_map(|d| {
+                let verdict = classify(d, prod_calls, reach, &ambiguous, marker)?;
+                marker_line(lines, &d.file, d.line).map(|line| orphan(d, line, marker, verdict))
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut out = attached(api_lines, MarkerKind::Api, |d| d.is_api);
+    out.extend(attached(test_helper_lines, MarkerKind::TestHelper, |d| {
+        d.is_test_helper
+    }));
     out.extend(unattached_orphans(
         declared,
         api_lines,
         MarkerKind::Api,
         "qual:api",
+        |d| d.is_api,
     ));
     out.extend(unattached_orphans(
         declared,
         test_helper_lines,
         MarkerKind::TestHelper,
         "qual:test_helper",
+        |d| d.is_test_helper,
     ));
     out.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
     out
@@ -86,9 +93,14 @@ fn unattached_orphans(
     lines: &HashMap<String, HashSet<usize>>,
     marker: MarkerKind,
     what: &str,
+    carries: fn(&DeclaredFunction) -> bool,
 ) -> Vec<OrphanSuppression> {
+    // Only a function that actually carries THIS marker claims its line — a
+    // function marked `qual:api` must not make a neighbouring
+    // `qual:test_helper` look attached.
     let claimed: HashSet<(&str, usize)> = declared
         .iter()
+        .filter(|d| carries(d))
         .filter_map(|d| marker_line(lines, &d.file, d.line).map(|l| (d.file.as_str(), l)))
         .collect();
     lines
@@ -136,18 +148,17 @@ fn classify(
     d: &DeclaredFunction,
     prod_calls: &HashSet<String>,
     reach: &ExternalReach,
+    ambiguous: &HashSet<&str>,
+    marker: MarkerKind,
 ) -> Option<Verdict> {
-    if !d.is_api && !d.is_test_helper {
-        return None;
-    }
     // Excluded from DRY-002 and TQ-003 whatever the marker says, so the marker
     // cannot be doing anything here (mirrors `should_exclude_uncalled` minus
     // the marker flags themselves, and `tq::untested`).
     if d.is_main || d.is_test || d.is_trait_impl || d.has_allow_dead_code {
         return Some(Verdict::NoEffectOnExemptFn);
     }
-    let called = prod_calls.contains(&d.name) || prod_calls.contains(&d.qualified_name);
-    if d.is_test_helper {
+    let called = is_called_by_production(d, prod_calls, ambiguous)?;
+    if marker == MarkerKind::TestHelper {
         return called.then_some(Verdict::Spent);
     }
     match (reach.is_externally_reachable(&d.file, &d.name), called) {
@@ -156,6 +167,42 @@ fn classify(
         (true, true) => Some(Verdict::Spent),
         (true, false) => None,
     }
+}
+
+/// Whether production calls `d`, or `None` when that cannot be attributed.
+///
+/// The call collector records a path call by its **last segment**, so a call to
+/// `module_b::handle` puts a bare `handle` into the set. If another declared
+/// function shares that bare name, the call cannot be pinned to either — and
+/// claiming it would tell the author to delete a marker that is still holding
+/// back a finding. A qualified `Type::method` match is specific enough to
+/// attribute and always counts. Operation: name lookup with an ambiguity gate.
+fn is_called_by_production(
+    d: &DeclaredFunction,
+    prod_calls: &HashSet<String>,
+    ambiguous: &HashSet<&str>,
+) -> Option<bool> {
+    if prod_calls.contains(&d.qualified_name) && d.qualified_name != d.name {
+        return Some(true);
+    }
+    if ambiguous.contains(d.name.as_str()) {
+        return None;
+    }
+    Some(prod_calls.contains(&d.name))
+}
+
+/// Bare names declared more than once — a call recorded under such a name
+/// cannot be attributed to one declaration.
+/// Operation: frequency count over the declarations.
+fn ambiguous_names(declared: &[DeclaredFunction]) -> HashSet<&str> {
+    let mut seen: HashSet<&str> = HashSet::new();
+    let mut twice: HashSet<&str> = HashSet::new();
+    declared.iter().for_each(|d| {
+        if !seen.insert(d.name.as_str()) {
+            twice.insert(d.name.as_str());
+        }
+    });
+    twice
 }
 
 /// The line the marker itself sits on: the closest annotation line at or above

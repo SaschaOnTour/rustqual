@@ -194,3 +194,34 @@ fn real_marker_outside_a_literal_is_still_collected() {
         "line 1 is a genuine marker: {lines:?}"
     );
 }
+
+#[test]
+fn marker_text_on_a_literal_closing_line_is_not_collected() {
+    // The closing line of a fixture still carries string content before the
+    // `"#`. `is_api_marker` matches by prefix, so `// qual:api example"#;`
+    // looks like a marker although it is literal text — a line-set filter
+    // cannot tell the two apart, only a column-aware one can.
+    let source =
+        "fn t() {\n    let code = r#\"\n        fn f() {}\n        // qual:api example\"#;\n}\n";
+    let parsed = parsed_single("src/lib.rs", source);
+    let lines = collect_api_lines(&parsed);
+    assert!(
+        lines.is_empty(),
+        "marker text inside the literal's closing line is data: {lines:?}"
+    );
+}
+
+#[test]
+fn a_marker_trailing_real_code_is_not_an_annotation() {
+    // Markers must own their line: `is_api_marker` matches only a trimmed line
+    // that *starts* with the marker. A trailing `// qual:api` after code was
+    // never an annotation — pinned here because it is exactly what makes the
+    // column check safe: the only line that can both start with the marker and
+    // sit inside a literal is fixture content.
+    let source = "pub fn f() {\n    let s = \"x\"; // qual:api\n}\n";
+    let parsed = parsed_single("src/lib.rs", source);
+    assert!(
+        collect_api_lines(&parsed).is_empty(),
+        "a marker must be alone on its line to count"
+    );
+}

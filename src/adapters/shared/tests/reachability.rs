@@ -7,7 +7,7 @@
 //! chain, inline modules, `pub use` re-exports) and its conservative bias:
 //! when in doubt, call it reachable, so the marker is left alone.
 
-use crate::adapters::shared::reachability::compute_external_reach;
+use crate::adapters::shared::reachability::{compute_external_reach, ExternalReach};
 
 fn parse(files: &[(&str, &str)]) -> Vec<(String, String, syn::File)> {
     files
@@ -134,17 +134,57 @@ fn glob_reexport_rescues_the_whole_module() {
     );
 }
 
+/// A two-crate workspace: `public` exposes its module, `private` hides its
+/// own. The module names are parameters so the same fixture covers both the
+/// plain per-package case and the name-collision case.
+fn two_crate_workspace(public_mod: &str, private_mod: &str) -> ExternalReach {
+    let files = [
+        (
+            "crates/public/src/lib.rs".to_string(),
+            format!("pub mod {public_mod};"),
+        ),
+        (
+            format!("crates/public/src/{public_mod}.rs"),
+            "pub fn exposed() {}".to_string(),
+        ),
+        (
+            "crates/private/src/lib.rs".to_string(),
+            format!("mod {private_mod};"),
+        ),
+        (
+            format!("crates/private/src/{private_mod}.rs"),
+            "pub fn hidden() {}".to_string(),
+        ),
+    ];
+    let refs: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(p, s)| (p.as_str(), s.as_str()))
+        .collect();
+    compute_external_reach(&parse(&refs))
+}
+
 #[test]
-fn workspace_crate_roots_are_detected_per_package() {
-    let parsed = parse(&[
-        ("crates/port/src/lib.rs", "pub mod api;"),
-        ("crates/port/src/api.rs", "pub fn entry() {}"),
-        ("crates/adapter/src/lib.rs", "mod guts;"),
-        ("crates/adapter/src/guts.rs", "pub fn hidden() {}"),
-    ]);
-    let reach = compute_external_reach(&parsed);
-    assert!(reach.is_externally_reachable("crates/port/src/api.rs", "entry"));
-    assert!(!reach.is_externally_reachable("crates/adapter/src/guts.rs", "hidden"));
+fn workspace_crates_are_resolved_per_package() {
+    // With identical module names, a module index keyed only by the path
+    // relative to `src/` lets one crate's file overwrite the other's — the
+    // public crate's `pub mod api` could then mark the *private* crate's file
+    // reachable, or leave the real API file unreachable and turn a valid
+    // marker into a false "never applied". (label, public_mod, private_mod)
+    for (label, public_mod, private_mod) in [
+        ("distinct module names", "api", "guts"),
+        ("same module name in both crates", "api", "api"),
+    ] {
+        let reach = two_crate_workspace(public_mod, private_mod);
+        assert!(
+            reach.is_externally_reachable(&format!("crates/public/src/{public_mod}.rs"), "exposed"),
+            "case {label}: the public crate's module stays reachable"
+        );
+        assert!(
+            !reach
+                .is_externally_reachable(&format!("crates/private/src/{private_mod}.rs"), "hidden"),
+            "case {label}: the private crate must not inherit the other's pub mod"
+        );
+    }
 }
 
 #[test]
@@ -170,5 +210,29 @@ fn binary_crate_items_are_not_externally_reachable() {
     assert!(
         !reach.is_externally_reachable("src/helpers.rs", "f"),
         "a binary has no outside consumers"
+    );
+}
+
+#[test]
+fn a_reexport_does_not_make_every_same_named_function_reachable() {
+    // `pub use public_impl::run` exposes exactly one `run`. Treating the bare
+    // name as globally re-exported would silently excuse an invalid marker on
+    // an unrelated `run` in a private module.
+    let parsed = parse(&[
+        (
+            "src/lib.rs",
+            "mod public_impl;\nmod other;\npub use public_impl::run;",
+        ),
+        ("src/public_impl.rs", "pub fn run() {}"),
+        ("src/other.rs", "pub fn run() {}"),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(
+        reach.is_externally_reachable("src/public_impl.rs", "run"),
+        "the re-exported one is reachable"
+    );
+    assert!(
+        !reach.is_externally_reachable("src/other.rs", "run"),
+        "an unrelated same-named fn must not ride along on the re-export"
     );
 }

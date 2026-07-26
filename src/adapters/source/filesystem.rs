@@ -226,35 +226,58 @@ pub(crate) fn collect_test_helper_lines(
 /// Only the interior counts: the opening and closing lines carry real code,
 /// so a marker sharing a line with a literal is still collected.
 /// Integration: literal-span collection + interior expansion.
-fn literal_interior_lines(syntax: &syn::File) -> std::collections::HashSet<usize> {
+fn literal_spans(syntax: &syn::File) -> LiteralSpans {
     let mut collector = LiteralSpans::default();
     syn::visit::Visit::visit_file(&mut collector, syntax);
     collector
-        .spans
-        .into_iter()
-        .filter(|(start, end)| end > start)
-        .flat_map(|(start, end)| (start + 1)..end)
-        .collect()
 }
 
-/// Collects `(start_line, end_line)` of every string literal, including those
-/// hidden inside macro token streams (`assert_eq!(x, r#"…"#)`).
+/// Line/column extents of every string literal, including those hidden inside
+/// macro token streams (`assert_eq!(x, r#"…"#)`).
+///
+/// Columns matter: the opening and closing lines of a multi-line literal carry
+/// *both* string content and real source, so a line-set filter cannot tell
+/// `// qual:api example"#;` (literal text) from a genuine trailing marker.
 #[derive(Default)]
 struct LiteralSpans {
-    spans: Vec<(usize, usize)>,
+    /// `(start_line, start_col, end_line, end_col)`, columns 0-based.
+    spans: Vec<(usize, usize, usize, usize)>,
+}
+
+impl LiteralSpans {
+    /// True when the text starting at `column` on `line` lies inside a string
+    /// literal. Interior lines are wholly inside; on the boundary lines only
+    /// the part within the literal's columns counts.
+    /// Operation: span containment test, no own calls.
+    fn covers(&self, line: usize, column: usize) -> bool {
+        self.spans.iter().any(|&(sl, sc, el, ec)| {
+            if line < sl || line > el {
+                return false;
+            }
+            let after_start = line > sl || column >= sc;
+            let before_end = line < el || column < ec;
+            after_start && before_end
+        })
+    }
+
+    /// Record one literal's extent.
+    /// Operation: span projection, no own calls.
+    fn push(&mut self, span: proc_macro2::Span) {
+        let (start, end) = (span.start(), span.end());
+        self.spans
+            .push((start.line, start.column, end.line, end.column));
+    }
 }
 
 impl<'ast> syn::visit::Visit<'ast> for LiteralSpans {
     fn visit_lit_str(&mut self, node: &'ast syn::LitStr) {
-        let span = syn::spanned::Spanned::span(node);
-        self.spans.push((span.start().line, span.end().line));
+        self.push(syn::spanned::Spanned::span(node));
     }
 
     fn visit_macro(&mut self, node: &'ast syn::Macro) {
         node.tokens.clone().into_iter().for_each(|tt| {
             if let proc_macro2::TokenTree::Literal(lit) = tt {
-                let span = lit.span();
-                self.spans.push((span.start().line, span.end().line));
+                self.push(lit.span());
             }
         });
         syn::visit::visit_macro(self, node);
@@ -273,12 +296,16 @@ where
         .filter_map(|(path, source, syntax)| {
             let ends = compute_comment_block_ends(source);
             let shift = |n: usize| ends.get(&n).copied().unwrap_or(n);
-            let inside_literal = literal_interior_lines(syntax);
+            let literals = literal_spans(syntax);
             let lines: std::collections::HashSet<usize> = source
                 .lines()
                 .enumerate()
-                .filter(|(i, _)| !inside_literal.contains(&(i + 1)))
-                .filter_map(|(i, line)| is_marker(line.trim()).then_some(shift(i + 1)))
+                .filter_map(|(i, line)| {
+                    let trimmed = line.trim_start();
+                    let column = line.len() - trimmed.len();
+                    let marker = is_marker(trimmed.trim_end());
+                    (marker && !literals.covers(i + 1, column)).then_some(shift(i + 1))
+                })
                 .collect();
             if lines.is_empty() {
                 None
