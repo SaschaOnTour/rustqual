@@ -30,8 +30,10 @@ pub(super) struct GlobUse {
 pub(super) struct FileFacts {
     /// `(file, fn-name)` for functions `pub` through their inline-mod chain.
     pub pub_items: HashSet<(String, String)>,
-    /// `(file, child-module-name)` for `pub mod child;` declarations.
-    pub pub_mod_links: HashSet<(String, String)>,
+    /// `(file, parent module path, child name)` for `pub mod child;`. The
+    /// parent path matters: `pub mod outer { pub mod inner; }` implements
+    /// `outer::inner`, not a top-level `inner`.
+    pub pub_mod_links: HashSet<(String, Vec<String>, String)>,
     /// `(module key, declaring file)` for inline `mod x { … }` blocks, so a
     /// re-export can name a module that has no file of its own.
     pub inline_modules: Vec<(String, String)>,
@@ -105,12 +107,56 @@ fn walk_module(scope: Scope<'_>, m: &syn::ItemMod, facts: &mut FileFacts) {
             walk_items(inner_scope, inner, facts);
         }
         None if inner_scope.chain_is_pub => {
-            facts
-                .pub_mod_links
-                .insert((scope.file.to_string(), m.ident.to_string()));
+            record_out_of_line_module(scope, m, facts);
         }
         None => {}
     }
+}
+
+/// Record a `pub mod child;` link plus, when the module carries a
+/// `#[path = "…"]`, the file it really lives in — otherwise the link looks
+/// for the conventional filename and a public module reads as unreachable.
+/// Integration: link insert + optional alias.
+fn record_out_of_line_module(scope: Scope<'_>, m: &syn::ItemMod, facts: &mut FileFacts) {
+    facts.pub_mod_links.insert((
+        scope.file.to_string(),
+        scope.mod_path.to_vec(),
+        m.ident.to_string(),
+    ));
+    if let Some(target) = path_attr_target(scope.file, &m.attrs) {
+        let mut nested = scope.mod_path.to_vec();
+        nested.push(m.ident.to_string());
+        if let Some(key) = module_key(scope.file, &nested) {
+            facts.inline_modules.push((key, target));
+        }
+    }
+}
+
+/// The file a `#[path = "…"]` attribute points at, resolved against the
+/// declaring file's directory.
+/// Operation: attribute extraction + path join.
+fn path_attr_target(declaring_file: &str, attrs: &[syn::Attribute]) -> Option<String> {
+    let value = attrs
+        .iter()
+        .find(|a| a.path().is_ident("path"))
+        .and_then(|a| match &a.meta {
+            syn::Meta::NameValue(nv) => Some(&nv.value),
+            _ => None,
+        })
+        .and_then(|e| match e {
+            syn::Expr::Lit(l) => match &l.lit {
+                syn::Lit::Str(s) => Some(s.value()),
+                _ => None,
+            },
+            _ => None,
+        })?;
+    let dir = declaring_file.replace('\\', "/");
+    let dir = dir.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
+    Some(if dir.is_empty() {
+        value
+    } else {
+        format!("{dir}/{value}")
+    })
 }
 
 /// Note that `path` names an inline module living in `file`.

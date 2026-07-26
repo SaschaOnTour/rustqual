@@ -129,8 +129,10 @@ fn walk_reachable(
         let next: Vec<String> = facts
             .pub_mod_links
             .iter()
-            .filter(|(parent, _)| reachable.contains(parent))
-            .filter_map(|(parent, child)| child_file(parent, child, modules))
+            .filter(|(parent, _, _)| reachable.contains(parent))
+            .filter_map(|(parent, parent_path, child)| {
+                child_file(parent, parent_path, child, modules)
+            })
             .collect();
         changed = next
             .into_iter()
@@ -139,10 +141,17 @@ fn walk_reachable(
     reachable
 }
 
-/// The file implementing `child` declared in `parent`, when it is known.
+/// The file implementing `child`, declared in `parent` inside the scope
+/// `parent_path`. The scope matters: `pub mod outer { pub mod inner; }`
+/// implements `outer::inner`, not a top-level `inner`.
 /// Operation: path extension + index lookup.
-fn child_file(parent: &str, child: &str, modules: &HashMap<String, String>) -> Option<String> {
-    let mut path = module_path_of(parent)?;
+fn child_file(
+    parent: &str,
+    parent_path: &[String],
+    child: &str,
+    modules: &HashMap<String, String>,
+) -> Option<String> {
+    let mut path = parent_path.to_vec();
     path.push(child.to_string());
     modules.get(&module_key(parent, &path)?).cloned()
 }
