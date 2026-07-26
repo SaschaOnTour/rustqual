@@ -4,6 +4,7 @@
 
 use crate::adapters::analyzers::dry::boilerplate::BoilerplateFind;
 use crate::adapters::analyzers::dry::dead_code::{DeadCodeKind, DeadCodeWarning};
+use crate::adapters::analyzers::dry::dead_types::{DeadTypeKind, DeadTypeWarning};
 use crate::adapters::analyzers::dry::fragments::FragmentGroup;
 use crate::adapters::analyzers::dry::functions::{DuplicateGroup, DuplicateKind};
 use crate::adapters::analyzers::dry::match_patterns::RepeatedMatchGroup;
@@ -33,6 +34,7 @@ pub(crate) fn project_dry(secondary: &SecondaryResults) -> Vec<DryFinding> {
     );
     out.extend(secondary.fragments.iter().flat_map(project_fragment_group));
     out.extend(secondary.dead_code.iter().map(project_dead_code));
+    out.extend(secondary.dead_types.iter().map(project_dead_type));
     out.extend(secondary.wildcard_warnings.iter().map(project_wildcard));
     out.extend(secondary.boilerplate.iter().map(project_boilerplate));
     out.extend(
@@ -143,6 +145,33 @@ fn project_dead_code(warning: &DeadCodeWarning) -> DryFinding {
         details: DryFindingDetails::DeadCode {
             qualified_name: warning.qualified_name.clone(),
             suggestion: Some(warning.suggestion.clone()),
+        },
+    }
+}
+
+/// DRY-006 findings carry their own detail shape: they name a declaration
+/// rather than a function, and the kind of declaration is part of the message.
+fn project_dead_type(warning: &DeadTypeWarning) -> DryFinding {
+    let (rule_id, kind) = match warning.kind {
+        DeadTypeKind::Unused => ("dry/dead_type/unused", DryFindingKind::DeadTypeUnused),
+        DeadTypeKind::TestOnly => ("dry/dead_type/testonly", DryFindingKind::DeadTypeTestOnly),
+    };
+    DryFinding {
+        common: Finding {
+            file: warning.file.clone(),
+            line: warning.line,
+            column: 0,
+            dimension: DIM,
+            rule_id: rule_id.into(),
+            message: format!("dead {}: {}", warning.item.label(), warning.name),
+            severity: SEV,
+            suppressed: false,
+        },
+        kind,
+        details: DryFindingDetails::DeadType {
+            name: warning.name.clone(),
+            item: warning.item.label(),
+            suggestion: warning.suggestion.clone(),
         },
     }
 }

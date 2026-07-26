@@ -29,6 +29,7 @@ pub const DEFAULT_MIN_TOKENS: usize = 30;
 pub const DEFAULT_MIN_LINES: usize = 5;
 pub const DEFAULT_MIN_STATEMENTS: usize = 3;
 pub const DEFAULT_DETECT_DEAD_CODE: bool = true;
+pub const DEFAULT_DETECT_DEAD_TYPES: bool = true;
 
 // Boilerplate
 pub const DEFAULT_BOILERPLATE_ENABLED: bool = true;
@@ -127,6 +128,8 @@ pub struct DuplicatesConfig {
     pub min_statements: usize,
     pub ignore_trait_impls: bool,
     pub detect_dead_code: bool,
+    /// DRY-006: report types and constants nothing refers to.
+    pub detect_dead_types: bool,
     pub detect_wildcard_imports: bool,
     pub detect_repeated_matches: bool,
 }
@@ -141,6 +144,7 @@ impl Default for DuplicatesConfig {
             min_statements: DEFAULT_MIN_STATEMENTS,
             ignore_trait_impls: true,
             detect_dead_code: DEFAULT_DETECT_DEAD_CODE,
+            detect_dead_types: DEFAULT_DETECT_DEAD_TYPES,
             detect_wildcard_imports: DEFAULT_DETECT_WILDCARD_IMPORTS,
             detect_repeated_matches: DEFAULT_DETECT_REPEATED_MATCHES,
         }

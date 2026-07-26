@@ -5,9 +5,9 @@
 use std::collections::HashSet;
 
 use super::super::json_types::{
-    JsonBoilerplateFind, JsonDeadCodeWarning, JsonDuplicateEntry, JsonDuplicateGroup,
-    JsonFragmentEntry, JsonFragmentGroup, JsonRepeatedMatchEntry, JsonRepeatedMatchGroup,
-    JsonWildcardWarning,
+    JsonBoilerplateFind, JsonDeadCodeWarning, JsonDeadTypeWarning, JsonDuplicateEntry,
+    JsonDuplicateGroup, JsonFragmentEntry, JsonFragmentGroup, JsonRepeatedMatchEntry,
+    JsonRepeatedMatchGroup, JsonWildcardWarning,
 };
 use crate::domain::findings::{DryFinding, DryFindingDetails, DryFindingKind};
 
@@ -66,6 +66,28 @@ pub(super) fn build_dead_code(findings: &[DryFinding]) -> Vec<JsonDeadCodeWarnin
                 line: f.common.line,
                 kind: f.kind.meta().json_label.to_string(),
                 suggestion: suggestion.clone().unwrap_or_default(),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+pub(super) fn build_dead_types(findings: &[DryFinding]) -> Vec<JsonDeadTypeWarning> {
+    findings
+        .iter()
+        .filter(|f| !f.common.suppressed)
+        .filter_map(|f| match &f.details {
+            DryFindingDetails::DeadType {
+                name,
+                item,
+                suggestion,
+            } => Some(JsonDeadTypeWarning {
+                name: name.clone(),
+                item: (*item).to_string(),
+                file: f.common.file.clone(),
+                line: f.common.line,
+                kind: f.kind.meta().json_label.to_string(),
+                suggestion: suggestion.clone(),
             }),
             _ => None,
         })

@@ -19,6 +19,7 @@ pub(super) fn dry_rule(f: &DryFinding) -> &str {
     match (&f.kind, &f.details) {
         (DryFindingKind::DuplicateExact | DryFindingKind::DuplicateSimilar, _) => "DRY-001",
         (DryFindingKind::DeadCodeUncalled | DryFindingKind::DeadCodeTestOnly, _) => "DRY-002",
+        (DryFindingKind::DeadTypeUnused | DryFindingKind::DeadTypeTestOnly, _) => "DRY-006",
         (DryFindingKind::Fragment, _) => "DRY-003",
         (DryFindingKind::Wildcard, _) => "DRY-004",
         (DryFindingKind::RepeatedMatch, _) => "DRY-005",

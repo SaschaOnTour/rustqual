@@ -8,7 +8,7 @@ pub(super) fn format_dead_code_table(rows: &[DeadCodeRow]) -> String {
     let esc = |s: &str| html_escape(s);
     render_table(
         "Dead Code",
-        &["Function", "File", "Line", "Kind", "Suggestion"],
+        &["Item", "File", "Line", "Kind", "Suggestion"],
         rows,
         |r| {
             format!(

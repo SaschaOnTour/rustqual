@@ -53,6 +53,7 @@ impl<'a> JsonOutputComposer<'a> {
             },
             duplicates: merged.duplicates,
             dead_code: merged.dead_code,
+            dead_types: merged.dead_types,
             fragments: merged.fragments,
             wildcard_warnings: merged.wildcards,
             boilerplate: merged.boilerplate,

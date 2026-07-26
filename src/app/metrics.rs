@@ -82,13 +82,61 @@ pub(super) struct AnnotationLines<'a> {
 pub(super) struct DryResults {
     pub(super) duplicates: Vec<crate::adapters::analyzers::dry::functions::DuplicateGroup>,
     pub(super) dead_code: Vec<crate::adapters::analyzers::dry::dead_code::DeadCodeWarning>,
+    pub(super) dead_types: Vec<crate::adapters::analyzers::dry::dead_types::DeadTypeWarning>,
     pub(super) fragments: Vec<crate::adapters::analyzers::dry::fragments::FragmentGroup>,
     pub(super) boilerplate: Vec<crate::adapters::analyzers::dry::boilerplate::BoilerplateFind>,
     pub(super) wildcard_warnings:
         Vec<crate::adapters::analyzers::dry::wildcards::WildcardImportWarning>,
 }
 
-/// Run all DRY detection passes (duplicates, dead code, fragments, boilerplate, wildcards).
+/// DRY-002: functions nothing calls.
+/// Operation: guarded detection, own calls hidden in the closure.
+fn run_dead_code_detection(
+    parsed: &[(String, String, syn::File)],
+    config: &Config,
+    annotation_lines: &AnnotationLines<'_>,
+    cfg_test_files: &std::collections::HashSet<String>,
+) -> Vec<crate::adapters::analyzers::dry::dead_code::DeadCodeWarning> {
+    run_guarded_detection(
+        config.duplicates.enabled && config.duplicates.detect_dead_code,
+        |p, _| {
+            crate::adapters::analyzers::dry::dead_code::detect_dead_code(
+                p,
+                annotation_lines.api,
+                annotation_lines.test_helper,
+                cfg_test_files,
+            )
+        },
+        parsed,
+        config,
+    )
+}
+
+/// DRY-006: types and constants nothing refers to.
+/// Operation: guarded detection, own calls hidden in the closure.
+fn run_dead_type_detection(
+    parsed: &[(String, String, syn::File)],
+    config: &Config,
+    annotation_lines: &AnnotationLines<'_>,
+    cfg_test_files: &std::collections::HashSet<String>,
+) -> Vec<crate::adapters::analyzers::dry::dead_types::DeadTypeWarning> {
+    run_guarded_detection(
+        config.duplicates.enabled && config.duplicates.detect_dead_types,
+        |p, _| {
+            crate::adapters::analyzers::dry::dead_types::detect_dead_types(
+                p,
+                annotation_lines.api,
+                annotation_lines.test_helper,
+                cfg_test_files,
+            )
+        },
+        parsed,
+        config,
+    )
+}
+
+/// Run all DRY detection passes (duplicates, dead code, dead types, fragments,
+/// boilerplate, wildcards).
 /// Integration: orchestrates detection sub-functions, no logic.
 pub(super) fn run_dry_detection(
     parsed: &[(String, String, syn::File)],
@@ -103,22 +151,8 @@ pub(super) fn run_dry_detection(
         parsed,
         config,
     );
-    let dead_code = run_guarded_detection(
-        config.duplicates.enabled,
-        |p, c| {
-            if !c.duplicates.detect_dead_code {
-                return vec![];
-            }
-            crate::adapters::analyzers::dry::dead_code::detect_dead_code(
-                p,
-                annotation_lines.api,
-                annotation_lines.test_helper,
-                cfg_test_files,
-            )
-        },
-        parsed,
-        config,
-    );
+    let dead_code = run_dead_code_detection(parsed, config, annotation_lines, cfg_test_files);
+    let dead_types = run_dead_type_detection(parsed, config, annotation_lines, cfg_test_files);
     let fragments = run_guarded_detection(
         config.duplicates.enabled,
         |p, c| crate::adapters::analyzers::dry::fragments::detect_fragments(p, &c.duplicates),
@@ -147,6 +181,7 @@ pub(super) fn run_dry_detection(
     DryResults {
         duplicates,
         dead_code,
+        dead_types,
         fragments,
         boilerplate,
         wildcard_warnings,
@@ -161,6 +196,7 @@ pub(super) fn count_dry_findings(
     summary: &mut Summary,
 ) {
     summary.dead_code_warnings = dry.dead_code.len();
+    summary.dead_type_warnings = dry.dead_types.len();
     summary.wildcard_import_warnings = dry
         .wildcard_warnings
         .iter()

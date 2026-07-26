@@ -5,6 +5,7 @@ use syn::visit::Visit;
 use super::{has_allow_dead_code, has_cfg_test, has_test_attr, qualify_name};
 use crate::adapters::shared::declared_function::DeclaredFunction;
 use crate::adapters::shared::file_visitor::FileVisitor;
+use crate::adapters::shared::marked_declaration::{mark_annotated, MarkerLines};
 
 // ── DeclaredFnCollector (for dead code) ─────────────────────────
 
@@ -169,35 +170,22 @@ pub fn detect_dead_code(
     merge_warnings(uncalled, test_only)
 }
 
-/// Mark functions that have a `// qual:api` annotation within the annotation window.
-/// Operation: iterates declarations checking line proximity to API markers.
-pub(crate) fn mark_api_declarations(
-    declared: &mut [DeclaredFunction],
-    api_lines: &std::collections::HashMap<String, std::collections::HashSet<usize>>,
-) {
-    declared.iter_mut().for_each(|d| {
-        if let Some(lines) = api_lines.get(&d.file) {
-            if crate::findings::has_annotation_in_window(lines, d.line) {
-                d.is_api = true;
-            }
-        }
-    });
+/// Mark functions that have a `// qual:api` annotation within the annotation
+/// window. The window rule is shared with DRY-006 and the stale-marker check,
+/// so the three cannot disagree about what a marker attaches to.
+/// Trivial: delegates to `mark_annotated`.
+pub(crate) fn mark_api_declarations(declared: &mut [DeclaredFunction], api_lines: &MarkerLines) {
+    mark_annotated(declared, api_lines, |d| d.is_api = true);
 }
 
 /// Mark functions that have a `// qual:test_helper` annotation within
 /// the annotation window.
-/// Operation: iterates declarations checking line proximity to markers.
+/// Trivial: delegates to `mark_annotated`.
 pub(crate) fn mark_test_helper_declarations(
     declared: &mut [DeclaredFunction],
-    test_helper_lines: &std::collections::HashMap<String, std::collections::HashSet<usize>>,
+    test_helper_lines: &MarkerLines,
 ) {
-    declared.iter_mut().for_each(|d| {
-        if let Some(lines) = test_helper_lines.get(&d.file) {
-            if crate::findings::has_annotation_in_window(lines, d.line) {
-                d.is_test_helper = true;
-            }
-        }
-    });
+    mark_annotated(declared, test_helper_lines, |d| d.is_test_helper = true);
 }
 
 /// Merge warning lists into one.

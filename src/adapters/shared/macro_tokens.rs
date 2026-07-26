@@ -161,3 +161,77 @@ pub fn tokens_reference_ident(tokens: &TokenStream, name: &str) -> bool {
     }
     false
 }
+
+/// Every identifier in `tokens`, recursing into groups and into the
+/// placeholders of string literals. The raw, maximally generous harvest — no
+/// position or casing filter — for the question "does anything here refer to
+/// this name at all". A spurious hit only errs toward "referenced", which for a
+/// dead-declaration check is the safe direction: it suppresses a finding rather
+/// than inventing one. Integration: token walk + placeholder extraction.
+pub fn all_idents(tokens: &TokenStream) -> impl Iterator<Item = String> {
+    let mut out = Vec::new();
+    let mut stack: Vec<TokenStream> = vec![tokens.clone()];
+    while let Some(stream) = stack.pop() {
+        for tt in stream {
+            match tt {
+                TokenTree::Ident(id) => out.push(id.to_string()),
+                TokenTree::Group(g) => stack.push(g.stream()),
+                TokenTree::Literal(lit) => out.extend(placeholder_names(&lit.to_string())),
+                _ => {}
+            }
+        }
+    }
+    out.into_iter()
+}
+
+/// The names inside `{…}` placeholders of a format string. `proc_macro2` lexes
+/// a string as ONE literal, so `format!("{PREFIX}{path}")` would otherwise
+/// reference nothing — and inline format arguments have been idiomatic since
+/// Rust 2021. Every identifier-shaped run inside a placeholder is yielded, which
+/// covers both the argument and the spec (`{value:>width$}` names two). `{{` is
+/// an escaped brace and starts no placeholder; a positional `{0}` yields
+/// nothing, since a run must start like an identifier.
+/// Operation: character scan over the literal text, no own calls.
+fn placeholder_names(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let bytes: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != '{' {
+            i += 1;
+            continue;
+        }
+        if bytes.get(i + 1) == Some(&'{') {
+            i += 2;
+            continue;
+        }
+        i += 1;
+        let start = i;
+        while i < bytes.len() && bytes[i] != '}' {
+            i += 1;
+        }
+        out.extend(ident_runs(&bytes[start..i]));
+    }
+    out
+}
+
+/// Identifier-shaped runs in a placeholder body: start with a letter or `_`,
+/// continue with letters, digits or `_`.
+/// Operation: run scan, no own calls.
+fn ident_runs(body: &[char]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current = String::new();
+    for &c in body {
+        let extends = match current.is_empty() {
+            true => c == '_' || c.is_alphabetic(),
+            false => c == '_' || c.is_alphanumeric(),
+        };
+        match (extends, current.is_empty()) {
+            (true, _) => current.push(c),
+            (false, false) => out.push(std::mem::take(&mut current)),
+            (false, true) => {}
+        }
+    }
+    out.extend(Some(current).filter(|c| !c.is_empty()));
+    out
+}

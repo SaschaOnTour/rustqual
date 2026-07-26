@@ -280,6 +280,7 @@ fn count_dry_findings_counts_only_unsuppressed() {
             one_entry_dup(true),
         ],
         dead_code: vec![],
+        dead_types: vec![],
         fragments: vec![
             one_entry_frag(false),
             one_entry_frag(false),

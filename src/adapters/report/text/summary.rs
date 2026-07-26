@@ -90,6 +90,7 @@ fn build_dimensions(s: &Summary) -> Vec<DimensionEntry> {
                 (s.duplicate_groups, "duplicates"),
                 (s.fragment_groups, "fragments"),
                 (s.dead_code_warnings, "dead code"),
+                (s.dead_type_warnings, "dead types"),
                 (s.boilerplate_warnings, "boilerplate"),
                 (s.wildcard_import_warnings, "wildcards"),
                 (s.repeated_match_groups, "repeated match"),
@@ -197,6 +198,7 @@ fn dimension_categories(dim_name: &str) -> &[&str] {
         "DRY" => &[
             "DUPLICATE",
             "DEAD_CODE",
+            "DEAD_TYPE",
             "FRAGMENT",
             "BOILERPLATE",
             "WILDCARD",

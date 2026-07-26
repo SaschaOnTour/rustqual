@@ -81,6 +81,8 @@ pub struct Summary {
     pub duplicate_groups: usize,
     /// Number of dead code warnings.
     pub dead_code_warnings: usize,
+    /// Number of dead type / constant warnings (DRY-006).
+    pub dead_type_warnings: usize,
     /// Number of individual entries across all duplicate fragment groups.
     pub fragment_groups: usize,
     /// Number of boilerplate pattern findings.
@@ -177,6 +179,7 @@ impl Summary {
             1.0 - ((self.duplicate_groups
                 + self.fragment_groups
                 + self.dead_code_warnings
+                + self.dead_type_warnings
                 + self.boilerplate_warnings
                 + self.wildcard_import_warnings
                 + self.repeated_match_groups) as f64
@@ -225,6 +228,7 @@ impl Summary {
             + self.duplicate_groups
             + self.fragment_groups
             + self.dead_code_warnings
+            + self.dead_type_warnings
             + self.boilerplate_warnings
             + self.srp_struct_warnings
             + self.srp_module_warnings

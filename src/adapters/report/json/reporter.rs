@@ -5,8 +5,8 @@
 
 use super::chunk::JsonChunk;
 use super::dry::{
-    build_boilerplate, build_dead_code, build_duplicates, build_fragments, build_repeated_matches,
-    build_wildcards,
+    build_boilerplate, build_dead_code, build_dead_types, build_duplicates, build_fragments,
+    build_repeated_matches, build_wildcards,
 };
 use super::functions::build_functions;
 use super::misc::{build_architecture, build_tq};
@@ -64,6 +64,7 @@ impl<'a> ReporterImpl for JsonReporter<'a> {
         JsonChunk {
             duplicates: build_duplicates(findings),
             dead_code: build_dead_code(findings),
+            dead_types: build_dead_types(findings),
             fragments: build_fragments(findings),
             wildcards: build_wildcards(findings),
             boilerplate: build_boilerplate(findings),

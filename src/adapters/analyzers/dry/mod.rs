@@ -1,13 +1,17 @@
 pub mod boilerplate;
 pub(crate) mod call_targets;
 pub mod dead_code;
+pub mod dead_types;
+pub(crate) mod declared_types;
 pub mod fragments;
 pub mod functions;
 pub mod match_patterns;
+pub(crate) mod type_references;
 pub mod wildcards;
 
 pub use boilerplate::BoilerplateFind;
 pub use dead_code::{DeadCodeKind, DeadCodeWarning};
+pub use dead_types::{DeadTypeKind, DeadTypeWarning};
 pub use fragments::FragmentGroup;
 pub use functions::{DuplicateGroup, DuplicateKind};
 
@@ -51,11 +55,23 @@ pub(crate) fn collect_declared_functions(
     collector.functions
 }
 
+/// Collect declared type and constant metadata from all parsed files.
+/// Trivial: creates visitor and delegates to visit_all_files.
+pub(crate) fn collect_declared_types(
+    parsed: &[(String, String, syn::File)],
+) -> Vec<crate::adapters::shared::declared_type::DeclaredType> {
+    let mut collector = declared_types::DeclaredTypeCollector::new();
+    visit_all_files(parsed, &mut collector);
+    collector.types
+}
+
 // ── Attribute helpers ───────────────────────────────────────────
 
 // `has_cfg_test` and `has_test_attr` live in `adapters::shared::cfg_test`
 // (multi-dimension utility). Re-exports keep existing call sites working.
 pub(crate) use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
+
+pub(crate) use type_references::collect_type_references;
 
 /// Check if attributes contain `#[allow(..., dead_code, ...)]`. Handles
 /// both the single-lint form (`#[allow(dead_code)]`) and the list form

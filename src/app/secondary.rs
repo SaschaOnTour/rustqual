@@ -30,6 +30,7 @@ pub(crate) struct SecondaryResults {
     pub(crate) coupling: Option<crate::adapters::analyzers::coupling::CouplingAnalysis>,
     pub(crate) duplicates: Vec<crate::adapters::analyzers::dry::functions::DuplicateGroup>,
     pub(crate) dead_code: Vec<crate::adapters::analyzers::dry::dead_code::DeadCodeWarning>,
+    pub(crate) dead_types: Vec<crate::adapters::analyzers::dry::dead_types::DeadTypeWarning>,
     pub(crate) fragments: Vec<crate::adapters::analyzers::dry::fragments::FragmentGroup>,
     pub(crate) boilerplate: Vec<crate::adapters::analyzers::dry::boilerplate::BoilerplateFind>,
     pub(crate) wildcard_warnings:
@@ -80,6 +81,7 @@ pub(crate) fn run_secondary_analysis(
         coupling,
         duplicates: dry.duplicates,
         dead_code: dry.dead_code,
+        dead_types: dry.dead_types,
         fragments: dry.fragments,
         boilerplate: dry.boilerplate,
         wildcard_warnings: dry.wildcard_warnings,

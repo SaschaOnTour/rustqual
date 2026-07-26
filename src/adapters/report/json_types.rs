@@ -13,6 +13,8 @@ pub(crate) struct JsonOutput {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) dead_code: Vec<JsonDeadCodeWarning>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) dead_types: Vec<JsonDeadTypeWarning>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) fragments: Vec<JsonFragmentGroup>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) boilerplate: Vec<JsonBoilerplateFind>,
@@ -218,6 +220,19 @@ pub(crate) struct JsonDuplicateEntry {
 pub(crate) struct JsonDeadCodeWarning {
     pub(crate) function_name: String,
     pub(crate) qualified_name: String,
+    pub(crate) file: String,
+    pub(crate) line: usize,
+    pub(crate) kind: String,
+    pub(crate) suggestion: String,
+}
+
+/// DRY-006. Kept apart from `dead_code` rather than folded into it: a machine
+/// consumer reading `function_name` must not be handed a struct name.
+#[derive(serde::Serialize)]
+pub(crate) struct JsonDeadTypeWarning {
+    pub(crate) name: String,
+    /// `struct`, `enum`, `union`, `type alias`, `const` or `static`.
+    pub(crate) item: String,
     pub(crate) file: String,
     pub(crate) line: usize,
     pub(crate) kind: String,

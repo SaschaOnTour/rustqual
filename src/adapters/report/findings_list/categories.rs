@@ -59,6 +59,12 @@ pub(super) fn dry_category_detail(f: &DryFinding) -> (&'static str, String) {
         (DryFindingKind::DeadCodeTestOnly, DryFindingDetails::DeadCode { qualified_name, .. }) => {
             ("DEAD_CODE", format!("testonly {qualified_name}"))
         }
+        (DryFindingKind::DeadTypeUnused, DryFindingDetails::DeadType { name, item, .. }) => {
+            ("DEAD_TYPE", format!("{item} {name}"))
+        }
+        (DryFindingKind::DeadTypeTestOnly, DryFindingDetails::DeadType { name, item, .. }) => {
+            ("DEAD_TYPE", format!("testonly {item} {name}"))
+        }
         (DryFindingKind::Wildcard, DryFindingDetails::Wildcard { module_path }) => {
             ("WILDCARD", module_path.clone())
         }
