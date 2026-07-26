@@ -16,8 +16,7 @@ use std::collections::HashSet;
 use syn::visit::Visit;
 
 use super::doc_scan::{DocLine, DocScanner};
-use super::split_names::{collect_split, SplitCollector, SplitNames};
-use crate::adapters::shared::item_shape::{impl_item_attrs, item_attrs, trait_item_attrs};
+use super::split_names::{collect_split, test_scoped_visits, SplitCollector, SplitNames};
 use crate::adapters::shared::macro_tokens;
 
 /// AST visitor collecting referenced names, split by production / test context.
@@ -162,29 +161,13 @@ impl<'ast> Visit<'ast> for TypeReferenceCollector {
         self.target().extend(idents);
     }
 
-    /// Every item goes through here, so the two scope-forming attributes are
-    /// handled once instead of on the handful of shapes that happen to need an
-    /// override: `#[cfg(test)]` on a const or a `use` scopes exactly as it does
-    /// on a function, and a lint level set on an `impl` or a function covers
-    /// what is declared inside it.
-    fn visit_item(&mut self, node: &'ast syn::Item) {
-        let previous = self.names.enter(item_attrs(node));
-        syn::visit::visit_item(self, node);
-        self.names.leave(previous);
-    }
+    test_scoped_visits!();
 
-    /// Associated items do not pass through `visit_item`, so the same scoping
-    /// happens at their own dispatch — a `#[cfg(test)]` associated const or
-    /// type carries references just as a free one does.
-    fn visit_impl_item(&mut self, node: &'ast syn::ImplItem) {
-        let previous = self.names.enter(impl_item_attrs(node));
-        syn::visit::visit_impl_item(self, node);
-        self.names.leave(previous);
-    }
-
-    fn visit_trait_item(&mut self, node: &'ast syn::TraitItem) {
-        let previous = self.names.enter(trait_item_attrs(node));
-        syn::visit::visit_trait_item(self, node);
+    /// The one attributed kind the shared list leaves out, because the call
+    /// graph needs extra work here and a macro would hide it.
+    fn visit_field(&mut self, node: &'ast syn::Field) {
+        let previous = self.names.enter(&node.attrs);
+        syn::visit::visit_field(self, node);
         self.names.leave(previous);
     }
 }

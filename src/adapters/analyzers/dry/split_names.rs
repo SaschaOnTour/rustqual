@@ -67,6 +67,69 @@ pub(crate) trait SplitCollector {
     fn names(&mut self) -> &mut SplitNames;
 }
 
+/// The `Visit` methods that switch test context, one per node kind that can
+/// carry `#[cfg(test)]`.
+///
+/// This exists as a list rather than as hand-written methods because the gap it
+/// closes is always the same shape — *a node kind nobody thought of*. Three
+/// review rounds found three of them (associated items, then fields, variants
+/// and foreign items), each time in only one of the two collectors. Adding a
+/// kind here fixes both at once, and the list itself is the documentation of
+/// what is covered.
+///
+/// `visit_field` is **not** here: one collector reads serde attributes off a
+/// field, so writing it out keeps that visible to the call graph rather than
+/// hiding it behind a macro the analyzer cannot see through.
+///
+/// Not covered, deliberately: statement- and expression-level attributes
+/// (`#[cfg(test)] let x = …`). They sit inside a function body, and a body that
+/// is not itself test-only is production — the enclosing item already decided.
+macro_rules! test_scoped_visits {
+    () => {
+        fn visit_item(&mut self, node: &'ast syn::Item) {
+            let previous = self
+                .names
+                .enter(crate::adapters::shared::item_shape::item_attrs(node));
+            syn::visit::visit_item(self, node);
+            self.names.leave(previous);
+        }
+
+        fn visit_impl_item(&mut self, node: &'ast syn::ImplItem) {
+            let previous = self
+                .names
+                .enter(crate::adapters::shared::item_shape::impl_item_attrs(node));
+            syn::visit::visit_impl_item(self, node);
+            self.names.leave(previous);
+        }
+
+        fn visit_trait_item(&mut self, node: &'ast syn::TraitItem) {
+            let previous = self
+                .names
+                .enter(crate::adapters::shared::item_shape::trait_item_attrs(node));
+            syn::visit::visit_trait_item(self, node);
+            self.names.leave(previous);
+        }
+
+        fn visit_foreign_item(&mut self, node: &'ast syn::ForeignItem) {
+            let previous =
+                self.names
+                    .enter(crate::adapters::shared::item_shape::foreign_item_attrs(
+                        node,
+                    ));
+            syn::visit::visit_foreign_item(self, node);
+            self.names.leave(previous);
+        }
+
+        fn visit_variant(&mut self, node: &'ast syn::Variant) {
+            let previous = self.names.enter(&node.attrs);
+            syn::visit::visit_variant(self, node);
+            self.names.leave(previous);
+        }
+    };
+}
+
+pub(crate) use test_scoped_visits;
+
 /// Run `collector` over every file with the context set from `cfg_test_files`,
 /// and hand back `(production, tests)`.
 /// Operation: per-file context switch + visitor run, own calls in the closure.

@@ -100,10 +100,13 @@ there was nothing to verify it against.
   declaration used only from there produced no finding at all. Both the call
   graph and the reference set now scope at the item dispatch, where every kind
   passes through — along with `#[test]`-family attributes, which the call graph
-  previously recognised only on free functions. Associated items reach the tree
-  through their own dispatch rather than `visit_item`, so `impl` and trait items
-  are scoped there too: a `#[cfg(test)]` associated const carries references
-  just as a free one does.
+  previously recognised only on free functions. Attributes are not an item-level
+  thing, though, so the same scoping happens at every dispatch that can carry
+  one: associated items in an `impl` or a trait, items in an `extern` block,
+  struct fields and enum variants. The list lives in one place
+  (`dry/split_names.rs`), because the gap this closes is always the same shape —
+  a node kind nobody thought of — and one list fixes both the call graph and the
+  reference set at once.
 - **SLM missed `self` inside an inline format argument.** `format!("{self:?}")`
   is one literal to `proc_macro2`, so the token scan saw no `self` and reported
   the method as self-less. Same root cause as the DRY-006 case above, same fix:

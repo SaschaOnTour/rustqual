@@ -51,10 +51,12 @@ pub(crate) fn item_attrs(item: &syn::Item) -> &[syn::Attribute] {
 // position, so a macro would have to take the variant list as an argument and
 // the list would be written twice again. A trait would move the same two matches
 // into two impls. Both are worse than saying so here.
-// qual:allow(dry, duplicate) reason: "two syn enums with identical variant
+// qual:allow(dry, duplicate) reason: "three syn enums with overlapping variant
 // names and no shared accessor; every way to share the match is longer than the
-// match, and the two lists cannot drift because both are exhaustive over their
-// own enum with a catch-all."
+// match, and they cannot drift because each is exhaustive over its own enum
+// with a catch-all."
+// qual:allow(dry, repeated_matches) reason: "same three enums — the repetition
+// is syn's shape, not a missing abstraction."
 /// The attributes of an associated item in an `impl` block.
 /// Operation: shape lookup table, no own calls.
 pub(crate) fn impl_item_attrs(item: &syn::ImplItem) -> &[syn::Attribute] {
@@ -75,6 +77,18 @@ pub(crate) fn trait_item_attrs(item: &syn::TraitItem) -> &[syn::Attribute] {
         syn::TraitItem::Fn(i) => &i.attrs,
         syn::TraitItem::Type(i) => &i.attrs,
         syn::TraitItem::Macro(i) => &i.attrs,
+        _ => &[],
+    }
+}
+
+/// The attributes of an item in an `extern` block.
+/// Operation: shape lookup table, no own calls.
+pub(crate) fn foreign_item_attrs(item: &syn::ForeignItem) -> &[syn::Attribute] {
+    match item {
+        syn::ForeignItem::Fn(i) => &i.attrs,
+        syn::ForeignItem::Static(i) => &i.attrs,
+        syn::ForeignItem::Type(i) => &i.attrs,
+        syn::ForeignItem::Macro(i) => &i.attrs,
         _ => &[],
     }
 }

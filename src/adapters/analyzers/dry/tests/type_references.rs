@@ -238,64 +238,45 @@ fn a_name_value_attribute_still_contributes_its_value() {
     );
 }
 
-#[test]
-fn test_context_switches_on_every_item_kind() {
-    // The switch has to sit at the item dispatch, not on the handful of shapes
-    // that happened to need an override — a `#[cfg(test)]` const or struct
-    // carries references just as a function does.
-    let via_const = split_refs(
-        "src/lib.rs",
-        "pub struct Fixture;\n#[cfg(test)]\nconst CHECK: fn(Fixture) = |_| {};",
-        &[],
-    );
-    assert!(!via_const.0.contains("Fixture"), "const: {:?}", via_const.0);
-    assert!(via_const.1.contains("Fixture"));
-
-    let via_struct = split_refs(
-        "src/lib.rs",
-        "pub struct Fixture;\n#[cfg(test)]\nstruct Holder(Fixture);",
-        &[],
-    );
-    assert!(
-        !via_struct.0.contains("Fixture"),
-        "struct: {:?}",
-        via_struct.0
-    );
-
-    let via_use = split_refs(
-        "src/lib.rs",
-        "#[cfg(test)]\nuse crate::inner::Fixture;",
-        &[],
-    );
-    assert!(!via_use.0.contains("Fixture"), "use: {:?}", via_use.0);
+/// `(production, test)` sets for a fixture declaring `Fixture` and referring to
+/// it from a `#[cfg(test)]` node of the given shape.
+fn scoped_by(shape: &str) -> (HashSet<String>, HashSet<String>) {
+    split_refs("src/lib.rs", &format!("pub struct Fixture;\n{shape}"), &[])
 }
 
 #[test]
-fn test_context_switches_on_associated_items_too() {
-    // `visit_item` only sees `syn::Item`. An associated const, type or method
-    // reaches the tree through `visit_impl_item` / `visit_trait_item`, so those
-    // dispatches need the same scoping or a `#[cfg(test)]` associated item
-    // contributes production references.
-    let assoc_const = split_refs(
-        "src/lib.rs",
-        "pub struct Fixture;\nstruct Holder;\nimpl Holder { #[cfg(test)] const CHECK: Option<Fixture> = None; }",
-        &[],
-    );
-    assert!(
-        !assoc_const.0.contains("Fixture"),
-        "impl-item const: {:?}",
-        assoc_const.0
-    );
-    assert!(assoc_const.1.contains("Fixture"));
-
-    let assoc_type = split_refs(
-        "src/lib.rs",
-        "pub struct Fixture;\ntrait T { #[cfg(test)] type Out = Fixture; }",
-        &[],
-    );
-    assert!(
-        !assoc_type.0.contains("Fixture"),
-        "trait-item type: {:?}",
-        assoc_type.0
-    );
+fn test_context_switches_on_every_attributed_node_kind() {
+    // Attributes are not an item-level thing. Each of these reaches the tree
+    // through a different dispatch, and one missed dispatch means a reference
+    // from test-only code lands in the production set — where it suppresses the
+    // test-only finding entirely rather than producing a wrong one.
+    let shapes = [
+        (
+            "free const",
+            "#[cfg(test)] const CHECK: fn(Fixture) = |_| {};",
+        ),
+        ("free struct", "#[cfg(test)] struct Holder(Fixture);"),
+        ("use item", "#[cfg(test)] use crate::inner::Fixture;"),
+        (
+            "associated const",
+            "struct H; impl H { #[cfg(test)] const C: Option<Fixture> = None; }",
+        ),
+        (
+            "associated type",
+            "trait T { #[cfg(test)] type Out = Fixture; }",
+        ),
+        ("struct field", "struct H { #[cfg(test)] f: Fixture }"),
+        ("enum variant", "enum E { #[cfg(test)] V(Fixture) }"),
+        (
+            "foreign item",
+            "extern \"C\" { #[cfg(test)] fn f(x: Fixture); }",
+        ),
+    ];
+    for (label, shape) in shapes {
+        let (production, _) = scoped_by(shape);
+        assert!(
+            !production.contains("Fixture"),
+            "{label}: a #[cfg(test)] node must not contribute a production reference: {production:?}"
+        );
+    }
 }
