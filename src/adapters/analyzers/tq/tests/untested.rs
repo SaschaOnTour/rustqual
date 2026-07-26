@@ -269,3 +269,28 @@ fn a_reexport_alone_is_not_a_production_call() {
     );
     assert!(out.is_empty(), "no production call, no TQ-003: {out:?}");
 }
+
+#[test]
+fn coverage_seeds_the_tested_set() {
+    // `FNDA:1,name` says a test ran the function. That is measurement, not
+    // inference — it settles the cases the call graph cannot follow (a macro it
+    // does not expand, a trait object, generated code) without any heuristic.
+    let hits: HashMap<String, u64> = [("ran".to_string(), 3u64), ("never".to_string(), 0u64)]
+        .into_iter()
+        .collect();
+    let data = crate::adapters::analyzers::tq::lcov::LcovFileData {
+        function_hits: hits,
+        line_hits: HashMap::new(),
+    };
+    let files: HashMap<String, _> = [("src/lib.rs".to_string(), data)].into_iter().collect();
+    let seeded = crate::adapters::analyzers::tq::executed_under_test(Some(&files));
+    assert!(seeded.contains(&"ran".to_string()));
+    assert!(
+        !seeded.contains(&"never".to_string()),
+        "a recorded-but-never-executed function is not tested: {seeded:?}"
+    );
+    assert!(
+        crate::adapters::analyzers::tq::executed_under_test(None).is_empty(),
+        "no report, no change to the call-graph answer"
+    );
+}
