@@ -40,6 +40,41 @@ fn dead_code_detection_skipped_when_disabled() {
 }
 
 #[test]
+fn dead_type_detection_skipped_when_disabled() {
+    // With `detect_dead_types = false` an unreferenced struct must NOT be
+    // reported; guards the `detect_dead_types` half of the enable condition.
+    let mut config = crate::config::Config::default();
+    config.duplicates.detect_dead_types = false;
+    config.compile();
+    let dry = run_dry(&config, "struct Unused { n: u8 }");
+    assert!(
+        dry.dead_types.is_empty(),
+        "no dead-type warnings when detect_dead_types is off, got {:?}",
+        dry.dead_types
+    );
+}
+
+#[test]
+fn dead_type_detection_runs_when_enabled() {
+    // The counterpart: with the default config the same input DOES report, so
+    // the test above pins the flag rather than an empty fixture.
+    let mut config = crate::config::Config::default();
+    config.compile();
+    let dry = run_dry(&config, "struct Unused { n: u8 }");
+    assert_eq!(dry.dead_types.len(), 1, "got {:?}", dry.dead_types);
+}
+
+#[test]
+fn dead_type_detection_skipped_when_duplicates_disabled() {
+    // The DRY dimension's own switch must also silence it.
+    let mut config = crate::config::Config::default();
+    config.duplicates.enabled = false;
+    config.compile();
+    let dry = run_dry(&config, "struct Unused { n: u8 }");
+    assert!(dry.dead_types.is_empty(), "got {:?}", dry.dead_types);
+}
+
+#[test]
 fn wildcard_detection_skipped_when_duplicates_disabled() {
     // `detect_wildcard_imports` stays on but `duplicates.enabled = false`, so the
     // wildcard closure's `if !c.duplicates.enabled` must short-circuit to empty;

@@ -23,6 +23,7 @@ fn test_duplicates_config_defaults() {
     assert_eq!(c.min_lines, DEFAULT_MIN_LINES);
     assert_eq!(c.min_statements, DEFAULT_MIN_STATEMENTS);
     assert!(c.detect_dead_code);
+    assert!(c.detect_dead_types);
 }
 
 #[test]
