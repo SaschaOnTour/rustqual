@@ -168,6 +168,36 @@ pub fn detect_repeated_matches(parsed: &[(String, String, syn::File)]) -> Vec<Re
 
 /// Group collected match entries by hash and filter to repeated patterns.
 /// Operation: hash grouping + filtering logic, no own calls.
+/// Project one hash bucket into a reported group, ordering its entries by
+/// (file, line, function) so the output is stable regardless of visit order.
+/// Operation: projection + sort, no own calls.
+fn project_group(entries: Vec<CollectedMatch>) -> RepeatedMatchGroup {
+    let enum_name = entries
+        .first()
+        .map(|e| e.enum_name.clone())
+        .unwrap_or_default();
+    let mut projected: Vec<RepeatedMatchEntry> = entries
+        .into_iter()
+        .map(|e| RepeatedMatchEntry {
+            file: e.file,
+            line: e.line,
+            function_name: e.function_name,
+            arm_count: e.arm_count,
+        })
+        .collect();
+    projected.sort_by(|a, b| {
+        a.file
+            .cmp(&b.file)
+            .then(a.line.cmp(&b.line))
+            .then(a.function_name.cmp(&b.function_name))
+    });
+    RepeatedMatchGroup {
+        enum_name,
+        entries: projected,
+        suppressed: false,
+    }
+}
+
 pub(crate) fn group_repeated_patterns(collected: Vec<CollectedMatch>) -> Vec<RepeatedMatchGroup> {
     let mut groups: HashMap<u64, Vec<CollectedMatch>> = HashMap::new();
     for entry in collected {
@@ -183,34 +213,7 @@ pub(crate) fn group_repeated_patterns(collected: Vec<CollectedMatch>) -> Vec<Rep
             let mut seen = std::collections::HashSet::new();
             entries.iter().any(|e| !seen.insert(&e.function_name)) || seen.len() >= 2
         })
-        .map(|(_hash, entries)| {
-            let enum_name = entries
-                .first()
-                .map(|e| e.enum_name.clone())
-                .unwrap_or_default();
-            let mut projected: Vec<RepeatedMatchEntry> = entries
-                .into_iter()
-                .map(|e| RepeatedMatchEntry {
-                    file: e.file,
-                    line: e.line,
-                    function_name: e.function_name,
-                    arm_count: e.arm_count,
-                })
-                .collect();
-            // Sort entries within each group by (file, line, function) so the
-            // snapshot order is stable regardless of visit order.
-            projected.sort_by(|a, b| {
-                a.file
-                    .cmp(&b.file)
-                    .then(a.line.cmp(&b.line))
-                    .then(a.function_name.cmp(&b.function_name))
-            });
-            RepeatedMatchGroup {
-                enum_name,
-                entries: projected,
-                suppressed: false,
-            }
-        })
+        .map(|(_hash, entries)| project_group(entries))
         .collect();
 
     // Group ordering: most-repeated first, ties broken by enum_name and then

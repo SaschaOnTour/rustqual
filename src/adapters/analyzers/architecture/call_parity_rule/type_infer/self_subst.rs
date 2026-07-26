@@ -14,7 +14,6 @@
 
 use syn::visit_mut::VisitMut;
 
-// qual:api
 /// Clone `ty` and rewrite every bare `Self` ident path to `impl_segs`.
 /// Returns the input untouched when `impl_segs.join("::")` doesn't
 /// parse as a path (defensive — real impl segments always do).

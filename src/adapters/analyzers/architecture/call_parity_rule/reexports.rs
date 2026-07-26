@@ -36,7 +36,6 @@ const MAX_REEXPORT_CHAIN_DEPTH: usize = 16;
 /// and by the defense-in-depth post-pass `rewrite_reexport_edges`.
 pub(crate) type ReexportMap = HashMap<String, String>;
 
-// qual:api
 /// Walk every `pub use` (and `pub(crate)`/`pub(super)`/`pub(in path)`
 /// use) leaf across the workspace and produce a map from
 /// reexport-site canonical → original-definition canonical. Chained
@@ -56,7 +55,6 @@ pub(crate) fn collect_reexport_map(
     map
 }
 
-// qual:api
 /// Normalise a fully-resolved workspace canonical through the
 /// re-export map: if the canonical (or a strict `::`-bounded prefix
 /// of it) is registered as a re-export, substitute the prefix with the
@@ -117,7 +115,6 @@ pub(crate) fn apply_reexport_substitution(
     }
 }
 
-// qual:api
 /// Apply the re-export map to every callee canonical in the graph,
 /// rewriting both `forward` and `reverse`. Edges whose callee isn't
 /// in the map are left alone.

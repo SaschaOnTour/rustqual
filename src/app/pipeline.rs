@@ -104,10 +104,16 @@ pub(crate) fn run_analysis(
         suppression_lines: &suppression_lines,
         cfg_test_files: &cfg_test_files,
     };
-    let secondary = run_secondary_analysis(&secondary_ctx, &mut summary);
+    let mut secondary = run_secondary_analysis(&secondary_ctx, &mut summary);
     let architecture_findings =
         collect_architecture_findings(parsed, config, &suppression_lines, &mut summary);
     finalize_summary(&mut summary, config, &suppression_lines, parsed);
+    // Taken before `secondary` is moved into the result: stale `qual:api` /
+    // `qual:test_helper` markers are found during the TQ pass (that is where
+    // the marked declarations and the production-call set already exist) and
+    // join the `qual:allow` orphans below, so all three marker kinds surface
+    // through one finding category.
+    let stale_markers = std::mem::take(&mut secondary.stale_markers);
     let mut result = build_result(
         &mut all_results,
         summary,
@@ -117,12 +123,14 @@ pub(crate) fn run_analysis(
     );
     let invalid_qual_allow_lines =
         crate::adapters::source::filesystem::collect_invalid_qual_allow_lines(parsed);
-    let orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
+    let mut orphans = crate::app::orphan_suppressions::detect_orphan_suppressions(
         &suppression_lines,
         &invalid_qual_allow_lines,
         &result,
         config,
     );
+    orphans.extend(stale_markers);
+    orphans.sort_by(|a, b| a.file.cmp(&b.file).then(a.line.cmp(&b.line)));
     result.summary.orphan_suppressions = orphans.len();
     result.findings.orphan_suppressions = orphans;
     result

@@ -6,16 +6,15 @@
 //! resulting set to classify functions as test helpers rather than
 //! production code.
 
-use std::borrow::Cow;
 use std::collections::HashSet;
-use std::path::Path;
 
 /// Borrowed workspace slice shape. The test-file detector never needs
 /// the source content (the middle `String` in the pipeline's parsed
 /// tuple), just path + AST — so the internal helpers only take these.
 /// Adapters (`collect_cfg_test_file_paths`) translate from their
 /// richer tuple shape without cloning the ASTs.
-type ParsedRefs<'a> = [(&'a str, &'a syn::File)];
+pub(crate) use super::child_paths::{ChildPathResolver, ParsedRefs};
+use super::crate_roots::crate_root_of;
 
 /// Compute the set of source paths that are reachable only under
 /// `#[cfg(test)]`. Combines direct hits with transitive propagation
@@ -75,53 +74,16 @@ fn tests_dir_owners(path: &str) -> impl Iterator<Item = &str> + '_ {
     })
 }
 
-/// If `path` is a crate-root file, return the owning package-root
-/// directory (`""` for the analysis-root crate). Crate roots are Cargo's
-/// defining markers of a package: the default `src/lib.rs` / `src/main.rs`
-/// and autobinary `src/bin/<name>.rs`. This identifies real package roots
-/// from the parsed `.rs` set without reading any manifest. Custom
-/// `[lib] path = …` / `[[bin]] path = …` layouts are not detectable from
-/// paths alone (they would require parsing `Cargo.toml`).
-/// Integration: combines the default-root and autobinary lookups.
-fn crate_root_owner(path: &str) -> Option<&str> {
-    ["src/lib.rs", "src/main.rs"]
-        .into_iter()
-        .find_map(|tail| owner_with_tail(path, tail))
-        .or_else(|| bin_crate_root_owner(path))
-}
-
-/// Owner directory of a path ending in `<owner>/{tail}` (`""` when the
-/// path equals `tail`), or `None`. Boundary-aware via the trailing `/`.
-/// Operation: suffix matching, no own calls.
-fn owner_with_tail<'a>(path: &'a str, tail: &str) -> Option<&'a str> {
-    (path == tail)
-        .then_some("")
-        .or_else(|| path.strip_suffix(tail).and_then(|p| p.strip_suffix('/')))
-}
-
-/// Owner directory of an autobinary crate root `<owner>/src/bin/<name>.rs`
-/// (`""` for a top-level `src/bin/<name>.rs`), or `None`. Only a file
-/// directly inside `src/bin/` counts — deeper modules do not.
-/// Operation: split + filter, no own calls.
-fn bin_crate_root_owner(path: &str) -> Option<&str> {
-    path.strip_prefix("src/bin/")
-        .map(|name| ("", name))
-        .or_else(|| path.split_once("/src/bin/"))
-        .filter(|(_, name)| name.ends_with(".rs") && !name.contains('/'))
-        .map(|(owner, _)| owner)
-}
-
 /// Directory prefixes that are genuine Cargo package roots in the parsed
-/// tree: every directory that holds a crate-root file (`src/lib.rs` or
-/// `src/main.rs`). `""` denotes the analysis-root crate. Derived from the
-/// actual `.rs` set — no filesystem or manifest access — so a directory
-/// merely *containing* a `src/` subtree (without a crate root) does not
-/// qualify.
-/// Operation: filter_map over parsed paths, no own calls.
+/// tree: every directory that holds a crate-root file. `""` denotes the
+/// analysis-root crate. Which files count as roots is decided by the shared
+/// [`crate_root_of`] — so a directory merely *containing* a `src/` subtree
+/// (without a crate root) does not qualify.
+/// Operation: filter_map over parsed paths, own call hidden in the closure.
 fn package_roots(parsed: &ParsedRefs<'_>) -> HashSet<String> {
     parsed
         .iter()
-        .filter_map(|(path, _)| crate_root_owner(path).map(String::from))
+        .filter_map(|(path, _)| crate_root_of(path).map(|(owner, _)| owner.to_string()))
         .collect()
 }
 
@@ -159,124 +121,90 @@ fn integration_test_files(parsed: &ParsedRefs<'_>) -> HashSet<String> {
         .collect()
 }
 
-/// Resolves `mod name;` declarations to child file paths by probing the
-/// candidate `{parent_dir}/{name}.rs` and `{parent_dir}/{name}/mod.rs`
-/// locations against the set of known file paths.
-struct ChildPathResolver<'a> {
-    known_paths: HashSet<&'a str>,
+/// One out-of-line `mod name;` a file declares, with what locating and
+/// classifying it needs: the inline `mod {}` chain enclosing it, and whether
+/// any block in that chain carries `#[cfg(test)]`.
+struct ExternalMod<'a> {
+    inline_stack: Vec<String>,
+    under_cfg_test: bool,
+    item: &'a syn::ItemMod,
 }
 
-impl<'a> ChildPathResolver<'a> {
-    fn from_parsed(parsed: &'a ParsedRefs<'a>) -> Self {
-        Self {
-            known_paths: parsed.iter().map(|(p, _)| *p).collect(),
-        }
-    }
-
-    fn resolve(&self, parent_path: &str, mod_item: &syn::ItemMod) -> Option<String> {
-        if let Some(explicit) = path_attribute(&mod_item.attrs) {
-            return self.resolve_explicit_path(parent_path, &explicit);
-        }
-        self.resolve_by_convention(parent_path, &mod_item.ident.to_string())
-    }
-
-    /// `#[path = "custom.rs"]` is resolved relative to the directory
-    /// containing the parent file, matching rustc's own semantics.
-    /// Operation: path arithmetic + existence check, no own calls.
-    fn resolve_explicit_path(&self, parent_path: &str, relative: &str) -> Option<String> {
-        let parent_dir = Path::new(parent_path)
-            .parent()
-            .unwrap_or(Path::new(""))
-            .to_path_buf();
-        let candidate = parent_dir
-            .join(relative)
-            .to_string_lossy()
-            .replace('\\', "/");
-        self.known_paths
-            .contains(candidate.as_str())
-            .then_some(candidate)
-    }
-
-    /// Naming-convention resolution: try `{dir}/{name}.rs` then
-    /// `{dir}/{name}/mod.rs` under the parent file's module directory.
-    /// Operation: path arithmetic + existence checks, no own calls.
-    fn resolve_by_convention(&self, parent_path: &str, mod_name: &str) -> Option<String> {
-        let parent = Path::new(parent_path);
-        let child_dir = if parent
-            .file_stem()
-            .is_some_and(|s| s == "mod" || s == "lib" || s == "main")
-        {
-            parent.parent().unwrap_or(Path::new("")).to_path_buf()
-        } else {
-            parent.with_extension("")
-        };
-        let file_raw = child_dir.join(format!("{mod_name}.rs"));
-        let dir_raw = child_dir.join(mod_name).join("mod.rs");
-        let file_lossy = file_raw.to_string_lossy();
-        let dir_lossy = dir_raw.to_string_lossy();
-        let candidate_file = normalize_sep(file_lossy.as_ref());
-        let candidate_dir = normalize_sep(dir_lossy.as_ref());
-        if self.known_paths.contains(candidate_file.as_ref()) {
-            Some(candidate_file.into_owned())
-        } else if self.known_paths.contains(candidate_dir.as_ref()) {
-            Some(candidate_dir.into_owned())
-        } else {
-            None
-        }
-    }
-}
-
-/// Convert OS-native path separators into the forward-slash form used
-/// by `known_paths`. Returns `Cow::Borrowed` on Unix and on Windows
-/// paths without backslashes; allocates only when a replacement is
-/// actually needed.
-fn normalize_sep(path: &str) -> Cow<'_, str> {
-    if cfg!(windows) && path.contains('\\') {
-        Cow::Owned(path.replace('\\', "/"))
-    } else {
-        Cow::Borrowed(path)
-    }
-}
-
-/// Extract the string value of a `#[path = "..."]` attribute if present.
-/// Operation: attribute lookup + literal parsing, no own calls.
-fn path_attribute(attrs: &[syn::Attribute]) -> Option<String> {
-    attrs.iter().find_map(|attr| {
-        if !attr.path().is_ident("path") {
-            return None;
-        }
-        match &attr.meta {
-            syn::Meta::NameValue(nv) => match &nv.value {
-                syn::Expr::Lit(expr_lit) => match &expr_lit.lit {
-                    syn::Lit::Str(s) => Some(s.value()),
-                    _ => None,
-                },
-                _ => None,
-            },
+/// Every out-of-line `mod name;` in a file, descending through inline
+/// `mod {}` blocks. A declaration nested in one is a real declaration: it just
+/// needs the enclosing chain to locate its file, since a module's children live
+/// in *its* directory, not the file's.
+/// Integration: per-item delegation.
+// qual:recursive
+fn external_mods<'a>(
+    items: &'a [syn::Item],
+    inline_stack: &[String],
+    under_cfg_test: bool,
+) -> Vec<ExternalMod<'a>> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            syn::Item::Mod(m) => Some(m),
             _ => None,
-        }
-    })
+        })
+        .flat_map(|m| mod_declarations(m, inline_stack, under_cfg_test))
+        .collect()
 }
 
-/// Files referenced by an explicit `#[cfg(test)] mod foo;` in a parent file.
+/// One `mod` item: an out-of-line declaration is itself the result; an inline
+/// block contributes what its body declares, one level deeper — and passes its
+/// own `#[cfg(test)]` down, because the attribute covers everything inside.
+/// Operation: selects between the two shapes, own calls hidden in the closures.
+// qual:recursive
+fn mod_declarations<'a>(
+    m: &'a syn::ItemMod,
+    inline_stack: &[String],
+    under_cfg_test: bool,
+) -> Vec<ExternalMod<'a>> {
+    let declaration = || {
+        vec![ExternalMod {
+            inline_stack: inline_stack.to_vec(),
+            under_cfg_test,
+            item: m,
+        }]
+    };
+    let descend = |inner: &'a [syn::Item]| {
+        external_mods(
+            inner,
+            &child_stack(inline_stack, m),
+            under_cfg_test || super::cfg_test::has_cfg_test(&m.attrs),
+        )
+    };
+    m.content
+        .as_ref()
+        .map_or_else(declaration, |(_, inner)| descend(inner))
+}
+
+/// Operation: clone + push, no own calls.
+fn child_stack(inline_stack: &[String], m: &syn::ItemMod) -> Vec<String> {
+    let mut nested = inline_stack.to_vec();
+    nested.push(m.ident.to_string());
+    nested
+}
+
+/// Files referenced by an explicit `#[cfg(test)] mod foo;` in a parent file —
+/// including one nested in an inline `mod {}` block, or covered by a
+/// `#[cfg(test)]` on such a block.
 fn direct_cfg_test_files(
     parsed: &ParsedRefs<'_>,
     resolver: &ChildPathResolver<'_>,
 ) -> HashSet<String> {
-    let is_ext_cfg_test =
-        |m: &syn::ItemMod| m.content.is_none() && super::cfg_test::has_cfg_test(&m.attrs);
+    let is_cfg_test =
+        |e: &ExternalMod<'_>| e.under_cfg_test || super::cfg_test::has_cfg_test(&e.item.attrs);
     parsed
         .iter()
         .flat_map(|(path, file)| {
-            file.items
-                .iter()
-                .filter_map(move |item| match item {
-                    syn::Item::Mod(m) if is_ext_cfg_test(m) => Some((*path, m)),
-                    _ => None,
-                })
+            external_mods(&file.items, &[], false)
+                .into_iter()
+                .filter(&is_cfg_test)
+                .filter_map(|e| resolver.resolve(path, &e.inline_stack, e.item))
                 .collect::<Vec<_>>()
         })
-        .filter_map(|(parent, m)| resolver.resolve(parent, m))
         .collect()
 }
 
@@ -289,7 +217,6 @@ fn propagate_cfg_test_through_plain_mods(
 ) {
     let path_to_file: std::collections::HashMap<&str, &syn::File> =
         parsed.iter().map(|(p, f)| (*p, *f)).collect();
-    let is_any_ext_mod = |m: &syn::ItemMod| m.content.is_none();
     loop {
         let new_children: Vec<String> = set
             .iter()
@@ -299,12 +226,9 @@ fn propagate_cfg_test_through_plain_mods(
                     .map(|f| (parent_path, *f))
             })
             .flat_map(|(parent_path, file)| {
-                file.items
-                    .iter()
-                    .filter_map(|item| match item {
-                        syn::Item::Mod(m) if is_any_ext_mod(m) => resolver.resolve(parent_path, m),
-                        _ => None,
-                    })
+                external_mods(&file.items, &[], false)
+                    .into_iter()
+                    .filter_map(|e| resolver.resolve(parent_path, &e.inline_stack, e.item))
                     .collect::<Vec<_>>()
             })
             .filter(|child| !set.contains(child))

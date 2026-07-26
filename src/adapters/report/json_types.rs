@@ -51,6 +51,10 @@ pub(crate) struct JsonArchitectureFinding {
 /// — a per-reporter view type on the public `ReporterImpl` trait.
 #[derive(serde::Serialize)]
 pub struct JsonOrphanSuppression {
+    /// Which annotation is stale: `"allow"`, `"api"`, or `"test_helper"` —
+    /// without it a consumer cannot tell a bare `qual:api` marker (no
+    /// dimensions, no target) from a blanket `qual:allow`.
+    pub(crate) marker: &'static str,
     pub(crate) file: String,
     pub(crate) line: usize,
     /// Why the marker is reported: `"stale"` (delete it) or `"too_loose"`

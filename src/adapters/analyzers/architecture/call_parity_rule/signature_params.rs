@@ -8,7 +8,6 @@ use super::bindings::{canonicalise_workspace_path, CanonScope};
 use super::local_symbols::FileScope;
 use std::collections::HashMap;
 
-// qual:api
 /// Per-param entry in the canonical generics map: the canonicalised
 /// trait bounds for the param plus its turbofish substitution position
 /// (`Some(idx)` for params reachable via a call-site turbofish — fn-own
@@ -22,7 +21,6 @@ pub struct ParamInfo {
     pub turbofish_index: Option<usize>,
 }
 
-// qual:api
 /// Single source of truth for "does this path qualify as an in-scope
 /// generic-param shadow against `generic_params`?" The gate enforces
 /// two invariants every caller must respect:
@@ -70,7 +68,6 @@ pub(crate) fn extract_signature_params(sig: &syn::Signature) -> Vec<(String, &sy
         .collect()
 }
 
-// qual:api
 /// Canonical generic-param map for a free fn / struct / impl-block —
 /// any item whose generics aren't merged with an outer scope. Returns
 /// `{name → ParamInfo}` with each param's `turbofish_index` set to its
@@ -100,7 +97,6 @@ pub(crate) fn item_canonical_generics(
     out
 }
 
-// qual:api
 /// Canonical generic-param map for a method inside an `impl` block.
 /// Tags each param with its origin so turbofish substitution at the
 /// call site only fires for method-own params:
@@ -169,7 +165,6 @@ pub(crate) fn method_canonical_generics(
     out
 }
 
-// qual:api
 /// Raw impl-level generic-params for use as `outer_names` /
 /// `impl_generics` input to `method_canonical_generics`. Visitor
 /// frames hold this so children can refer to the impl's params.

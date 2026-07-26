@@ -111,6 +111,7 @@ fn github_reporter_emits_orphan_annotations_via_snapshot_view() {
     };
     let mut findings = crate::domain::AnalysisFindings::default();
     findings.orphan_suppressions = vec![OrphanSuppression {
+        marker: crate::domain::findings::MarkerKind::Allow,
         file: "src/foo.rs".into(),
         line: 42,
         dimensions: vec![crate::findings::Dimension::Srp],

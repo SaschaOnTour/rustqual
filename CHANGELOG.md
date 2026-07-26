@@ -5,6 +5,152 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-07-26
+
+Release closing the last blind spot in the suppression system: `// qual:api`
+and `// qual:test_helper` were **permanent, unverified silencers**. Unlike
+`qual:allow` — which re-fires and is reported as `ORPHAN_SUPPRESSION` when it
+stops covering anything — the two bare markers kept working forever once
+written. That made a marker ambiguous: it could mean "real API entry point" or
+"dead code nobody noticed", and the two are indistinguishable without checking
+every case by hand. Genuine rot hides behind the second reading indefinitely.
+
+Dogfooding found **59 spent markers in rustqual's own code** on the first run;
+all are removed in this release.
+
+### Added
+- **Stale `qual:api` / `qual:test_helper` detection.** Both markers exist to
+  excuse a function *production never calls*, so once production calls it the
+  excuse is spent and the marker is reported as `ORPHAN_SUPPRESSION`. The rule
+  deliberately does **not** also require the function to be tested: TQ-003
+  (untested) only fires for functions that already have production callers, so
+  for a genuine outside-the-crate entry point that exclusion never applied
+  anyway — requiring "and tested" would only let a spent marker keep hiding a
+  real TQ-003 finding. Removing a spent marker can therefore surface an
+  `untested` finding; the message says so up front.
+- **`qual:api` on a crate-internal item is reported as a category error.** A
+  marker on something no outside consumer can name — behind a private `mod`,
+  not `pub`, or anywhere in a binary — never applied in the first place. The
+  message says why (*"cannot be called from outside the crate"*) and what to
+  do: remove the marker, or call the function from production / delete it.
+  External reachability (`adapters/shared/reachability/`) is derived from the
+  `.rs` set alone: the module tree is **walked** from every crate root, so a
+  module's logical path and the file implementing it agree by construction —
+  then the `mod` visibility chain decides, plus `pub use` name and glob
+  re-exports. Every uncertainty resolves to *reachable*, so an unrecognised
+  layout can never manufacture a false finding.
+- **Markers that reach no function are reported.** Both markers only affect
+  the function-level checks (DRY-002, TQ-003), so one sitting on a type, a
+  constant or a `pub use` re-export provably does nothing — as does one on a
+  function both checks already exempt (`main`, a test fn, a trait-impl method,
+  `#[allow(dead_code)]`). Attachment mirrors the marking pass exactly (same
+  annotation window), so a working marker can never be called unattached.
+- **`marker` field on JSON orphan entries** (`"allow"` / `"api"` /
+  `"test_helper"`). A bare `qual:api` carries no dimensions and no target, so
+  without it a consumer could not tell it from a blanket `qual:allow` — and
+  would report the wrong remedy.
+
+### Changed
+- **Orphan markers render by their real name in every reporter.** The
+  `qual:allow(...)` string was duplicated across the text, SARIF, GitHub, AI
+  and HTML reporters; all now go through one `OrphanSuppression::marker_spec`,
+  so a stale `qual:api` no longer prints as a meaningless
+  `qual:allow(<all>)`. The HTML orphan table's *Scope* column is now *Marker*.
+- **`qual:test_helper` is judged by callers only** — being unreachable from
+  outside the crate is its normal, intended state. The "helper nobody calls"
+  case stays with DRY-002, which deliberately does not suppress its `uncalled`
+  variant for this marker; reporting it here too would double-report one
+  defect.
+- **59 spent `qual:api` markers removed from rustqual's own source.** All sat
+  on crate-internal items (`mod adapters;` and friends are private, so the
+  `pub` keyword is inert there) that production already calls.
+
+### Fixed
+- **Ambiguous names never mark a marker spent.** The call collector records a
+  path call by its last segment, so a production call to `module_b::handle`
+  puts a bare `handle` into the call set. When another declared function shares
+  that bare name the call cannot be attributed, and claiming it would tell the
+  author to delete a marker that is still holding back a finding — so the
+  detector stays silent. A qualified `Type::method` match is specific enough
+  and still counts.
+- **Workspace crates no longer collide.** A module's identity is its crate
+  root plus its logical path, so `crates/a` and `crates/b` can both have an
+  `api` module without one marking the other's file reachable — down to the
+  visit key of the walk itself, so a file pulled into two crates by `#[path]`
+  is judged separately for each and a private `mod` in one crate cannot hide
+  what the other publishes.
+- **Module files are located by rustc's own rules, in one shared place.**
+  `adapters/shared/child_paths.rs` owns them for both consumers (cfg-test
+  classification and reachability), so the two cannot drift: a module's
+  children live in its *module directory* — the declaring file's directory for
+  `mod.rs` / `lib.rs` / `main.rs`, otherwise a directory named after the file's
+  stem, extended by the surrounding inline `mod {}` blocks. `#[path]` overrides
+  the name but not the base, except at a file's top level, where rustc resolves
+  it against the file's own directory. `.` and `..` segments are resolved, since
+  `src/a/../shared/api.rs` never equals the recorded `src/shared/api.rs` as a
+  string. A `mod` that fails to resolve leaves its file unwalked — and an
+  unwalked file counts as reachable, so the mistake was invisible in the output
+  but would surface as a false "marker never applied" as soon as a second,
+  private module tree claimed the same file.
+- **cfg-test classification sees `mod` declarations inside inline blocks.** It
+  scanned only a file's top-level items, so a `#[cfg(test)] mod tests;` nested
+  in `mod helpers { … }` was never found and the test-only file it names was
+  analysed as production — the wrong direction, since that surfaces findings in
+  test code. Declarations are now collected with their inline chain (which is
+  also where their files live: `helpers/tests.rs`, not `tests.rs`), and a
+  `#[cfg(test)]` on an inline block covers everything it declares.
+- **Cargo's autobinary forms decide what starts a crate tree.** Both consumers
+  now share `adapters/shared/crate_roots.rs`: `src/lib.rs`, `src/main.rs`,
+  `src/bin/<name>.rs` and `src/bin/<name>/main.rs`. A deeper file such as
+  `src/bin/tools/helper.rs` is a *module* of some binary, not a root — treating
+  it as one made it "known but externally unreachable" instead of leaving it
+  unknown, which is the difference between reporting a `qual:api` on it and
+  leaving it alone. The directory form is newly recognised as a package root
+  for integration-test classification too.
+- **A `pub use` re-export excuses only the item it names.** Re-exports were
+  recorded by bare name, so `pub use public_impl::run` made *every* `run` in
+  the workspace look externally reachable. They resolve to the source module's
+  file now: `super::` prefixes, unprefixed paths (resolved both crate-root and
+  module-relative, since uniform paths allow either), inline modules that have
+  no file of their own, renames that change the name mid-chain, multi-step
+  façade chains and glob preludes — and only when the re-exporting file is
+  itself reachable, so a `pub use` in a private module exposes nothing.
+- **A name collision no longer hides a marker that never applied.** External
+  reachability is decidable on its own, so the ambiguity brake now only blurs
+  *spent* vs *uncalled*; the message says which part is uncertain.
+- **Markers inside string literals are no longer collected as annotations.**
+  Test fixtures embed rustqual's own markers as data
+  (`let code = r#"… // qual:api …"#;`); the raw line scan read those as real
+  annotations on the enclosing file. Harmless while markers were never
+  verified — but it would have produced phantom findings now, so marker
+  collection is column-aware: a marker only counts when it starts outside
+  every string-literal span, including literals nested in macro token groups
+  (`fixture!({ r#"…"# })`), which neither `syn` nor a top-level token scan
+  reaches.
+  A line-based filter could not do this — the closing line of a fixture holds
+  both literal text and real source, so `// qual:api example"#;` would still
+  have registered.
+
+### Notes
+- The check rides along with the test-quality pass, because that is where the
+  marked declarations and the production call set already exist. With
+  `[test_quality] enabled = false` it does not run.
+- Item identity in the reachability derivation is `(file, name)` (issue #40),
+  so two
+  same-named functions in different inline modules of one file cannot be told
+  apart — the public one makes the private one look reachable and a stale
+  marker there goes unreported. That is the safe direction (a missed finding,
+  never a wrongly-demanded deletion); a qualified item key would have to be
+  threaded through `DeclaredFunction` and the analyzers sharing it, and its
+  payoff is capped because call sites are recorded by last path segment.
+- Dead-code detection covers **functions only**, so an unused `struct`,
+  `enum`, type alias or `const` is still not reported. That is why a
+  `qual:api` on such an item can only ever be inert — and why it is now
+  reported instead of silently doing nothing.
+- A caller invisible to the call graph (dynamic dispatch, macros) reads as "no
+  production callers", so the marker is left alone — the safe direction:
+  under-report, never a false "delete me".
+
 ## [1.6.1] - 2026-07-25
 
 Bugfix release.

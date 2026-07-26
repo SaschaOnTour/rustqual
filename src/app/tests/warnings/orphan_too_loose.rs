@@ -265,6 +265,7 @@ fn orphan_target_rendering_covers_metric_boolean_and_blanket() {
     use crate::domain::findings::{OrphanKind, OrphanSuppression};
     use crate::domain::SuppressionTarget;
     let mk = |target| OrphanSuppression {
+        marker: crate::domain::findings::MarkerKind::Allow,
         file: "x".into(),
         line: 1,
         dimensions: vec![Dimension::Srp],

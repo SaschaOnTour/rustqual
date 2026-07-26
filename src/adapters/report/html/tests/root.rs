@@ -217,6 +217,7 @@ fn html_reporter_renders_orphans_via_snapshot_view() {
     use crate::domain::findings::OrphanSuppression;
     let mut analysis = make_analysis(vec![]);
     analysis.findings.orphan_suppressions = vec![OrphanSuppression {
+        marker: crate::domain::findings::MarkerKind::Allow,
         file: "src/foo.rs".into(),
         line: 42,
         dimensions: vec![crate::findings::Dimension::Iosp],

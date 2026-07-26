@@ -10,7 +10,6 @@ use std::collections::HashMap;
 use syn::spanned::Spanned;
 use syn::UseTree;
 
-// qual:api
 /// The canonical target that an in-scope alias resolves to, paired
 /// with the bit that distinguishes Rust 2018+ absolute paths
 /// (`use ::ext::Foo as Bar;`) from relative ones
@@ -119,7 +118,6 @@ pub fn collect_use_paths(
     }
 }
 
-// qual:api
 /// Build a map from in-scope identifier to its canonical path
 /// (segments + absolute-root flag).
 ///
@@ -141,7 +139,6 @@ pub fn gather_alias_map(ast: &syn::File) -> AliasMap {
     out
 }
 
-// qual:api
 /// Like `gather_alias_map`, but separates `use` items by their declaring
 /// inline-mod scope. Returns `mod_path → name → AliasTarget`. The
 /// empty `Vec` key holds top-level `use` items. Each inline `mod inner

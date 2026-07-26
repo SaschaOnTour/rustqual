@@ -160,3 +160,81 @@ fn qual_api_marker_also_honors_contiguous_block() {
         file_lines
     );
 }
+
+#[test]
+fn marker_inside_a_multiline_string_literal_is_not_collected() {
+    // Test fixtures embed rustqual's own markers as *data*:
+    //   let code = r#"
+    //       // qual:api
+    //       pub fn f() {}
+    //   "#;
+    // Scanning raw lines would treat that comment as a real marker on this
+    // file, producing phantom annotations (and, once markers are verified,
+    // phantom orphan findings) for source that is only a string.
+    let source =
+        "fn t() {\n    let code = r#\"\n        // qual:api\n        pub fn f() {}\n    \"#;\n}\n";
+    let parsed = parsed_single("src/lib.rs", source);
+    let lines = collect_api_lines(&parsed);
+    assert!(
+        lines.is_empty(),
+        "a marker inside a string literal is data, not an annotation: {lines:?}"
+    );
+}
+
+#[test]
+fn real_marker_outside_a_literal_is_still_collected() {
+    // Guard the other direction: the literal filter must not swallow the
+    // markers that sit in ordinary comment position.
+    let source = "// qual:api\npub fn real() {}\n\nfn t() {\n    let code = r#\"\n        // qual:api\n    \"#;\n}\n";
+    let parsed = parsed_single("src/lib.rs", source);
+    let lines = collect_api_lines(&parsed);
+    assert_eq!(lines.len(), 1, "the real marker's file must be present");
+    assert!(
+        lines.values().any(|s| s.contains(&1)),
+        "line 1 is a genuine marker: {lines:?}"
+    );
+}
+
+#[test]
+fn marker_text_on_a_literal_closing_line_is_not_collected() {
+    // The closing line of a fixture still carries string content before the
+    // `"#`. `is_api_marker` matches by prefix, so `// qual:api example"#;`
+    // looks like a marker although it is literal text — a line-set filter
+    // cannot tell the two apart, only a column-aware one can.
+    let source =
+        "fn t() {\n    let code = r#\"\n        fn f() {}\n        // qual:api example\"#;\n}\n";
+    let parsed = parsed_single("src/lib.rs", source);
+    let lines = collect_api_lines(&parsed);
+    assert!(
+        lines.is_empty(),
+        "marker text inside the literal's closing line is data: {lines:?}"
+    );
+}
+
+#[test]
+fn a_marker_trailing_real_code_is_not_an_annotation() {
+    // Markers must own their line: `is_api_marker` matches only a trimmed line
+    // that *starts* with the marker. A trailing `// qual:api` after code was
+    // never an annotation — pinned here because it is exactly what makes the
+    // column check safe: the only line that can both start with the marker and
+    // sit inside a literal is fixture content.
+    let source = "pub fn f() {\n    let s = \"x\"; // qual:api\n}\n";
+    let parsed = parsed_single("src/lib.rs", source);
+    assert!(
+        collect_api_lines(&parsed).is_empty(),
+        "a marker must be alone on its line to count"
+    );
+}
+
+#[test]
+fn marker_inside_a_nested_macro_group_literal_is_not_collected() {
+    // `visit_macro` sees only the top-level token trees; a literal nested in a
+    // brace/paren group (`fixture!({ r#"…"# })`) is invisible unless the walk
+    // recurses, and its marker text would register as a real annotation.
+    let source = "fn t() {\n    fixture!({ r#\"\n        // qual:api\n        pub fn f() {}\n    \"# });\n}\n";
+    let parsed = parsed_single("src/lib.rs", source);
+    assert!(
+        collect_api_lines(&parsed).is_empty(),
+        "a literal nested in a macro group is still data"
+    );
+}

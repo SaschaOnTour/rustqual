@@ -217,6 +217,7 @@ fn findings_list_includes_orphan_suppressions_via_snapshot_view() {
     // (the trait-driven path) — the legacy `analysis.orphan_suppressions`
     // field is no longer the source for reporter rendering.
     analysis.findings.orphan_suppressions = vec![OrphanSuppression {
+        marker: crate::domain::findings::MarkerKind::Allow,
         file: "src/foo.rs".into(),
         line: 42,
         dimensions: vec![crate::findings::Dimension::Srp],
@@ -258,4 +259,32 @@ fn test_format_findings_emits_file_line_category_and_function_name() {
     assert!(s.contains("logic + calls"), "detail preserved; got `{s}`");
     assert!(s.contains("fn_x"), "function_name preserved; got `{s}`");
     assert!(s.contains("1 Finding"), "heading shows count; got `{s}`");
+}
+
+#[test]
+fn api_marker_orphan_renders_as_qual_api_not_qual_allow() {
+    // A stale `qual:api` carries no dimensions and no target, so the
+    // qual:allow rendering would print a meaningless `qual:allow(<all>)` and
+    // send the author looking for a suppression that isn't there.
+    use crate::domain::findings::{MarkerKind, OrphanKind, OrphanSuppression};
+    use crate::report::findings_list::orphan_to_finding_entry;
+    let entry = orphan_to_finding_entry(&OrphanSuppression {
+        marker: MarkerKind::Api,
+        file: "src/lib.rs".into(),
+        line: 1,
+        dimensions: vec![],
+        target: None,
+        reason: Some("silences nothing".into()),
+        kind: OrphanKind::Stale,
+    });
+    assert!(
+        entry.detail.contains("qual:api"),
+        "must name the actual marker: {}",
+        entry.detail
+    );
+    assert!(
+        !entry.detail.contains("qual:allow"),
+        "must not claim it is a qual:allow: {}",
+        entry.detail
+    );
 }

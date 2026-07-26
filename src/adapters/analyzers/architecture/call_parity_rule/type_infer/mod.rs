@@ -23,19 +23,14 @@ mod resolve_wrapper;
 pub(crate) mod self_subst;
 pub mod workspace_index;
 
-// qual:api
 pub use canonical::CanonicalType;
 
-// qual:api
 pub use combinators::combinator_return;
 
-// qual:api
 pub use infer::{infer_type, BindingLookup, FlatBindings, InferContext};
 
-// qual:api
 pub use patterns::{extract_bindings, extract_for_bindings};
 
-// qual:api
 pub use workspace_index::{
     build_workspace_type_index, MethodLocation, WorkspaceIndexInputs, WorkspaceTypeIndex,
 };

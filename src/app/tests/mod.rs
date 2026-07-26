@@ -7,6 +7,7 @@ mod pipeline;
 mod projection;
 mod projection_secondary;
 mod run;
+mod stale_markers;
 mod structural_metrics;
 mod tq_metrics;
 mod warnings;

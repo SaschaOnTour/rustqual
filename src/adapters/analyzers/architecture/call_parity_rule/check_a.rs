@@ -20,7 +20,6 @@ use crate::adapters::analyzers::architecture::compiled::CompiledCallParity;
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use std::collections::HashMap;
 
-// qual:api
 /// Emit one `CallParityNoDelegation` finding per adapter pub-fn whose
 /// touchpoint set is empty.
 /// Integration: per-adapter scan + per-fn cache lookup via `inspect_handler`.

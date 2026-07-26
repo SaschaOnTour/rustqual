@@ -24,8 +24,6 @@
 pub mod destructure;
 pub mod iterator;
 
-// qual:api
 pub use destructure::extract_bindings;
 
-// qual:api
 pub use iterator::extract_for_bindings;

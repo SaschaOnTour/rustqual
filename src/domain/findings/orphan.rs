@@ -50,12 +50,48 @@ impl OrphanKind {
     }
 }
 
+/// Which annotation the reported marker is. `qual:allow` carries a dimension
+/// scope and optional target; `qual:api` and `qual:test_helper` are bare
+/// markers that silence DRY-002 (dead code) plus TQ-003 (untested) — they go
+/// stale once production calls the function they guard, at which point the
+/// "nothing calls it" excuse is spent and the marker only hides future rot.
+/// Being tested is deliberately not part of the test: TQ-003 fires only for
+/// functions that already have production callers, so demanding it too would
+/// let a spent marker keep hiding a real finding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MarkerKind {
+    /// `// qual:allow(dim[, target])` — a targeted or blanket suppression.
+    #[default]
+    Allow,
+    /// `// qual:api` — public-API exclusion.
+    Api,
+    /// `// qual:test_helper` — test-helper exclusion.
+    TestHelper,
+}
+
+impl MarkerKind {
+    /// Stable snake_case token for structured output (JSON/AI), so machine
+    /// consumers can tell a bare `qual:api` marker — which carries no
+    /// dimensions and no target — from a blanket `qual:allow`.
+    /// Operation: variant → token, no own calls.
+    pub fn json_kind(self) -> &'static str {
+        match self {
+            MarkerKind::Allow => "allow",
+            MarkerKind::Api => "api",
+            MarkerKind::TestHelper => "test_helper",
+        }
+    }
+}
+
 /// A `// qual:allow(...)` marker that should be reported: a stale/misplaced
 /// suppression, or a metric pin that is looser than it needs to be.
 ///
 /// (No `Eq`: `target` carries a metric pin (`f64`), which is `PartialEq` only.)
 #[derive(Debug, Clone, PartialEq)]
 pub struct OrphanSuppression {
+    /// Which annotation this is — decides how the marker renders and, for
+    /// `Api`/`TestHelper`, that there is no dimension scope to print.
+    pub marker: MarkerKind,
     pub file: String,
     /// 1-based line of the marker (already shifted to the last line
     /// of the contiguous `//`-comment block containing the marker).
@@ -96,6 +132,22 @@ impl OrphanSuppression {
         self.target_spec()
             .map(|s| format!(", {s}"))
             .unwrap_or_default()
+    }
+
+    /// The marker as it is written in source, so every reporter names it the
+    /// same way: `qual:allow(<scope>[, target])`, `qual:api`, or
+    /// `qual:test_helper`. `allow_scope` is the caller's rendering of the
+    /// dimension list — reporters differ in their empty-dimension wording, so
+    /// that part stays with them while the marker naming lives here.
+    /// Operation: match on the marker kind, no own calls.
+    pub fn marker_spec(&self, allow_scope: &str) -> String {
+        match self.marker {
+            MarkerKind::Api => "qual:api".to_string(),
+            MarkerKind::TestHelper => "qual:test_helper".to_string(),
+            MarkerKind::Allow => {
+                format!("qual:allow({allow_scope}{})", self.target_suffix())
+            }
+        }
     }
 }
 

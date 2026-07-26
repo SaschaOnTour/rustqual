@@ -1,9 +1,11 @@
 mod cfg_test;
 mod cfg_test_files;
+mod cfg_test_inline_mods;
 mod file_to_module;
 mod macro_expansion;
 mod macro_tokens;
 mod normalize;
 mod normalize_coverage;
+mod reachability;
 mod scope;
 mod use_tree;

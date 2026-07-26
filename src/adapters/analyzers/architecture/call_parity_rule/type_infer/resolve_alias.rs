@@ -74,7 +74,6 @@ pub(super) fn lookup_alias_param(
     subs.get(&name).cloned()
 }
 
-// qual:api
 /// Project a `TypePath` to its single bare ident (e.g. `T`, `Output`)
 /// or `None` for multi-segment paths, qualified-self paths, or paths
 /// with generic arguments. Shared by alias-param lookup and generic

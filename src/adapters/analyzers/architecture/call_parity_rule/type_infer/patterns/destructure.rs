@@ -11,7 +11,6 @@ use super::super::infer::InferContext;
 use super::super::resolve::{resolve_type, ResolveContext};
 use super::super::self_subst::substitute_bare_self;
 
-// qual:api
 /// Extract `(binding_name, canonical_type)` pairs from a pattern matched
 /// against a value of `matched_type`. Integration: delegates to `collect`
 /// which dispatches over pattern variants.

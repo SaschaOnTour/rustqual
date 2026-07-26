@@ -307,7 +307,6 @@ impl WalkState {
     }
 }
 
-// qual:api
 /// Build the workspace call graph. Skips cfg-test files wholesale;
 /// every fn in a non-test file contributes a node, and each of its
 /// canonical calls (via `collect_canonical_calls`) becomes an edge.

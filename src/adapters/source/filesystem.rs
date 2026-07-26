@@ -213,10 +213,94 @@ pub(crate) fn collect_test_helper_lines(
     )
 }
 
+/// Where every string literal sits, so marker text *inside* one is not read as
+/// an annotation. Test fixtures embed rustqual's own markers as data
+/// (`let code = r#"… // qual:api …"#;`), and a raw line scan reads those as
+/// annotations on the enclosing file — phantom markers, and once markers are
+/// verified, phantom findings.
+///
+/// Spans carry columns, not just lines: a multi-line literal's opening and
+/// closing lines hold literal text *and* real source, so containment is decided
+/// at the marker's own start column. That boundary is the whole point — a
+/// marker only counts when it starts its line, so the one way a marker-looking
+/// line can sit inside a literal is fixture content on such a line.
+/// Operation: one `syn` walk, no own calls.
+fn literal_spans(syntax: &syn::File) -> LiteralSpans {
+    let mut collector = LiteralSpans::default();
+    syn::visit::Visit::visit_file(&mut collector, syntax);
+    collector
+}
+
+/// Line/column extents of every string literal, including those hidden inside
+/// macro token streams (`assert_eq!(x, r#"…"#)`).
+///
+/// Columns matter: the opening and closing lines of a multi-line literal carry
+/// *both* string content and real source, so a line-set filter cannot tell
+/// `// qual:api example"#;` (literal text) from a genuine trailing marker.
+#[derive(Default)]
+struct LiteralSpans {
+    /// `(start_line, start_col, end_line, end_col)`, columns 0-based.
+    spans: Vec<(usize, usize, usize, usize)>,
+}
+
+impl LiteralSpans {
+    /// True when the text starting at `column` on `line` lies inside a string
+    /// literal. Interior lines are wholly inside; on the boundary lines only
+    /// the part within the literal's columns counts.
+    /// Operation: span containment test, no own calls.
+    fn covers(&self, line: usize, column: usize) -> bool {
+        self.spans.iter().any(|&(sl, sc, el, ec)| {
+            if line < sl || line > el {
+                return false;
+            }
+            let after_start = line > sl || column >= sc;
+            let before_end = line < el || column < ec;
+            after_start && before_end
+        })
+    }
+
+    /// Collect literal spans from a macro token stream, descending into
+    /// groups: `fixture!({ r#"…"# })` hides its literal one level down, and
+    /// `syn` does not walk into the opaque stream at all.
+    /// Operation: token walk with an explicit stack.
+    fn scan_tokens(&mut self, tokens: proc_macro2::TokenStream) {
+        let mut stack = vec![tokens];
+        while let Some(stream) = stack.pop() {
+            for tt in stream {
+                match tt {
+                    proc_macro2::TokenTree::Literal(lit) => self.push(lit.span()),
+                    proc_macro2::TokenTree::Group(g) => stack.push(g.stream()),
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    /// Record one literal's extent.
+    /// Operation: span projection, no own calls.
+    fn push(&mut self, span: proc_macro2::Span) {
+        let (start, end) = (span.start(), span.end());
+        self.spans
+            .push((start.line, start.column, end.line, end.column));
+    }
+}
+
+impl<'ast> syn::visit::Visit<'ast> for LiteralSpans {
+    fn visit_lit_str(&mut self, node: &'ast syn::LitStr) {
+        self.push(syn::spanned::Spanned::span(node));
+    }
+
+    fn visit_macro(&mut self, node: &'ast syn::Macro) {
+        self.scan_tokens(node.tokens.clone());
+        syn::visit::visit_macro(self, node);
+    }
+}
+
 /// Shared implementation for marker-line collectors that produce a
-/// `HashSet<usize>` per file. Applies the contiguous `//`-block
-/// end-shift so multi-line rationales preceding a marker still match
-/// items within `ANNOTATION_WINDOW` of the block's last line.
+/// `HashSet<usize>` per file. Applies the contiguous `//`-block end-shift so
+/// multi-line rationales preceding a marker still match items within
+/// `ANNOTATION_WINDOW` of the block's last line, and drops markers that start
+/// inside a string literal (see [`literal_spans`]).
 /// Operation: collect raw marker lines, then map each to its block-end.
 fn collect_marker_lines<F>(
     parsed: &[(String, String, syn::File)],
@@ -227,13 +311,19 @@ where
 {
     parsed
         .iter()
-        .filter_map(|(path, source, _)| {
+        .filter_map(|(path, source, syntax)| {
             let ends = compute_comment_block_ends(source);
             let shift = |n: usize| ends.get(&n).copied().unwrap_or(n);
+            let literals = literal_spans(syntax);
             let lines: std::collections::HashSet<usize> = source
                 .lines()
                 .enumerate()
-                .filter_map(|(i, line)| is_marker(line.trim()).then_some(shift(i + 1)))
+                .filter_map(|(i, line)| {
+                    let trimmed = line.trim_start();
+                    let column = line.len() - trimmed.len();
+                    let marker = is_marker(trimmed.trim_end());
+                    (marker && !literals.covers(i + 1, column)).then_some(shift(i + 1))
+                })
                 .collect();
             if lines.is_empty() {
                 None

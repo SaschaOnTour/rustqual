@@ -33,6 +33,6 @@ pub use dry::{
     RepeatedMatchParticipant,
 };
 pub use iosp::{CallLocation, IospFinding, LogicLocation};
-pub use orphan::{OrphanKind, OrphanSuppression};
+pub use orphan::{MarkerKind, OrphanKind, OrphanSuppression};
 pub use srp::{ResponsibilityCluster, SrpFinding, SrpFindingDetails, SrpFindingKind};
 pub use tq::{TqFinding, TqFindingKind};

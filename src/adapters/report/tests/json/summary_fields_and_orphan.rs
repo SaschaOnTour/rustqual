@@ -91,6 +91,7 @@ fn json_reporter_includes_orphan_suppressions_via_snapshot_view() {
     use crate::domain::findings::OrphanSuppression;
     let mut analysis = make_analysis(vec![]);
     analysis.findings.orphan_suppressions = vec![OrphanSuppression {
+        marker: crate::domain::findings::MarkerKind::Allow,
         file: "src/foo.rs".into(),
         line: 42,
         dimensions: vec![crate::findings::Dimension::Srp],
@@ -116,6 +117,7 @@ fn json_orphan_projects_too_loose_kind_and_target() {
     use crate::domain::SuppressionTarget;
     let mut analysis = make_analysis(vec![]);
     analysis.findings.orphan_suppressions = vec![OrphanSuppression {
+        marker: crate::domain::findings::MarkerKind::Allow,
         file: "src/foo.rs".into(),
         line: 7,
         dimensions: vec![crate::findings::Dimension::Srp],
@@ -142,4 +144,29 @@ fn test_json_omits_empty_orphan_suppressions() {
         parsed.get("orphan_suppressions").is_none(),
         "empty orphan list should be elided from JSON"
     );
+}
+
+#[test]
+fn json_orphan_carries_the_marker_kind() {
+    // A stale `qual:api` has no dimensions and no target, so without an
+    // explicit marker field a JSON consumer cannot tell it from a blanket
+    // `qual:allow` — and would report the wrong remedy.
+    use crate::domain::findings::{MarkerKind, OrphanKind, OrphanSuppression};
+    let mut analysis = make_analysis(vec![]);
+    analysis.findings.orphan_suppressions = vec![OrphanSuppression {
+        marker: MarkerKind::Api,
+        file: "src/foo.rs".into(),
+        line: 7,
+        dimensions: vec![],
+        reason: Some("production calls it".into()),
+        target: None,
+        kind: OrphanKind::Stale,
+    }];
+    let parsed = json_value(&analysis);
+    let orphan = &parsed["orphan_suppressions"][0];
+    assert_eq!(
+        orphan["marker"], "api",
+        "marker kind must round-trip: {orphan}"
+    );
+    assert_eq!(orphan["kind"], "stale");
 }

@@ -23,7 +23,6 @@ use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use crate::config::architecture::SingleTouchpointMode;
 use std::collections::HashMap;
 
-// qual:api
 /// Emit one `CallParityMultiTouchpoint` finding per adapter pub-fn that
 /// has more than one touchpoint in the target layer.
 /// Integration: per-adapter scan + per-fn touchpoint lookup via
