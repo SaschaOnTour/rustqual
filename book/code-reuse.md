@@ -22,6 +22,7 @@ rustqual covers four families:
 |---|---|
 | `DRY-001` | Two functions are duplicates (95%+ token similarity, one is suggested for removal) |
 | `DRY-002` | Dead code — function defined but never called |
+| `DRY-006` | Dead type or constant — declared but nothing refers to it |
 | `DRY-003` | Duplicate code fragment (≥6 lines repeated across functions) |
 | `DRY-004` | Wildcard import (`use module::*;`) |
 | `DRY-005` | Repeated match pattern across functions (≥3 arms identical, ≥3 instances) |
@@ -70,9 +71,26 @@ pub fn parse_config(input: &str) -> Result<Config> { /* … */ }
 pub fn assert_in_range(actual: f64, expected: f64, tol: f64) { /* … */ }
 ```
 
-`qual:api` and `qual:test_helper` exclude the function from `DRY-002` *and* from `TQ-003` (untested), without counting against `max_suppression_ratio`. Use them on functions that are exported to consumers outside the crate or used only by integration tests.
+`qual:api` and `qual:test_helper` exclude the declaration from `DRY-002` / `DRY-006` *and* from `TQ-003` (untested), without counting against `max_suppression_ratio`. Use them on things exported to consumers outside the crate or used only by integration tests. Both markers are verified — see [reference-suppression.md](./reference-suppression.md).
 
 By default, the dead-code analysis treats a package's `tests/**` files as call-sites — both the analysis-root crate's `tests/**` and each member's `crates/*/tests/**` — so a function used only from integration tests is not dead.
+
+## Dead types and constants
+
+`DRY-006` asks the same question of everything that is not a function: a
+`struct`, `enum`, `union`, type alias, `const` or `static` that no name in the
+workspace refers to. References are counted across macro bodies and attribute
+arguments too, and a type's own `impl` blocks deliberately do not count —
+carrying methods keeps nothing alive, which is the same verdict rustc reaches
+with "never constructed".
+
+The value over rustc's own `dead_code` lint is the crate boundary: a `pub` type
+nobody in the workspace uses is invisible to the compiler. Deliberate
+exceptions take `#[allow(dead_code)]`, and a leading underscore (`_Marker`) is
+honoured exactly as rustc honours it.
+
+Traits are out of scope: every `impl Trait for X` names the trait, so a trait
+with one implementation would always look used.
 
 ## Code fragments and repeated matches
 

@@ -5,6 +5,78 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-07-26
+
+Dead-code detection covered functions only. An unused `struct`, `enum`,
+`union`, type alias, `const` or `static` was invisible — and a `// qual:api` on
+one of them was reported as inert, because nothing could ever act on it. That
+was the loose end left by 1.7.0: the marker had become verified, but on a type
+there was nothing to verify it against.
+
+### Added
+- **DRY-006: dead types and constants.** A declaration nothing refers to is
+  reported as `unused type`; one only test code names, as `type test-only`. The
+  model mirrors DRY-002 — declarations on one side, a workspace-wide reference
+  set on the other — and the exemptions are the same, so there is no second
+  rule to learn: `#[allow(dead_code)]`, `// qual:api`, `// qual:test_helper`.
+  Configurable via `[duplicates] detect_dead_types` (default true).
+
+  A reference is any name occurrence: type positions, expression paths,
+  patterns, generic bounds, derive arguments and macro token streams. That is
+  the grain the call graph already works at, and it is deliberately generous —
+  over-collecting only suppresses a finding, while under-collecting invents
+  one, and telling an author to delete a type that is in use is the expensive
+  mistake.
+
+  Exactly two things are not a reference: a declaration's own name, and the
+  self type of an `impl` block. Without the second, a type carrying only its
+  own methods would keep itself alive and nothing could ever be found — the
+  same verdict rustc reaches with "never constructed". rustc's `dead_code` lint
+  stops at the crate boundary, so a `pub` type nobody in the workspace uses
+  stays invisible there; that is where this earns its keep.
+
+  **Traits are deliberately out of scope.** Every `impl Trait for X` names the
+  trait, so a trait with a single implementation would always look used: the
+  check would carry the full false-finding risk without the value.
+- **`qual:api` and `qual:test_helper` are verified on types too.** Functions and
+  types are now asked the same three questions — is it exempt anyway, can it be
+  named from outside the crate, does production use it — with the message
+  naming the evidence that applies ("production calls" vs "production refers
+  to"). External reachability therefore records public types, constants and
+  traits, not just functions; without that every legitimately public type would
+  have been accused of not being nameable from outside.
+- **JSON gains a `dead_types` array.** Kept apart from `dead_code` rather than
+  folded into it: a consumer reading `function_name` must not be handed a
+  struct name. Human-facing output lists both in one table, told apart by the
+  kind tag.
+
+### Changed
+- **"Not attached" now names what it means.** A marker that reaches no
+  declaration is still reported, but the remedy text names what it could be
+  sitting on — a `pub use` re-export, a module, a trait — instead of "a type, a
+  constant or a re-export", which stopped being true.
+- **Two exemptions came out of running DRY-006 on rustqual itself.** Inline
+  format arguments (`format!("{PREFIX}…")`) are one literal to `proc_macro2`,
+  so a token walk saw no reference at all; `all_idents` now reads `{…}`
+  placeholders, including named spec arguments (`{v:>width$}`). And a leading
+  underscore is the language's own "deliberately unused" convention, which
+  rustc's `dead_code` lint honours — arguing with the compiler there would only
+  be noise.
+
+### Fixed
+- **SLM missed `self` inside an inline format argument.** `format!("{self:?}")`
+  is one literal to `proc_macro2`, so the token scan saw no `self` and reported
+  the method as self-less. Same root cause as the DRY-006 case above, same fix:
+  `tokens_reference_ident` reads the placeholders. It can only turn findings
+  off, matching the check's documented bias.
+- **NMS missed mutation through a nested field.** `self.inner.items.push(v)`
+  mutates `self` just as `self.items.push(v)` does, but the self-target test
+  matched exactly one field level, so the method was reported as taking a
+  needless `&mut self` — advice that would not even compile. The chain is now
+  walked to its root through field, index and paren expressions, which also
+  subsumes the separate `self.field[i]` case. Strictly more conservative: it
+  can only turn findings off.
+
 ## [1.7.0] - 2026-07-26
 
 Release closing the last blind spot in the suppression system: `// qual:api`
