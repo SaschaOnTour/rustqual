@@ -56,14 +56,26 @@ pub(crate) fn collect_declared_functions(
     collector.functions
 }
 
-/// Collect declared type and constant metadata from all parsed files.
-/// Trivial: creates visitor and delegates to visit_all_files.
+/// Collect declared type and constant metadata from all parsed files, marking
+/// those from test-only files as test code.
+///
+/// The propagation belongs here rather than at each call site: DRY-006 and the
+/// stale-marker check both build their exemption from `is_test`, and when only
+/// one of them applied it the two silently disagreed about every declaration in
+/// an integration-test file.
+/// Operation: collection + flag pass, own calls hidden in the closures.
 pub(crate) fn collect_declared_types(
     parsed: &[(String, String, syn::File)],
+    cfg_test_files: &std::collections::HashSet<String>,
 ) -> Vec<crate::adapters::shared::declared_type::DeclaredType> {
     let mut collector = declared_types::DeclaredTypeCollector::new();
     visit_all_files(parsed, &mut collector);
-    collector.types
+    let mut declared = collector.types;
+    declared
+        .iter_mut()
+        .filter(|d| cfg_test_files.contains(&d.file))
+        .for_each(|d| d.is_test = true);
+    declared
 }
 
 // ── Attribute helpers ───────────────────────────────────────────

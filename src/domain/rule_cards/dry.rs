@@ -42,7 +42,8 @@ pub(super) const CARDS: &[RuleCard] = &[
             nothing refers to: 'unused type' (no reference anywhere) or \
             'type test-only' (only test code names it). References are counted \
             by name across the whole workspace, including inside macro bodies \
-            and attribute arguments. A type's own impl blocks do not count — \
+            and attribute arguments, and inside doc-test fences (that code is \
+            compiled by cargo test). A type's own impl blocks do not count — \
             carrying methods keeps nothing alive.",
         why: "An unused type is read, maintained and refactored like the rest \
             of the code while modelling nothing. rustc's own dead_code lint \
@@ -54,10 +55,12 @@ pub(super) const CARDS: &[RuleCard] = &[
         suppress: "// qual:api (public API) or // qual:test_helper — DRY-006 \
             is deliberately NOT suppressible via qual:allow(dry, …), matching \
             DRY-002.",
-        config: "[duplicates] detect_dead_types (default true). A file rustqual \
-            cannot parse is dropped from the analysis, so anything used only \
-            there reads as unused — check stderr for parse warnings before \
-            acting on a surprising batch of findings.",
+        config: "[duplicates] detect_dead_types (default true). Two blind \
+            spots, both erring toward a finding: a file rustqual cannot parse \
+            is dropped from the analysis (check stderr for parse warnings \
+            before acting on a surprising batch), and content pulled in by \
+            include! is never parsed at all. An unclosed doc fence errs the \
+            other way — it leaks into the next item, suppressing findings.",
     },
     RuleCard {
         id: "DRY-003",

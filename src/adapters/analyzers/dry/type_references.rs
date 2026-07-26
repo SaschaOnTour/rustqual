@@ -145,7 +145,10 @@ impl<'ast> Visit<'ast> for TypeReferenceCollector {
     /// to build, and the body of a ``` fence, which is code `cargo test`
     /// compiles and runs. Prose is neither.
     fn visit_meta_name_value(&mut self, node: &'ast syn::MetaNameValue) {
-        self.visit_path(&node.path);
+        // The value is walked as syn would — overriding this method must not
+        // quietly drop `#[foo = Bar]` or `#[doc = include_str!(…)]`, which
+        // would be under-collection, the direction that invents findings.
+        syn::visit::visit_meta_name_value(self, node);
         let line = doc_text(node);
         line.into_iter()
             .for_each(|text| self.absorb_doc_line(&text));

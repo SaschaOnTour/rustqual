@@ -5,7 +5,10 @@ use crate::adapters::shared::declared_type::{DeclaredType, TypeItemKind};
 
 fn declared(code: &str) -> Vec<DeclaredType> {
     let syntax = syn::parse_file(code).expect("fixture must parse");
-    collect_declared_types(&[("src/lib.rs".to_string(), code.to_string(), syntax)])
+    collect_declared_types(
+        &[("src/lib.rs".to_string(), code.to_string(), syntax)],
+        &std::collections::HashSet::new(),
+    )
 }
 
 fn kinds_of(code: &str) -> Vec<(String, TypeItemKind)> {

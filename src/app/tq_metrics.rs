@@ -73,14 +73,8 @@ fn detect_stale_markers(
     use crate::adapters::shared::marked_declaration::mark_annotated;
     let cfg_test_files =
         crate::adapters::analyzers::dry::dead_code::collect_cfg_test_file_paths(parsed);
-    let mut declared_types = crate::adapters::analyzers::dry::collect_declared_types(parsed);
-    // Same propagation `dead_types::collect_declared` does — the marker check's
-    // exemption claims to mirror DRY-006's, so its `is_test` must be built the
-    // same way or the two would disagree about a test-file declaration.
-    declared_types
-        .iter_mut()
-        .filter(|d| cfg_test_files.contains(&d.file))
-        .for_each(|d| d.is_test = true);
+    let mut declared_types =
+        crate::adapters::analyzers::dry::collect_declared_types(parsed, &cfg_test_files);
     mark_annotated(&mut declared_types, annotation_lines.api, |d| {
         d.is_api = true
     });

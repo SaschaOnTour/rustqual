@@ -218,3 +218,17 @@ fn test_context_stays_sticky_through_nested_modules() {
     );
     assert!(tests.contains("Fixture"));
 }
+
+#[test]
+fn a_name_value_attribute_still_contributes_its_value() {
+    // Overriding `visit_meta_name_value` for doc comments replaced syn's
+    // default, which visited the value expression. Any other name-value
+    // attribute would then contribute nothing — under-collection, which is the
+    // direction that invents findings.
+    assert!(refs("#[cfg_attr(feature = \"x\", derive(Trace))]\npub struct S;").contains("Trace"));
+    let via_macro = refs("#[doc = include_str!(\"api.md\")]\npub fn f() {}");
+    assert!(
+        via_macro.contains("include_str"),
+        "the value expression is walked even when it is not a literal: {via_macro:?}"
+    );
+}

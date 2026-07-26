@@ -42,7 +42,7 @@ pub fn detect_dead_types(
     test_helper_lines: &MarkerLines,
     cfg_test_files: &HashSet<String>,
 ) -> Vec<DeadTypeWarning> {
-    let mut declared = collect_declared(parsed, cfg_test_files);
+    let mut declared = super::collect_declared_types(parsed, cfg_test_files);
     mark_annotated(&mut declared, api_lines, |d| d.is_api = true);
     mark_annotated(&mut declared, test_helper_lines, |d| {
         d.is_test_helper = true
@@ -51,20 +51,6 @@ pub fn detect_dead_types(
     let mut found = find_unused(&declared, &production, &tests);
     found.extend(find_test_only(&declared, &production, &tests));
     found
-}
-
-/// Collect declarations and mark those from test-only files.
-/// Operation: collection + flag pass, own calls hidden in the closures.
-fn collect_declared(
-    parsed: &[(String, String, syn::File)],
-    cfg_test_files: &HashSet<String>,
-) -> Vec<DeclaredType> {
-    let mut declared = super::collect_declared_types(parsed);
-    declared
-        .iter_mut()
-        .filter(|d| cfg_test_files.contains(&d.file))
-        .for_each(|d| d.is_test = true);
-    declared
 }
 
 /// Declarations nothing refers to, from production or test code.
