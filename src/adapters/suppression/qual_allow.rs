@@ -93,7 +93,6 @@ fn parse_iosp_legacy(line_number: usize, trimmed: &str) -> Option<Suppression> {
     }
 }
 
-// qual:api
 /// Why a `// qual:allow(...)` marker was flagged as invalid. Carried
 /// through the side-channel into the orphan-finding's reason text so
 /// the author sees the actual failure mode (unknown dim vs unclosed

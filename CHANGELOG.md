@@ -38,6 +38,12 @@ all are removed in this release.
   library root, plus `pub use` name and glob re-exports. Every uncertainty
   resolves to *reachable*, so an unrecognised layout can never manufacture a
   false finding.
+- **Markers that reach no function are reported.** Both markers only affect
+  the function-level checks (DRY-002, TQ-003), so one sitting on a type, a
+  constant or a `pub use` re-export provably does nothing — as does one on a
+  function both checks already exempt (`main`, a test fn, a trait-impl method,
+  `#[allow(dead_code)]`). Attachment mirrors the marking pass exactly (same
+  annotation window), so a working marker can never be called unattached.
 - **`marker` field on JSON orphan entries** (`"allow"` / `"api"` /
   `"test_helper"`). A bare `qual:api` carries no dimensions and no target, so
   without it a consumer could not tell it from a blanket `qual:allow` — and
@@ -58,10 +64,24 @@ all are removed in this release.
   on crate-internal items (`mod adapters;` and friends are private, so the
   `pub` keyword is inert there) that production already calls.
 
+### Fixed
+- **Markers inside string literals are no longer collected as annotations.**
+  Test fixtures embed rustqual's own markers as data
+  (`let code = r#"… // qual:api …"#;`); the raw line scan read those as real
+  annotations on the enclosing file. Harmless while markers were never
+  verified — but it would have produced phantom findings now, so marker
+  collection skips the interior of multi-line string literals (including
+  literals inside macro token streams). Only the interior is skipped, so a
+  marker sharing a line with a literal still counts.
+
 ### Notes
 - The check rides along with the test-quality pass, because that is where the
   marked declarations and the production call set already exist. With
   `[test_quality] enabled = false` it does not run.
+- Dead-code detection covers **functions only**, so an unused `struct`,
+  `enum`, type alias or `const` is still not reported. That is why a
+  `qual:api` on such an item can only ever be inert — and why it is now
+  reported instead of silently doing nothing.
 - A caller invisible to the call graph (dynamic dispatch, macros) reads as "no
   production callers", so the marker is left alone — the safe direction:
   under-report, never a false "delete me".

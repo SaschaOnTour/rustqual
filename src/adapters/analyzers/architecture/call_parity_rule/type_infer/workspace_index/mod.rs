@@ -313,7 +313,6 @@ impl WorkspaceTypeIndex {
     }
 }
 
-// qual:api
 /// Bundled input for `build_workspace_type_index`. Bundles per-file
 /// pre-computed maps + the workspace-wide flag set so the entry-point
 /// signature stays under the SRP param count.

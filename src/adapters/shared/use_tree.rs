@@ -10,7 +10,6 @@ use std::collections::HashMap;
 use syn::spanned::Spanned;
 use syn::UseTree;
 
-// qual:api
 /// The canonical target that an in-scope alias resolves to, paired
 /// with the bit that distinguishes Rust 2018+ absolute paths
 /// (`use ::ext::Foo as Bar;`) from relative ones

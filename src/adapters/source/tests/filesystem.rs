@@ -160,3 +160,37 @@ fn qual_api_marker_also_honors_contiguous_block() {
         file_lines
     );
 }
+
+#[test]
+fn marker_inside_a_multiline_string_literal_is_not_collected() {
+    // Test fixtures embed rustqual's own markers as *data*:
+    //   let code = r#"
+    //       // qual:api
+    //       pub fn f() {}
+    //   "#;
+    // Scanning raw lines would treat that comment as a real marker on this
+    // file, producing phantom annotations (and, once markers are verified,
+    // phantom orphan findings) for source that is only a string.
+    let source =
+        "fn t() {\n    let code = r#\"\n        // qual:api\n        pub fn f() {}\n    \"#;\n}\n";
+    let parsed = parsed_single("src/lib.rs", source);
+    let lines = collect_api_lines(&parsed);
+    assert!(
+        lines.is_empty(),
+        "a marker inside a string literal is data, not an annotation: {lines:?}"
+    );
+}
+
+#[test]
+fn real_marker_outside_a_literal_is_still_collected() {
+    // Guard the other direction: the literal filter must not swallow the
+    // markers that sit in ordinary comment position.
+    let source = "// qual:api\npub fn real() {}\n\nfn t() {\n    let code = r#\"\n        // qual:api\n    \"#;\n}\n";
+    let parsed = parsed_single("src/lib.rs", source);
+    let lines = collect_api_lines(&parsed);
+    assert_eq!(lines.len(), 1, "the real marker's file must be present");
+    assert!(
+        lines.values().any(|s| s.contains(&1)),
+        "line 1 is a genuine marker: {lines:?}"
+    );
+}

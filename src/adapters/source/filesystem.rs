@@ -218,6 +218,49 @@ pub(crate) fn collect_test_helper_lines(
 /// end-shift so multi-line rationales preceding a marker still match
 /// items within `ANNOTATION_WINDOW` of the block's last line.
 /// Operation: collect raw marker lines, then map each to its block-end.
+/// Lines strictly *inside* a multi-line string literal. Test fixtures embed
+/// rustqual's own markers as data (`let code = r#"… // qual:api …"#;`), and a
+/// raw line scan would read those as annotations on the enclosing file —
+/// phantom markers, and once markers are verified, phantom findings.
+///
+/// Only the interior counts: the opening and closing lines carry real code,
+/// so a marker sharing a line with a literal is still collected.
+/// Integration: literal-span collection + interior expansion.
+fn literal_interior_lines(syntax: &syn::File) -> std::collections::HashSet<usize> {
+    let mut collector = LiteralSpans::default();
+    syn::visit::Visit::visit_file(&mut collector, syntax);
+    collector
+        .spans
+        .into_iter()
+        .filter(|(start, end)| end > start)
+        .flat_map(|(start, end)| (start + 1)..end)
+        .collect()
+}
+
+/// Collects `(start_line, end_line)` of every string literal, including those
+/// hidden inside macro token streams (`assert_eq!(x, r#"…"#)`).
+#[derive(Default)]
+struct LiteralSpans {
+    spans: Vec<(usize, usize)>,
+}
+
+impl<'ast> syn::visit::Visit<'ast> for LiteralSpans {
+    fn visit_lit_str(&mut self, node: &'ast syn::LitStr) {
+        let span = syn::spanned::Spanned::span(node);
+        self.spans.push((span.start().line, span.end().line));
+    }
+
+    fn visit_macro(&mut self, node: &'ast syn::Macro) {
+        node.tokens.clone().into_iter().for_each(|tt| {
+            if let proc_macro2::TokenTree::Literal(lit) = tt {
+                let span = lit.span();
+                self.spans.push((span.start().line, span.end().line));
+            }
+        });
+        syn::visit::visit_macro(self, node);
+    }
+}
+
 fn collect_marker_lines<F>(
     parsed: &[(String, String, syn::File)],
     is_marker: F,
@@ -227,12 +270,14 @@ where
 {
     parsed
         .iter()
-        .filter_map(|(path, source, _)| {
+        .filter_map(|(path, source, syntax)| {
             let ends = compute_comment_block_ends(source);
             let shift = |n: usize| ends.get(&n).copied().unwrap_or(n);
+            let inside_literal = literal_interior_lines(syntax);
             let lines: std::collections::HashSet<usize> = source
                 .lines()
                 .enumerate()
+                .filter(|(i, _)| !inside_literal.contains(&(i + 1)))
                 .filter_map(|(i, line)| is_marker(line.trim()).then_some(shift(i + 1)))
                 .collect();
             if lines.is_empty() {

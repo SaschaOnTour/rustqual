@@ -8,7 +8,6 @@ use super::bindings::{canonicalise_workspace_path, CanonScope};
 use super::local_symbols::FileScope;
 use std::collections::HashMap;
 
-// qual:api
 /// Per-param entry in the canonical generics map: the canonicalised
 /// trait bounds for the param plus its turbofish substitution position
 /// (`Some(idx)` for params reachable via a call-site turbofish — fn-own
