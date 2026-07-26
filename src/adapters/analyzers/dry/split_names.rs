@@ -237,7 +237,10 @@ where
 {
     parsed.iter().for_each(|(path, _, file)| {
         collector.names().in_test = cfg_test_files.contains(path);
-        syn::visit::visit_file(collector, file);
+        // Through the trait, not `syn::visit::visit_file` — same reason as
+        // `file_visitor::visit_all_files`: a collector that overrides
+        // `visit_file` to read a file's inner attributes must actually see it.
+        collector.visit_file(file);
     });
     let names = collector.names();
     (

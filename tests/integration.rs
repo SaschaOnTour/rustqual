@@ -148,6 +148,11 @@ fn test_dead_type_reaches_the_json_envelope_and_fails_the_run() {
         ])
         .output()
         .expect("Failed to execute");
+    assert!(
+        output.status.success(),
+        "--no-fail must exit zero, or the parse below fails for the wrong reason: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     let json: serde_json::Value = serde_json::from_str(&stdout).expect("Invalid JSON output");
 

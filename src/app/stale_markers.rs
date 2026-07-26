@@ -67,9 +67,33 @@ struct Marked<'a> {
     exempt: Option<&'static str>,
     /// Whether production uses it; `None` when the name cannot be attributed.
     used: Option<bool>,
-    /// How production would use it: "calls" a function, "refers to" a type.
-    verb: &'static str,
+    /// The words that differ by declaration kind.
+    kind: Kind,
 }
+
+/// What a message has to call things, which differs between a function and a
+/// type: how production uses it, and which check reports it when the marker
+/// goes. Getting the second wrong sends the author looking for a `DEAD_CODE`
+/// finding on a struct.
+#[derive(Clone, Copy)]
+struct Kind {
+    /// "calls" a function, "refers to" a type.
+    verb: &'static str,
+    /// "dead-code" for DRY-002, "dead-type" for DRY-006.
+    finding: &'static str,
+}
+
+/// Operation: constant, no own calls.
+const FUNCTION: Kind = Kind {
+    verb: "calls",
+    finding: "dead-code",
+};
+
+/// Operation: constant, no own calls.
+const TYPE: Kind = Kind {
+    verb: "refers to",
+    finding: "dead-type",
+};
 
 /// Report `qual:api` / `qual:test_helper` markers that silence nothing.
 /// Integration: marked-declaration collection + per-marker passes.
@@ -115,7 +139,7 @@ fn marked_fns<'a>(ctx: &'a MarkerContext<'a>, ambiguous: &HashSet<&str>) -> Vec<
                 "it is `main`, a test, a trait-impl method, or carries #[allow(dead_code)]",
             ),
             used: attributed_use(&d.qualified_name, &d.name, ctx.prod_calls, ambiguous),
-            verb: "calls",
+            kind: FUNCTION,
         })
         .collect()
 }
@@ -136,7 +160,7 @@ fn marked_types<'a>(ctx: &'a MarkerContext<'a>, ambiguous: &HashSet<&str>) -> Ve
                 "it is test-only, carries #[allow(dead_code)], or its name starts with `_`",
             ),
             used: attributed_use(&d.name, &d.name, ctx.prod_refs, ambiguous),
-            verb: "refers to",
+            kind: TYPE,
         })
         .collect()
 }
@@ -242,7 +266,7 @@ fn unattached_orphans(
             line,
             dimensions: Vec::new(),
             target: None,
-            reason: Some(reason_for(Verdict::NotAttached, what, "", "")),
+            reason: Some(reason_for(Verdict::NotAttached, what, "", FUNCTION)),
             kind: OrphanKind::Stale,
         })
         .collect()
@@ -368,7 +392,7 @@ fn orphan(m: &Marked<'_>, line: usize, marker: MarkerKind, verdict: Verdict) -> 
         line,
         dimensions: Vec::new(),
         target: None,
-        reason: Some(reason_for(verdict, marker_word(marker), m.display, m.verb)),
+        reason: Some(reason_for(verdict, marker_word(marker), m.display, m.kind)),
         kind: OrphanKind::Stale,
     }
 }
@@ -377,7 +401,8 @@ fn orphan(m: &Marked<'_>, line: usize, marker: MarkerKind, verdict: Verdict) -> 
 /// cause; the tail depends on whether production uses the declaration — and
 /// when a name collision leaves that open, says so instead of guessing.
 /// Operation: message assembly, no own calls.
-fn never_applied_reason(what: &str, name: &str, called: Option<bool>, verb: &str) -> String {
+fn never_applied_reason(what: &str, name: &str, called: Option<bool>, kind: Kind) -> String {
+    let (verb, finding) = (kind.verb, kind.finding);
     let head = format!(
         "{what} never applied here: {name} cannot be named from outside the crate \
          (it is not `pub`, or a module on its path is private)"
@@ -387,11 +412,11 @@ fn never_applied_reason(what: &str, name: &str, called: Option<bool>, verb: &str
         Some(false) => format!(
             "{head}, so there is no external consumer to excuse — use it from \
              production or delete it (removing the marker will surface the \
-             dead-code finding)"
+             {finding} finding)"
         ),
         None => format!(
             "{head} — remove the marker; another declaration shares this name, so \
-             whatever the dead-code and untested checks then report is the real state"
+             whatever the {finding} and untested checks then report is the real state"
         ),
     }
 }
@@ -399,7 +424,8 @@ fn never_applied_reason(what: &str, name: &str, called: Option<bool>, verb: &str
 /// The remedy text for one verdict — each says what the author must do next,
 /// and what will happen once they do it.
 /// Operation: verdict → message, own call hidden in the arm.
-fn reason_for(verdict: Verdict, what: &str, name: &str, verb: &str) -> String {
+fn reason_for(verdict: Verdict, what: &str, name: &str, kind: Kind) -> String {
+    let (verb, finding) = (kind.verb, kind.finding);
     match verdict {
         Verdict::NotAttached => format!(
             "{what} is not attached to any declaration — it only affects the \
@@ -408,9 +434,9 @@ fn reason_for(verdict: Verdict, what: &str, name: &str, verb: &str) -> String {
         ),
         Verdict::NoEffectOnExempt { why } => format!(
             "{what} changes nothing for {name}: it is already exempt from the \
-             dead-code and untested checks ({why}) — remove the marker"
+             {finding} and untested checks ({why}) — remove the marker"
         ),
-        Verdict::NeverApplied { called } => never_applied_reason(what, name, called, verb),
+        Verdict::NeverApplied { called } => never_applied_reason(what, name, called, kind),
         Verdict::Spent => format!(
             "production {verb} {name}, so {what} excuses nothing — remove the marker \
              (if it is untested, an untested finding will surface: that is the point)"

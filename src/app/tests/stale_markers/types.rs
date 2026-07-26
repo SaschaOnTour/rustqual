@@ -176,3 +176,23 @@ fn a_marker_belongs_to_the_nearest_declaration() {
         "the marker belongs to `Exposed` two lines below it, not to `helper`: {out:?}"
     );
 }
+
+#[test]
+fn the_message_names_the_check_that_will_report_a_type() {
+    // Removing the marker surfaces DRY-006 here, not DRY-002. Naming the wrong
+    // one sends the author looking for a `DEAD_CODE` finding on a struct.
+    let reach = reach_of(&[
+        ("src/lib.rs", "mod inner;"),
+        ("src/inner.rs", "pub struct Hidden;"),
+    ]);
+    let mut d = declared_type("Hidden", 10, true, false);
+    d.file = "src/inner.rs".to_string();
+    let mut lines = HashMap::new();
+    lines.insert("src/inner.rs".to_string(), [9].into_iter().collect());
+    let out = detect_type(&[d], &HashSet::new(), &lines, &reach);
+    let reason = out[0].reason.clone().unwrap_or_default();
+    assert!(
+        reason.contains("dead-type finding") && !reason.contains("dead-code"),
+        "a type's remedy must name the dead-type check: {reason}"
+    );
+}
