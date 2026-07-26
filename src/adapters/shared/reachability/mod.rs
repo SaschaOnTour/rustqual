@@ -17,8 +17,8 @@
 //! so a wrong "unreachable" would demand deleting a marker that is still doing
 //! its job. Missing a re-export costs a finding; inventing one costs trust.
 //!
-//! **Known limit, in that safe direction:** items are identified by
-//! `(file, name)`. Two same-named functions in *different inline modules of
+//! **Known limit, in that safe direction (issue #40):** items are identified
+//! by `(file, name)`. Two same-named functions in *different inline modules of
 //! one file* — say a `pub` one in `mod shown` and a private one in
 //! `mod hidden` — are indistinguishable, so the public one makes the private
 //! one look reachable and a stale marker on it goes unreported. Fixing this

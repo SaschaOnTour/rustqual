@@ -105,7 +105,8 @@ all are removed in this release.
 - The check rides along with the test-quality pass, because that is where the
   marked declarations and the production call set already exist. With
   `[test_quality] enabled = false` it does not run.
-- Item identity in the reachability derivation is `(file, name)`, so two
+- Item identity in the reachability derivation is `(file, name)` (issue #40),
+  so two
   same-named functions in different inline modules of one file cannot be told
   apart — the public one makes the private one look reachable and a stale
   marker there goes unreported. That is the safe direction (a missed finding,
