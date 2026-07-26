@@ -288,3 +288,22 @@ fn path_suffix_matching_respects_segment_boundaries() {
         "the exact segment match wins"
     );
 }
+
+#[test]
+fn path_attribute_may_point_outside_its_own_package() {
+    // A crate can pull a file in from anywhere: `#[path = "../../shared/…"]`.
+    // Restricting candidates to the declaring package excludes the real target
+    // and leaves genuinely public functions looking unreachable.
+    let parsed = parse(&[
+        (
+            "crates/a/src/lib.rs",
+            "#[path = \"../../shared/src/api.rs\"]\npub mod api;",
+        ),
+        ("shared/src/api.rs", "pub fn entry() {}"),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(
+        reach.is_externally_reachable("shared/src/api.rs", "entry"),
+        "a cross-package #[path] target is still public API"
+    );
+}

@@ -15,12 +15,6 @@ fn split_at_src(file: &str) -> Option<(String, String)> {
     Some((norm[..idx].to_string(), norm[idx + 4..].to_string()))
 }
 
-/// The package prefix of a source file — everything before its `src/`.
-/// Operation: delegates to the shared splitter.
-pub(super) fn package_of(file: &str) -> Option<String> {
-    split_at_src(file).map(|(package, _)| package)
-}
-
 /// A module's index key: package prefix plus module path, so
 /// `crates/a/src/api.rs` and `crates/b/src/api.rs` stay distinct.
 /// Integration: package lookup + join.

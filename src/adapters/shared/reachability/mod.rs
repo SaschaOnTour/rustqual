@@ -32,8 +32,8 @@ mod paths;
 
 use std::collections::{HashMap, HashSet};
 
-use collect::{collect_file_facts, FileFacts, GlobUse, ReexportUse};
-use paths::{is_lib_root, module_key, module_path_of, package_of};
+use collect::{collect_file_facts, FileFacts, GlobUse, PathModule, ReexportUse};
+use paths::{is_lib_root, module_key, module_path_of};
 
 /// Which items a consumer outside the crate can name.
 pub(crate) struct ExternalReach {
@@ -111,34 +111,43 @@ fn unrecognised_files(
 
 /// Resolve every `#[path = "…"] mod x;` to `(bindings, ambiguous candidates)`.
 ///
-/// A candidate must live in the **same package** and match the declared suffix
-/// at a path-segment boundary (`api.rs` must not match `myapi.rs`). Exactly one
-/// match binds the module key; several are left unbound and returned as
-/// ambiguous, because picking one could leave the real file unreachable — the
+/// First the paths Rust would actually produce (`collect::candidate_files`);
+/// only if none of them is in the parsed set does it fall back to matching the
+/// bare value as a path suffix — across all packages, since a `#[path]` may
+/// legitimately point into another one. Exactly one match binds the module
+/// key; several leave it unbound and count as reachable instead, because
+/// picking one could leave the real file looking private, which is the
 /// direction that demands deleting a working marker.
-/// Integration: per-attribute candidate search.
+/// Integration: per-attribute resolution + arity dispatch.
 fn resolve_path_modules(
     parsed: &[(String, String, syn::File)],
     facts: &FileFacts,
 ) -> (Vec<(String, String)>, HashSet<String>) {
     let mut bindings = Vec::new();
     let mut ambiguous = HashSet::new();
-    facts.path_modules.iter().for_each(|(key, suffix)| {
-        let package = key.split_once('|').map(|(p, _)| p).unwrap_or_default();
-        let candidates: Vec<String> = parsed
-            .iter()
-            .map(|(f, _, _)| f)
-            .filter(|f| package_of(f).as_deref() == Some(package))
-            .filter(|f| suffix_matches(f, suffix))
-            .cloned()
-            .collect();
-        match candidates.len() {
-            1 => bindings.push((key.clone(), candidates[0].clone())),
+    facts.path_modules.iter().for_each(|pm| {
+        let files = matching_files(parsed, pm);
+        match files.len() {
+            1 => bindings.push((pm.key.clone(), files[0].clone())),
             0 => {}
-            _ => ambiguous.extend(candidates),
+            _ => ambiguous.extend(files),
         }
     });
     (bindings, ambiguous)
+}
+
+/// Parsed files a `#[path]` denotes: the resolved candidates when known,
+/// otherwise every file ending with the value at a path-segment boundary.
+/// Operation: two-stage lookup over the parsed set.
+fn matching_files(parsed: &[(String, String, syn::File)], pm: &PathModule) -> Vec<String> {
+    let files = || parsed.iter().map(|(f, _, _)| f.replace('\\', "/"));
+    let resolved: Vec<String> = files()
+        .filter(|f| pm.candidates.iter().any(|c| c == f))
+        .collect();
+    if !resolved.is_empty() {
+        return resolved;
+    }
+    files().filter(|f| suffix_matches(f, &pm.suffix)).collect()
 }
 
 /// True when `file` ends with `suffix` at a path-segment boundary.
