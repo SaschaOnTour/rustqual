@@ -144,3 +144,40 @@ fn a_crate_root_style_unprefixed_reexport_still_resolves() {
         "a crate-root-relative unprefixed re-export must resolve"
     );
 }
+
+#[test]
+fn a_reexport_inside_a_private_inline_module_exposes_nothing() {
+    // The declaring *file* is reachable (it is the crate root), but the
+    // `pub use` sits inside a private inline module, so no outside consumer
+    // can name it. Judging only by the file would treat the target as public
+    // API and let an invalid marker on it go unreported.
+    let parsed = parse(&[
+        (
+            "src/lib.rs",
+            "mod target;\nmod hidden { pub use super::target::entry; }",
+        ),
+        ("src/target.rs", "pub fn entry() {}"),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(
+        !reach.is_externally_reachable("src/target.rs", "entry"),
+        "a re-export behind a private inline module exposes nothing"
+    );
+}
+
+#[test]
+fn a_reexport_inside_a_public_inline_module_still_exposes() {
+    // The other direction — the guard must not swallow a legitimate export.
+    let parsed = parse(&[
+        (
+            "src/lib.rs",
+            "mod target;\npub mod shown { pub use super::target::entry; }",
+        ),
+        ("src/target.rs", "pub fn entry() {}"),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(
+        reach.is_externally_reachable("src/target.rs", "entry"),
+        "a public inline module's re-export is real public API"
+    );
+}

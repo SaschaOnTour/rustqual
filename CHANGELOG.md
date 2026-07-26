@@ -105,6 +105,13 @@ all are removed in this release.
 - The check rides along with the test-quality pass, because that is where the
   marked declarations and the production call set already exist. With
   `[test_quality] enabled = false` it does not run.
+- Item identity in the reachability derivation is `(file, name)`, so two
+  same-named functions in different inline modules of one file cannot be told
+  apart — the public one makes the private one look reachable and a stale
+  marker there goes unreported. That is the safe direction (a missed finding,
+  never a wrongly-demanded deletion); a qualified item key would have to be
+  threaded through `DeclaredFunction` and the analyzers sharing it, and its
+  payoff is capped because call sites are recorded by last path segment.
 - Dead-code detection covers **functions only**, so an unused `struct`,
   `enum`, type alias or `const` is still not reported. That is why a
   `qual:api` on such an item can only ever be inert — and why it is now

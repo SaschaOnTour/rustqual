@@ -16,6 +16,16 @@
 //! consumer reports a marker as "never applied" when an item is unreachable,
 //! so a wrong "unreachable" would demand deleting a marker that is still doing
 //! its job. Missing a re-export costs a finding; inventing one costs trust.
+//!
+//! **Known limit, in that safe direction:** items are identified by
+//! `(file, name)`. Two same-named functions in *different inline modules of
+//! one file* — say a `pub` one in `mod shown` and a private one in
+//! `mod hidden` — are indistinguishable, so the public one makes the private
+//! one look reachable and a stale marker on it goes unreported. Fixing this
+//! needs a qualified item key threaded through `DeclaredFunction` and the
+//! analyzers that share it; that is its own piece of work, and its payoff is
+//! capped anyway because call sites are recorded by last path segment (see
+//! `dry::call_targets`), so declarations alone cannot attribute a call.
 
 mod collect;
 mod paths;
@@ -173,7 +183,7 @@ fn resolve_globs(
     };
     let mut queue: Vec<String> = globs
         .iter()
-        .filter(|g| reachable_files.contains(&g.file))
+        .filter(|g| g.scope_is_pub && reachable_files.contains(&g.file))
         .flat_map(targets)
         .collect();
     let mut exposed: HashSet<String> = HashSet::new();
@@ -206,6 +216,7 @@ fn resolve_reexports(
     };
     let mut queue: Vec<(String, String)> = reexports
         .iter()
+        .filter(|r| r.scope_is_pub)
         .filter(|r| reachable_files.contains(&r.file) || glob_files.contains(&r.file))
         .flat_map(hops)
         .collect();

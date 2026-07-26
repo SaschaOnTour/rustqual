@@ -12,6 +12,10 @@ use super::paths::{is_pub, module_key, module_path_of};
 /// under uniform paths, and guessing one would drop valid re-exports.
 pub(super) struct ReexportUse {
     pub file: String,
+    /// Whether the inline-module chain around the `pub use` is public. The
+    /// declaring file can be reachable while the `mod hidden { … }` holding
+    /// the re-export is not — then nothing is exposed.
+    pub scope_is_pub: bool,
     pub targets: Vec<String>,
     /// The name the re-export publishes (the alias, when renamed).
     pub exported: String,
@@ -22,6 +26,8 @@ pub(super) struct ReexportUse {
 /// One `pub use path::*`.
 pub(super) struct GlobUse {
     pub file: String,
+    /// See `ReexportUse::scope_is_pub`.
+    pub scope_is_pub: bool,
     pub targets: Vec<String>,
 }
 
@@ -200,6 +206,7 @@ fn collect_use(
         }
         syn::UseTree::Glob(_) => facts.globs.push(GlobUse {
             file: scope.file.to_string(),
+            scope_is_pub: scope.chain_is_pub,
             targets: target_keys(scope, prefix),
         }),
         syn::UseTree::Group(g) => g
@@ -220,6 +227,7 @@ fn push_reexport(
 ) {
     facts.reexports.push(ReexportUse {
         file: scope.file.to_string(),
+        scope_is_pub: scope.chain_is_pub,
         targets: target_keys(scope, prefix),
         exported: exported.to_string(),
         source: source.to_string(),
