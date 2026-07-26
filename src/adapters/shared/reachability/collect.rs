@@ -324,21 +324,13 @@ fn module_key(root: &str, path: &[String]) -> String {
 }
 
 /// The name a `pub` item publishes, or `None` when it is not public or has no
-/// nameable identity (an `impl` block, a `macro_rules!`, …).
-/// Operation: shape dispatch, own call hidden in the closure.
+/// nameable identity (an `impl` block, a `macro_rules!`, …). Which shapes carry
+/// a name is the shared table's answer, so this cannot forget one.
+/// Operation: shape lookup + visibility filter, own calls in the closure.
 fn public_name(item: &syn::Item) -> Option<String> {
-    let named = |vis: &syn::Visibility, id: &syn::Ident| is_pub(vis).then(|| id.to_string());
-    match item {
-        syn::Item::Fn(i) => named(&i.vis, &i.sig.ident),
-        syn::Item::Struct(i) => named(&i.vis, &i.ident),
-        syn::Item::Enum(i) => named(&i.vis, &i.ident),
-        syn::Item::Union(i) => named(&i.vis, &i.ident),
-        syn::Item::Type(i) => named(&i.vis, &i.ident),
-        syn::Item::Const(i) => named(&i.vis, &i.ident),
-        syn::Item::Static(i) => named(&i.vis, &i.ident),
-        syn::Item::Trait(i) => named(&i.vis, &i.ident),
-        _ => None,
-    }
+    super::super::item_ident::item_ident_and_vis(item)
+        .filter(|(_, vis)| is_pub(vis))
+        .map(|(ident, _)| ident.to_string())
 }
 
 /// Operation: visibility match, no own calls.

@@ -15,34 +15,26 @@ use std::collections::HashSet;
 
 use syn::visit::Visit;
 
-use super::has_cfg_test;
-use crate::adapters::shared::file_visitor::FileVisitor;
+use super::split_names::{collect_split, SplitCollector, SplitNames};
 use crate::adapters::shared::macro_tokens;
 
 /// AST visitor collecting referenced names, split by production / test context.
+#[derive(Default)]
 pub(crate) struct TypeReferenceCollector {
-    pub(crate) production: HashSet<String>,
-    pub(crate) tests: HashSet<String>,
-    in_test: bool,
+    names: SplitNames,
+}
+
+impl SplitCollector for TypeReferenceCollector {
+    fn names(&mut self) -> &mut SplitNames {
+        &mut self.names
+    }
 }
 
 impl TypeReferenceCollector {
-    pub(crate) fn new() -> Self {
-        Self {
-            production: HashSet::new(),
-            tests: HashSet::new(),
-            in_test: false,
-        }
-    }
-
     /// The reference set for the current context.
-    /// Operation: one branch, no own calls.
+    /// Trivial: delegates to the shared split.
     fn target(&mut self) -> &mut HashSet<String> {
-        if self.in_test {
-            &mut self.tests
-        } else {
-            &mut self.production
-        }
+        self.names.target()
     }
 
     /// Everything surrounding a declaration's own name: its attributes and
@@ -74,13 +66,6 @@ impl TypeReferenceCollector {
             }
             self.visit_path_arguments(&seg.arguments);
         });
-    }
-}
-
-impl FileVisitor for TypeReferenceCollector {
-    fn reset_for_file(&mut self, file_path: &str) {
-        self.in_test = false;
-        let _ = file_path;
     }
 }
 
@@ -123,17 +108,14 @@ impl<'ast> Visit<'ast> for TypeReferenceCollector {
     }
 
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
-        let prev = self.in_test;
-        if has_cfg_test(&node.attrs) {
-            self.in_test = true;
-        }
+        let previous = self.names.enter(&node.attrs);
         self.around(&node.attrs, &node.generics);
         node.trait_
             .iter()
             .for_each(|(_, path, _)| self.visit_path(path));
         self.self_type(&node.self_ty);
         node.items.iter().for_each(|i| self.visit_impl_item(i));
-        self.in_test = prev;
+        self.names.leave(previous);
     }
 
     /// An attribute's arguments are an opaque token stream too, so
@@ -154,25 +136,21 @@ impl<'ast> Visit<'ast> for TypeReferenceCollector {
     }
 
     fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
-        let prev = self.in_test;
-        if has_cfg_test(&node.attrs) {
-            self.in_test = true;
-        }
+        let previous = self.names.enter(&node.attrs);
         syn::visit::visit_item_mod(self, node);
-        self.in_test = prev;
+        self.names.leave(previous);
     }
 }
 
 /// Collect referenced names across all parsed files.
-/// Integration: per-file context switch + visitor delegation.
+/// Trivial: delegates to the shared split driver.
 pub(crate) fn collect_type_references(
     parsed: &[(String, String, syn::File)],
     cfg_test_files: &HashSet<String>,
 ) -> (HashSet<String>, HashSet<String>) {
-    let mut collector = TypeReferenceCollector::new();
-    parsed.iter().for_each(|(path, _, file)| {
-        collector.in_test = cfg_test_files.contains(path);
-        syn::visit::visit_file(&mut collector, file);
-    });
-    (collector.production, collector.tests)
+    collect_split(
+        parsed,
+        cfg_test_files,
+        &mut TypeReferenceCollector::default(),
+    )
 }

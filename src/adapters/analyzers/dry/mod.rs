@@ -6,6 +6,7 @@ pub(crate) mod declared_types;
 pub mod fragments;
 pub mod functions;
 pub mod match_patterns;
+pub(crate) mod split_names;
 pub(crate) mod type_references;
 pub mod wildcards;
 

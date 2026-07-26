@@ -19,9 +19,16 @@ use std::collections::HashMap;
 
 use syn::visit::Visit;
 
-/// Known generic forwarder helpers whose visitor argument is the *driven* type.
-/// `visit_all_files(parsed, &mut collector)` drives `collector` over every file.
-const DRIVE_FORWARDERS: &[(&str, usize)] = &[("visit_all_files", 1)];
+/// Known generic forwarder helpers whose visitor argument is the *driven* type,
+/// with the position of that argument. `visit_all_files(parsed, &mut collector)`
+/// and `collect_split(parsed, cfg_test_files, &mut collector)` both drive their
+/// visitor over every file.
+///
+/// A shared per-file loop is invisible to this resolution unless it is
+/// registered here: the drive-site moves out of the caller, so the concrete
+/// visitor type can no longer be read there and every helper of that visitor
+/// reads as untested. Add the forwarder when you factor such a loop out.
+const DRIVE_FORWARDERS: &[(&str, usize)] = &[("visit_all_files", 1), ("collect_split", 2)];
 
 /// Compute `driver_fn → helper-method-name` edges that model syn-visitor
 /// dispatch. Each returned pair adds the helper names a driver transitively
