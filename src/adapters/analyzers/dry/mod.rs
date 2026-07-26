@@ -7,6 +7,7 @@ pub(crate) mod declared_types;
 pub(crate) mod doc_scan;
 pub mod fragments;
 pub mod functions;
+pub(crate) mod macro_reach;
 pub mod match_patterns;
 pub(crate) mod split_names;
 pub(crate) mod type_references;

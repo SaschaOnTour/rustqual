@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Bugfix release for the marker verification 1.8.0 shipped.
 
+### Added
+- **Coverage settles TQ-003 when a report is present.** `FNDA:<n>,<name>` says a
+  test ran the function — measurement, not inference — so every executed
+  function seeds the tested set. That answers the cases no call graph can:
+  a helper reached only through a macro rustqual does not expand, a trait
+  object, generated code. It only ever adds to the set, so a missing or stale
+  report leaves the call-graph answer exactly as it was.
+- **A macro invoked from a test reaches what its definition names.** Not
+  expansion — that means rustc's matcher, fragment types, hygiene, and for a
+  proc macro a full build. The weaker statement is enough for the shape that
+  hurts: a contract suite driven by `run_suite!(store)` really does run the
+  functions the macro body names. Deliberately coarse — a macro naming many
+  functions marks all of them reached — which is acceptable here and only here,
+  because the test-reached set only suppresses findings.
+
 ### Fixed
 - **A `pub use` re-export is not a production call (TQ-003).** The call
   collector recorded a re-exported name as production usage, which DRY-002 needs
