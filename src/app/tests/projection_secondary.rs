@@ -122,6 +122,7 @@ fn empty_secondary() -> SecondaryResults {
         coupling: None,
         duplicates: vec![],
         dead_code: vec![],
+        dead_types: vec![],
         fragments: vec![],
         boilerplate: vec![],
         wildcard_warnings: vec![],

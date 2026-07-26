@@ -212,3 +212,36 @@ fn a_shared_file_is_walked_once_per_crate() {
         "the file is walked, so a private item stays unreachable"
     );
 }
+
+#[test]
+fn public_types_and_constants_are_reachable_items_too() {
+    // `qual:api` is verified against this set, and since DRY-006 it can sit on
+    // a type. If only functions were recorded, every legitimately public type
+    // would be accused of not being nameable from outside.
+    let parsed = parse(&[
+        ("src/lib.rs", "pub mod api;"),
+        (
+            "src/api.rs",
+            "pub struct Entry; pub enum Mode { A } pub type Alias = u8; \
+             pub const MAX: u8 = 1; pub static NAME: &str = \"x\"; struct Hidden;",
+        ),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    for name in ["Entry", "Mode", "Alias", "MAX", "NAME"] {
+        assert!(
+            reach.is_externally_reachable("src/api.rs", name),
+            "{name} is public through a public module"
+        );
+    }
+    assert!(!reach.is_externally_reachable("src/api.rs", "Hidden"));
+}
+
+#[test]
+fn a_public_type_behind_a_private_module_is_not_reachable() {
+    let parsed = parse(&[
+        ("src/lib.rs", "mod internal;"),
+        ("src/internal.rs", "pub struct Looks;"),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(!reach.is_externally_reachable("src/internal.rs", "Looks"));
+}

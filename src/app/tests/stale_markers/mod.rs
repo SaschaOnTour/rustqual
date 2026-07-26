@@ -14,8 +14,44 @@
 pub(super) use std::collections::{HashMap, HashSet};
 
 pub(super) use crate::adapters::shared::declared_function::DeclaredFunction;
-use crate::adapters::shared::reachability::{compute_external_reach, ExternalReach};
-pub(super) use crate::app::stale_markers::detect_stale_marker_orphans;
+pub(super) use crate::adapters::shared::declared_type::{DeclaredType, TypeItemKind};
+use crate::adapters::shared::reachability::compute_external_reach;
+pub(super) use crate::adapters::shared::reachability::ExternalReach;
+pub(super) use crate::app::stale_markers::MarkerContext;
+
+/// The function-only form these tests were written against: no declared types,
+/// no reference set. Type-aware cases build a `MarkerContext` directly.
+pub(super) fn detect_stale_marker_orphans(
+    declared: &[DeclaredFunction],
+    prod_calls: &HashSet<String>,
+    api_lines: &HashMap<String, HashSet<usize>>,
+    test_helper_lines: &HashMap<String, HashSet<usize>>,
+    reach: &ExternalReach,
+) -> Vec<OrphanSuppression> {
+    crate::app::stale_markers::detect_stale_marker_orphans(&MarkerContext {
+        declared_fns: declared,
+        declared_types: &[],
+        prod_calls,
+        prod_refs: &HashSet::new(),
+        api_lines,
+        test_helper_lines,
+        reach,
+    })
+}
+
+/// A declared type at `line` carrying the given marker.
+pub(super) fn declared_type(name: &str, line: usize, api: bool, helper: bool) -> DeclaredType {
+    DeclaredType {
+        name: name.to_string(),
+        kind: TypeItemKind::Struct,
+        file: "src/lib.rs".to_string(),
+        line,
+        is_test: false,
+        has_allow_dead_code: false,
+        is_api: api,
+        is_test_helper: helper,
+    }
+}
 pub(super) use crate::domain::findings::{MarkerKind, OrphanSuppression};
 
 /// A declared production fn at `line` carrying the given marker.
@@ -115,4 +151,5 @@ pub(super) fn internal_orphans(prod: &[&str], api: bool) -> Vec<OrphanSuppressio
 }
 
 mod ineffective;
+mod types;
 mod verdicts;

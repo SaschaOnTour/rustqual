@@ -137,6 +137,7 @@ min_lines = 5
 min_statements = 3
 ignore_trait_impls = true
 detect_dead_code = true
+detect_dead_types = true
 detect_wildcard_imports = true
 detect_repeated_matches = true
 
@@ -266,6 +267,7 @@ min_lines = 5
 min_statements = 3
 ignore_trait_impls = true
 detect_dead_code = true
+detect_dead_types = true
 detect_wildcard_imports = true
 detect_repeated_matches = true
 

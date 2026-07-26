@@ -57,6 +57,7 @@ For dimension intent and refactor patterns, see the use-case guides linked at th
 | `DRY-003` | Duplicate code fragment (≥6 lines repeated) |
 | `DRY-004` | Wildcard import (`use foo::*;`) |
 | `DRY-005` | Repeated match pattern across functions (≥3 arms, ≥3 instances) |
+| `DRY-006` | Dead type or constant — struct/enum/union/alias/const/static nothing refers to |
 
 ## Boilerplate (BP-*)
 

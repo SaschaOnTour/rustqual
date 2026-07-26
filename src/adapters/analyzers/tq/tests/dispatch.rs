@@ -121,3 +121,35 @@ fn undriven_visitor_yields_no_edges() {
         "no drive-site exists, so no edges expected; got {edges:?}"
     );
 }
+
+/// `collect_split(parsed, cfg_test_files, &mut collector)` drives its third
+/// argument. Registering a forwarder here is what keeps the driver→visitor edge
+/// visible when the per-file loop is shared instead of written out in each
+/// collector — without it, sharing the loop silently costs the edge and every
+/// visitor helper reads as untested.
+#[test]
+fn forwarder_drive_resolves_third_argument() {
+    let src = r#"
+        struct C;
+        impl C {
+            fn default() -> Self { C }
+            fn record(&self) {}
+        }
+        impl<'ast> syn::visit::Visit<'ast> for C {
+            fn visit_item_use(&mut self, u: &syn::ItemUse) {
+                self.record();
+                syn::visit::visit_item_use(self, u);
+            }
+        }
+        fn analyze(files: &[(String, String, syn::File)], skip: &HashSet<String>) {
+            collect_split(files, skip, &mut C::default())
+        }
+    "#;
+    let edges = visitor_dispatch_edges(&parsed(src));
+    assert!(
+        edges
+            .iter()
+            .any(|(from, tos)| from == "analyze" && tos.iter().any(|t| t == "record")),
+        "analyze→record edge missing; got {edges:?}"
+    );
+}

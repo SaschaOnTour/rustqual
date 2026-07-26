@@ -7,8 +7,8 @@ Annotation forms, ordered from most-restricted to least:
 | `// qual:allow(<dim>, <target>[=N]) reason: "…"` | One finding-kind within a multi-kind dimension (`complexity`, `dry`, `srp`, `coupling`, `test_quality`, `architecture`) | Yes |
 | `// qual:allow(iosp)` | The whole `iosp` dimension (its only form — `iosp` has no targets) | Yes |
 | `// qual:allow(unsafe)` | `CX-006` only | No |
-| `// qual:api` | Excludes from `DRY-002`, `TQ-003` | No |
-| `// qual:test_helper` | Excludes from `DRY-002` (testonly), `TQ-003` | No |
+| `// qual:api` | Excludes from `DRY-002`, `DRY-006`, `TQ-003` | No |
+| `// qual:test_helper` | Excludes from `DRY-002` / `DRY-006` (test-only), `TQ-003` | No |
 | `// qual:inverse(<fn>)` | Suppresses near-duplicate `DRY-001` for inverse pairs | No |
 | `// qual:recursive` | Removes self-calls from own-calls before leaf reclassification | No |
 
@@ -59,20 +59,22 @@ pub fn parse_config(input: &str) -> Result<Config> { /* … */ }
 
 Excludes from:
 
-- `DRY-002` (dead code) — function isn't dead, it's exported.
-- `TQ-003` (untested) — function may be tested by downstream consumers.
+- `DRY-002` (dead code) — the function isn't dead, it's exported.
+- `DRY-006` (dead type) — same, for a type or constant (since 1.8.0).
+- `TQ-003` (untested) — the function may be tested by downstream consumers.
 
 Other dimensions still apply (complexity, IOSP, etc.). Doesn't count against `max_suppression_ratio`.
 
-**It is verified (since 1.7.0).** The marker excuses a function *production
-never calls*, so rustqual reports it as `ORPHAN_SUPPRESSION` once that stops
-being true:
+**It is verified (since 1.7.0, on types since 1.8.0).** The marker excuses a
+declaration *production never uses*, so rustqual reports it as
+`ORPHAN_SUPPRESSION` once that stops being true:
 
 | Situation | What you get |
 |---|---|
-| Reachable from outside the crate, no in-crate callers | Silent — the marker is doing its job |
-| Production calls the function | *spent* — remove the marker (an `untested` finding may surface; that is the point) |
-| Item can't be named from outside (private `mod`, not `pub`, or in a binary) | *never applied* — remove the marker, and call the function from production or delete it |
+| Reachable from outside the crate, nothing in the workspace uses it | Silent — the marker is doing its job |
+| Production calls the function / refers to the type | *spent* — remove the marker (an `untested` finding may surface; that is the point) |
+| Item can't be named from outside (private `mod`, not `pub`, or in a binary) | *never applied* — remove the marker, and use it from production or delete it |
+| The marker reaches no declaration at all (a `pub use`, a module, a trait) | *not attached* — it silences nothing; remove it |
 
 Reachability is derived from the sources alone: the `mod` visibility chain
 from a library root plus `pub use` re-exports. Anything rustqual cannot
@@ -88,7 +90,7 @@ pub fn assert_in_range(actual: f64, expected: f64, tol: f64) {
 }
 ```
 
-Same exclusions as `qual:api` (`DRY-002`, `TQ-003`). Use when a helper lives in `src/` so it's importable from integration tests in `tests/`, but isn't called from any production code.
+Same exclusions as `qual:api` (`DRY-002`, `DRY-006`, `TQ-003`). Use when a helper — a function, or since 1.8.0 a type — lives in `src/` so it's importable from integration tests in `tests/`, but isn't used from any production code.
 
 Unlike a blanket exclusion, `qual:test_helper` only silences DRY-002 and TQ-003 — complexity / SRP / IOSP all still apply. (rustqual has no function-name ignore list; the blunt `ignore_functions` option was removed in 1.5.0.)
 

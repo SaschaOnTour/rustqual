@@ -49,7 +49,6 @@ pub struct GithubDetailListView<D> {
     pub(crate) rows: Vec<GithubDetailRow<D>>,
 }
 
-pub type GithubDryRow = GithubDetailRow<DryFindingDetails>;
 pub type GithubDryView = GithubDetailListView<DryFindingDetails>;
 
 pub type GithubSrpRow = GithubDetailRow<SrpFindingDetails>;

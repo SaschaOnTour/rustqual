@@ -36,6 +36,33 @@ pub(super) const CARDS: &[RuleCard] = &[
         config: "[duplicates] detect_dead_code (default true).",
     },
     RuleCard {
+        id: "DRY-006",
+        title: "Dead type or constant detected",
+        detects: "A struct, enum, union, type alias, const or static that \
+            nothing refers to: 'unused type' (no reference anywhere) or \
+            'type test-only' (only test code names it). References are counted \
+            by name across the whole workspace, including inside macro bodies \
+            and attribute arguments, and inside doc-test fences (that code is \
+            compiled by cargo test). A type's own impl blocks do not count — \
+            carrying methods keeps nothing alive.",
+        why: "An unused type is read, maintained and refactored like the rest \
+            of the code while modelling nothing. rustc's own dead_code lint \
+            stops at the crate boundary, so a pub type nobody in the workspace \
+            uses stays invisible there.",
+        fix: "Delete it, or wire it to its intended user. Public API types: \
+            mark // qual:api. Types serving integration tests from src/: mark \
+            // qual:test_helper. Deliberate exceptions: #[allow(dead_code)].",
+        suppress: "// qual:api (public API) or // qual:test_helper — DRY-006 \
+            is deliberately NOT suppressible via qual:allow(dry, …), matching \
+            DRY-002.",
+        config: "[duplicates] detect_dead_types (default true). Two blind \
+            spots, both erring toward a finding: a file rustqual cannot parse \
+            is dropped from the analysis (check stderr for parse warnings \
+            before acting on a surprising batch), and content pulled in by \
+            include! is never parsed at all. An unclosed doc fence errs the \
+            other way — it leaks into the next item, suppressing findings.",
+    },
+    RuleCard {
         id: "DRY-003",
         title: "Duplicate code fragment",
         detects: "The same statement sequence (at least min_lines lines, \

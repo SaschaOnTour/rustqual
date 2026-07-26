@@ -6,9 +6,9 @@
 
 use super::super::json_types::{
     JsonArchitectureFinding, JsonBoilerplateFind, JsonCouplingModule, JsonDeadCodeWarning,
-    JsonDuplicateGroup, JsonFragmentGroup, JsonFunction, JsonModuleSrpWarning, JsonParamSrpWarning,
-    JsonRepeatedMatchGroup, JsonSdpViolation, JsonSrpWarning, JsonStructuralWarning, JsonTqWarning,
-    JsonWildcardWarning,
+    JsonDeadTypeWarning, JsonDuplicateGroup, JsonFragmentGroup, JsonFunction, JsonModuleSrpWarning,
+    JsonParamSrpWarning, JsonRepeatedMatchGroup, JsonSdpViolation, JsonSrpWarning,
+    JsonStructuralWarning, JsonTqWarning, JsonWildcardWarning,
 };
 
 /// All sections any per-dimension JsonReporter method might populate.
@@ -21,6 +21,7 @@ pub struct JsonChunk {
     pub sdp_violations: Vec<JsonSdpViolation>,
     pub duplicates: Vec<JsonDuplicateGroup>,
     pub dead_code: Vec<JsonDeadCodeWarning>,
+    pub dead_types: Vec<JsonDeadTypeWarning>,
     pub fragments: Vec<JsonFragmentGroup>,
     pub wildcards: Vec<JsonWildcardWarning>,
     pub boilerplate: Vec<JsonBoilerplateFind>,
@@ -42,6 +43,7 @@ impl JsonChunk {
         self.sdp_violations.extend(other.sdp_violations);
         self.duplicates.extend(other.duplicates);
         self.dead_code.extend(other.dead_code);
+        self.dead_types.extend(other.dead_types);
         self.fragments.extend(other.fragments);
         self.wildcards.extend(other.wildcards);
         self.boilerplate.extend(other.boilerplate);

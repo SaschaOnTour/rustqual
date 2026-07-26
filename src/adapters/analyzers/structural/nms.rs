@@ -96,26 +96,32 @@ fn is_self_mutation(expr: &syn::Expr) -> bool {
         syn::Expr::Assign(a) => is_self_target(&a.left),
         // Compound assignments: +=, -=, *=, etc.
         syn::Expr::Binary(b) => is_compound_assign(&b.op) && is_self_target(&b.left),
-        // Any method call on self.field or self.field[i] is conservatively a mutation
-        syn::Expr::MethodCall(mc) => {
-            is_self_field(&mc.receiver)
-                || is_self_path(&mc.receiver)
-                || is_self_indexed_field(&mc.receiver)
-        }
+        // Any method call on self or on part of self is conservatively a mutation
+        syn::Expr::MethodCall(mc) => is_self_path(&mc.receiver) || is_self_target(&mc.receiver),
         syn::Expr::Reference(r) => r.mutability.is_some() && is_self_target(&r.expr),
         _ => false,
     }
 }
 
-/// Check if expression is a mutation target involving self: `self.field`, `self.field[i]`.
-/// Operation: pattern matching, no own calls.
+/// Whether the expression designates part of `self`: `self.field`,
+/// `self.a.b`, `self.field[i]`, `(self.field)`, `(*self).field`. The chain is
+/// followed to its
+/// root, because a nested field is just as much part of `self` as a direct one
+/// — `self.inner.items.push(v)` mutates `self`, and stopping at one level
+/// reports a needless `&mut` on a method that plainly needs it.
+/// Operation: chain walk to the root, no own calls.
 fn is_self_target(expr: &syn::Expr) -> bool {
-    match expr {
-        syn::Expr::Field(f) => matches!(&*f.base, syn::Expr::Path(p) if p.path.is_ident("self")),
-        syn::Expr::Index(idx) => {
-            matches!(&*idx.expr, syn::Expr::Field(f) if matches!(&*f.base, syn::Expr::Path(p) if p.path.is_ident("self")))
-        }
-        _ => false,
+    let mut current = expr;
+    loop {
+        current = match current {
+            syn::Expr::Field(f) => &f.base,
+            syn::Expr::Index(idx) => &idx.expr,
+            syn::Expr::Paren(p) => &p.expr,
+            syn::Expr::Group(g) => &g.expr,
+            syn::Expr::Unary(u) if matches!(u.op, syn::UnOp::Deref(_)) => &u.expr,
+            syn::Expr::Path(p) => return p.path.is_ident("self"),
+            _ => return false,
+        };
     }
 }
 
@@ -135,21 +141,6 @@ fn is_compound_assign(op: &syn::BinOp) -> bool {
             | syn::BinOp::ShlAssign(_)
             | syn::BinOp::ShrAssign(_)
     )
-}
-
-/// Check if expression is `self.field`.
-/// Operation: pattern matching.
-fn is_self_field(expr: &syn::Expr) -> bool {
-    match expr {
-        syn::Expr::Field(f) => matches!(&*f.base, syn::Expr::Path(p) if p.path.is_ident("self")),
-        _ => false,
-    }
-}
-
-/// Check if expression is `self.field[i]` (indexed field access).
-/// Operation: pattern matching.
-fn is_self_indexed_field(expr: &syn::Expr) -> bool {
-    matches!(expr, syn::Expr::Index(idx) if is_self_field(&idx.expr))
 }
 
 /// Check if expression is `self`.

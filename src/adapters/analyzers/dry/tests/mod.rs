@@ -1,8 +1,11 @@
 mod dead_code;
+mod dead_types;
+mod declared_types;
 mod fragments;
 mod functions;
 mod match_patterns;
 mod root;
+mod type_references;
 mod wildcards;
 
 /// Three free functions (`func_a`/`func_b`/`func_c`) with identical

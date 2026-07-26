@@ -56,7 +56,9 @@ pub(crate) struct WildcardRow {
     pub line: usize,
 }
 
-/// All six DRY buckets, reporter-agnostic.
+/// The DRY buckets, reporter-agnostic. Dead functions and dead types share
+/// `dead_code`: both answer "nothing refers to this", and the human-facing
+/// table tells them apart by the kind tag.
 pub(crate) struct DryBuckets {
     pub duplicate_groups: Vec<DryGroupRow>,
     pub fragment_groups: Vec<DryGroupRow>,
@@ -66,7 +68,7 @@ pub(crate) struct DryBuckets {
     pub wildcards: Vec<WildcardRow>,
 }
 
-/// Project DRY findings into the six typed buckets. Group-style
+/// Project DRY findings into the typed buckets. Group-style
 /// buckets are deduped by participant-location set so the same group
 /// only appears once even if the analyzer emitted one finding per
 /// participant.
@@ -187,23 +189,32 @@ fn build_dead_code(findings: &[DryFinding]) -> Vec<DeadCodeRow> {
     findings
         .iter()
         .filter(|f| !f.common.suppressed)
-        .filter_map(|f| match (&f.kind, &f.details) {
-            (
-                DryFindingKind::DeadCodeUncalled | DryFindingKind::DeadCodeTestOnly,
-                DryFindingDetails::DeadCode {
-                    qualified_name,
-                    suggestion,
-                },
-            ) => Some(DeadCodeRow {
-                qualified_name: qualified_name.clone(),
-                kind_tag: f.kind.meta().html_dead_code_tag,
-                file: f.common.file.clone(),
-                line: f.common.line,
-                suggestion: suggestion.clone().unwrap_or_default(),
-            }),
-            _ => None,
-        })
+        .filter_map(dead_row)
         .collect()
+}
+
+/// A dead function and a dead type answer the same question — "nothing refers
+/// to this" — so the human-facing table lists them together, told apart by the
+/// kind tag. Only where the name lives differs.
+/// Operation: shape dispatch + row construction, no own calls.
+fn dead_row(f: &DryFinding) -> Option<DeadCodeRow> {
+    let (name, suggestion) = match &f.details {
+        DryFindingDetails::DeadCode {
+            qualified_name,
+            suggestion,
+        } => (qualified_name, suggestion.clone().unwrap_or_default()),
+        DryFindingDetails::DeadType {
+            name, suggestion, ..
+        } => (name, suggestion.clone()),
+        _ => return None,
+    };
+    Some(DeadCodeRow {
+        qualified_name: name.clone(),
+        kind_tag: f.kind.meta().html_dead_code_tag,
+        file: f.common.file.clone(),
+        line: f.common.line,
+        suggestion,
+    })
 }
 
 fn build_boilerplate(findings: &[DryFinding]) -> Vec<BoilerplateRow> {

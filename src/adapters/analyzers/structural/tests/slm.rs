@@ -118,3 +118,29 @@ fn test_self_in_macro_arg_not_flagged() {
         w.len()
     );
 }
+
+#[test]
+fn self_in_an_inline_format_arg_not_flagged() {
+    // `format!("{self:?}")` uses self just as `format!("{:?}", self)` does, but
+    // proc_macro2 lexes the whole string as ONE literal — so a token scan sees
+    // no `self` at all and the method looks self-less. Inline format arguments
+    // have been idiomatic since Rust 2021.
+    let w = detect_in(
+        "struct S { n: u8 } impl S { fn label(&self) -> String { format!(\"{self:?}\") } }",
+    );
+    assert!(
+        w.is_empty(),
+        "self interpolated into a format string is a self reference: {w:?}"
+    );
+}
+
+#[test]
+fn a_similarly_named_placeholder_is_not_a_self_reference() {
+    // The placeholder scan matches whole names. Loosening it to a substring
+    // test would silently disable SLM everywhere, and the sibling test only
+    // pins the suppressing direction.
+    let w = detect_in(
+        "struct S { n: u8 } impl S { fn label(&self) -> String { let selfish = 1; format!(\"{selfish}\") } }",
+    );
+    assert_eq!(w.len(), 1, "`selfish` must not count as `self`: {w:?}");
+}

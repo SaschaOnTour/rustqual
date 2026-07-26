@@ -2,6 +2,8 @@ use std::collections::HashSet;
 
 use syn::visit::Visit;
 
+use super::split_names::{collect_split, test_scoped_visits, SplitCollector, SplitNames};
+
 // ── Call target collection ──────────────────────────────────────
 
 /// Collect all function/method call targets from all parsed files,
@@ -11,23 +13,19 @@ pub(crate) fn collect_all_calls(
     parsed: &[(String, String, syn::File)],
     cfg_test_files: &HashSet<String>,
 ) -> (HashSet<String>, HashSet<String>) {
-    let mut collector = CallTargetCollector {
-        production_calls: HashSet::new(),
-        test_calls: HashSet::new(),
-        in_test: false,
-    };
-    parsed.iter().for_each(|(path, _, file)| {
-        collector.in_test = cfg_test_files.contains(path);
-        syn::visit::visit_file(&mut collector, file);
-    });
-    (collector.production_calls, collector.test_calls)
+    collect_split(parsed, cfg_test_files, &mut CallTargetCollector::default())
 }
 
 /// AST visitor that collects all function/method call targets.
+#[derive(Default)]
 struct CallTargetCollector {
-    production_calls: HashSet<String>,
-    test_calls: HashSet<String>,
-    in_test: bool,
+    names: SplitNames,
+}
+
+impl SplitCollector for CallTargetCollector {
+    fn names(&mut self) -> &mut SplitNames {
+        &mut self.names
+    }
 }
 
 /// Insert the last path segment and qualified `Type::method` form into the target set.
@@ -44,13 +42,9 @@ fn insert_path_segments(target: &mut HashSet<String>, path: &syn::Path) {
 
 impl CallTargetCollector {
     /// The call-target set for the current context (test vs production).
-    /// Operation: one branch, no own calls.
+    /// Trivial: delegates to the shared split.
     fn target(&mut self) -> &mut HashSet<String> {
-        if self.in_test {
-            &mut self.test_calls
-        } else {
-            &mut self.production_calls
-        }
+        self.names.target()
     }
 
     /// Extract function names referenced by serde field attributes.
@@ -98,11 +92,7 @@ impl CallTargetCollector {
         &mut self,
         args: &syn::punctuated::Punctuated<syn::Expr, syn::token::Comma>,
     ) {
-        let target = if self.in_test {
-            &mut self.test_calls
-        } else {
-            &mut self.production_calls
-        };
+        let target = self.names.target();
         args.iter().for_each(|arg| {
             let expr = match arg {
                 syn::Expr::Reference(r) => &*r.expr,
@@ -118,12 +108,7 @@ impl CallTargetCollector {
 impl<'ast> Visit<'ast> for CallTargetCollector {
     fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
         if let syn::Expr::Path(p) = &*node.func {
-            let target = if self.in_test {
-                &mut self.test_calls
-            } else {
-                &mut self.production_calls
-            };
-            insert_path_segments(target, &p.path);
+            insert_path_segments(self.names.target(), &p.path);
         }
         self.record_path_args(&node.args);
         syn::visit::visit_expr_call(self, node);
@@ -131,21 +116,13 @@ impl<'ast> Visit<'ast> for CallTargetCollector {
 
     fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
         let name = node.method.to_string();
-        if self.in_test {
-            self.test_calls.insert(name);
-        } else {
-            self.production_calls.insert(name);
-        }
+        self.names.target().insert(name);
         self.record_path_args(&node.args);
         syn::visit::visit_expr_method_call(self, node);
     }
 
     fn visit_expr_struct(&mut self, node: &'ast syn::ExprStruct) {
-        let target = if self.in_test {
-            &mut self.test_calls
-        } else {
-            &mut self.production_calls
-        };
+        let target = self.names.target();
         node.fields.iter().for_each(|field| {
             if let syn::Expr::Path(p) = &field.expr {
                 insert_path_segments(target, &p.path);
@@ -154,22 +131,16 @@ impl<'ast> Visit<'ast> for CallTargetCollector {
         syn::visit::visit_expr_struct(self, node);
     }
 
-    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
-        let prev = self.in_test;
-        if super::has_cfg_test(&node.attrs) {
-            self.in_test = true;
-        }
-        syn::visit::visit_item_mod(self, node);
-        self.in_test = prev;
-    }
+    test_scoped_visits!();
 
-    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
-        let prev = self.in_test;
-        if super::has_test_attr(&node.attrs) {
-            self.in_test = true;
-        }
-        syn::visit::visit_item_fn(self, node);
-        self.in_test = prev;
+    /// Scoped like the generated kinds, plus the function names serde
+    /// attributes carry (`deserialize_with = "…"`) that nothing else calls.
+    fn visit_field(&mut self, node: &'ast syn::Field) {
+        let previous = self.names.enter(&node.attrs);
+        let refs = Self::extract_serde_fn_refs(&node.attrs);
+        self.target().extend(refs);
+        syn::visit::visit_field(self, node);
+        self.names.leave(previous);
     }
 
     fn visit_macro(&mut self, node: &'ast syn::Macro) {
@@ -195,12 +166,6 @@ impl<'ast> Visit<'ast> for CallTargetCollector {
         syn::visit::visit_macro(self, node);
     }
 
-    fn visit_field(&mut self, node: &'ast syn::Field) {
-        let refs = Self::extract_serde_fn_refs(&node.attrs);
-        self.target().extend(refs);
-        syn::visit::visit_field(self, node);
-    }
-
     fn visit_item_use(&mut self, node: &'ast syn::ItemUse) {
         // Only pub/pub(crate) re-exports count as usage of the original function.
         // Private `use` imports are not re-exports; their call targets are already
@@ -208,11 +173,7 @@ impl<'ast> Visit<'ast> for CallTargetCollector {
         if matches!(node.vis, syn::Visibility::Inherited) {
             return;
         }
-        let target = if self.in_test {
-            &mut self.test_calls
-        } else {
-            &mut self.production_calls
-        };
+        let target = self.names.target();
         // Iterative UseTree walk
         let mut stack: Vec<&syn::UseTree> = vec![&node.tree];
         while let Some(tree) = stack.pop() {

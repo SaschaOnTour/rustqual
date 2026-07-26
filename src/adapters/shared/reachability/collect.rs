@@ -148,11 +148,6 @@ impl Walk<'_> {
     fn items(&mut self, scope: Scope<'_>, items: &[syn::Item]) {
         for item in items {
             match item {
-                syn::Item::Fn(f) if scope.inline_is_pub && is_pub(&f.vis) => {
-                    self.tree
-                        .pub_items
-                        .insert((scope.file.to_string(), f.sig.ident.to_string()));
-                }
                 syn::Item::Mod(m) => self.module(scope, m),
                 // A `pub use` inside a private module is collected too — whether
                 // it exposes anything is decided later, from the scope's own
@@ -160,8 +155,19 @@ impl Walk<'_> {
                 syn::Item::Use(u) if is_pub(&u.vis) => {
                     collect_use(&u.tree, scope, &mut Vec::new(), &mut self.tree);
                 }
-                _ => {}
+                other => self.named_item(scope, other),
             }
+        }
+    }
+
+    /// A `pub` item an outside consumer could name. Types and constants count
+    /// alongside functions: `qual:api` is verified against this set and, since
+    /// DRY-006, may sit on any of them.
+    /// Operation: shape lookup + insert, own call hidden in the closure.
+    fn named_item(&mut self, scope: Scope<'_>, item: &syn::Item) {
+        let named = public_name(item).filter(|_| scope.inline_is_pub);
+        if let Some(name) = named {
+            self.tree.pub_items.insert((scope.file.to_string(), name));
         }
     }
 
@@ -315,6 +321,16 @@ fn candidate_paths(mod_path: &[String], prefix: &[String]) -> Vec<Vec<String>> {
 /// Operation: string join, no own calls.
 fn module_key(root: &str, path: &[String]) -> String {
     format!("{root}|{}", path.join("::"))
+}
+
+/// The name a `pub` item publishes, or `None` when it is not public or has no
+/// nameable identity (an `impl` block, a `macro_rules!`, …). Which shapes carry
+/// a name is the shared table's answer, so this cannot forget one.
+/// Operation: shape lookup + visibility filter, own calls in the closure.
+fn public_name(item: &syn::Item) -> Option<String> {
+    super::super::item_shape::item_ident_and_vis(item)
+        .filter(|(_, vis)| is_pub(vis))
+        .map(|(ident, _)| ident.to_string())
 }
 
 /// Operation: visibility match, no own calls.

@@ -2,9 +2,12 @@ use std::collections::HashSet;
 
 use syn::visit::Visit;
 
-use super::{has_allow_dead_code, has_cfg_test, has_test_attr, qualify_name};
+use super::allow_scope::AllowScope;
+use super::{has_cfg_test, has_test_attr, qualify_name};
 use crate::adapters::shared::declared_function::DeclaredFunction;
 use crate::adapters::shared::file_visitor::FileVisitor;
+use crate::adapters::shared::item_shape::{impl_item_attrs, item_attrs, trait_item_attrs};
+use crate::adapters::shared::marked_declaration::{mark_annotated, MarkerLines};
 
 // ── DeclaredFnCollector (for dead code) ─────────────────────────
 
@@ -15,6 +18,7 @@ pub(crate) struct DeclaredFnCollector {
     in_test: bool,
     parent_type: Option<String>,
     is_trait_impl: bool,
+    allow: AllowScope,
 }
 
 impl DeclaredFnCollector {
@@ -25,6 +29,7 @@ impl DeclaredFnCollector {
             in_test: false,
             parent_type: None,
             is_trait_impl: false,
+            allow: AllowScope::default(),
         }
     }
 }
@@ -47,7 +52,7 @@ impl<'ast> Visit<'ast> for DeclaredFnCollector {
             is_main: name == "main",
             is_test: self.in_test || has_test_attr(&node.attrs) || has_cfg_test(&node.attrs),
             is_trait_impl: false,
-            has_allow_dead_code: has_allow_dead_code(&node.attrs),
+            has_allow_dead_code: self.allow.covers(&node.attrs),
             is_api: false,
             is_test_helper: false,
             name,
@@ -88,7 +93,7 @@ impl<'ast> Visit<'ast> for DeclaredFnCollector {
             is_main: false,
             is_test: self.in_test || has_test_attr(&node.attrs) || has_cfg_test(&node.attrs),
             is_trait_impl: self.is_trait_impl,
-            has_allow_dead_code: has_allow_dead_code(&node.attrs),
+            has_allow_dead_code: self.allow.covers(&node.attrs),
             is_api: false,
             is_test_helper: false,
             name,
@@ -116,12 +121,46 @@ impl<'ast> Visit<'ast> for DeclaredFnCollector {
         }
     }
 
-    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+    fn visit_file(&mut self, node: &'ast syn::File) {
+        self.allow.enter_file(&node.attrs);
+        syn::visit::visit_file(self, node);
+    }
+
+    /// Every item goes through here, so the two scope-forming attributes are
+    /// handled once instead of on the handful of shapes that happen to need an
+    /// override: `#[cfg(test)]` on a const or a `use` scopes exactly as it does
+    /// on a function, and a lint level set on an `impl` or a function covers
+    /// what is declared inside it.
+    fn visit_item(&mut self, node: &'ast syn::Item) {
+        let attrs = item_attrs(node);
         let prev_in_test = self.in_test;
-        if has_cfg_test(&node.attrs) {
-            self.in_test = true;
-        }
-        syn::visit::visit_item_mod(self, node);
+        let prev_allow = self.allow.enter(attrs);
+        self.in_test = prev_in_test || has_cfg_test(attrs);
+        syn::visit::visit_item(self, node);
+        self.allow.leave(prev_allow);
+        self.in_test = prev_in_test;
+    }
+
+    /// Associated items do not pass through `visit_item`, so the same scoping
+    /// happens at their own dispatch — a `#[cfg(test)]` associated const or
+    /// type carries references just as a free one does.
+    fn visit_impl_item(&mut self, node: &'ast syn::ImplItem) {
+        let attrs = impl_item_attrs(node);
+        let prev_in_test = self.in_test;
+        let prev_allow = self.allow.enter(attrs);
+        self.in_test = prev_in_test || has_cfg_test(attrs);
+        syn::visit::visit_impl_item(self, node);
+        self.allow.leave(prev_allow);
+        self.in_test = prev_in_test;
+    }
+
+    fn visit_trait_item(&mut self, node: &'ast syn::TraitItem) {
+        let attrs = trait_item_attrs(node);
+        let prev_in_test = self.in_test;
+        let prev_allow = self.allow.enter(attrs);
+        self.in_test = prev_in_test || has_cfg_test(attrs);
+        syn::visit::visit_trait_item(self, node);
+        self.allow.leave(prev_allow);
         self.in_test = prev_in_test;
     }
 }
@@ -169,35 +208,22 @@ pub fn detect_dead_code(
     merge_warnings(uncalled, test_only)
 }
 
-/// Mark functions that have a `// qual:api` annotation within the annotation window.
-/// Operation: iterates declarations checking line proximity to API markers.
-pub(crate) fn mark_api_declarations(
-    declared: &mut [DeclaredFunction],
-    api_lines: &std::collections::HashMap<String, std::collections::HashSet<usize>>,
-) {
-    declared.iter_mut().for_each(|d| {
-        if let Some(lines) = api_lines.get(&d.file) {
-            if crate::findings::has_annotation_in_window(lines, d.line) {
-                d.is_api = true;
-            }
-        }
-    });
+/// Mark functions that have a `// qual:api` annotation within the annotation
+/// window. The window rule is shared with DRY-006 and the stale-marker check,
+/// so the three cannot disagree about what a marker attaches to.
+/// Trivial: delegates to `mark_annotated`.
+pub(crate) fn mark_api_declarations(declared: &mut [DeclaredFunction], api_lines: &MarkerLines) {
+    mark_annotated(declared, api_lines, |d| d.is_api = true);
 }
 
 /// Mark functions that have a `// qual:test_helper` annotation within
 /// the annotation window.
-/// Operation: iterates declarations checking line proximity to markers.
+/// Trivial: delegates to `mark_annotated`.
 pub(crate) fn mark_test_helper_declarations(
     declared: &mut [DeclaredFunction],
-    test_helper_lines: &std::collections::HashMap<String, std::collections::HashSet<usize>>,
+    test_helper_lines: &MarkerLines,
 ) {
-    declared.iter_mut().for_each(|d| {
-        if let Some(lines) = test_helper_lines.get(&d.file) {
-            if crate::findings::has_annotation_in_window(lines, d.line) {
-                d.is_test_helper = true;
-            }
-        }
-    });
+    mark_annotated(declared, test_helper_lines, |d| d.is_test_helper = true);
 }
 
 /// Merge warning lists into one.

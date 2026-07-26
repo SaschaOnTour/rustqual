@@ -1,10 +1,10 @@
 //! Typed Finding for the DRY dimension.
 //!
-//! DRY is the most heterogeneous dimension: it produces six distinct
-//! finding shapes (Duplicate, Fragment, DeadCode, Wildcard, Boilerplate,
-//! RepeatedMatch). Each variant of `DryFindingDetails` carries its own
-//! per-finding data; the wrapping `DryFinding` keeps a uniform surface
-//! for collection and rendering.
+//! DRY is the most heterogeneous dimension: it produces seven distinct
+//! finding shapes (Duplicate, Fragment, DeadCode, DeadType, Wildcard,
+//! Boilerplate, RepeatedMatch). Each variant of `DryFindingDetails` carries its
+//! own per-finding data; the wrapping `DryFinding` keeps a uniform surface for
+//! collection and rendering.
 
 use crate::domain::Finding;
 
@@ -16,6 +16,10 @@ pub enum DryFindingKind {
     Fragment,
     DeadCodeUncalled,
     DeadCodeTestOnly,
+    /// DRY-006: a type or constant nothing refers to.
+    DeadTypeUnused,
+    /// DRY-006: a type or constant only test code refers to.
+    DeadTypeTestOnly,
     Wildcard,
     Boilerplate,
     RepeatedMatch,
@@ -45,6 +49,8 @@ impl DryFindingKind {
             Self::Fragment => ("Fragment", "", "fragment"),
             Self::DeadCodeUncalled => ("Dead", "uncalled", "uncalled"),
             Self::DeadCodeTestOnly => ("Dead", "test-only", "test_only"),
+            Self::DeadTypeUnused => ("Dead", "unused type", "unused_type"),
+            Self::DeadTypeTestOnly => ("Dead", "type test-only", "test_only_type"),
             Self::Wildcard => ("Wildcard", "", "wildcard"),
             Self::Boilerplate => ("Boilerplate", "", "boilerplate"),
             Self::RepeatedMatch => ("Repeated", "", "repeated_match"),
@@ -100,6 +106,14 @@ pub enum DryFindingDetails {
     DeadCode {
         qualified_name: String,
         suggestion: Option<String>,
+    },
+    /// DRY-006. A separate shape from `DeadCode`: it names a declaration, not a
+    /// function, and carries what kind of declaration it was.
+    DeadType {
+        name: String,
+        /// `struct`, `enum`, `union`, `type alias`, `const` or `static`.
+        item: &'static str,
+        suggestion: String,
     },
     Wildcard {
         module_path: String,

@@ -58,15 +58,43 @@ pub(super) fn compute_tq(
         coverage_path,
     };
     let analysis = crate::adapters::analyzers::tq::analyze_test_quality(&ctx);
-    let reach = crate::adapters::shared::reachability::compute_external_reach(parsed);
-    let stale = crate::app::stale_markers::detect_stale_marker_orphans(
-        &declared_fns,
-        &prod_calls,
-        annotation_lines.api,
-        annotation_lines.test_helper,
-        &reach,
-    );
+    let stale = detect_stale_markers(parsed, annotation_lines, &declared_fns, &prod_calls);
     (Some(analysis), stale)
+}
+
+/// The `qual:api` / `qual:test_helper` markers that have gone stale.
+/// Integration: type collection + marking + the check itself.
+fn detect_stale_markers(
+    parsed: &[(String, String, syn::File)],
+    annotation_lines: &super::metrics::AnnotationLines<'_>,
+    declared_fns: &[crate::adapters::shared::declared_function::DeclaredFunction],
+    prod_calls: &std::collections::HashSet<String>,
+) -> Vec<crate::domain::findings::OrphanSuppression> {
+    use crate::adapters::shared::marked_declaration::mark_annotated;
+    let cfg_test_files =
+        crate::adapters::analyzers::dry::dead_code::collect_cfg_test_file_paths(parsed);
+    let mut declared_types =
+        crate::adapters::analyzers::dry::collect_declared_types(parsed, &cfg_test_files);
+    mark_annotated(&mut declared_types, annotation_lines.api, |d| {
+        d.is_api = true
+    });
+    mark_annotated(&mut declared_types, annotation_lines.test_helper, |d| {
+        d.is_test_helper = true
+    });
+    let (prod_refs, _) =
+        crate::adapters::analyzers::dry::collect_type_references(parsed, &cfg_test_files);
+    let reach = crate::adapters::shared::reachability::compute_external_reach(parsed);
+    crate::app::stale_markers::detect_stale_marker_orphans(
+        &crate::app::stale_markers::MarkerContext {
+            declared_fns,
+            declared_types: &declared_types,
+            prod_calls,
+            prod_refs: &prod_refs,
+            api_lines: annotation_lines.api,
+            test_helper_lines: annotation_lines.test_helper,
+            reach: &reach,
+        },
+    )
 }
 
 /// Mark TQ warnings as suppressed based on `// qual:allow(test_quality[, kind])`

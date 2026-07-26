@@ -1,13 +1,20 @@
+pub(crate) mod allow_scope;
 pub mod boilerplate;
 pub(crate) mod call_targets;
 pub mod dead_code;
+pub mod dead_types;
+pub(crate) mod declared_types;
+pub(crate) mod doc_scan;
 pub mod fragments;
 pub mod functions;
 pub mod match_patterns;
+pub(crate) mod split_names;
+pub(crate) mod type_references;
 pub mod wildcards;
 
 pub use boilerplate::BoilerplateFind;
 pub use dead_code::{DeadCodeKind, DeadCodeWarning};
+pub use dead_types::{DeadTypeKind, DeadTypeWarning};
 pub use fragments::FragmentGroup;
 pub use functions::{DuplicateGroup, DuplicateKind};
 
@@ -51,21 +58,68 @@ pub(crate) fn collect_declared_functions(
     collector.functions
 }
 
+/// Collect declared type and constant metadata from all parsed files, marking
+/// those from test-only files as test code.
+///
+/// The propagation belongs here rather than at each call site: DRY-006 and the
+/// stale-marker check both build their exemption from `is_test`, and when only
+/// one of them applied it the two silently disagreed about every declaration in
+/// an integration-test file.
+/// Operation: collection + flag pass, own calls hidden in the closures.
+pub(crate) fn collect_declared_types(
+    parsed: &[(String, String, syn::File)],
+    cfg_test_files: &std::collections::HashSet<String>,
+) -> Vec<crate::adapters::shared::declared_type::DeclaredType> {
+    let mut collector = declared_types::DeclaredTypeCollector::new();
+    visit_all_files(parsed, &mut collector);
+    let mut declared = collector.types;
+    declared
+        .iter_mut()
+        .filter(|d| cfg_test_files.contains(&d.file))
+        .for_each(|d| d.is_test = true);
+    declared
+}
+
 // ── Attribute helpers ───────────────────────────────────────────
 
 // `has_cfg_test` and `has_test_attr` live in `adapters::shared::cfg_test`
 // (multi-dimension utility). Re-exports keep existing call sites working.
 pub(crate) use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
 
-/// Check if attributes contain `#[allow(..., dead_code, ...)]`. Handles
-/// both the single-lint form (`#[allow(dead_code)]`) and the list form
-/// (`#[allow(dead_code, unused_variables)]`).
-/// Operation: attribute inspection + punctuated-path parsing.
-fn has_allow_dead_code(attrs: &[syn::Attribute]) -> bool {
+pub(crate) use type_references::collect_type_references;
+
+/// The `dead_code` lint level these attributes set, or `None` when they say
+/// nothing about it and the surrounding scope decides.
+///
+/// Folded in **source order**, because that is how rustc resolves them: a later
+/// attribute overrides an earlier one, so `#[deny(…)] #[allow(…)]` really is
+/// allowed. The exception is `forbid`, which a later attribute may not relax.
+/// `warn` and `deny` both land on "report it" — what matters is that they
+/// revoke an inherited `allow`.
+/// Integration: fold over the attributes, level lookup delegated.
+pub(crate) fn dead_code_level(attrs: &[syn::Attribute]) -> Option<allow_scope::DeadCodeLevel> {
     attrs
         .iter()
-        .filter(|a| a.path().is_ident("allow"))
-        .any(allow_contains_dead_code)
+        .filter_map(attribute_level)
+        .fold(None, |current, next| match current {
+            Some(allow_scope::DeadCodeLevel::Forbid) => current,
+            _ => Some(next),
+        })
+}
+
+/// The level one attribute sets for `dead_code`, or `None` when it is not a
+/// lint attribute or names a different lint.
+/// Operation: path lookup + lint-list check, own call in the guard.
+fn attribute_level(attr: &syn::Attribute) -> Option<allow_scope::DeadCodeLevel> {
+    let level = match () {
+        _ if attr.path().is_ident("allow") => allow_scope::DeadCodeLevel::Allow,
+        _ if attr.path().is_ident("forbid") => allow_scope::DeadCodeLevel::Forbid,
+        _ if attr.path().is_ident("warn") || attr.path().is_ident("deny") => {
+            allow_scope::DeadCodeLevel::Report
+        }
+        _ => return None,
+    };
+    allow_contains_dead_code(attr).then_some(level)
 }
 
 /// True if this `#[allow(...)]` attribute's argument list contains

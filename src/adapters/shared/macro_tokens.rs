@@ -24,6 +24,8 @@
 
 use proc_macro2::{Delimiter, TokenStream, TokenTree};
 
+use super::text_names::placeholder_names;
+
 /// Best-effort extraction of the expressions embedded in a macro token stream.
 /// Most macros accept comma-separated exprs (`assert!(a, b)`, `format!("{}", x)`),
 /// but block-like bodies (`tokio::select! { … }`) and separator-`;` variants
@@ -141,13 +143,15 @@ fn is_call_position(id: &proc_macro2::Ident, next: Option<&TokenTree>) -> bool {
 }
 
 /// True if `name` appears as an identifier anywhere in `tokens` (recursing into
-/// groups). Never fails — for yes/no presence checks like SLM's "does this macro
-/// body reference `self`", where parsing the body as exprs is both unnecessary
-/// and fragile (e.g. `matches!(self, Variant(_))` won't parse as an expr list).
-/// A spurious hit only errs toward "reference present", the safe direction for a
-/// self-less-method check. Note: idents inside string literals (capture
-/// interpolation like `format!("{self}")`) are NOT seen — `proc_macro2` lexes a
-/// string as one `Literal`, not idents. Operation: token-tree presence scan.
+/// groups), or as a `{…}` placeholder in a string literal. Never fails — for
+/// yes/no presence checks like SLM's "does this macro body reference `self`",
+/// where parsing the body as exprs is both unnecessary and fragile (e.g.
+/// `matches!(self, Variant(_))` won't parse as an expr list). A spurious hit
+/// only errs toward "reference present", the safe direction for a
+/// self-less-method check — which is also why the placeholders count:
+/// `format!("{self:?}")` is one `Literal` to `proc_macro2`, and missing it
+/// reported a method that plainly uses `self` as self-less.
+/// Integration: token walk + placeholder extraction.
 pub fn tokens_reference_ident(tokens: &TokenStream, name: &str) -> bool {
     let mut stack: Vec<TokenStream> = vec![tokens.clone()];
     while let Some(stream) = stack.pop() {
@@ -155,9 +159,40 @@ pub fn tokens_reference_ident(tokens: &TokenStream, name: &str) -> bool {
             match tt {
                 TokenTree::Ident(id) if id == name => return true,
                 TokenTree::Group(g) => stack.push(g.stream()),
+                TokenTree::Literal(lit) if names_placeholder(&lit, name) => return true,
                 _ => {}
             }
         }
     }
     false
+}
+
+/// Whether a literal interpolates `name`.
+/// Operation: placeholder lookup, own call hidden in the closure.
+fn names_placeholder(lit: &proc_macro2::Literal, name: &str) -> bool {
+    placeholder_names(&lit.to_string())
+        .iter()
+        .any(|p| p == name)
+}
+
+/// Every identifier in `tokens`, recursing into groups and into the
+/// placeholders of string literals. The raw, maximally generous harvest — no
+/// position or casing filter — for the question "does anything here refer to
+/// this name at all". A spurious hit only errs toward "referenced", which for a
+/// dead-declaration check is the safe direction: it suppresses a finding rather
+/// than inventing one. Integration: token walk + placeholder extraction.
+pub fn all_idents(tokens: &TokenStream) -> impl Iterator<Item = String> {
+    let mut out = Vec::new();
+    let mut stack: Vec<TokenStream> = vec![tokens.clone()];
+    while let Some(stream) = stack.pop() {
+        for tt in stream {
+            match tt {
+                TokenTree::Ident(id) => out.push(id.to_string()),
+                TokenTree::Group(g) => stack.push(g.stream()),
+                TokenTree::Literal(lit) => out.extend(placeholder_names(&lit.to_string())),
+                _ => {}
+            }
+        }
+    }
+    out.into_iter()
 }

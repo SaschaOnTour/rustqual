@@ -50,6 +50,11 @@ pub(super) fn dry_category_detail(f: &DryFinding) -> (&'static str, String) {
             };
             ("dead_code", detail)
         }
+        DryFindingDetails::DeadType {
+            name,
+            item,
+            suggestion,
+        } => ("dead_type", format!("{item} {name} ({suggestion})")),
         DryFindingDetails::Wildcard { module_path } => ("wildcard_import", module_path.clone()),
         DryFindingDetails::Boilerplate {
             pattern_id,

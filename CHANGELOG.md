@@ -5,6 +5,135 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-07-26
+
+Dead-code detection covered functions only. An unused `struct`, `enum`,
+`union`, type alias, `const` or `static` was invisible — and a `// qual:api` on
+one of them was reported as inert, because nothing could ever act on it. That
+was the loose end left by 1.7.0: the marker had become verified, but on a type
+there was nothing to verify it against.
+
+### Added
+- **DRY-006: dead types and constants.** A declaration nothing refers to is
+  reported as `unused type`; one only test code names, as `type test-only`. The
+  model mirrors DRY-002 — declarations on one side, a workspace-wide reference
+  set on the other — and the exemptions are the same, so there is no second
+  rule to learn: `#[allow(dead_code)]`, `// qual:api`, `// qual:test_helper`.
+  Configurable via `[duplicates] detect_dead_types` (default true).
+
+  A reference is any name occurrence: type positions, expression paths,
+  patterns, generic bounds, derive arguments and macro token streams. That is
+  the grain the call graph already works at, and it is deliberately generous —
+  over-collecting only suppresses a finding, while under-collecting invents
+  one, and telling an author to delete a type that is in use is the expensive
+  mistake.
+
+  Exactly two things are not a reference: a declaration's own name, and the
+  self type of an `impl` block. Without the second, a type carrying only its
+  own methods would keep itself alive and nothing could ever be found — the
+  same verdict rustc reaches with "never constructed". rustc's `dead_code` lint
+  stops at the crate boundary, so a `pub` type nobody in the workspace uses
+  stays invisible there; that is where this earns its keep.
+
+  **Traits are deliberately out of scope.** Every `impl Trait for X` names the
+  trait, so a trait with a single implementation would always look used: the
+  check would carry the full false-finding risk without the value.
+- **`qual:api` and `qual:test_helper` are verified on types too.** Functions and
+  types are now asked the same three questions — is it exempt anyway, can it be
+  named from outside the crate, does production use it — with the message
+  naming the evidence that applies ("production calls" vs "production refers
+  to"). External reachability therefore records public types, constants and
+  traits, not just functions; without that every legitimately public type would
+  have been accused of not being nameable from outside.
+- **Intra-doc links count as references.** `/// see [`MAX`]` names an item that
+  no lexer turns into an identifier, and deleting the target breaks the
+  documentation — so a bracketed link target is a use. Only bracketed spans
+  count; harvesting every word of prose would let any type whose name appears
+  in a sentence keep itself alive. Format-string placeholders and doc links are
+  the two ways a name hides inside text, and both now go through
+  `shared/text_names.rs`.
+- **Doc examples count as test uses.** A type named only inside a ``` fence in
+  a doc comment is in use — `cargo test` compiles and runs that code — but it is
+  *test* use, so it is reported as `type test-only` rather than silently
+  ignored. Doc comments reach `syn` as one `#[doc = "…"]` attribute per line, so
+  the fence is tracked across them. An intra-doc link stays a production
+  reference: it documents the API rather than exercising it, and prose outside a
+  fence still contributes nothing but its link targets.
+- **JSON gains a `dead_types` array.** Kept apart from `dead_code` rather than
+  folded into it: a consumer reading `function_name` must not be handed a
+  struct name. Human-facing output lists both in one table, told apart by the
+  kind tag.
+
+### Changed
+- **The JSON summary and the baseline carry `dead_type_warnings`.** The array
+  was there but the count was not, so the two halves of the envelope disagreed;
+  the baseline field is `#[serde(default)]`, so older baseline files still load.
+- **"Not attached" now names what it means.** A marker that reaches no
+  declaration is still reported, but the remedy text names what it could be
+  sitting on — a `pub use` re-export, a module, a trait — instead of "a type, a
+  constant or a re-export", which stopped being true.
+- **Two exemptions came out of running DRY-006 on rustqual itself.** Inline
+  format arguments (`format!("{PREFIX}…")`) are one literal to `proc_macro2`,
+  so a token walk saw no reference at all; `all_idents` now reads `{…}`
+  placeholders, including named spec arguments (`{v:>width$}`). And a leading
+  underscore is the language's own "deliberately unused" convention, which
+  rustc's `dead_code` lint honours — arguing with the compiler there would only
+  be noise.
+
+### Fixed
+- **The `dead_code` lint level is modelled as Rust defines it.** Both dead-code
+  checks read only a declaration's own attributes, so `#![allow(dead_code)]` at
+  the top of a file, `#[allow(dead_code)]` on a module or an `impl` — the
+  generated-code idiom, one attribute rather than one per item — and one on an
+  enclosing function excused nothing. The level is now tracked down every
+  lexical scope for DRY-002 and DRY-006 alike, and it is a *level*, not a
+  one-way flag: attributes are folded in source order so a later one overrides
+  an earlier one (`#[deny] #[allow]` really is allowed), an inner
+  `#[deny(dead_code)]` revokes an inherited `allow`, and `forbid` is the one
+  level nothing narrower may relax — for rustc an inner `allow` under it is an
+  error, so honouring one would silence what the compiler never would.
+  (`visit_all_files` dispatches through the trait for this, so a visitor
+  overriding `visit_file` sees a file's inner attributes.)
+- **The test-context switch happens on every item.** It fired for modules,
+  `impl` blocks and functions but not for the rest, so a reference from a
+  `#[cfg(test)]` const, struct or `use` landed in the production set and a
+  declaration used only from there produced no finding at all. Both the call
+  graph and the reference set now scope at the item dispatch, where every kind
+  passes through — along with `#[test]`-family attributes, which the call graph
+  previously recognised only on free functions. Attributes are not an item-level
+  thing, though, so the same scoping happens at every dispatch that can carry
+  one: associated items in an `impl` or a trait, items in an `extern` block,
+  struct fields, enum variants, `let` and macro statements, and match arms. A
+  `#[cfg(test)]` statement is absent from a non-test build, so what it names is
+  a test reference — the enclosing function being production says nothing about
+  it. The list lives in one place (`dry/split_names.rs`), because the gap this
+  closes is always the same shape — a node kind nobody thought of — and one list
+  fixes both the call graph and the reference set at once. The list is derived
+  rather than guessed: `syn` has sixty-nine structs with an `attrs` field, and
+  they reach a visitor through those dispatches or as their own node, so every
+  attributed position an author can write is covered — down to an array element,
+  a call argument, a struct field value and a pattern field. Reaching them needs
+  exhaustive matches over `syn::Expr` and `syn::Pat` (there is no shared
+  accessor) plus a step to the first operand of an assignment, where `syn` binds
+  what rustc reads as the statement's attribute. The signature and generic
+  positions are covered too — `fn(#[cfg(test)] Fixture)` and
+  `struct Holder<#[cfg(test)] T = Fixture>` both compile and both drop the only
+  mention of the type outside a test build. `File` is the one attributed node
+  handled elsewhere: its inner attributes are what the whole-file test
+  classification reads.
+- **SLM missed `self` inside an inline format argument.** `format!("{self:?}")`
+  is one literal to `proc_macro2`, so the token scan saw no `self` and reported
+  the method as self-less. Same root cause as the DRY-006 case above, same fix:
+  `tokens_reference_ident` reads the placeholders. It can only turn findings
+  off, matching the check's documented bias.
+- **NMS missed mutation through a nested field.** `self.inner.items.push(v)`
+  mutates `self` just as `self.items.push(v)` does, but the self-target test
+  matched exactly one field level, so the method was reported as taking a
+  needless `&mut self` — advice that would not even compile. The chain is now
+  walked to its root through field, index and paren expressions, which also
+  subsumes the separate `self.field[i]` case. Strictly more conservative: it
+  can only turn findings off.
+
 ## [1.7.0] - 2026-07-26
 
 Release closing the last blind spot in the suppression system: `// qual:api`

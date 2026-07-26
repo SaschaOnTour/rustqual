@@ -20,6 +20,10 @@ where
 {
     parsed.iter().for_each(|(path, _, file)| {
         visitor.reset_for_file(path);
-        syn::visit::visit_file(visitor, file);
+        // Dispatch through the trait, not `syn::visit::visit_file`, so a
+        // visitor that overrides `visit_file` — to read a file's inner
+        // attributes, say `#![allow(dead_code)]` — actually sees it. For every
+        // other visitor the default does exactly what the free function did.
+        visitor.visit_file(file);
     });
 }

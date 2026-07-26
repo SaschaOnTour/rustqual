@@ -114,3 +114,54 @@ fn test_verbose_shows_all() {
         "Verbose should show violations"
     );
 }
+
+/// DRY-006 end to end: source → detector → JSON envelope → exit code. Every
+/// unit test below this level works on already-parsed fixtures, so nothing else
+/// proves the finding actually travels the pipeline or fails the run.
+#[test]
+fn test_dead_type_reaches_the_json_envelope_and_fails_the_run() {
+    let dir = tempfile::Builder::new()
+        .prefix("test_dead_type_")
+        .tempdir()
+        .expect("temp dir");
+    std::fs::create_dir_all(dir.path().join("src")).expect("src dir");
+    std::fs::write(
+        dir.path().join("src/lib.rs"),
+        "pub struct Orphan { pub n: u8 }\npub struct Alive;\npub fn make() -> Alive { Alive }\n",
+    )
+    .expect("write lib.rs");
+
+    let failing = cargo_bin()
+        .args([dir.path().to_str().expect("utf-8 path")])
+        .output()
+        .expect("Failed to execute");
+    assert!(
+        !failing.status.success(),
+        "a dead type must fail the run by default"
+    );
+
+    let output = cargo_bin()
+        .args([
+            dir.path().to_str().expect("utf-8 path"),
+            "--json",
+            "--no-fail",
+        ])
+        .output()
+        .expect("Failed to execute");
+    assert!(
+        output.status.success(),
+        "--no-fail must exit zero, or the parse below fails for the wrong reason: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = serde_json::from_str(&stdout).expect("Invalid JSON output");
+
+    let dead_types = json["dead_types"].as_array().expect("dead_types array");
+    assert_eq!(dead_types.len(), 1, "only `Orphan` is dead: {stdout}");
+    assert_eq!(dead_types[0]["name"], "Orphan");
+    assert_eq!(dead_types[0]["item"], "struct");
+    assert_eq!(
+        json["summary"]["dead_type_warnings"], 1,
+        "the summary count must agree with the array"
+    );
+}

@@ -20,6 +20,9 @@ struct Baseline {
     error_handling_warnings: usize,
     duplicate_groups: usize,
     dead_code_warnings: usize,
+    /// Added in 1.8.0 (DRY-006); absent from older baselines.
+    #[serde(default)]
+    dead_type_warnings: usize,
     fragment_groups: usize,
     boilerplate_warnings: usize,
     srp_struct_warnings: usize,
@@ -80,6 +83,7 @@ pub fn create_baseline(results: &[FunctionAnalysis], summary: &Summary) -> Strin
         error_handling_warnings: summary.error_handling_warnings,
         duplicate_groups: summary.duplicate_groups,
         dead_code_warnings: summary.dead_code_warnings,
+        dead_type_warnings: summary.dead_type_warnings,
         fragment_groups: summary.fragment_groups,
         boilerplate_warnings: summary.boilerplate_warnings,
         srp_struct_warnings: summary.srp_struct_warnings,

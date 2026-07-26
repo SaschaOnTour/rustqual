@@ -347,19 +347,8 @@ pub(crate) fn scope_for_local<'a>(
         .map(Vec::as_slice)
 }
 
-/// Extract the declared ident from an `Item` if it has one
-/// `local_symbols` cares about. Operation: lookup table.
+/// The declared name of an item, via the shared shape table.
+/// Trivial: delegates to `item_ident`.
 fn item_name(item: &syn::Item) -> Option<String> {
-    match item {
-        syn::Item::Fn(f) => Some(f.sig.ident.to_string()),
-        syn::Item::Mod(m) => Some(m.ident.to_string()),
-        syn::Item::Struct(s) => Some(s.ident.to_string()),
-        syn::Item::Enum(e) => Some(e.ident.to_string()),
-        syn::Item::Union(u) => Some(u.ident.to_string()),
-        syn::Item::Trait(t) => Some(t.ident.to_string()),
-        syn::Item::Type(t) => Some(t.ident.to_string()),
-        syn::Item::Const(c) => Some(c.ident.to_string()),
-        syn::Item::Static(s) => Some(s.ident.to_string()),
-        _ => None,
-    }
+    crate::adapters::shared::item_shape::item_ident(item).map(syn::Ident::to_string)
 }

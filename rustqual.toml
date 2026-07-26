@@ -43,6 +43,8 @@ allow_expect = false
 
 [duplicates]
 enabled = true
+# detect_dead_code  = true   # DRY-002: functions nothing calls
+# detect_dead_types = true   # DRY-006: types and constants nothing refers to
 
 # ── Boilerplate Detection ───────────────────────────────────────────────
 #

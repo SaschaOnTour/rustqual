@@ -179,7 +179,10 @@ fn collect_dry_positions<F>(
             DryFindingKind::Wildcard => (wildcard_mode, "wildcard_imports"),
             // Dead-code findings are intentionally *not* included: they are
             // not suppressible via `qual:allow(dry)` (see comment above).
-            DryFindingKind::DeadCodeUncalled | DryFindingKind::DeadCodeTestOnly => return,
+            DryFindingKind::DeadCodeUncalled
+            | DryFindingKind::DeadCodeTestOnly
+            | DryFindingKind::DeadTypeUnused
+            | DryFindingKind::DeadTypeTestOnly => return,
         };
         push(
             &f.common.file,
