@@ -39,8 +39,15 @@ pub(super) fn compute_tq(
     );
     let cfg_test_files =
         crate::adapters::analyzers::dry::dead_code::collect_cfg_test_file_paths(parsed);
-    let (prod_calls, test_calls) =
+    let calls =
         crate::adapters::analyzers::dry::dead_code::collect_all_calls(parsed, &cfg_test_files);
+    // TQ-003 asks whether production *calls* a function, so a `pub use`
+    // re-export does not qualify it — the marker check and DRY-002 do want the
+    // re-export, since there the question is whether anything uses it at all.
+    let prod_calls = calls.production;
+    let test_calls = calls.tests;
+    let mut used_in_production = prod_calls.clone();
+    used_in_production.extend(calls.reexported);
     let coverage_path = config
         .test_quality
         .coverage_file
@@ -58,7 +65,7 @@ pub(super) fn compute_tq(
         coverage_path,
     };
     let analysis = crate::adapters::analyzers::tq::analyze_test_quality(&ctx);
-    let stale = detect_stale_markers(parsed, annotation_lines, &declared_fns, &prod_calls);
+    let stale = detect_stale_markers(parsed, annotation_lines, &declared_fns, &used_in_production);
     (Some(analysis), stale)
 }
 

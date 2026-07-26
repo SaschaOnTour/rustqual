@@ -18,6 +18,10 @@ use super::{has_cfg_test, has_test_attr};
 pub(crate) struct SplitNames {
     pub(crate) production: HashSet<String>,
     pub(crate) tests: HashSet<String>,
+    /// Names a `pub use` re-exports. Usage, but not a *call*: DRY-002 needs it
+    /// so a re-exported function is not called dead, while TQ-003 asks whether
+    /// production calls the function and must not count it.
+    pub(crate) reexported: HashSet<String>,
     pub(crate) in_test: bool,
 }
 
@@ -231,7 +235,7 @@ pub(crate) fn collect_split<V>(
     parsed: &[(String, String, syn::File)],
     cfg_test_files: &HashSet<String>,
     collector: &mut V,
-) -> (HashSet<String>, HashSet<String>)
+) -> SplitNames
 where
     V: SplitCollector + for<'ast> Visit<'ast>,
 {
@@ -242,9 +246,5 @@ where
         // `visit_file` to read a file's inner attributes must actually see it.
         collector.visit_file(file);
     });
-    let names = collector.names();
-    (
-        std::mem::take(&mut names.production),
-        std::mem::take(&mut names.tests),
-    )
+    std::mem::take(collector.names())
 }

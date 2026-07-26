@@ -202,7 +202,11 @@ pub fn detect_dead_code(
     let mut declared = mark_cfg_test_declarations(declared, cfg_test_files);
     mark_api_declarations(&mut declared, api_lines);
     mark_test_helper_declarations(&mut declared, test_helper_lines);
-    let (prod_calls, test_calls) = collect_all_calls(parsed, cfg_test_files);
+    let calls = collect_all_calls(parsed, cfg_test_files);
+    // A re-export is usage for DRY-002: a re-exported function is not dead.
+    let mut prod_calls = calls.production;
+    prod_calls.extend(calls.reexported);
+    let test_calls = calls.tests;
     let uncalled = find_uncalled(&declared, &prod_calls, &test_calls);
     let test_only = find_test_only(&declared, &prod_calls, &test_calls);
     merge_warnings(uncalled, test_only)

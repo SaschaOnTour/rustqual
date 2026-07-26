@@ -192,9 +192,10 @@ pub(crate) fn collect_type_references(
     parsed: &[(String, String, syn::File)],
     cfg_test_files: &HashSet<String>,
 ) -> (HashSet<String>, HashSet<String>) {
-    collect_split(
+    let split = collect_split(
         parsed,
         cfg_test_files,
         &mut TypeReferenceCollector::default(),
-    )
+    );
+    (split.production, split.tests)
 }

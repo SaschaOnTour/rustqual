@@ -37,7 +37,12 @@ fn collected_calls(code: &str) -> (HashSet<String>, HashSet<String>) {
     let parsed = parse(code);
     let cfg_test_files =
         crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(&parsed);
-    collect_all_calls(&parsed, &cfg_test_files)
+    let calls = collect_all_calls(&parsed, &cfg_test_files);
+    // The helper keeps the pre-split shape: a re-export is production usage for
+    // every consumer but TQ-003.
+    let mut production = calls.production;
+    production.extend(calls.reexported);
+    (production, calls.tests)
 }
 
 /// Run dead-code detection over `parsed` with the default config and no
