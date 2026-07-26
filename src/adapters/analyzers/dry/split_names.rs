@@ -81,9 +81,15 @@ pub(crate) trait SplitCollector {
 /// field, so writing it out keeps that visible to the call graph rather than
 /// hiding it behind a macro the analyzer cannot see through.
 ///
-/// Not covered, deliberately: statement- and expression-level attributes
-/// (`#[cfg(test)] let x = …`). They sit inside a function body, and a body that
-/// is not itself test-only is production — the enclosing item already decided.
+/// Body nodes are in the list too. An earlier version left them out on the
+/// grounds that "the enclosing item already decided", which confused *the item
+/// is production* with *everything in it is production* — precisely what `cfg`
+/// does not mean. A `#[cfg(test)] let` is absent from a non-test build, so what
+/// it names is a test reference.
+///
+/// The remaining gap is an attribute on a bare expression statement; see
+/// `item_shape::stmt_attrs` for why, and note it can only miss a
+/// classification, never invent one.
 macro_rules! test_scoped_visits {
     () => {
         fn visit_item(&mut self, node: &'ast syn::Item) {
@@ -123,6 +129,20 @@ macro_rules! test_scoped_visits {
         fn visit_variant(&mut self, node: &'ast syn::Variant) {
             let previous = self.names.enter(&node.attrs);
             syn::visit::visit_variant(self, node);
+            self.names.leave(previous);
+        }
+
+        fn visit_stmt(&mut self, node: &'ast syn::Stmt) {
+            let previous = self
+                .names
+                .enter(crate::adapters::shared::item_shape::stmt_attrs(node));
+            syn::visit::visit_stmt(self, node);
+            self.names.leave(previous);
+        }
+
+        fn visit_arm(&mut self, node: &'ast syn::Arm) {
+            let previous = self.names.enter(&node.attrs);
+            syn::visit::visit_arm(self, node);
             self.names.leave(previous);
         }
     };

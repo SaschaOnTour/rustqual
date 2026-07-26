@@ -103,10 +103,14 @@ there was nothing to verify it against.
   previously recognised only on free functions. Attributes are not an item-level
   thing, though, so the same scoping happens at every dispatch that can carry
   one: associated items in an `impl` or a trait, items in an `extern` block,
-  struct fields and enum variants. The list lives in one place
-  (`dry/split_names.rs`), because the gap this closes is always the same shape —
-  a node kind nobody thought of — and one list fixes both the call graph and the
-  reference set at once.
+  struct fields, enum variants, `let` and macro statements, and match arms. A
+  `#[cfg(test)]` statement is absent from a non-test build, so what it names is
+  a test reference — the enclosing function being production says nothing about
+  it. The list lives in one place (`dry/split_names.rs`), because the gap this
+  closes is always the same shape — a node kind nobody thought of — and one list
+  fixes both the call graph and the reference set at once. The one node syn does
+  not expose attributes for is a bare expression statement; that can only miss a
+  test-only classification, never invent one.
 - **SLM missed `self` inside an inline format argument.** `format!("{self:?}")`
   is one literal to `proc_macro2`, so the token scan saw no `self` and reported
   the method as self-less. Same root cause as the DRY-006 case above, same fix:

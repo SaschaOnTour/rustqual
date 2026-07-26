@@ -5,7 +5,7 @@
 //! `#[cfg(test)]` or `#[allow(dead_code)]` with it.
 
 use crate::adapters::shared::item_shape::{
-    foreign_item_attrs, impl_item_attrs, item_attrs, item_ident, trait_item_attrs,
+    foreign_item_attrs, impl_item_attrs, item_attrs, item_ident, stmt_attrs, trait_item_attrs,
 };
 
 fn items(code: &str) -> Vec<syn::Item> {
@@ -49,4 +49,22 @@ fn associated_and_foreign_item_kinds_yield_their_attributes() {
         panic!("expected an extern block")
     };
     assert!(m.items.iter().all(|i| foreign_item_attrs(i).len() == 1));
+}
+
+#[test]
+fn statement_attributes_are_exposed_where_syn_offers_them() {
+    // A `#[cfg(test)]` statement is absent from a non-test build, so it scopes
+    // like an item. `Stmt::Item` yields nothing because the item dispatch
+    // already scopes it; `Stmt::Expr` is the documented gap.
+    let syn::Item::Fn(f) =
+        &items("fn f() { #[a] let _ = 1; #[a] println!(\"x\"); #[a] struct S; #[a] 1 + 1; }")[0]
+    else {
+        panic!("expected a function")
+    };
+    let counts: Vec<usize> = f.block.stmts.iter().map(|s| stmt_attrs(s).len()).collect();
+    assert_eq!(
+        counts,
+        vec![1, 1, 0, 0],
+        "let and macro statements expose their attributes; item and expression do not"
+    );
 }

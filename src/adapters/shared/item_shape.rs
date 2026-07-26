@@ -93,6 +93,26 @@ pub(crate) fn foreign_item_attrs(item: &syn::ForeignItem) -> &[syn::Attribute] {
     }
 }
 
+/// The attributes of a statement. A `#[cfg(test)]` here removes the statement
+/// from a non-test build, so it scopes just like an item does — the enclosing
+/// function being production says nothing about it.
+///
+/// `Stmt::Item` yields nothing on purpose: the item dispatch scopes it, and
+/// counting the attributes twice would be harmless but confusing.
+/// `Stmt::Expr` is the one gap — `syn` exposes no accessor for an expression's
+/// attributes (`Expr::replace_attrs` is crate-private) and enumerating forty
+/// variants to reach a form that is rarer than the `let` it usually wraps is
+/// not worth the match. The gap only ever *misses* a test-only classification,
+/// never invents one.
+/// Operation: shape lookup table, no own calls.
+pub(crate) fn stmt_attrs(stmt: &syn::Stmt) -> &[syn::Attribute] {
+    match stmt {
+        syn::Stmt::Local(s) => &s.attrs,
+        syn::Stmt::Macro(s) => &s.attrs,
+        _ => &[],
+    }
+}
+
 /// The declared identifier together with its visibility.
 /// Operation: shape lookup table, no own calls.
 pub(crate) fn item_ident_and_vis(item: &syn::Item) -> Option<(&syn::Ident, &syn::Visibility)> {

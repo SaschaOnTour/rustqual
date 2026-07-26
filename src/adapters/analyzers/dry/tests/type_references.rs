@@ -271,6 +271,18 @@ fn test_context_switches_on_every_attributed_node_kind() {
             "foreign item",
             "extern \"C\" { #[cfg(test)] fn f(x: Fixture); }",
         ),
+        (
+            "let statement",
+            "fn production() { #[cfg(test)] let _ = Fixture; }",
+        ),
+        (
+            "statement macro",
+            "fn production() { #[cfg(test)] println!(\"{}\", Fixture); }",
+        ),
+        (
+            "match arm",
+            "fn production(v: u8) { match v { #[cfg(test)] 0 => { let _ = Fixture; } _ => {} } }",
+        ),
     ];
     for (label, shape) in shapes {
         let (production, _) = scoped_by(shape);
