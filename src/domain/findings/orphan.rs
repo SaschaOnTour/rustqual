@@ -53,8 +53,11 @@ impl OrphanKind {
 /// Which annotation the reported marker is. `qual:allow` carries a dimension
 /// scope and optional target; `qual:api` and `qual:test_helper` are bare
 /// markers that silence DRY-002 (dead code) plus TQ-003 (untested) — they go
-/// stale once the function they guard is both called from production and
-/// tested, at which point they silence nothing and only hide future rot.
+/// stale once production calls the function they guard, at which point the
+/// "nothing calls it" excuse is spent and the marker only hides future rot.
+/// Being tested is deliberately not part of the test: TQ-003 fires only for
+/// functions that already have production callers, so demanding it too would
+/// let a spent marker keep hiding a real finding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MarkerKind {
     /// `// qual:allow(dim[, target])` — a targeted or blanket suppression.

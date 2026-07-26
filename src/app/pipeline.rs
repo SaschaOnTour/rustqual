@@ -110,8 +110,9 @@ pub(crate) fn run_analysis(
     finalize_summary(&mut summary, config, &suppression_lines, parsed);
     // Taken before `secondary` is moved into the result: stale `qual:api` /
     // `qual:test_helper` markers are found during the TQ pass (that is where
-    // the tested-set lives) and join the `qual:allow` orphans below, so all
-    // three marker kinds surface through one finding category.
+    // the marked declarations and the production-call set already exist) and
+    // join the `qual:allow` orphans below, so all three marker kinds surface
+    // through one finding category.
     let stale_markers = std::mem::take(&mut secondary.stale_markers);
     let mut result = build_result(
         &mut all_results,
