@@ -5,8 +5,8 @@
 //! `#[cfg(test)]` or `#[allow(dead_code)]` with it.
 
 use crate::adapters::shared::item_shape::{
-    expr_attrs, foreign_item_attrs, impl_item_attrs, item_attrs, item_ident, pat_attrs, stmt_attrs,
-    trait_item_attrs,
+    expr_attrs, foreign_item_attrs, generic_param_attrs, impl_item_attrs, item_attrs, item_ident,
+    pat_attrs, stmt_attrs, trait_item_attrs,
 };
 
 fn items(code: &str) -> Vec<syn::Item> {
@@ -181,4 +181,23 @@ fn pattern_attributes_are_reachable_for_every_shape() {
         1,
         "a closure parameter pattern carries its own attribute"
     );
+}
+
+#[test]
+fn generic_parameter_attributes_are_reachable_for_every_kind() {
+    // `#[cfg(test)]` is valid on all three and removes the parameter — a type
+    // parameter's default can be the only mention of a type. Verified against
+    // rustc before covering it; the earlier assumption that these positions
+    // could not drop a reference was wrong.
+    let code = "struct S<#[a] 'x, #[a] T = u8, #[a] const N: usize = 1>;";
+    let syn::Item::Struct(s) = &items(code)[0] else {
+        panic!("expected a struct")
+    };
+    let counts: Vec<usize> = s
+        .generics
+        .params
+        .iter()
+        .map(|p| generic_param_attrs(p).len())
+        .collect();
+    assert_eq!(counts, vec![1, 1, 1], "lifetime, type and const alike");
 }

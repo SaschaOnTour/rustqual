@@ -115,9 +115,12 @@ there was nothing to verify it against.
   a call argument, a struct field value and a pattern field. Reaching them needs
   exhaustive matches over `syn::Expr` and `syn::Pat` (there is no shared
   accessor) plus a step to the first operand of an assignment, where `syn` binds
-  what rustc reads as the statement's attribute. Left out are the signature and
-  generic-parameter positions, where an attribute cannot remove a reference the
-  way `cfg` does elsewhere.
+  what rustc reads as the statement's attribute. The signature and generic
+  positions are covered too — `fn(#[cfg(test)] Fixture)` and
+  `struct Holder<#[cfg(test)] T = Fixture>` both compile and both drop the only
+  mention of the type outside a test build. `File` is the one attributed node
+  handled elsewhere: its inner attributes are what the whole-file test
+  classification reads.
 - **SLM missed `self` inside an inline format argument.** `format!("{self:?}")`
   is one literal to `proc_macro2`, so the token scan saw no `self` and reported
   the method as self-less. Same root cause as the DRY-006 case above, same fix:

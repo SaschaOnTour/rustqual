@@ -151,6 +151,18 @@ pub(crate) fn expr_attrs(expr: &syn::Expr) -> &[syn::Attribute] {
     }
 }
 
+/// The attributes of a generic parameter. `#[cfg(test)]` is valid on all three
+/// kinds and removes the parameter — a type parameter's default can name a type
+/// nothing else mentions.
+/// Operation: shape lookup table, no own calls.
+pub(crate) fn generic_param_attrs(param: &syn::GenericParam) -> &[syn::Attribute] {
+    match param {
+        syn::GenericParam::Lifetime(p) => &p.attrs,
+        syn::GenericParam::Type(p) => &p.attrs,
+        syn::GenericParam::Const(p) => &p.attrs,
+    }
+}
+
 /// The attributes of a pattern. Same story as [`expr_attrs`]: every variant
 /// owns its `attrs` and `syn` offers no shared accessor.
 ///

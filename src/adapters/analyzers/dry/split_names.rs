@@ -89,14 +89,19 @@ pub(crate) trait SplitCollector {
 ///
 /// The list is derived rather than guessed: `syn` has sixty-nine structs with
 /// an `attrs` field, and they reach a visitor through the dispatches named here
-/// (`Item`, `ImplItem`, `TraitItem`, `ForeignItem`, `Stmt`, `Expr`, `Pat`) or as
-/// their own node (`Field`, `Variant`, `Arm`, `FieldValue`, `FieldPat`).
+/// (`Item`, `ImplItem`, `TraitItem`, `ForeignItem`, `Stmt`, `Expr`, `Pat`,
+/// `GenericParam`) or as their own node (`Field`, `Variant`, `Arm`,
+/// `FieldValue`, `FieldPat`, `BareFnArg`, `Receiver`, `Variadic`,
+/// `BareVariadic`). That is all of them.
 ///
-/// What is left out is the signature and generic-parameter positions —
-/// `Receiver`, `BareFnArg`, `Variadic`, `ConstParam`, `LifetimeParam`. An
-/// attribute there cannot remove a reference the way `cfg` does elsewhere, and
-/// `File`'s inner attributes are already handled one level up, by the whole-file
-/// test classification.
+/// The signature and generic positions were once left out on the theory that an
+/// attribute there cannot remove a reference. It can: `fn(#[cfg(test)] Fixture)`
+/// and `struct Holder<#[cfg(test)] T = Fixture>` both compile, and both drop the
+/// only mention of `Fixture` outside a test build. Checking what the compiler
+/// accepts beats reasoning about it.
+///
+/// `File` is the one attributed node handled elsewhere — its inner attributes
+/// are what the whole-file test classification reads, one level up.
 macro_rules! test_scoped_visits {
     () => {
         fn visit_item(&mut self, node: &'ast syn::Item) {
@@ -178,6 +183,40 @@ macro_rules! test_scoped_visits {
         fn visit_field_pat(&mut self, node: &'ast syn::FieldPat) {
             let previous = self.names.enter(&node.attrs);
             syn::visit::visit_field_pat(self, node);
+            self.names.leave(previous);
+        }
+
+        fn visit_generic_param(&mut self, node: &'ast syn::GenericParam) {
+            let previous =
+                self.names
+                    .enter(crate::adapters::shared::item_shape::generic_param_attrs(
+                        node,
+                    ));
+            syn::visit::visit_generic_param(self, node);
+            self.names.leave(previous);
+        }
+
+        fn visit_bare_fn_arg(&mut self, node: &'ast syn::BareFnArg) {
+            let previous = self.names.enter(&node.attrs);
+            syn::visit::visit_bare_fn_arg(self, node);
+            self.names.leave(previous);
+        }
+
+        fn visit_receiver(&mut self, node: &'ast syn::Receiver) {
+            let previous = self.names.enter(&node.attrs);
+            syn::visit::visit_receiver(self, node);
+            self.names.leave(previous);
+        }
+
+        fn visit_variadic(&mut self, node: &'ast syn::Variadic) {
+            let previous = self.names.enter(&node.attrs);
+            syn::visit::visit_variadic(self, node);
+            self.names.leave(previous);
+        }
+
+        fn visit_bare_variadic(&mut self, node: &'ast syn::BareVariadic) {
+            let previous = self.names.enter(&node.attrs);
+            syn::visit::visit_bare_variadic(self, node);
             self.names.leave(previous);
         }
     };

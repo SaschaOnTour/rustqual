@@ -300,6 +300,14 @@ const SCOPED_SHAPES: &[(&str, &str)] = &[
         "struct pattern field",
         "fn production(c: C) { let C { #[cfg(test)] f: Fixture } = c; }",
     ),
+    (
+        "bare fn argument",
+        "pub type Callback = fn(#[cfg(test)] Fixture);",
+    ),
+    (
+        "generic type parameter default",
+        "pub struct Holder<#[cfg(test)] T = Fixture>(#[cfg(test)] core::marker::PhantomData<T>);",
+    ),
 ];
 
 #[test]
