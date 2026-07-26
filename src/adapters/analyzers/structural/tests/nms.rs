@@ -202,3 +202,39 @@ fn needless_mut_self_in_inline_cfg_test_module_excluded() {
         "needless &mut self in a #[cfg(test)] mod must be excluded"
     );
 }
+
+#[test]
+fn mutation_through_a_nested_field_counts() {
+    // `self.inner.items.insert(v)` mutates self exactly as `self.items.insert(v)`
+    // does. Recognising only one field level reports a needless `&mut` on a
+    // method that plainly needs it — and NMS's advice would then not compile.
+    let w = detect_in(
+        "struct Inner { items: Vec<u8> } struct S { inner: Inner } \
+         impl S { fn add(&mut self, v: u8) { self.inner.items.push(v); } }",
+    );
+    assert!(
+        w.is_empty(),
+        "a nested-field mutation must count as mutating self: {w:?}"
+    );
+}
+
+#[test]
+fn assignment_through_a_nested_field_counts() {
+    let w = detect_in(
+        "struct Inner { n: u8 } struct S { inner: Inner } \
+         impl S { fn set(&mut self, v: u8) { self.inner.n = v; } }",
+    );
+    assert!(w.is_empty(), "nested assignment mutates self: {w:?}");
+}
+
+#[test]
+fn a_genuinely_read_only_method_is_still_reported() {
+    // The fix must not blunt the check: reading through a nested field is not
+    // a mutation.
+    let w = detect_in(
+        "struct Inner { n: u8 } struct S { inner: Inner } \
+         impl S { fn get(&mut self) -> u8 { self.inner.n } }",
+    );
+    assert_eq!(w.len(), 1, "read-only &mut self is still needless: {w:?}");
+    assert!(matches!(w[0].kind, StructuralWarningKind::NeedlessMutSelf));
+}
