@@ -6,7 +6,7 @@ use super::allow_scope::AllowScope;
 use super::{has_cfg_test, has_test_attr, qualify_name};
 use crate::adapters::shared::declared_function::DeclaredFunction;
 use crate::adapters::shared::file_visitor::FileVisitor;
-use crate::adapters::shared::item_shape::item_attrs;
+use crate::adapters::shared::item_shape::{impl_item_attrs, item_attrs, trait_item_attrs};
 use crate::adapters::shared::marked_declaration::{mark_annotated, MarkerLines};
 
 // ── DeclaredFnCollector (for dead code) ─────────────────────────
@@ -137,6 +137,29 @@ impl<'ast> Visit<'ast> for DeclaredFnCollector {
         let prev_allow = self.allow.enter(attrs);
         self.in_test = prev_in_test || has_cfg_test(attrs);
         syn::visit::visit_item(self, node);
+        self.allow.leave(prev_allow);
+        self.in_test = prev_in_test;
+    }
+
+    /// Associated items do not pass through `visit_item`, so the same scoping
+    /// happens at their own dispatch — a `#[cfg(test)]` associated const or
+    /// type carries references just as a free one does.
+    fn visit_impl_item(&mut self, node: &'ast syn::ImplItem) {
+        let attrs = impl_item_attrs(node);
+        let prev_in_test = self.in_test;
+        let prev_allow = self.allow.enter(attrs);
+        self.in_test = prev_in_test || has_cfg_test(attrs);
+        syn::visit::visit_impl_item(self, node);
+        self.allow.leave(prev_allow);
+        self.in_test = prev_in_test;
+    }
+
+    fn visit_trait_item(&mut self, node: &'ast syn::TraitItem) {
+        let attrs = trait_item_attrs(node);
+        let prev_in_test = self.in_test;
+        let prev_allow = self.allow.enter(attrs);
+        self.in_test = prev_in_test || has_cfg_test(attrs);
+        syn::visit::visit_trait_item(self, node);
         self.allow.leave(prev_allow);
         self.in_test = prev_in_test;
     }

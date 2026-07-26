@@ -269,3 +269,33 @@ fn test_context_switches_on_every_item_kind() {
     );
     assert!(!via_use.0.contains("Fixture"), "use: {:?}", via_use.0);
 }
+
+#[test]
+fn test_context_switches_on_associated_items_too() {
+    // `visit_item` only sees `syn::Item`. An associated const, type or method
+    // reaches the tree through `visit_impl_item` / `visit_trait_item`, so those
+    // dispatches need the same scoping or a `#[cfg(test)]` associated item
+    // contributes production references.
+    let assoc_const = split_refs(
+        "src/lib.rs",
+        "pub struct Fixture;\nstruct Holder;\nimpl Holder { #[cfg(test)] const CHECK: Option<Fixture> = None; }",
+        &[],
+    );
+    assert!(
+        !assoc_const.0.contains("Fixture"),
+        "impl-item const: {:?}",
+        assoc_const.0
+    );
+    assert!(assoc_const.1.contains("Fixture"));
+
+    let assoc_type = split_refs(
+        "src/lib.rs",
+        "pub struct Fixture;\ntrait T { #[cfg(test)] type Out = Fixture; }",
+        &[],
+    );
+    assert!(
+        !assoc_type.0.contains("Fixture"),
+        "trait-item type: {:?}",
+        assoc_type.0
+    );
+}

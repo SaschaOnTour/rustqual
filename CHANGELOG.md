@@ -87,16 +87,23 @@ there was nothing to verify it against.
   generated-code idiom, one attribute rather than one per item — and one on an
   enclosing function excused nothing. The level is now tracked down every
   lexical scope for DRY-002 and DRY-006 alike, and it is a *level*, not a
-  one-way flag: an inner `#[deny(dead_code)]` revokes an inherited `allow`, as
-  it does for the compiler. (`visit_all_files` dispatches through the trait for
-  this, so a visitor overriding `visit_file` sees a file's inner attributes.)
+  one-way flag: attributes are folded in source order so a later one overrides
+  an earlier one (`#[deny] #[allow]` really is allowed), an inner
+  `#[deny(dead_code)]` revokes an inherited `allow`, and `forbid` is the one
+  level nothing narrower may relax — for rustc an inner `allow` under it is an
+  error, so honouring one would silence what the compiler never would.
+  (`visit_all_files` dispatches through the trait for this, so a visitor
+  overriding `visit_file` sees a file's inner attributes.)
 - **The test-context switch happens on every item.** It fired for modules,
   `impl` blocks and functions but not for the rest, so a reference from a
   `#[cfg(test)]` const, struct or `use` landed in the production set and a
   declaration used only from there produced no finding at all. Both the call
   graph and the reference set now scope at the item dispatch, where every kind
   passes through — along with `#[test]`-family attributes, which the call graph
-  previously recognised only on free functions.
+  previously recognised only on free functions. Associated items reach the tree
+  through their own dispatch rather than `visit_item`, so `impl` and trait items
+  are scoped there too: a `#[cfg(test)]` associated const carries references
+  just as a free one does.
 - **SLM missed `self` inside an inline format argument.** `format!("{self:?}")`
   is one literal to `proc_macro2`, so the token scan saw no `self` and reported
   the method as self-less. Same root cause as the DRY-006 case above, same fix:

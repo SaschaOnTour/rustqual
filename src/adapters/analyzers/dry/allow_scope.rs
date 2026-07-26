@@ -16,11 +16,14 @@ use super::dead_code_level;
 /// so an inner `deny` really does revoke an outer `allow` — modelling the
 /// context as a one-way flag would keep suppressing what the author re-armed.
 /// Only `allow` excuses a declaration; `warn` and `deny` both mean "report it",
-/// which is what rustqual does anyway.
+/// which is what rustqual does anyway. `forbid` is `Report` that a narrower
+/// scope may not relax: for rustc an inner `allow` under it is an error, so
+/// honouring one would silence something the compiler never would.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DeadCodeLevel {
     Allow,
     Report,
+    Forbid,
 }
 
 /// The level in force, tracked down the lexical scopes.
@@ -46,10 +49,10 @@ impl AllowScope {
 
     /// Enter a scope-forming item, returning the level to restore afterwards.
     /// An explicit level on the item wins over the inherited one.
-    /// Operation: level lookup + update, own call in the argument.
+    /// Trivial: delegates to `effective`.
     pub(crate) fn enter(&mut self, attrs: &[syn::Attribute]) -> DeadCodeLevel {
         let previous = self.inherited;
-        self.inherited = dead_code_level(attrs).unwrap_or(previous);
+        self.inherited = self.effective(attrs);
         previous
     }
 
@@ -60,8 +63,18 @@ impl AllowScope {
 
     /// Whether a declaration carrying `attrs` is excused — by its own level or
     /// by the one it inherits.
-    /// Operation: level lookup, own call in the argument.
+    /// Trivial: delegates to `effective`.
     pub(crate) fn covers(&self, attrs: &[syn::Attribute]) -> bool {
-        dead_code_level(attrs).unwrap_or(self.inherited) == DeadCodeLevel::Allow
+        self.effective(attrs) == DeadCodeLevel::Allow
+    }
+
+    /// The level in force for a declaration carrying `attrs`: its own, unless
+    /// the surrounding scope forbids, which nothing narrower may relax.
+    /// Operation: inherited-level dispatch, own call in the arm.
+    fn effective(&self, attrs: &[syn::Attribute]) -> DeadCodeLevel {
+        match self.inherited {
+            DeadCodeLevel::Forbid => DeadCodeLevel::Forbid,
+            inherited => dead_code_level(attrs).unwrap_or(inherited),
+        }
     }
 }

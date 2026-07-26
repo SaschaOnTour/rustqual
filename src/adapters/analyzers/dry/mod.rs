@@ -89,26 +89,37 @@ pub(crate) use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
 pub(crate) use type_references::collect_type_references;
 
 /// The `dead_code` lint level these attributes set, or `None` when they say
-/// nothing about it and the surrounding scope decides. `warn`, `deny` and
-/// `forbid` all mean "report it" as far as this tool is concerned; what matters
-/// is that they revoke an inherited `allow`, which a plain allow-or-not flag
-/// cannot express.
-/// Operation: attribute scan by lint level, own call in the closure.
+/// nothing about it and the surrounding scope decides.
+///
+/// Folded in **source order**, because that is how rustc resolves them: a later
+/// attribute overrides an earlier one, so `#[deny(…)] #[allow(…)]` really is
+/// allowed. The exception is `forbid`, which a later attribute may not relax.
+/// `warn` and `deny` both land on "report it" — what matters is that they
+/// revoke an inherited `allow`.
+/// Integration: fold over the attributes, level lookup delegated.
 pub(crate) fn dead_code_level(attrs: &[syn::Attribute]) -> Option<allow_scope::DeadCodeLevel> {
-    let level_of = |name: &str| match name {
-        "allow" => allow_scope::DeadCodeLevel::Allow,
-        _ => allow_scope::DeadCodeLevel::Report,
-    };
-    ["allow", "warn", "deny", "forbid"]
-        .into_iter()
-        .filter(|level| {
-            attrs
-                .iter()
-                .filter(|a| a.path().is_ident(level))
-                .any(allow_contains_dead_code)
+    attrs
+        .iter()
+        .filter_map(attribute_level)
+        .fold(None, |current, next| match current {
+            Some(allow_scope::DeadCodeLevel::Forbid) => current,
+            _ => Some(next),
         })
-        .map(level_of)
-        .next_back()
+}
+
+/// The level one attribute sets for `dead_code`, or `None` when it is not a
+/// lint attribute or names a different lint.
+/// Operation: path lookup + lint-list check, own call in the guard.
+fn attribute_level(attr: &syn::Attribute) -> Option<allow_scope::DeadCodeLevel> {
+    let level = match () {
+        _ if attr.path().is_ident("allow") => allow_scope::DeadCodeLevel::Allow,
+        _ if attr.path().is_ident("forbid") => allow_scope::DeadCodeLevel::Forbid,
+        _ if attr.path().is_ident("warn") || attr.path().is_ident("deny") => {
+            allow_scope::DeadCodeLevel::Report
+        }
+        _ => return None,
+    };
+    allow_contains_dead_code(attr).then_some(level)
 }
 
 /// True if this `#[allow(...)]` attribute's argument list contains

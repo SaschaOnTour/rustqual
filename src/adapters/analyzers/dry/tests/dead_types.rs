@@ -271,3 +271,28 @@ fn an_inner_deny_overrides_an_inherited_allow() {
     assert_eq!(found.len(), 1, "the inner deny wins: {found:?}");
     assert_eq!(found[0].name, "MustBeUsed");
 }
+
+#[test]
+fn the_last_lint_attribute_in_source_order_wins() {
+    // Rust evaluates lint attributes in the order they are written; a later
+    // level overrides an earlier one. Scanning a fixed severity order instead
+    // reports a declaration the author explicitly allowed.
+    assert!(
+        names("#[deny(dead_code)]\n#[allow(dead_code)]\nstruct Intentional;").is_empty(),
+        "the trailing allow wins"
+    );
+    assert_eq!(
+        names("#[allow(dead_code)]\n#[deny(dead_code)]\nstruct Reported;"),
+        vec!["Reported".to_string()],
+        "the trailing deny wins"
+    );
+}
+
+#[test]
+fn forbid_cannot_be_downgraded_by_an_inner_allow() {
+    // `forbid` is the one level a narrower scope may not relax — for rustc an
+    // inner `allow` under it is an error, so honouring the allow would silence
+    // something the compiler never would.
+    let found = detect("#![forbid(dead_code)]\n#[allow(dead_code)]\nstruct StillReported;");
+    assert_eq!(found.len(), 1, "forbid survives the inner allow: {found:?}");
+}

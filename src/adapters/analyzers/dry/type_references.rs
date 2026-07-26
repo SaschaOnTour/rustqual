@@ -17,7 +17,7 @@ use syn::visit::Visit;
 
 use super::doc_scan::{DocLine, DocScanner};
 use super::split_names::{collect_split, SplitCollector, SplitNames};
-use crate::adapters::shared::item_shape::item_attrs;
+use crate::adapters::shared::item_shape::{impl_item_attrs, item_attrs, trait_item_attrs};
 use crate::adapters::shared::macro_tokens;
 
 /// AST visitor collecting referenced names, split by production / test context.
@@ -173,9 +173,18 @@ impl<'ast> Visit<'ast> for TypeReferenceCollector {
         self.names.leave(previous);
     }
 
-    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
-        let previous = self.names.enter(&node.attrs);
-        syn::visit::visit_impl_item_fn(self, node);
+    /// Associated items do not pass through `visit_item`, so the same scoping
+    /// happens at their own dispatch — a `#[cfg(test)]` associated const or
+    /// type carries references just as a free one does.
+    fn visit_impl_item(&mut self, node: &'ast syn::ImplItem) {
+        let previous = self.names.enter(impl_item_attrs(node));
+        syn::visit::visit_impl_item(self, node);
+        self.names.leave(previous);
+    }
+
+    fn visit_trait_item(&mut self, node: &'ast syn::TraitItem) {
+        let previous = self.names.enter(trait_item_attrs(node));
+        syn::visit::visit_trait_item(self, node);
         self.names.leave(previous);
     }
 }
