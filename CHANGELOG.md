@@ -80,14 +80,21 @@ all are removed in this release.
 - **A `pub use` re-export excuses only the item it names.** Re-exports were
   recorded by bare name, so `pub use public_impl::run` made *every* `run` in
   the workspace look externally reachable. They resolve to the source module's
-  file now.
+  file now — following `super::` prefixes, multi-step façade chains
+  (`lib → facade → hidden`), and only when the re-exporting file is itself
+  reachable, so a `pub use` inside a private module exposes nothing.
+- **A name collision no longer hides a marker that never applied.** External
+  reachability is decidable on its own, so the ambiguity brake now only blurs
+  *spent* vs *uncalled*; the message says which part is uncertain.
 - **Markers inside string literals are no longer collected as annotations.**
   Test fixtures embed rustqual's own markers as data
   (`let code = r#"… // qual:api …"#;`); the raw line scan read those as real
   annotations on the enclosing file. Harmless while markers were never
   verified — but it would have produced phantom findings now, so marker
   collection is column-aware: a marker only counts when it starts outside
-  every string-literal span (including literals inside macro token streams).
+  every string-literal span, including literals nested in macro token groups
+  (`fixture!({ r#"…"# })`), which neither `syn` nor a top-level token scan
+  reaches.
   A line-based filter could not do this — the closing line of a fixture holds
   both literal text and real source, so `// qual:api example"#;` would still
   have registered.

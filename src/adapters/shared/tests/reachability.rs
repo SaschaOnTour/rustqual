@@ -236,3 +236,54 @@ fn a_reexport_does_not_make_every_same_named_function_reachable() {
         "an unrelated same-named fn must not ride along on the re-export"
     );
 }
+
+#[test]
+fn super_prefixed_reexports_resolve_to_the_parent_module() {
+    // `pub use super::internal::entry` inside `mod api` names the *parent's*
+    // `internal`. Appending "super" as a module segment would look for
+    // `api::super::internal`, find nothing, and turn a valid marker into a
+    // false "never applied".
+    let parsed = parse(&[
+        ("src/lib.rs", "pub mod api;\nmod internal;"),
+        ("src/api.rs", "pub use super::internal::entry;"),
+        ("src/internal.rs", "pub fn entry() {}"),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(
+        reach.is_externally_reachable("src/internal.rs", "entry"),
+        "a `super::`-prefixed re-export must resolve to the parent module"
+    );
+}
+
+#[test]
+fn reexport_chains_are_followed_to_the_declaration() {
+    // Façade/prelude modules re-export in steps: lib → facade → hidden. Only
+    // resolving one hop leaves the real declaration looking unreachable.
+    let parsed = parse(&[
+        ("src/lib.rs", "mod facade;\npub use facade::entry;"),
+        ("src/facade.rs", "mod hidden;\npub use hidden::entry;"),
+        ("src/facade/hidden.rs", "pub fn entry() {}"),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(
+        reach.is_externally_reachable("src/facade/hidden.rs", "entry"),
+        "a multi-step re-export chain must reach the declaring file"
+    );
+}
+
+#[test]
+fn a_reexport_inside_a_private_module_does_not_expose_anything() {
+    // `private_facade.rs` is only reached via `mod private_facade;`, so its
+    // `pub use` cannot be named from outside — treating it as an export would
+    // silently excuse an invalid marker on the target.
+    let parsed = parse(&[
+        ("src/lib.rs", "mod private_facade;\nmod target;"),
+        ("src/private_facade.rs", "pub use super::target::hidden;"),
+        ("src/target.rs", "pub fn hidden() {}"),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(
+        !reach.is_externally_reachable("src/target.rs", "hidden"),
+        "a re-export from a private module exposes nothing"
+    );
+}

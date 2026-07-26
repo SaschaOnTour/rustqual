@@ -225,3 +225,16 @@ fn a_marker_trailing_real_code_is_not_an_annotation() {
         "a marker must be alone on its line to count"
     );
 }
+
+#[test]
+fn marker_inside_a_nested_macro_group_literal_is_not_collected() {
+    // `visit_macro` sees only the top-level token trees; a literal nested in a
+    // brace/paren group (`fixture!({ r#"…"# })`) is invisible unless the walk
+    // recurses, and its marker text would register as a real annotation.
+    let source = "fn t() {\n    fixture!({ r#\"\n        // qual:api\n        pub fn f() {}\n    \"# });\n}\n";
+    let parsed = parsed_single("src/lib.rs", source);
+    assert!(
+        collect_api_lines(&parsed).is_empty(),
+        "a literal nested in a macro group is still data"
+    );
+}

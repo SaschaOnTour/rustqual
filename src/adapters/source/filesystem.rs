@@ -260,6 +260,23 @@ impl LiteralSpans {
         })
     }
 
+    /// Collect literal spans from a macro token stream, descending into
+    /// groups: `fixture!({ r#"…"# })` hides its literal one level down, and
+    /// `syn` does not walk into the opaque stream at all.
+    /// Operation: token walk with an explicit stack.
+    fn scan_tokens(&mut self, tokens: proc_macro2::TokenStream) {
+        let mut stack = vec![tokens];
+        while let Some(stream) = stack.pop() {
+            for tt in stream {
+                match tt {
+                    proc_macro2::TokenTree::Literal(lit) => self.push(lit.span()),
+                    proc_macro2::TokenTree::Group(g) => stack.push(g.stream()),
+                    _ => {}
+                }
+            }
+        }
+    }
+
     /// Record one literal's extent.
     /// Operation: span projection, no own calls.
     fn push(&mut self, span: proc_macro2::Span) {
@@ -275,11 +292,7 @@ impl<'ast> syn::visit::Visit<'ast> for LiteralSpans {
     }
 
     fn visit_macro(&mut self, node: &'ast syn::Macro) {
-        node.tokens.clone().into_iter().for_each(|tt| {
-            if let proc_macro2::TokenTree::Literal(lit) = tt {
-                self.push(lit.span());
-            }
-        });
+        self.scan_tokens(node.tokens.clone());
         syn::visit::visit_macro(self, node);
     }
 }

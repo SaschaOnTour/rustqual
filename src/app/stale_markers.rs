@@ -130,12 +130,11 @@ enum Verdict {
     /// Attached, but that function is excluded from both checks anyway
     /// (`main`, a test fn, a trait-impl method, `#[allow(dead_code)]`).
     NoEffectOnExemptFn,
-    /// `qual:api` on an item no outside consumer can name: the marker's
-    /// premise is false. Production already calls it, so just drop the marker.
-    NeverAppliedButCalled,
-    /// `qual:api` on an unreachable item that nothing calls either — the
-    /// marker is hiding dead code.
-    NeverAppliedAndUncalled,
+    /// `qual:api` on an item no outside consumer can name — the marker's
+    /// premise is false. `called` refines the remedy; `None` when a name
+    /// collision makes the call unattributable, which does not affect the
+    /// verdict itself (reachability is decidable on its own).
+    NeverApplied { called: Option<bool> },
     /// The marker was right once, but production calls the function now.
     Spent,
 }
@@ -157,15 +156,15 @@ fn classify(
     if d.is_main || d.is_test || d.is_trait_impl || d.has_allow_dead_code {
         return Some(Verdict::NoEffectOnExemptFn);
     }
-    let called = is_called_by_production(d, prod_calls, ambiguous)?;
-    if marker == MarkerKind::TestHelper {
-        return called.then_some(Verdict::Spent);
+    let called = is_called_by_production(d, prod_calls, ambiguous);
+    // Reachability is decidable on its own, so an unattributable call must not
+    // hide a marker that could never have applied — it only blurs the remedy.
+    if marker == MarkerKind::Api && !reach.is_externally_reachable(&d.file, &d.name) {
+        return Some(Verdict::NeverApplied { called });
     }
-    match (reach.is_externally_reachable(&d.file, &d.name), called) {
-        (false, true) => Some(Verdict::NeverAppliedButCalled),
-        (false, false) => Some(Verdict::NeverAppliedAndUncalled),
-        (true, true) => Some(Verdict::Spent),
-        (true, false) => None,
+    match called? {
+        true => Some(Verdict::Spent),
+        false => None,
     }
 }
 
@@ -244,6 +243,29 @@ fn orphan(
     }
 }
 
+/// The remedy for a marker that never applied. The shared half states the
+/// cause; the tail depends on whether production calls the function — and when
+/// a name collision leaves that open, says so instead of guessing.
+/// Operation: message assembly, no own calls.
+fn never_applied_reason(what: &str, name: &str, called: Option<bool>) -> String {
+    let head = format!(
+        "{what} never applied here: {name} cannot be called from outside the crate \
+         (it is not `pub`, or a module on its path is private)"
+    );
+    match called {
+        Some(true) => format!("{head}, and production already calls it — remove the marker"),
+        Some(false) => format!(
+            "{head}, so there is no external caller to excuse — call it from \
+             production or delete it (removing the marker will surface the \
+             dead-code finding)"
+        ),
+        None => format!(
+            "{head} — remove the marker; another function shares this name, so \
+             whatever the dead-code and untested checks then report is the real state"
+        ),
+    }
+}
+
 /// The remedy text for one verdict — each says what the author must do next,
 /// and what will happen once they do it.
 /// Operation: verdict → message, no own calls.
@@ -259,17 +281,7 @@ fn reason_for(verdict: Verdict, what: &str, name: &str) -> String {
              from the dead-code and untested checks (it is `main`, a test, a \
              trait-impl method, or carries #[allow(dead_code)]) — remove the marker"
         ),
-        Verdict::NeverAppliedButCalled => format!(
-            "{what} never applied here: {name} cannot be called from outside the crate \
-             (it is not `pub`, or a module on its path is private), and production \
-             already calls it — remove the marker"
-        ),
-        Verdict::NeverAppliedAndUncalled => format!(
-            "{what} never applied here: {name} cannot be called from outside the crate \
-             (it is not `pub`, or a module on its path is private), so there is no \
-             external caller to excuse — call it from production or delete it \
-             (removing the marker will surface the dead-code finding)"
-        ),
+        Verdict::NeverApplied { called } => never_applied_reason(what, name, called),
         Verdict::Spent => format!(
             "production calls {name}, so {what} excuses nothing — remove the marker \
              (if the function is untested, an untested finding will surface: that is the point)"

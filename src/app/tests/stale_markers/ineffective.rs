@@ -150,7 +150,7 @@ fn marker_on_an_exempt_function_is_reported_as_ineffective() {
 /// Two declared `handle` functions in different files — the marked one in
 /// `src/a.rs`. `qualified` gives them distinct `Type::method` names, which the
 /// call graph can attribute; without it only the colliding bare name exists.
-fn colliding_handles(qualified: bool, call: &str) -> Vec<OrphanSuppression> {
+fn colliding_handles(qualified: bool, call: &str, public: bool) -> Vec<OrphanSuppression> {
     let mut a = declared("handle", 10, true, false);
     let mut b = declared("handle", 10, false, false);
     a.file = "src/a.rs".to_string();
@@ -161,8 +161,13 @@ fn colliding_handles(qualified: bool, call: &str) -> Vec<OrphanSuppression> {
     }
     let mut lines = HashMap::new();
     lines.insert("src/a.rs".to_string(), [9].into_iter().collect());
+    let root = if public {
+        "pub mod a; pub mod b;"
+    } else {
+        "mod a; mod b;"
+    };
     let reach = reach_of(&[
-        ("src/lib.rs", "pub mod a; pub mod b;"),
+        ("src/lib.rs", root),
         ("src/a.rs", "pub fn handle() {}"),
         ("src/b.rs", "pub fn handle() {}"),
     ]);
@@ -176,7 +181,7 @@ fn ambiguous_bare_name_never_reports_a_marker_as_spent() {
     // to `module_a::handle` would tell the author to delete a marker that is
     // still holding back a finding — when the bare name is not unique among
     // declared functions we cannot attribute the call, so stay silent.
-    let out = colliding_handles(false, "handle");
+    let out = colliding_handles(false, "handle", true);
     assert!(
         out.is_empty(),
         "an ambiguous bare-name call must not mark the marker spent: {out:?}"
@@ -187,7 +192,7 @@ fn ambiguous_bare_name_never_reports_a_marker_as_spent() {
 fn qualified_name_match_is_unambiguous_even_when_bare_names_collide() {
     // `Type::method` is specific enough to attribute, so a collision on the
     // bare name must not suppress a genuine spent-marker finding.
-    let out = colliding_handles(true, "A::handle");
+    let out = colliding_handles(true, "A::handle", true);
     assert_eq!(out.len(), 1, "qualified match attributes cleanly: {out:?}");
 }
 
@@ -210,4 +215,22 @@ fn both_markers_on_one_function_are_each_classified() {
     );
     let kinds: Vec<MarkerKind> = out.iter().map(|o| o.marker).collect();
     assert!(kinds.contains(&MarkerKind::Api) && kinds.contains(&MarkerKind::TestHelper));
+}
+
+#[test]
+fn ambiguity_does_not_hide_a_never_applied_marker() {
+    // Whether the item is reachable from outside is knowable regardless of
+    // which `handle` a call meant. The ambiguity brake must only blur
+    // spent-vs-uncalled, never silence a marker that could never apply.
+    let out = colliding_handles(false, "handle", false);
+    assert_eq!(
+        out.len(),
+        1,
+        "unreachable is decidable without the call: {out:?}"
+    );
+    let reason = out[0].reason.clone().unwrap_or_default();
+    assert!(
+        reason.contains("outside the crate"),
+        "must report the never-applied case: {reason}"
+    );
 }

@@ -58,11 +58,12 @@ pub(crate) fn compute_external_reach(parsed: &[(String, String, syn::File)]) -> 
         .iter()
         .for_each(|(file, _, syntax)| collect_file_facts(file, syntax, &mut facts));
     let reachable_files = walk_reachable(parsed, &modules, &facts);
-    let glob_reexported_files = resolve_globs(&facts.glob_uses, &modules);
+    let glob_reexported_files = resolve_globs(&facts.glob_uses, &modules, &reachable_files);
+    let reexported_items = resolve_reexports(&facts.reexports, &modules, &reachable_files);
     ExternalReach {
         reachable_files,
         pub_items: facts.pub_items,
-        reexported_items: resolve_reexports(&facts.reexports, &modules),
+        reexported_items,
         glob_reexported_files,
         unknown_files: parsed
             .iter()
@@ -79,12 +80,13 @@ struct FileFacts {
     pub_items: HashSet<(String, String)>,
     /// `(file, child-module-name)` for `pub mod child;` declarations.
     pub_mod_links: HashSet<(String, String)>,
-    /// `(module key, name)` re-exported by a `pub use …::Name;` — keyed by
-    /// the source module, so one crate.s re-export cannot excuse a same-named
-    /// function somewhere else.
-    reexports: HashSet<(String, String)>,
-    /// Module paths glob-re-exported by a `pub use path::*;`.
-    glob_uses: HashSet<String>,
+    /// `(declaring file, source module key, name)` for `pub use …::Name;`.
+    /// The declaring file matters twice: a re-export only exposes anything if
+    /// that file is itself reachable, and a chain (lib → facade → hidden) is
+    /// followed by looking up what the target file re-exports in turn.
+    reexports: HashSet<(String, String, String)>,
+    /// `(declaring file, source module key)` for `pub use path::*;`.
+    glob_uses: HashSet<(String, String)>,
 }
 
 /// Walk one file's items, recording visibility chains and re-exports.
@@ -164,7 +166,7 @@ fn collect_use(
         }
         syn::UseTree::Glob(_) => {
             if let Some(key) = module_key(file, &resolve_use_prefix(mod_path, prefix)) {
-                facts.glob_uses.insert(key);
+                facts.glob_uses.insert((file.to_string(), key));
             }
         }
         syn::UseTree::Group(g) => g
@@ -178,15 +180,23 @@ fn collect_use(
 /// `crate::`/`self::` heads against the current scope.
 /// Operation: prefix normalisation, no own calls.
 fn resolve_use_prefix(mod_path: &[String], prefix: &[String]) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
+    let mut out: Vec<String> = mod_path.to_vec();
     let mut rest = prefix;
     match rest.first().map(String::as_str) {
-        Some("crate") => rest = &rest[1..],
-        Some("self") => {
-            out.extend(mod_path.iter().cloned());
+        Some("crate") => {
+            out.clear();
             rest = &rest[1..];
         }
-        _ => out.extend(mod_path.iter().cloned()),
+        Some("self") => rest = &rest[1..],
+        // Each leading `super` climbs one module; treating it as a segment
+        // would look for `api::super::internal` and resolve nothing.
+        Some("super") => {
+            while rest.first().map(String::as_str) == Some("super") {
+                out.pop();
+                rest = &rest[1..];
+            }
+        }
+        _ => {}
     }
     out.extend(rest.iter().cloned());
     out
@@ -203,7 +213,9 @@ fn record_reexport(
     facts: &mut FileFacts,
 ) {
     if let Some(key) = module_key(file, &resolve_use_prefix(mod_path, prefix)) {
-        facts.reexports.insert((key, name.to_string()));
+        facts
+            .reexports
+            .insert((file.to_string(), key, name.to_string()));
     }
 }
 
@@ -261,21 +273,45 @@ fn walk_reachable(
 /// in the workspace. A key that resolves to no known file is dropped.
 /// Operation: lookup + projection.
 fn resolve_reexports(
-    reexports: &HashSet<(String, String)>,
+    reexports: &HashSet<(String, String, String)>,
     modules: &HashMap<String, String>,
+    reachable_files: &HashSet<String>,
 ) -> HashSet<(String, String)> {
-    reexports
+    // Seed with re-exports written in a file an outside consumer can reach —
+    // a `pub use` inside a private module exposes nothing.
+    let mut queue: Vec<(String, String)> = reexports
         .iter()
-        .filter_map(|(key, name)| modules.get(key).map(|f| (f.clone(), name.clone())))
-        .collect()
+        .filter(|(declaring, _, _)| reachable_files.contains(declaring))
+        .filter_map(|(_, key, name)| modules.get(key).map(|f| (f.clone(), name.clone())))
+        .collect();
+    // Then follow the chain: if the file we just exposed re-exports that same
+    // name again (lib → facade → hidden), the declaration lives one hop
+    // further down.
+    let mut exposed: HashSet<(String, String)> = HashSet::new();
+    while let Some((file, name)) = queue.pop() {
+        if !exposed.insert((file.clone(), name.clone())) {
+            continue;
+        }
+        reexports
+            .iter()
+            .filter(|(declaring, _, n)| *declaring == file && *n == name)
+            .filter_map(|(_, key, _)| modules.get(key))
+            .for_each(|next| queue.push((next.clone(), name.clone())));
+    }
+    exposed
 }
 
 /// Files covered by a `pub use <module>::*` glob.
 /// Operation: glob path → file lookup.
-fn resolve_globs(globs: &HashSet<String>, modules: &HashMap<String, String>) -> HashSet<String> {
+fn resolve_globs(
+    globs: &HashSet<(String, String)>,
+    modules: &HashMap<String, String>,
+    reachable_files: &HashSet<String>,
+) -> HashSet<String> {
     globs
         .iter()
-        .filter_map(|path| modules.get(path).cloned())
+        .filter(|(declaring, _)| reachable_files.contains(declaring))
+        .filter_map(|(_, key)| modules.get(key).cloned())
         .collect()
 }
 
