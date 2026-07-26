@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.1] - 2026-07-26
+
+Bugfix release for the marker verification 1.8.0 shipped.
+
+### Fixed
+- **Public methods count as externally reachable.** The reachability set was
+  built from item-level declarations only, and a method is an `ImplItem`, not an
+  `Item` — so every `qual:api` on a method was reported as sitting on something
+  that "cannot be named from outside the crate". That is where the marker sits
+  most often, and it is the worst shape a finding can take: a confident,
+  specific, false claim. A downstream workspace saw 305 of them on a first run.
+
+  The message was accurate about what the code had computed; the computation was
+  missing an AST level. Inherent impls now contribute their `pub` methods, trait
+  impls all of theirs (they carry no visibility and are reached through the
+  trait), and a `pub` trait its own. A method is recorded without checking that
+  its type is nameable, which over-approximates in the direction this module
+  documents: calling something reachable costs a missed finding, calling it
+  unreachable accuses an author of writing a marker that could never work.
+
 ## [1.8.0] - 2026-07-26
 
 Dead-code detection covered functions only. An unused `struct`, `enum`,
@@ -81,20 +101,6 @@ there was nothing to verify it against.
   be noise.
 
 ### Fixed
-- **Public methods count as externally reachable.** The reachability set was
-  built from item-level declarations only, and a method is an `ImplItem`, not an
-  `Item` — so every `qual:api` on a method was reported as sitting on something
-  that "cannot be named from outside the crate". That is where the marker sits
-  most often, and it is the worst shape a finding can take: a confident,
-  specific, false claim. A downstream workspace saw 305 of them on a first run.
-
-  The message was accurate about what the code had computed; the computation was
-  missing an AST level. Inherent impls now contribute their `pub` methods, trait
-  impls all of theirs (they carry no visibility and are reached through the
-  trait), and a `pub` trait its own. A method is recorded without checking that
-  its type is nameable, which over-approximates in the direction this module
-  documents: calling something reachable costs a missed finding, calling it
-  unreachable accuses an author of writing a marker that could never work.
 - **The `dead_code` lint level is modelled as Rust defines it.** Both dead-code
   checks read only a declaration's own attributes, so `#![allow(dead_code)]` at
   the top of a file, `#[allow(dead_code)]` on a module or an `impl` — the
