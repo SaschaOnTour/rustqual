@@ -16,7 +16,11 @@ pub(crate) fn detect_uncovered_functions(
         .filter(|fa| !fa.suppressed && !fa.is_test)
         .filter_map(|fa| {
             let file_data = lcov_data.get(&fa.file)?;
-            let hit_count = file_data.function_hits.get(&fa.name)?;
+            // Keyed by function name: `llvm-cov` writes one mangled symbol per
+            // monomorphisation, so a raw lookup by name matches nothing and the
+            // check silently never fires.
+            let by_name = super::lcov::hits_by_function_name(file_data);
+            let hit_count = by_name.get(&fa.name)?;
             if *hit_count == 0 {
                 Some(TqWarning {
                     file: fa.file.clone(),

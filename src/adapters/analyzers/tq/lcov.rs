@@ -73,6 +73,24 @@ pub(crate) fn parse_lcov(path: &Path) -> Result<HashMap<String, LcovFileData>, S
     Ok(result)
 }
 
+/// Execution counts keyed by function name rather than by mangled symbol.
+///
+/// One entry per monomorphisation becomes one entry per function: if any
+/// instantiation ran, the function ran. Every identifier a symbol yields gets
+/// the count, so a module or crate name collects hits too — harmless, since
+/// only declared function names are ever looked up, and an inflated count can
+/// only suppress a finding.
+/// Operation: fold over the raw symbols, own call in the closure.
+pub(crate) fn hits_by_function_name(data: &LcovFileData) -> HashMap<String, u64> {
+    let mut out: HashMap<String, u64> = HashMap::new();
+    data.function_hits.iter().for_each(|(symbol, hits)| {
+        symbol_base_names(symbol).into_iter().for_each(|name| {
+            *out.entry(name).or_insert(0) += hits;
+        });
+    });
+    out
+}
+
 /// The identifiers inside a mangled LCOV symbol.
 ///
 /// `llvm-cov` writes Rust's v0 mangling (`_RNvNtNtCs…20capture_secret_event`)
