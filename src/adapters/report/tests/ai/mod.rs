@@ -39,6 +39,7 @@ mod smoke_and_orphan;
 pub(super) fn build_ai_value(analysis: &AnalysisResult, config: &Config) -> Value {
     let reporter = AiReporter {
         config,
+        coverage_measured: analysis.summary.coverage_measured,
         data: &analysis.data,
         format: AiOutputFormat::Json,
     };
@@ -76,6 +77,7 @@ pub(super) fn make_reporter<'a>(
 ) -> AiReporter<'a> {
     AiReporter {
         config,
+        coverage_measured: false,
         data,
         format: AiOutputFormat::Json,
     }

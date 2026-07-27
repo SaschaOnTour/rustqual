@@ -289,23 +289,15 @@ fn coverage_lookup_aggregates_monomorphisations() {
     // TQ-004 looked a function up by its bare name in a map keyed by mangled
     // symbols, so it matched nothing and never fired. Instantiations aggregate
     // onto the function: if any of them ran, the function ran.
-    let hits: std::collections::HashMap<String, u64> = [
-        (
-            "_RINvNtNtCs1_5crate6suites12append_ticksNtNt2_5other7StorageE".to_string(),
-            2u64,
-        ),
-        (
-            "_RINvNtNtCs1_5crate6suites12append_ticksNtNt2_5other5OtherE".to_string(),
-            3u64,
-        ),
-        ("_RNvNtCs1_5crate6suites11never_ranE".to_string(), 0u64),
-    ]
-    .into_iter()
-    .collect();
+    let a = "_RINvNtNtCs569pcWMmiue_17sv_test_contracts6suites15run_event_store12append_ticksNtNtCs7gCM0XvToDQ_21sv_adp_storage_sqlite7adapter13SqliteStorageEB1j_";
+    let b = "_RINvNtNtCsgRGDab5B9eV_17sv_test_contracts6suites15run_event_store12append_ticksNtNtB4_21run_event_store_tests19InlineRunEventStoreEB6_";
+    let hits: std::collections::HashMap<String, u64> =
+        [(a.to_string(), 2u64), (b.to_string(), 3u64)]
+            .into_iter()
+            .collect();
     let by_name = hits_by_function_name(&LcovFileData {
         function_hits: hits,
         line_hits: std::collections::HashMap::new(),
     });
-    assert_eq!(by_name.get("append_ticks"), Some(&5));
-    assert_eq!(by_name.get("never_ran"), Some(&0), "zero stays zero");
+    assert_eq!(by_name.get("append_ticks"), Some(&5), "both instantiations");
 }

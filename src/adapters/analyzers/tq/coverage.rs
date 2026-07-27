@@ -11,16 +11,19 @@ pub(crate) fn detect_uncovered_functions(
     all_results: &[FunctionAnalysis],
     lcov_data: &HashMap<String, LcovFileData>,
 ) -> Vec<TqWarning> {
+    // Keyed by function name: `llvm-cov` writes one mangled symbol per
+    // monomorphisation, so a raw lookup by name matches nothing and the check
+    // silently never fires. Aggregated once per file — inside the loop it would
+    // be re-derived for every function, which is quadratic in generic code.
+    let by_file: HashMap<&String, HashMap<String, u64>> = lcov_data
+        .iter()
+        .map(|(file, data)| (file, super::lcov::hits_by_function_name(data)))
+        .collect();
     all_results
         .iter()
         .filter(|fa| !fa.suppressed && !fa.is_test)
         .filter_map(|fa| {
-            let file_data = lcov_data.get(&fa.file)?;
-            // Keyed by function name: `llvm-cov` writes one mangled symbol per
-            // monomorphisation, so a raw lookup by name matches nothing and the
-            // check silently never fires.
-            let by_name = super::lcov::hits_by_function_name(file_data);
-            let hit_count = by_name.get(&fa.name)?;
+            let hit_count = by_file.get(&fa.file)?.get(&fa.name)?;
             if *hit_count == 0 {
                 Some(TqWarning {
                     file: fa.file.clone(),
