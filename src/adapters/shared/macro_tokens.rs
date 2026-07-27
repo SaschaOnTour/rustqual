@@ -196,3 +196,31 @@ pub fn all_idents(tokens: &TokenStream) -> impl Iterator<Item = String> {
     }
     out.into_iter()
 }
+
+/// Whether these tokens use a metavariable in callee position: `$name(…)`.
+///
+/// The transcriber of `macro_rules! step { ($t:path) => { $t(&make()); } }`
+/// holds `$`, `t`, `(…)` as three consecutive trees. What the invocation binds
+/// to `$t` is the function that really runs, and no walk over the invocation
+/// can know that without first asking the definition — an ident followed by a
+/// comma is not in call position.
+/// Operation: positional token-tree scan, no own calls.
+pub fn calls_through_metavariable(tokens: &TokenStream) -> bool {
+    let mut stack: Vec<TokenStream> = vec![tokens.clone()];
+    while let Some(stream) = stack.pop() {
+        let trees: Vec<TokenTree> = stream.into_iter().collect();
+        for (i, tt) in trees.iter().enumerate() {
+            if let TokenTree::Group(g) = tt {
+                stack.push(g.stream());
+            }
+            let is_dollar = matches!(tt, TokenTree::Punct(p) if p.as_char() == '$');
+            let names_a_call = matches!(trees.get(i + 1), Some(TokenTree::Ident(_)))
+                && matches!(trees.get(i + 2), Some(TokenTree::Group(g))
+                    if g.delimiter() == proc_macro2::Delimiter::Parenthesis);
+            if is_dollar && names_a_call {
+                return true;
+            }
+        }
+    }
+    false
+}

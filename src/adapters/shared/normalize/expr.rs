@@ -35,6 +35,31 @@ impl Normalizer {
         }
     }
 
+    /// The callee of a call expression.
+    ///
+    /// A **single-segment** path keeps its name instead of becoming a
+    /// positional index: `check_append(x)` and `check_rotate(x)` are different
+    /// bodies, and a runner whose whole content is *which* functions it names
+    /// must not match every other runner of the same length.
+    ///
+    /// A multi-segment path is walked as before, which drops it — see
+    /// `norm_path`. Two limits in one there: `Config::default()` and
+    /// `Summary::default()` share a last segment that says nothing, so naming
+    /// by it would conflate more than it separates, and emitting anything at
+    /// all raises the token count of every body that calls a qualified
+    /// function, which changes which bodies clear `min_tokens`. Both deserve
+    /// their own change; this one keeps the token count identical.
+    /// Operation: shape match, own calls in the arms.
+    pub(super) fn norm_callee(&mut self, func: &syn::Expr) {
+        match func {
+            syn::Expr::Path(p) if p.path.segments.len() == 1 => {
+                let name = p.path.segments[0].ident.to_string();
+                self.tokens.push(NormalizedToken::Call(name));
+            }
+            other => self.visit_expr(other),
+        }
+    }
+
     /// Binary, unary, and assignment operators. Operation: per-variant emission.
     pub(super) fn norm_operator(&mut self, expr: &syn::Expr) {
         match expr {
@@ -62,7 +87,7 @@ impl Normalizer {
     pub(super) fn norm_call_field(&mut self, expr: &syn::Expr) {
         match expr {
             syn::Expr::Call(e) => {
-                self.visit_expr(&e.func);
+                self.norm_callee(&e.func);
                 for arg in &e.args {
                     self.visit_expr(arg);
                 }

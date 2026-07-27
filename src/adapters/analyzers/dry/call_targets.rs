@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use syn::visit::Visit;
 
 use super::split_names::{collect_split, test_scoped_visits, SplitCollector, SplitNames};
+use crate::adapters::shared::macro_tokens;
 
 // ── Call target collection ──────────────────────────────────────
 
@@ -15,6 +16,7 @@ pub(crate) fn collect_all_calls(
 ) -> SplitNames {
     let mut collector = CallTargetCollector {
         macro_reach: super::macro_reach::collect_macro_reach(parsed),
+        call_through: super::macro_reach::call_through_macros(parsed),
         ..Default::default()
     };
     collect_split(parsed, cfg_test_files, &mut collector)
@@ -28,6 +30,11 @@ struct CallTargetCollector {
     /// runs whatever the definition names, and that edge is invisible to a
     /// walker that does not expand macros.
     macro_reach: super::macro_reach::MacroReach,
+    /// Macros that call through a metavariable — see
+    /// `macro_reach::call_through_macros`. At an invocation of one of these the
+    /// arguments are the functions that really run, and they arrive as bare
+    /// idents no token walk can recognise as calls.
+    call_through: HashSet<String>,
 }
 
 impl SplitCollector for CallTargetCollector {
@@ -72,6 +79,22 @@ impl CallTargetCollector {
             .cloned()
             .unwrap_or_default();
         self.names.refs.tests.extend(reached);
+    }
+
+    /// At an invocation of a call-through macro, every ident in the invocation
+    /// is a possible callee — the one the macro body applies arrives as a bare
+    /// name, with nothing syntactic to mark it. The consumer intersects the
+    /// result against declared function names, so the over-collection is bounded
+    /// by that; it can only suppress a finding, never raise one. The narrowness
+    /// is in the trigger, not here: an ordinary `assert_eq!` never qualifies.
+    /// Operation: membership check + bulk insert, no own calls.
+    fn arguments_of_a_call_through(&mut self, node: &syn::Macro) {
+        let invoked = node.path.segments.last().map(|s| s.ident.to_string());
+        if !invoked.is_some_and(|name| self.call_through.contains(&name)) {
+            return;
+        }
+        let idents: Vec<String> = macro_tokens::all_idents(&node.tokens).collect();
+        self.target().extend(idents);
     }
 
     /// Extract function names referenced by serde field attributes.
@@ -190,6 +213,7 @@ impl<'ast> Visit<'ast> for CallTargetCollector {
                 target.insert(id);
             },
         );
+        self.arguments_of_a_call_through(node);
         self.reach_through_macro(node);
         syn::visit::visit_macro(self, node);
     }

@@ -8,7 +8,12 @@ pub(super) const CARDS: &[RuleCard] = &[
         title: "Duplicate function detected",
         detects: "Two or more functions whose normalized bodies are at least \
             similarity_threshold alike (default 0.85; exact duplicates score \
-            1.0). Runs on test code too.",
+            1.0). Runs on test code too. Normalisation erases literal values \
+            and renames locals and parameters positionally, but keeps the \
+            names in call position — a called function, a method, a field — \
+            so two bodies that call different functions are different bodies. \
+            A qualified callee (mod::f(x)) is the one exception: it \
+            contributes no token at all.",
         why: "Parallel copies drift: a fix lands in one and not the other, \
             and reviewers must diff by eye to see whether they still match.",
         fix: "Extract one shared helper and call it from every site. For \
@@ -24,7 +29,11 @@ pub(super) const CARDS: &[RuleCard] = &[
         detects: "A production function never called from production code: \
             'uncalled' (no callers at all) or 'testonly' (only tests reach \
             it). Macro bodies are scanned, so calls inside vec!/format!/rsx! \
-            count as references.",
+            count as references. A macro that applies a metavariable \
+            ($test(&$make())), or forwards one to a macro that does, counts \
+            every ident at its invocation as a possible callee — the \
+            functions a run_suite!(make; a, b) really runs arrive as bare \
+            names nothing syntactic marks as calls.",
         why: "Dead code is maintained, reviewed, and refactored without ever \
             running — pure carrying cost that also misleads readers about \
             what the system does.",

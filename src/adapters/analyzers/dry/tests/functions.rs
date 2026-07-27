@@ -334,3 +334,71 @@ fn token_count_exactly_at_min_tokens_is_kept() {
         "bodies with exactly min_tokens tokens are kept and form a duplicate, got {groups:?}"
     );
 }
+
+#[test]
+fn bodies_calling_different_functions_are_not_duplicates() {
+    // The manifest shape: a suite runner whose whole meaning is *which*
+    // functions it names. Normalising a callee to a positional index made every
+    // such runner an exact duplicate of every other one of the same length —
+    // and the two checks then pulled against each other, DRY-002 rewarding the
+    // spelled-out calls that DRY-001 punished.
+    let code = r#"
+fn run_audit(s: &S) {
+    check_append(s);
+    check_rotate(s);
+    check_prune(s);
+}
+fn run_snapshot(s: &S) {
+    check_store(s);
+    check_load(s);
+    check_evict(s);
+}
+"#;
+    let groups = detect_duplicates(&parse(code), &low_threshold_config());
+    assert!(
+        groups.is_empty(),
+        "disjoint callees are not the same function: {groups:?}"
+    );
+}
+
+#[test]
+fn bodies_calling_the_same_functions_are_still_duplicates() {
+    // The counterpart: keeping the callee names must not blind the check to a
+    // real copy. Locals and parameters stay alpha-renamed, so only the names
+    // that carry the meaning have to match.
+    let code = r#"
+fn run_here(store: &S) {
+    check_append(store);
+    check_rotate(store);
+}
+fn run_there(other: &S) {
+    check_append(other);
+    check_rotate(other);
+}
+"#;
+    let groups = detect_duplicates(&parse(code), &low_threshold_config());
+    assert_eq!(groups.len(), 1, "same callees, same body: {groups:?}");
+}
+
+#[test]
+fn a_qualified_callee_is_still_dropped_entirely() {
+    // Known limit, pinned so it is visible rather than folklore: a
+    // multi-segment callee contributes no token at all, so two bodies made of
+    // qualified calls to entirely different functions still match. Naming them
+    // by their last segment would conflate `Config::default()` with
+    // `Summary::default()`, and emitting any token raises the count of every
+    // body that calls a qualified function — which shifts what clears
+    // `min_tokens`. That is its own change.
+    let code = r#"
+fn run_audit(s: &S) {
+    audit::check_append(s);
+    audit::check_rotate(s);
+}
+fn run_snapshot(s: &S) {
+    snapshot::check_store(s);
+    snapshot::check_load(s);
+}
+"#;
+    let groups = detect_duplicates(&parse(code), &low_threshold_config());
+    assert_eq!(groups.len(), 1, "the limit, not the goal: {groups:?}");
+}

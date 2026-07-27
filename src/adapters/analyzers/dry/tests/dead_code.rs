@@ -1416,3 +1416,66 @@ fn allow_dead_code_is_inherited_across_the_file_boundary() {
         "without the allow it is still dead"
     );
 }
+
+#[test]
+fn a_function_handed_to_a_call_through_macro_is_called() {
+    // `$test:path` in callee position: the invocation passes a bare name, and
+    // nothing in the token walk sees it as a call — an ident followed by a
+    // comma is not in call position. The functions the suite really runs were
+    // reported as never called, which is how a codebase ends up papering over
+    // it with `qual:api` and hiding the genuinely dead code underneath.
+    let code = r#"
+macro_rules! run_step {
+    ($test:path, $make:path) => {
+        $test(&$make());
+    };
+}
+fn make_store() -> S { S }
+fn check_append(s: &S) {}
+fn suite() { run_step!(check_append, make_store); }
+fn main() { suite(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn the_call_through_reaches_a_macro_that_only_forwards() {
+    // The real shape has two levels: the entry macro forwards its metavariable
+    // to the one that does the calling. Only following the chain gets the
+    // invocation site right.
+    let code = r#"
+macro_rules! step {
+    ($test:path, $make:path) => {
+        $test(&$make());
+    };
+}
+macro_rules! run_suite {
+    ($make:path; $($test:path),*) => {
+        $( step!($test, $make); )*
+    };
+}
+fn make_store() -> S { S }
+fn check_append(s: &S) {}
+fn suite() { run_suite!(make_store; check_append); }
+fn main() { suite(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn an_ordinary_macro_invocation_does_not_vouch_for_its_arguments() {
+    // The bound the fix needs: only a macro that really calls through a
+    // metavariable licenses harvesting every ident at its invocation. Without
+    // that trigger, `assert_eq!(a, dead_helper)` would mark a plainly dead
+    // function as called — which is the mistake that costs a real finding.
+    let code = r#"
+fn dead_helper() -> u8 { 1 }
+fn used() { let x = 1u8; assert_eq!(x, 1); }
+fn main() { used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].function_name, "dead_helper");
+}

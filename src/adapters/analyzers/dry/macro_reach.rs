@@ -83,3 +83,58 @@ impl<'ast> syn::visit::Visit<'ast> for MacroBodyCollector {
         self.bodies.insert(name, names);
     }
 }
+
+/// Macros that call *through* a metavariable: their body contains `$name(…)`,
+/// or they hand a metavariable to a macro that does.
+///
+/// `run_suite!(make; check_append, check_rotate)` names the functions it runs
+/// as bare idents — an ident followed by a comma is not in call position, so
+/// the token walk sees nothing and the functions read as never called. That is
+/// how a suite ends up papered over with `qual:api`, which then hides whatever
+/// is genuinely dead underneath.
+///
+/// Precise trigger, coarse payload: only at an invocation of one of *these*
+/// macros does the caller harvest every ident as a possible callee. Doing it
+/// for every macro invocation would let `assert_eq!(x, dead_helper)` vouch for
+/// a dead function — the mistake that costs a real finding.
+/// Integration: direct set, then the reach map decides the rest.
+pub(crate) fn call_through_macros(parsed: &[(String, String, syn::File)]) -> HashSet<String> {
+    let mut collector = CallThroughCollector::default();
+    visit_all_files(parsed, &mut collector);
+    let direct = collector.direct;
+    let forwarding = forwarders(&collect_macro_reach(parsed), &direct);
+    direct.union(&forwarding).cloned().collect()
+}
+
+/// Macros whose body reaches a call-through one. The real shape has two levels:
+/// an entry macro forwards its metavariable to the macro that does the calling,
+/// so only following the chain gets the invocation site right. The chain is the
+/// closure `collect_macro_reach` already computed.
+/// Operation: filter over the reach map, own calls hidden in the closures.
+fn forwarders(reach: &MacroReach, direct: &HashSet<String>) -> HashSet<String> {
+    reach
+        .iter()
+        .filter(|(_, reached)| reached.iter().any(|name| direct.contains(name)))
+        .map(|(name, _)| name.clone())
+        .collect()
+}
+
+/// Visitor recording each `macro_rules!` whose body calls through a
+/// metavariable.
+#[derive(Default)]
+struct CallThroughCollector {
+    direct: HashSet<String>,
+}
+
+impl FileVisitor for CallThroughCollector {
+    fn reset_for_file(&mut self, _file_path: &str) {}
+}
+
+impl<'ast> syn::visit::Visit<'ast> for CallThroughCollector {
+    fn visit_item_macro(&mut self, node: &'ast syn::ItemMacro) {
+        let named = node.ident.as_ref().map(|i| i.to_string());
+        let calls_through =
+            named.filter(|_| macro_tokens::calls_through_metavariable(&node.mac.tokens));
+        self.direct.extend(calls_through);
+    }
+}

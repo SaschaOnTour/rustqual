@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.2] - 2026-07-27
+
+Two false findings that pulled against each other: DRY-001 punished exactly the
+spelled-out calls DRY-002 rewards.
+
+### Fixed
+- **A callee's name counts (DRY-001).** Normalisation replaced a called
+  function with a positional index, so a body whose whole meaning is *which*
+  functions it names — a suite runner, a dispatch list, a registration table —
+  matched every other body of the same shape and length. Eleven calls to eleven
+  different functions produced the same token stream as eleven calls to eleven
+  others: reported as an **exact** duplicate with not one callee in common. The
+  vocabulary already conceded the principle for method calls
+  ("name preserved (structurally significant)") and field access; the free
+  function call was the gap. Locals and parameters stay alpha-renamed, so only
+  the names that carry the meaning have to match.
+  *Known limit, now pinned by a test rather than folklore:* a multi-segment
+  callee (`audit::check_append(s)`) still contributes no token at all. Naming it
+  by its last segment would conflate `Config::default()` with
+  `Summary::default()`, and emitting any token there raises the count of every
+  body that calls a qualified function, which shifts what clears `min_tokens`.
+  That is its own change.
+- **A function handed to a macro that calls it is called (DRY-002, TQ-003).**
+  `run_suite!(make; check_append, check_rotate)` passes the functions it runs as
+  bare idents, and an ident followed by a comma is not in call position — so a
+  whole test suite read as never called. Papering over that with `// qual:api`
+  is how genuinely dead code disappears behind markers. A `macro_rules!` whose
+  body applies a metavariable (`$test(&$make())`) is now recognised as
+  *call-through*, and so is one that forwards a metavariable to such a macro —
+  the two-level shape the real thing has, resolved over the macro-reach closure
+  that was already there. Only at an invocation of one of those macros is every
+  ident harvested as a possible callee: the trigger is narrow so an ordinary
+  `assert_eq!(x, dead_helper)` still cannot vouch for a dead function.
+
 ## [1.8.1] - 2026-07-26
 
 Bugfix release for the marker verification 1.8.0 shipped.
