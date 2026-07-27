@@ -97,6 +97,9 @@ pub(crate) struct JsonSummary {
     pub(crate) duplicate_groups: usize,
     pub(crate) dead_code_warnings: usize,
     pub(crate) dead_type_warnings: usize,
+    /// `"measured"` when a coverage report answered `untested`,
+    /// `"call-graph-only"` when it was inferred.
+    pub(crate) coverage: String,
     pub(crate) fragment_groups: usize,
     pub(crate) boilerplate_warnings: usize,
     pub(crate) srp_struct_warnings: usize,

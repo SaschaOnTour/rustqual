@@ -25,6 +25,10 @@ pub(super) fn build_summary(s: &super::super::Summary) -> JsonSummary {
         duplicate_groups: s.duplicate_groups,
         dead_code_warnings: s.dead_code_warnings,
         dead_type_warnings: s.dead_type_warnings,
+        coverage: match s.coverage_measured {
+            true => "measured".to_string(),
+            false => "call-graph-only".to_string(),
+        },
         fragment_groups: s.fragment_groups,
         boilerplate_warnings: s.boilerplate_warnings,
         srp_struct_warnings: s.srp_struct_warnings,

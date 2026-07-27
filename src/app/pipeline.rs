@@ -176,6 +176,7 @@ fn finalize_summary(
     suppression_lines: &std::collections::HashMap<String, Vec<crate::findings::Suppression>>,
     parsed: &[(String, String, syn::File)],
 ) {
+    summary.coverage_measured = config.test_quality.coverage_file.is_some();
     summary.compute_quality_score(&config.weights.as_array());
     summary.all_suppressions = count_all_suppressions(suppression_lines, parsed);
     summary.suppression_ratio_exceeded = check_suppression_ratio(
@@ -231,14 +232,7 @@ pub(crate) fn output_results(
         crate::cli::OutputFormat::AiJson => report::print_ai_json(analysis, config),
         crate::cli::OutputFormat::Text => {
             let findings_entries = collect_all_findings(analysis);
-            let has_coverage = config.test_quality.coverage_file.is_some();
-            crate::report::text::print_text(
-                analysis,
-                &findings_entries,
-                verbose,
-                None,
-                has_coverage,
-            );
+            crate::report::text::print_text(analysis, &findings_entries, verbose, None);
             if suggestions {
                 report::print_suggestions(&analysis.results);
             }

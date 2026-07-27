@@ -15,7 +15,6 @@ fn render_text(results: &[FunctionAnalysis], verbose: bool) -> String {
         findings_entries: &[],
         verbose,
         suggestions_text: None,
-        has_coverage: true,
     };
     let findings = AnalysisFindings::default();
     let data = AnalysisData::default();
@@ -144,7 +143,6 @@ fn text_reporter_renders_orphans_via_snapshot_view() {
         findings_entries: &[],
         verbose: true,
         suggestions_text: None,
-        has_coverage: true,
     };
     let findings = AnalysisFindings {
         orphan_suppressions: vec![OrphanSuppression {
@@ -217,7 +215,6 @@ fn footer_with_findings_points_at_rule_cards_and_allow_guide() {
         findings_entries: &entries,
         verbose: false,
         suggestions_text: None,
-        has_coverage: true,
     };
     let out = reporter.render(&AnalysisFindings::default(), &AnalysisData::default());
     assert!(
@@ -267,7 +264,6 @@ fn orphan_not_double_counted_when_present_in_findings_entries() {
         findings_entries: &findings_entries,
         verbose: false,
         suggestions_text: None,
-        has_coverage: true,
     };
     let findings = AnalysisFindings {
         orphan_suppressions: vec![orphan],

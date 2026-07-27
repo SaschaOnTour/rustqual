@@ -49,11 +49,6 @@ pub struct TextReporter<'a> {
     pub(crate) findings_entries: &'a [FindingEntry],
     pub(crate) verbose: bool,
     pub(crate) suggestions_text: Option<&'a str>,
-    /// Whether a coverage report was supplied. Without one, `untested` is
-    /// answered from the call graph alone, which cannot follow a macro it does
-    /// not expand — so the run says so rather than letting the reader assume
-    /// the answer is measured.
-    pub(crate) has_coverage: bool,
 }
 
 impl<'a> ReporterImpl for TextReporter<'a> {
@@ -140,7 +135,7 @@ impl<'a> ReporterImpl for TextReporter<'a> {
             out.push_str(&format_findings_list(&all_entries));
         }
         if !all_entries.is_empty() {
-            out.push_str(&coverage_hint(&all_entries, self.has_coverage));
+            out.push_str(&coverage_hint(&all_entries, self.summary.coverage_measured));
             out.push_str(&suppression_footer());
         }
         if let Some(s) = self.suggestions_text {
@@ -250,7 +245,6 @@ pub fn print_text(
     findings_entries: &[FindingEntry],
     verbose: bool,
     suggestions_text: Option<&str>,
-    has_coverage: bool,
 ) {
     use crate::ports::Reporter;
     let reporter = TextReporter {
@@ -259,7 +253,6 @@ pub fn print_text(
         findings_entries,
         verbose,
         suggestions_text,
-        has_coverage,
     };
     print!("{}", reporter.render(&analysis.findings, &analysis.data));
 }
