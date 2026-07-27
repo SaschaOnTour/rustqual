@@ -296,3 +296,22 @@ fn forbid_cannot_be_downgraded_by_an_inner_allow() {
     let found = detect("#![forbid(dead_code)]\n#[allow(dead_code)]\nstruct StillReported;");
     assert_eq!(found.len(), 1, "forbid survives the inner allow: {found:?}");
 }
+
+#[test]
+fn a_self_referencing_type_does_not_keep_itself_alive() {
+    // `struct Node { next: Option<Box<Node>> }` named itself in its own body,
+    // which counted as a use — so a linked list nobody builds stayed invisible.
+    // rustc calls the same type never constructed.
+    let found = detect("struct Node { next: Option<Box<Node>> }");
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].name, "Node");
+}
+
+#[test]
+fn a_referenced_recursive_type_is_still_alive() {
+    // The counterpart: suppressing the self-reference must not blind the check
+    // to a real user elsewhere.
+    assert!(
+        names("struct Node { next: Option<Box<Node>> }\nfn f(n: Node) { let _ = n; }").is_empty()
+    );
+}
