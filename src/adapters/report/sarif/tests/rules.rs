@@ -183,7 +183,7 @@ fn tqf(kind: TqFindingKind, suppressed: bool) -> TqFinding {
         kind,
         function_name: "t".into(),
         uncovered_lines: None,
-        coverage: crate::domain::findings::CoverageEvidence::NotApplicable,
+        coverage: crate::adapters::report::test_support::evidence_for(kind),
     }
 }
 

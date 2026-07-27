@@ -174,10 +174,10 @@ fn coverage_hint(call_graph_only: usize) -> String {
     }
     format!(
         "\n── Coverage did not answer {call_graph_only} of the TQ_UNTESTED findings above: no\n   \
-         report names those functions, so the call graph decided alone. Pass\n   \
-         --coverage <lcov>, or extend the one you passed — a function a test\n   \
-         reaches only through a macro, a trait object or generated code is\n   \
-         invisible here, but recorded there.\n"
+         report names those functions, so the call graph decided alone. A\n   \
+         --coverage <lcov> report that covers them would settle it — a function\n   \
+         a test reaches only through a macro, a trait object or generated code\n   \
+         is invisible here, but recorded there.\n"
     )
 }
 

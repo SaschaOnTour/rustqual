@@ -10,6 +10,7 @@
 use crate::adapters::analyzers::iosp::{
     compute_severity, CallOccurrence, Classification, FunctionAnalysis, LogicOccurrence,
 };
+use crate::domain::findings::CoverageEvidence;
 use crate::report::{AnalysisResult, Summary};
 
 /// A `Violation` classification with one logic location (`logic_kind` at
@@ -73,5 +74,24 @@ pub(crate) fn make_analysis(results: Vec<FunctionAnalysis>) -> AnalysisResult {
         summary,
         findings,
         data,
+    }
+}
+
+/// The coverage evidence a TQ kind carries on its own, for fixtures that build
+/// a `TqFinding` by hand.
+///
+/// Four of the five kinds are constant by construction — TQ-004 and TQ-005
+/// exist only when a coverage report does, TQ-001 and TQ-002 never consult
+/// one — and only `Untested` varies with what the report named, so a fixture
+/// has to say which case it means. Hardcoding `NotApplicable` everywhere made
+/// fixtures that render `[n/a]` on a finding that can only come from
+/// measurement.
+/// Operation: kind dispatch, no own calls.
+pub(crate) fn evidence_for(kind: crate::domain::findings::TqFindingKind) -> CoverageEvidence {
+    use crate::domain::findings::TqFindingKind as K;
+    match kind {
+        K::NoAssertion | K::NoSut => CoverageEvidence::NotApplicable,
+        K::Uncovered | K::UntestedLogic => CoverageEvidence::Measured,
+        K::Untested => CoverageEvidence::CallGraph,
     }
 }
