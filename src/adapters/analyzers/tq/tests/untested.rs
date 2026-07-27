@@ -327,3 +327,20 @@ fn a_monomorphised_symbol_yields_its_generic_function() {
     let sym = "_RINvNtNtCs569pcWMmiue_17sv_test_contracts6suites15run_event_store12append_ticksNtNtCs7gCM0XvToDQ_21sv_adp_storage_sqlite7adapter13SqliteStorageEB1j_";
     assert!(symbol_base_names(sym).contains(&"append_ticks".to_string()));
 }
+
+#[test]
+fn a_digit_in_a_function_name_survives_demangling() {
+    use crate::adapters::analyzers::tq::lcov::symbol_base_names;
+    // Splitting the symbol on digits cut `sha256_digest` into `sha` and
+    // `_digest`, so the function never appeared in the lookup — and with it
+    // every name carrying a digit (`parse_v2`, `http2_connect`). The lengths
+    // are read instead, which is what they are for.
+    let sym = "_RNvCsgABWfZxqfrq_8rust_out13sha256_digest";
+    let names = symbol_base_names(sym);
+    assert!(names.contains(&"sha256_digest".to_string()), "{names:?}");
+    assert!(names.contains(&"rust_out".to_string()), "{names:?}");
+    assert!(
+        !names.contains(&"sha".to_string()),
+        "no split name: {names:?}"
+    );
+}

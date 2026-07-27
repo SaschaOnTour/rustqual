@@ -39,6 +39,8 @@ pub enum AiOutputFormat {
 /// `build_orphans` → `Snapshot::orphans` → `publish`.
 pub struct AiReporter<'a> {
     pub(crate) config: &'a Config,
+    /// Whether a coverage report was read — not merely configured.
+    pub(crate) coverage_measured: bool,
     pub(crate) data: &'a AnalysisData,
     pub(crate) format: AiOutputFormat,
 }
@@ -191,7 +193,7 @@ impl<'a> ReporterImpl for AiReporter<'a> {
             // inferred, and inference cannot follow a macro rustqual does not
             // expand, a trait object, or generated code. A consumer deciding
             // whether to delete something needs to know which it is holding.
-            "coverage": coverage_mode(self.config.test_quality.coverage_file.is_some()),
+            "coverage": coverage_mode(self.coverage_measured),
         });
         if total > 0 {
             value["findings_by_file"] = output::group_by_file(all_entries);
@@ -216,6 +218,7 @@ fn coverage_mode(measured: bool) -> &'static str {
 pub fn print_ai(analysis: &AnalysisResult, config: &Config) {
     let reporter = AiReporter {
         config,
+        coverage_measured: analysis.summary.coverage_measured,
         data: &analysis.data,
         format: AiOutputFormat::Toon,
     };
@@ -225,6 +228,7 @@ pub fn print_ai(analysis: &AnalysisResult, config: &Config) {
 pub fn print_ai_json(analysis: &AnalysisResult, config: &Config) {
     let reporter = AiReporter {
         config,
+        coverage_measured: analysis.summary.coverage_measured,
         data: &analysis.data,
         format: AiOutputFormat::Json,
     };

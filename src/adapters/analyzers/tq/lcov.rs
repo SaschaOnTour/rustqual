@@ -73,6 +73,62 @@ pub(crate) fn parse_lcov(path: &Path) -> Result<HashMap<String, LcovFileData>, S
     Ok(result)
 }
 
+/// The identifiers inside a mangled LCOV symbol.
+///
+/// `llvm-cov` writes Rust's v0 mangling (`_RNvCs…13sha256_digest`) or the
+/// legacy form (`_ZN…17h<hash>E`); a plain name is returned unchanged. Both
+/// encode the path as `<len><name>` segments, so the lengths are read rather
+/// than guessed — splitting on digits would cut `sha256_digest` into `sha` and
+/// `_digest`, and any name with a digit in it with them.
+///
+/// A length is only accepted when it yields a plausible identifier that ends
+/// where the next segment or tag begins. That rejects the crate disambiguator
+/// (`Cs569pcWMmiue_`), whose base-62 body puts digits where a length would be.
+/// Operation: length-prefixed scan, no own calls.
+pub(crate) fn symbol_base_names(symbol: &str) -> Vec<String> {
+    if !symbol.starts_with("_R") && !symbol.starts_with("_ZN") {
+        return vec![symbol.to_string()];
+    }
+    let chars: Vec<char> = symbol.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        match read_segment(&chars, i) {
+            Some((name, next)) => {
+                out.push(name);
+                i = next;
+            }
+            None => i += 1,
+        }
+    }
+    out
+}
+
+/// One `<len><name>` segment at `at`, with the index after it. `None` when the
+/// digits there are not a length — a disambiguator's base-62 body, or a count
+/// that would run past the end or over something that is not an identifier.
+/// Operation: bounds and shape checks, no own calls.
+fn read_segment(chars: &[char], at: usize) -> Option<(String, usize)> {
+    if !chars[at].is_ascii_digit() || chars[at] == '0' {
+        return None;
+    }
+    let mut end = at;
+    while end < chars.len() && chars[end].is_ascii_digit() {
+        end += 1;
+    }
+    let len: usize = chars[at..end].iter().collect::<String>().parse().ok()?;
+    let stop = end.checked_add(len).filter(|s| *s <= chars.len())?;
+    let name: String = chars[end..stop].iter().collect();
+    let starts_ok = name.starts_with(|c: char| c.is_alphabetic() || c == '_');
+    let body_ok = name.chars().all(|c| c.is_alphanumeric() || c == '_');
+    // A segment ends where the next length or tag begins; anything else means
+    // the digits were not a length.
+    let ends_ok = chars
+        .get(stop)
+        .is_none_or(|c| c.is_ascii_digit() || c.is_ascii_uppercase());
+    (starts_ok && body_ok && ends_ok).then_some((name, stop))
+}
+
 /// Execution counts keyed by function name rather than by mangled symbol.
 ///
 /// One entry per monomorphisation becomes one entry per function: if any
@@ -89,44 +145,4 @@ pub(crate) fn hits_by_function_name(data: &LcovFileData) -> HashMap<String, u64>
         });
     });
     out
-}
-
-/// The identifiers inside a mangled LCOV symbol.
-///
-/// `llvm-cov` writes Rust's v0 mangling (`_RNvNtNtCs…20capture_secret_event`)
-/// or the legacy form (`_ZN…17h<hash>E`); a plain name is returned unchanged.
-/// Both encode the path as length-prefixed segments, but the crate
-/// disambiguator (`Cs569pcWMmiue_`) puts digits where a length would be, so the
-/// segments are read by splitting on digits rather than by trusting the counts.
-///
-/// Every run is yielded, not just the last: a symbol for a closure or a trait
-/// impl *inside* a function carries the function's name in the middle
-/// (`…capture_secret_event…BufWriter…flush`), and the outer name is the one
-/// that matters. Crate names, module names and mangling fragments come along —
-/// over-collection, which for the tested set only suppresses a finding.
-/// Operation: split on digits, no own calls.
-pub(crate) fn symbol_base_names(symbol: &str) -> Vec<String> {
-    if !symbol.starts_with("_R") && !symbol.starts_with("_ZN") {
-        return vec![symbol.to_string()];
-    }
-    symbol
-        .split(|c: char| c.is_ascii_digit())
-        .filter(|run| !run.is_empty())
-        .flat_map(|run| [run.to_string(), snake_prefix(run)])
-        .filter(|name| !name.is_empty())
-        .collect()
-}
-
-/// The leading snake_case part of a mangled run.
-///
-/// A monomorphised symbol runs the function name straight into the type
-/// arguments — `append_ticksNtNtCs…SqliteStorage` — so splitting on digits
-/// alone yields `append_ticksNtNtCs`. Rust function names are snake_case and
-/// the mangling appends CamelCase tags, so the first uppercase letter is the
-/// boundary. Emitted alongside the full run, never instead of it.
-/// Operation: prefix scan, no own calls.
-fn snake_prefix(run: &str) -> String {
-    run.chars()
-        .take_while(|c| !c.is_ascii_uppercase())
-        .collect()
 }

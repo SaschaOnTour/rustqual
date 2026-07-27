@@ -176,7 +176,14 @@ fn finalize_summary(
     suppression_lines: &std::collections::HashMap<String, Vec<crate::findings::Suppression>>,
     parsed: &[(String, String, syn::File)],
 ) {
-    summary.coverage_measured = config.test_quality.coverage_file.is_some();
+    // Not `is_some()`: a configured path that does not exist or does not parse
+    // falls back to the call graph, and claiming "measured" there is exactly
+    // the belief this field exists to prevent.
+    summary.coverage_measured = config
+        .test_quality
+        .coverage_file
+        .as_ref()
+        .is_some_and(|p| crate::adapters::analyzers::tq::coverage_is_readable(Path::new(p)));
     summary.compute_quality_score(&config.weights.as_array());
     summary.all_suppressions = count_all_suppressions(suppression_lines, parsed);
     summary.suppression_ratio_exceeded = check_suppression_ratio(

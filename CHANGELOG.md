@@ -25,7 +25,10 @@ Bugfix release for the marker verification 1.8.0 shipped.
   not, and the call graph does not follow a macro rustqual cannot expand, a
   trait object, or generated code. `json`, `ai` and `ai-json` carry
   `coverage: "measured" | "call-graph-only"` — a field, not prose, because the
-  consumer deciding whether to delete something is usually a program. The text
+  consumer deciding whether to delete something is usually a program.
+  "measured" follows the *parsed* report, not a configured path: a file that is
+  missing or unreadable makes the analysis fall back to the call graph silently,
+  and claiming measurement there is the belief this field exists to prevent. The text
   footer names the flag when, and only when, an `untested` finding was derived
   without a report.
 - **TQ-004 (uncovered) works again — same cause, opposite effect.** It looked a

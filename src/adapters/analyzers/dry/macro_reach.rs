@@ -45,10 +45,15 @@ fn close_over_nested(bodies: MacroReach) -> MacroReach {
                 .into_iter()
                 .collect();
             let before = reached.len();
-            direct
+            // Against `out`, not `bodies`: reading the unexpanded map would
+            // follow exactly one level, so `a! -> b! -> c! -> helper` stops at
+            // `c` however often the loop runs.
+            let nested: Vec<String> = direct
                 .iter()
-                .filter_map(|n| bodies.get(n))
-                .for_each(|nested| reached.extend(nested.iter().cloned()));
+                .filter_map(|n| out.get(n))
+                .flat_map(|names| names.iter().cloned())
+                .collect();
+            reached.extend(nested);
             changed |= reached.len() != before;
             out.insert(name.clone(), reached.into_iter().collect());
         }

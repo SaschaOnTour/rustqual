@@ -249,6 +249,13 @@ pub(crate) fn analyze_test_quality(ctx: &TqContext<'_>) -> TqAnalysis {
     TqAnalysis { warnings }
 }
 
+/// Whether a coverage report at `path` can be read and parsed. The reporters
+/// say "measured" only when the answer really came from one.
+/// Trivial: delegates to the parser.
+pub(crate) fn coverage_is_readable(path: &std::path::Path) -> bool {
+    lcov::parse_lcov(path).is_ok()
+}
+
 /// The functions the coverage run actually executed. When a report is present
 /// this is measurement rather than inference: `FNDA` says a test ran the
 /// function, whatever the call graph could or could not follow — a generic
