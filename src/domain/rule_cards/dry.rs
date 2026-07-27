@@ -40,8 +40,8 @@ pub(super) const CARDS: &[RuleCard] = &[
     RuleCard {
         id: "DRY-006",
         title: "Dead type or constant detected",
-        detects: "A struct, enum, union, type alias, const or static nothing \
-            reaches: 'unused type' (no reference anywhere) or 'type test-only' \
+        detects: "A struct, enum, union, type alias, const or static that \
+            nothing reaches: 'unused type' (no reference anywhere) or 'type test-only' \
             (only test code reaches it). References are counted by name across \
             the whole workspace, including inside macro bodies and attribute \
             arguments, and inside doc-test fences (that code is compiled by \
