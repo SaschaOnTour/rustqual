@@ -294,3 +294,36 @@ fn coverage_seeds_the_tested_set() {
         "no report, no change to the call-graph answer"
     );
 }
+
+#[test]
+fn mangled_coverage_symbols_yield_their_function_name() {
+    use crate::adapters::analyzers::tq::lcov::symbol_base_names;
+    // `llvm-cov` writes v0-mangled symbols, so comparing them to a declared
+    // function's bare name never matched — the report was read and then thrown
+    // away. A closure or trait impl inside a function carries the outer name in
+    // the middle, so every segment counts.
+    let sym = "_RNvNtNtCs569pcWMmiue_17sv_test_contracts6suites19credential_provider20capture_secret_event";
+    assert!(symbol_base_names(sym).contains(&"capture_secret_event".to_string()));
+    // A symbol for a closure or trait impl *inside* the function runs the name
+    // straight into the next segment (`…capture_secret_eventNtB2_9BufWriter…`),
+    // so it yields a prefix rather than the name. Harmless: the function has its
+    // own entry, which is the one above.
+    let nested = "_RNvXNvNtNtCs569pcWMmiue_17sv_test_contracts6suites19credential_provider20capture_secret_eventNtB2_9BufWriterNtNtCsjk69aaednnH_3std2io5Write5flush";
+    assert!(symbol_base_names(nested)
+        .iter()
+        .any(|n| n.starts_with("capture_secret_event")));
+    assert_eq!(
+        symbol_base_names("plain_name"),
+        vec!["plain_name".to_string()]
+    );
+}
+
+#[test]
+fn a_monomorphised_symbol_yields_its_generic_function() {
+    use crate::adapters::analyzers::tq::lcov::symbol_base_names;
+    // The case a downstream issue asked about: LCOV records one symbol per
+    // instantiation, and the name runs straight into the type arguments. Full
+    // line coverage then cleared nothing, because no key ever matched.
+    let sym = "_RINvNtNtCs569pcWMmiue_17sv_test_contracts6suites15run_event_store12append_ticksNtNtCs7gCM0XvToDQ_21sv_adp_storage_sqlite7adapter13SqliteStorageEB1j_";
+    assert!(symbol_base_names(sym).contains(&"append_ticks".to_string()));
+}

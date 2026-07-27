@@ -72,3 +72,43 @@ pub(crate) fn parse_lcov(path: &Path) -> Result<HashMap<String, LcovFileData>, S
 
     Ok(result)
 }
+
+/// The identifiers inside a mangled LCOV symbol.
+///
+/// `llvm-cov` writes Rust's v0 mangling (`_RNvNtNtCs…20capture_secret_event`)
+/// or the legacy form (`_ZN…17h<hash>E`); a plain name is returned unchanged.
+/// Both encode the path as length-prefixed segments, but the crate
+/// disambiguator (`Cs569pcWMmiue_`) puts digits where a length would be, so the
+/// segments are read by splitting on digits rather than by trusting the counts.
+///
+/// Every run is yielded, not just the last: a symbol for a closure or a trait
+/// impl *inside* a function carries the function's name in the middle
+/// (`…capture_secret_event…BufWriter…flush`), and the outer name is the one
+/// that matters. Crate names, module names and mangling fragments come along —
+/// over-collection, which for the tested set only suppresses a finding.
+/// Operation: split on digits, no own calls.
+pub(crate) fn symbol_base_names(symbol: &str) -> Vec<String> {
+    if !symbol.starts_with("_R") && !symbol.starts_with("_ZN") {
+        return vec![symbol.to_string()];
+    }
+    symbol
+        .split(|c: char| c.is_ascii_digit())
+        .filter(|run| !run.is_empty())
+        .flat_map(|run| [run.to_string(), snake_prefix(run)])
+        .filter(|name| !name.is_empty())
+        .collect()
+}
+
+/// The leading snake_case part of a mangled run.
+///
+/// A monomorphised symbol runs the function name straight into the type
+/// arguments — `append_ticksNtNtCs…SqliteStorage` — so splitting on digits
+/// alone yields `append_ticksNtNtCs`. Rust function names are snake_case and
+/// the mangling appends CamelCase tags, so the first uppercase letter is the
+/// boundary. Emitted alongside the full run, never instead of it.
+/// Operation: prefix scan, no own calls.
+fn snake_prefix(run: &str) -> String {
+    run.chars()
+        .take_while(|c| !c.is_ascii_uppercase())
+        .collect()
+}
