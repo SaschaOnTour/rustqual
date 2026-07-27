@@ -19,8 +19,11 @@ spelled-out calls DRY-002 rewards.
   others: reported as an **exact** duplicate with not one callee in common. The
   vocabulary already conceded the principle for method calls
   ("name preserved (structurally significant)") and field access; the free
-  function call was the gap. Locals and parameters stay alpha-renamed, so only
-  the names that carry the meaning have to match.
+  function call was the gap. Locals and parameters stay alpha-renamed *in call
+  position too* — a callback parameter or a `let`-bound function value is a
+  local like any other, so `apply(f)` and `apply(callback)` stay the same body;
+  that needs the signature, which is why the duplicate collector now normalises
+  through `normalize_fn` and seeds the parameter names.
   *Known limit, now pinned by a test rather than folklore:* a multi-segment
   callee (`audit::check_append(s)`) still contributes no token at all. Naming it
   by its last segment would conflate `Config::default()` with
@@ -37,7 +40,11 @@ spelled-out calls DRY-002 rewards.
   the two-level shape the real thing has, resolved over the macro-reach closure
   that was already there. Only at an invocation of one of those macros is every
   ident harvested as a possible callee: the trigger is narrow so an ordinary
-  `assert_eq!(x, dead_helper)` still cannot vouch for a dead function.
+  `assert_eq!(x, dead_helper)` still cannot vouch for a dead function. Macros
+  that only quote their input are excluded — `stringify!($f())` produces the
+  text `"$f()"` and runs nothing, so reading it as a call would have excused a
+  plainly dead function. Nested macros are otherwise descended into, because
+  `println!("{}", $f())` really does run `$f`.
 
 ## [1.8.1] - 2026-07-26
 

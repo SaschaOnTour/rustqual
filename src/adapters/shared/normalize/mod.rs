@@ -21,13 +21,20 @@ pub use token::NormalizedToken;
 // ── Public API ──────────────────────────────────────────────────
 
 /// Normalize a function body into a flat token stream.
-/// Operation: creates normalizer inline (no own calls), delegates to syn visitor.
-pub fn normalize_body(body: &syn::Block) -> Vec<NormalizedToken> {
+///
+/// The parameter names are seeded into the identifier map first, so a callee
+/// that *is* a parameter — `fn apply(f: F) { f(x) }` — stays positional like
+/// every other local. Without the signature the body alone cannot tell a
+/// callback apart from a free function, and two identical higher-order
+/// functions would drift apart on a rename.
+/// Operation: seed + walk, own calls in the closure.
+pub fn normalize_fn(sig: &syn::Signature, body: &syn::Block) -> Vec<NormalizedToken> {
     let mut n = Normalizer {
         tokens: Vec::new(),
         ident_map: HashMap::new(),
         next_ident_id: 0,
     };
+    n.seed_bindings(sig);
     syn::visit::visit_block(&mut n, body);
     n.tokens
 }
@@ -112,6 +119,34 @@ impl Normalizer {
             self.ident_map.insert(name.to_string(), id);
             id
         }
+    }
+
+    /// Whether `name` is already known as a binding in this body — a parameter
+    /// seeded from the signature, or a `let` seen earlier. In callee position
+    /// that is what separates a callback from a free function; nothing in the
+    /// token stream itself does.
+    /// Operation: map lookup, no own calls.
+    fn is_bound(&self, name: &str) -> bool {
+        self.ident_map.contains_key(name)
+    }
+
+    /// Record the parameter names before the body is walked.
+    /// Operation: iteration over the inputs, own call hidden in the closure.
+    fn seed_bindings(&mut self, sig: &syn::Signature) {
+        let names: Vec<String> = sig
+            .inputs
+            .iter()
+            .filter_map(|arg| match arg {
+                syn::FnArg::Typed(t) => match &*t.pat {
+                    syn::Pat::Ident(p) => Some(p.ident.to_string()),
+                    _ => None,
+                },
+                syn::FnArg::Receiver(_) => None,
+            })
+            .collect();
+        names.iter().for_each(|n| {
+            self.resolve_ident(n);
+        });
     }
 }
 

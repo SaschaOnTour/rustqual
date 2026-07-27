@@ -402,3 +402,45 @@ fn run_snapshot(s: &S) {
     let groups = detect_duplicates(&parse(code), &low_threshold_config());
     assert_eq!(groups.len(), 1, "the limit, not the goal: {groups:?}");
 }
+
+#[test]
+fn a_callback_parameter_is_still_alpha_renamed() {
+    // Keeping the callee's name must not reach the case where the callee *is*
+    // a local: `f` and `callback` are the same parameter under two spellings,
+    // and the promise this check makes about locals and parameters has to hold
+    // in call position too. Otherwise two identical higher-order functions
+    // drift apart on a rename alone.
+    let code = r#"
+fn apply_here(f: F, x: u8, y: u8) {
+    f(x);
+    f(y);
+    f(x);
+}
+fn apply_there(callback: F, x: u8, y: u8) {
+    callback(x);
+    callback(y);
+    callback(x);
+}
+"#;
+    let groups = detect_duplicates(&parse(code), &low_threshold_config());
+    assert_eq!(groups.len(), 1, "a rename is not a difference: {groups:?}");
+}
+
+#[test]
+fn a_let_bound_callee_is_still_alpha_renamed() {
+    // The same for a local binding, which needs no signature to see.
+    let code = r#"
+fn run_here() {
+    let step = pick();
+    step(1);
+    step(2);
+}
+fn run_there() {
+    let chosen = pick();
+    chosen(1);
+    chosen(2);
+}
+"#;
+    let groups = detect_duplicates(&parse(code), &low_threshold_config());
+    assert_eq!(groups.len(), 1, "{groups:?}");
+}

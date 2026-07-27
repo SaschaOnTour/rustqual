@@ -197,6 +197,11 @@ pub fn all_idents(tokens: &TokenStream) -> impl Iterator<Item = String> {
     out.into_iter()
 }
 
+/// Macros whose body is turned into tokens or text rather than run. `$f()`
+/// inside one of these is not a call, and reading it as one lets the
+/// invocation excuse a function nothing ever executes.
+const NON_EXECUTING: [&str; 2] = ["stringify", "quote"];
+
 /// Whether these tokens use a metavariable in callee position: `$name(…)`.
 ///
 /// The transcriber of `macro_rules! step { ($t:path) => { $t(&make()); } }`
@@ -204,14 +209,25 @@ pub fn all_idents(tokens: &TokenStream) -> impl Iterator<Item = String> {
 /// to `$t` is the function that really runs, and no walk over the invocation
 /// can know that without first asking the definition — an ident followed by a
 /// comma is not in call position.
+///
+/// A nested macro is descended into, because `println!("{}", $f())` really does
+/// run `$f` — except for the ones that only quote their input: `stringify!($f())`
+/// produces the string `"$f()"` and calls nothing. Skipping *all* nested macros
+/// would be the safer-looking choice and the wrong one, since it would reopen
+/// the case this predicate exists for.
 /// Operation: positional token-tree scan, no own calls.
 pub fn calls_through_metavariable(tokens: &TokenStream) -> bool {
     let mut stack: Vec<TokenStream> = vec![tokens.clone()];
     while let Some(stream) = stack.pop() {
         let trees: Vec<TokenTree> = stream.into_iter().collect();
         for (i, tt) in trees.iter().enumerate() {
-            if let TokenTree::Group(g) = tt {
-                stack.push(g.stream());
+            let quoted = i >= 2
+                && matches!(&trees[i - 1], TokenTree::Punct(p) if p.as_char() == '!')
+                && matches!(&trees[i - 2], TokenTree::Ident(id)
+                    if NON_EXECUTING.contains(&id.to_string().as_str()));
+            match tt {
+                TokenTree::Group(g) if !quoted => stack.push(g.stream()),
+                _ => {}
             }
             let is_dollar = matches!(tt, TokenTree::Punct(p) if p.as_char() == '$');
             let names_a_call = matches!(trees.get(i + 1), Some(TokenTree::Ident(_)))

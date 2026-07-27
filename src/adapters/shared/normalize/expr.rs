@@ -54,10 +54,25 @@ impl Normalizer {
         match func {
             syn::Expr::Path(p) if p.path.segments.len() == 1 => {
                 let name = p.path.segments[0].ident.to_string();
-                self.tokens.push(NormalizedToken::Call(name));
+                self.push_callee(name);
             }
             other => self.visit_expr(other),
         }
+    }
+
+    /// A single-segment callee: its name, unless it is a local. A callback
+    /// parameter or a `let`-bound function value is a local like any other and
+    /// keeps its positional index — otherwise `apply(f)` and `apply(callback)`
+    /// would differ on a rename, which is exactly what alpha-renaming exists to
+    /// prevent.
+    /// Operation: one branch, own call in the arm.
+    fn push_callee(&mut self, name: String) {
+        if self.is_bound(&name) {
+            let id = self.resolve_ident(&name);
+            self.tokens.push(NormalizedToken::Ident(id));
+            return;
+        }
+        self.tokens.push(NormalizedToken::Call(name));
     }
 
     /// Binary, unary, and assignment operators. Operation: per-variant emission.

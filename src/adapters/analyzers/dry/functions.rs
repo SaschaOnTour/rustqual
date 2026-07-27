@@ -43,18 +43,19 @@ impl FunctionCollector<'_> {
     /// Operation: config checks + normalize/hash calls in closure (lenient).
     fn build_hash_entry(
         &self,
-        name: &str,
-        line: usize,
+        sig: &syn::Signature,
         body: &syn::Block,
         is_trait_impl: bool,
     ) -> Option<FunctionHashEntry> {
+        let name = sig.ident.to_string();
+        let line = sig.ident.span().start().line;
         if self.config.ignore_trait_impls && is_trait_impl {
             return None;
         }
 
         // Closure hides own calls to normalize_body/structural_hash (lenient mode).
         let compute = |b: &syn::Block| {
-            let tokens = crate::adapters::shared::normalize::normalize_body(b);
+            let tokens = crate::adapters::shared::normalize::normalize_fn(sig, b);
             let hash = crate::adapters::shared::normalize::structural_hash(&tokens);
             (tokens, hash)
         };
@@ -71,7 +72,7 @@ impl FunctionCollector<'_> {
         }
 
         let qualify = |parent: &Option<String>, n: &str| qualify_name(parent, n);
-        let qualified_name = qualify(&self.parent_type, name);
+        let qualified_name = qualify(&self.parent_type, &name);
 
         Some(FunctionHashEntry {
             name: name.to_string(),
@@ -87,9 +88,7 @@ impl FunctionCollector<'_> {
 
 impl<'ast> Visit<'ast> for FunctionCollector<'_> {
     fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
-        let name = node.sig.ident.to_string();
-        let line = node.sig.ident.span().start().line;
-        if let Some(entry) = self.build_hash_entry(&name, line, &node.block, false) {
+        if let Some(entry) = self.build_hash_entry(&node.sig, &node.block, false) {
             self.entries.push(entry);
         }
         syn::visit::visit_item_fn(self, node);
@@ -113,18 +112,14 @@ impl<'ast> Visit<'ast> for FunctionCollector<'_> {
     }
 
     fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
-        let name = node.sig.ident.to_string();
-        let line = node.sig.ident.span().start().line;
-        if let Some(entry) = self.build_hash_entry(&name, line, &node.block, self.is_trait_impl) {
+        if let Some(entry) = self.build_hash_entry(&node.sig, &node.block, self.is_trait_impl) {
             self.entries.push(entry);
         }
     }
 
     fn visit_trait_item_fn(&mut self, node: &'ast syn::TraitItemFn) {
         if let Some(ref block) = node.default {
-            let name = node.sig.ident.to_string();
-            let line = node.sig.ident.span().start().line;
-            if let Some(entry) = self.build_hash_entry(&name, line, block, true) {
+            if let Some(entry) = self.build_hash_entry(&node.sig, block, true) {
                 self.entries.push(entry);
             }
         }

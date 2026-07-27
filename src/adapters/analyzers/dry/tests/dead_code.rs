@@ -1479,3 +1479,40 @@ fn main() { used(); }
     assert_eq!(found.len(), 1, "{found:?}");
     assert_eq!(found[0].function_name, "dead_helper");
 }
+
+#[test]
+fn a_macro_that_only_stringifies_does_not_vouch_for_its_argument() {
+    // `stringify!($f())` turns the tokens into text and calls nothing. Reading
+    // every `$name(` in a macro body as a call classified this as
+    // call-through, and the invocation then excused a plainly dead function
+    // from DRY-002 and TQ-003 — a masked finding, which is the whole thing
+    // these checks exist to prevent.
+    let code = r#"
+macro_rules! name_of {
+    ($f:path) => { stringify!($f()) };
+}
+fn dead_helper() -> u8 { 1 }
+fn used() -> &'static str { name_of!(dead_helper) }
+fn main() { let _ = used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].function_name, "dead_helper");
+}
+
+#[test]
+fn a_macro_that_formats_the_result_still_calls_through() {
+    // The counterpart: `println!("{}", $f())` really does run `$f`. Excluding
+    // every nested macro would have re-opened the bug this fix closed, so only
+    // the token-to-text macros are excluded.
+    let code = r#"
+macro_rules! report {
+    ($f:path) => { println!("{}", $f()); };
+}
+fn live_helper() -> u8 { 1 }
+fn used() { report!(live_helper); }
+fn main() { used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    assert!(found.is_empty(), "{found:?}");
+}
