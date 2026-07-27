@@ -22,7 +22,6 @@ pub struct FragmentGroup {
 /// An individual fragment location within a function.
 #[derive(Debug, Clone)]
 pub struct FragmentEntry {
-    pub function_name: String,
     pub qualified_name: String,
     pub file: String,
     pub start_line: usize,
@@ -33,7 +32,6 @@ pub struct FragmentEntry {
 
 /// Metadata for a function whose body was scanned for fragments.
 pub(crate) struct FnInfo {
-    name: String,
     qualified_name: String,
     file: String,
     /// (start_line, end_line) for each top-level statement in the body.
@@ -226,14 +224,12 @@ fn make_fragment_group(
     FragmentGroup {
         entries: vec![
             FragmentEntry {
-                function_name: info_a.name.clone(),
                 qualified_name: info_a.qualified_name.clone(),
                 file: info_a.file.clone(),
                 start_line: a_start,
                 end_line: a_end,
             },
             FragmentEntry {
-                function_name: info_b.name.clone(),
                 qualified_name: info_b.qualified_name.clone(),
                 file: info_b.file.clone(),
                 start_line: b_start,
@@ -300,7 +296,6 @@ impl FragmentCollector<'_> {
 
         let fn_idx = self.fn_infos.len();
         self.fn_infos.push(FnInfo {
-            name: name.to_string(),
             qualified_name,
             file: self.file.clone(),
             stmt_lines,

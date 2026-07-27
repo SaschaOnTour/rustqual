@@ -4,7 +4,6 @@
 use super::super::json_types::{
     JsonArchitectureFinding, JsonOrphanSuppression, JsonSummary, JsonTqWarning,
 };
-use super::super::AnalysisResult;
 use crate::domain::findings::{ArchitectureFinding, TqFinding};
 
 pub(super) fn build_summary(s: &super::super::Summary) -> JsonSummary {

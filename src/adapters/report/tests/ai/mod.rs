@@ -3,10 +3,6 @@
 //! arch_common/make_reporter helpers live here and reach the sub-modules via
 //! `use super::*`.
 
-pub(super) use crate::adapters::analyzers::iosp::{
-    CallOccurrence, Classification, ComplexityMetrics, FunctionAnalysis, LogicOccurrence,
-    MagicNumberOccurrence,
-};
 pub(super) use crate::config::Config;
 pub(super) use crate::domain::analysis_data::FunctionRecord;
 pub(super) use crate::domain::findings::{

@@ -66,6 +66,11 @@ pub enum CanonicalType {
 impl CanonicalType {
     /// Construct a `Path` variant from any iterator of string-ish segments.
     /// Operation: pure mapping.
+    /// Only the tests construct or read this; keeping it live for them while
+    /// rustc's own lint sees a production build that never touches it. rustqual
+    /// still judges it — the `cfg_attr` wrapper is invisible to `dead_code_level`,
+    /// deliberately, so removing the last test would surface it as DRY-002/006.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn path<I, S>(segments: I) -> Self
     where
         I: IntoIterator<Item = S>,

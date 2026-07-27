@@ -22,7 +22,7 @@ use super::file_visibility::collect_file_root_visibility;
 use super::local_symbols::{collect_local_symbols_scoped, FileScope, LocalSymbols};
 use super::pub_fns_visibility::{collect_visible_type_canonicals_workspace, is_visible};
 use super::signature_params::extract_signature_params;
-use super::workspace_graph::{collect_crate_root_modules, resolve_impl_self_type};
+use super::workspace_graph::resolve_impl_self_type;
 use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
 use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
 use crate::adapters::shared::use_tree::{gather_alias_map_scoped, AliasMap};
@@ -36,8 +36,18 @@ pub(crate) struct PubFnInfo<'ast> {
     pub file: String,
     pub fn_name: String,
     pub line: usize,
+    /// Only the tests construct or read this; keeping it live for them while
+    /// rustc's own lint sees a production build that never touches it. rustqual
+    /// still judges it — the `cfg_attr` wrapper is invisible to `dead_code_level`,
+    /// deliberately, so removing the last test would surface it as DRY-002/006.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub body: &'ast syn::Block,
     /// Signature parameters, parallel to `FnContext.signature_params`.
+    /// Only the tests construct or read this; keeping it live for them while
+    /// rustc's own lint sees a production build that never touches it. rustqual
+    /// still judges it — the `cfg_attr` wrapper is invisible to `dead_code_level`,
+    /// deliberately, so removing the last test would surface it as DRY-002/006.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub signature_params: Vec<(String, &'ast syn::Type)>,
     /// Type-name path of the enclosing `impl`, if any. Forms the
     /// `Self::method` resolution context for the call collector.

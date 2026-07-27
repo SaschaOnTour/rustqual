@@ -6,7 +6,6 @@
 //! matched (macros are a distinct AST node).
 
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
-use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Find all macro invocations whose final path segment matches one of `names`.

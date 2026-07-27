@@ -1,7 +1,4 @@
 use crate::adapters::shared::normalize::*;
-use std::collections::{HashMap, HashSet};
-use std::hash::{Hash, Hasher};
-use syn::visit::Visit;
 
 /// Parse a function body from source code.
 fn parse_body(code: &str) -> syn::Block {

@@ -1,5 +1,4 @@
 use crate::adapters::config::sections::*;
-use serde::Deserialize;
 
 #[test]
 fn test_complexity_config_defaults() {

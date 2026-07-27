@@ -142,14 +142,12 @@ fn project_dry_emits_fragment_and_repeated_match_findings() {
     secondary.fragments = vec![FragmentGroup {
         entries: vec![
             FragmentEntry {
-                function_name: "a".into(),
                 qualified_name: "m::a".into(),
                 file: "src/x.rs".into(),
                 start_line: 1,
                 end_line: 8,
             },
             FragmentEntry {
-                function_name: "b".into(),
                 qualified_name: "m::b".into(),
                 file: "src/x.rs".into(),
                 start_line: 20,

@@ -33,15 +33,16 @@ impl AliasTarget {
     /// callers that build alias maps inline use this; the parser-side
     /// `collect_alias_entries` constructs them with the right
     /// `absolute_root` from the enclosing `ItemUse`.
+    /// Only the tests construct or read this; rustc's lint sees a production
+    /// build that never touches it. rustqual still judges it — `cfg_attr` is
+    /// invisible to `dead_code_level`, deliberately, so the day the last test
+    /// goes it surfaces as DRY-002/DRY-006 rather than staying silent.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn relative(segments: Vec<String>) -> Self {
         Self {
             segments,
             absolute_root: false,
         }
-    }
-
-    pub fn segments(&self) -> &[String] {
-        &self.segments
     }
 }
 

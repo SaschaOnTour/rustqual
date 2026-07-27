@@ -21,7 +21,6 @@
 
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use std::collections::HashSet;
-use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 const KIND_ASYNC_FN: &str = "async_fn";

@@ -203,3 +203,123 @@ fn an_exported_symbol_by_name_counts_too() {
                 pub static PLUGIN: Descriptor = Descriptor { name: \"x\" };";
     assert!(names(code).is_empty(), "{:?}", detect(code));
 }
+
+/// Detect over a two-file module tree: `parent` declares `mod child;`.
+fn detect_tree(parent_path: &str, parent: &str, child_path: &str, child: &str) -> Vec<String> {
+    let parsed = vec![
+        (
+            parent_path.to_string(),
+            parent.to_string(),
+            syn::parse_file(parent).expect("parse parent"),
+        ),
+        (
+            child_path.to_string(),
+            child.to_string(),
+            syn::parse_file(child).expect("parse child"),
+        ),
+    ];
+    detect_dead_types(&parsed, &Markers::new(), &Markers::new(), &HashSet::new())
+        .into_iter()
+        .map(|w| w.name)
+        .collect()
+}
+
+#[test]
+fn allow_dead_code_is_inherited_across_the_file_boundary() {
+    // A lint level covers everything below it, and rustc does not stop at the
+    // file a module happens to live in. Reading only the declaring file's own
+    // attributes reported declarations the author had excused one level up —
+    // a false finding by this check's own documented rule.
+    let found = detect_tree(
+        "src/lib.rs",
+        "pub mod inner;",
+        "src/inner.rs",
+        "#![allow(dead_code)]\npub struct Excused;",
+    );
+    assert!(found.is_empty(), "same file, the baseline: {found:?}");
+    let across = detect_tree(
+        "src/lib.rs",
+        "#![allow(dead_code)]\npub mod inner;",
+        "src/inner.rs",
+        "pub struct Excused;",
+    );
+    assert!(
+        across.is_empty(),
+        "inner attribute one level up: {across:?}"
+    );
+}
+
+#[test]
+fn an_allow_on_the_mod_declaration_covers_the_file_it_names() {
+    // The other spelling, and the more common one: the attribute sits on
+    // `mod child;` in the parent, while what it excuses lives in another file.
+    let found = detect_tree(
+        "src/lib.rs",
+        "#[allow(dead_code)]\npub mod inner;",
+        "src/inner.rs",
+        "pub struct Excused;",
+    );
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn an_inherited_allow_does_not_leak_to_a_sibling_module() {
+    // The restore half: one excused module must not silence the rest of the
+    // tree, or the inheritance would be worse than not having it.
+    let parsed = vec![
+        ("src/lib.rs", "#[allow(dead_code)]\npub mod a;\npub mod b;"),
+        ("src/a.rs", "pub struct Excused;"),
+        ("src/b.rs", "pub struct Reported;"),
+    ];
+    let parsed: Vec<(String, String, syn::File)> = parsed
+        .into_iter()
+        .map(|(p, c)| {
+            (
+                p.to_string(),
+                c.to_string(),
+                syn::parse_file(c).expect("parse"),
+            )
+        })
+        .collect();
+    let found: Vec<String> =
+        detect_dead_types(&parsed, &Markers::new(), &Markers::new(), &HashSet::new())
+            .into_iter()
+            .map(|w| w.name)
+            .collect();
+    assert_eq!(found, vec!["Reported".to_string()], "{found:?}");
+}
+
+#[test]
+fn a_deny_in_the_child_file_revokes_an_inherited_allow() {
+    // Rust resolves levels innermost-first across files exactly as within one,
+    // so the inheritance must be a level, not a one-way flag.
+    let found = detect_tree(
+        "src/lib.rs",
+        "#![allow(dead_code)]\npub mod inner;",
+        "src/inner.rs",
+        "#![deny(dead_code)]\npub struct MustBeUsed;",
+    );
+    assert_eq!(found, vec!["MustBeUsed".to_string()], "{found:?}");
+}
+
+#[test]
+fn the_inherited_allow_reaches_a_grandchild() {
+    // Levels are inherited all the way down, not one hop.
+    let parsed = vec![
+        ("src/lib.rs", "#![allow(dead_code)]\npub mod a;"),
+        ("src/a.rs", "pub mod b;"),
+        ("src/a/b.rs", "pub struct Excused;"),
+    ];
+    let parsed: Vec<(String, String, syn::File)> = parsed
+        .into_iter()
+        .map(|(p, c)| {
+            (
+                p.to_string(),
+                c.to_string(),
+                syn::parse_file(c).expect("parse"),
+            )
+        })
+        .collect();
+    let found = detect_dead_types(&parsed, &Markers::new(), &Markers::new(), &HashSet::new());
+    assert!(found.is_empty(), "{found:?}");
+}

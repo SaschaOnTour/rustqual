@@ -9,8 +9,9 @@
 
 use syn::visit::Visit;
 
-use super::allow_scope::AllowScope;
+use super::allow_scope::{AllowScope, DeadCodeLevel};
 use super::has_cfg_test;
+use super::inherited_allow::InheritedLevels;
 use crate::adapters::shared::declared_type::{DeclaredType, TypeItemKind};
 use crate::adapters::shared::file_visitor::FileVisitor;
 use crate::adapters::shared::item_shape::{impl_item_attrs, item_attrs, trait_item_attrs};
@@ -21,15 +22,19 @@ pub(crate) struct DeclaredTypeCollector {
     pub(crate) types: Vec<DeclaredType>,
     in_test: bool,
     allow: AllowScope,
+    /// The `dead_code` level each file arrives with, from the module that
+    /// declares it — a lint level does not stop at a file boundary.
+    inherited: InheritedLevels,
 }
 
 impl DeclaredTypeCollector {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(inherited: InheritedLevels) -> Self {
         Self {
             file: String::new(),
             types: Vec::new(),
             in_test: false,
             allow: AllowScope::default(),
+            inherited,
         }
     }
 
@@ -53,6 +58,12 @@ impl FileVisitor for DeclaredTypeCollector {
     fn reset_for_file(&mut self, file_path: &str) {
         self.file = file_path.to_string();
         self.in_test = false;
+        let inherited = self
+            .inherited
+            .get(file_path)
+            .copied()
+            .unwrap_or(DeadCodeLevel::Report);
+        self.allow = AllowScope::with_baseline(inherited);
     }
 }
 

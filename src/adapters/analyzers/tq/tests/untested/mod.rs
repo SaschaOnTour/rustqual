@@ -9,7 +9,6 @@ mod call_graph;
 mod coverage;
 
 use crate::adapters::analyzers::dry::dead_code::DeadCodeWarning;
-use crate::adapters::analyzers::tq::build_reaches_prod_set;
 use crate::adapters::analyzers::tq::untested::*;
 use crate::adapters::analyzers::tq::{TqWarning, TqWarningKind};
 use crate::adapters::shared::declared_function::DeclaredFunction;

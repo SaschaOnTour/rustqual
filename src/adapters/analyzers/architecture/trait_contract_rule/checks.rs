@@ -3,7 +3,6 @@
 use super::rendering::{receiver_kind, render_type, render_type_param_bound};
 use super::CompiledTraitContract;
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
-use syn::spanned::Spanned;
 
 /// Everything a check needs to know about one trait in one file.
 pub(super) struct TraitSite<'a> {

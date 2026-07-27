@@ -3,10 +3,9 @@
 //! helpers live here and reach the sub-modules via `use super::*`.
 
 pub(super) use crate::adapters::analyzers::iosp::{
-    CallOccurrence, Classification, ComplexityMetrics, FunctionAnalysis, LogicOccurrence,
+    CallOccurrence, Classification, ComplexityMetrics, LogicOccurrence,
 };
 pub(super) use crate::adapters::report::test_support::{make_analysis, make_result};
-pub(super) use crate::report::json::*;
 pub(super) use crate::report::AnalysisResult;
 
 mod functions;

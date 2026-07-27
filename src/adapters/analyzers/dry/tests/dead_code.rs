@@ -1,10 +1,6 @@
 use crate::adapters::analyzers::dry::dead_code::*;
-use crate::adapters::analyzers::dry::{has_cfg_test, has_test_attr, qualify_name};
-use crate::adapters::shared::declared_function::DeclaredFunction;
-use crate::adapters::shared::file_visitor::FileVisitor;
 use crate::config::Config;
 use std::collections::HashSet;
-use syn::visit::Visit;
 
 fn parse(code: &str) -> Vec<(String, String, syn::File)> {
     let syntax = syn::parse_file(code).expect("parse failed");
@@ -1386,4 +1382,37 @@ fn an_ffi_export_is_not_dead_code() {
         "#[unsafe(no_mangle)]\npub extern \"C\" fn plugin_entry() {}",
     ));
     assert!(edition_2024.is_empty(), "{edition_2024:?}");
+}
+
+#[test]
+fn allow_dead_code_is_inherited_across_the_file_boundary() {
+    // A lint level covers everything below it and does not stop at the file a
+    // module happens to live in. DRY-002 read only the declaring file's own
+    // attributes, so a function the author had excused one level up was still
+    // reported — a false finding by the rule this check documents.
+    let excused = parse2(
+        "src/lib.rs",
+        "#![allow(dead_code)]\npub mod inner;",
+        "src/inner.rs",
+        "pub fn unused() {}",
+    );
+    assert!(dead_code_warnings(&excused).is_empty());
+    let on_the_declaration = parse2(
+        "src/lib.rs",
+        "#[allow(dead_code)]\npub mod inner;",
+        "src/inner.rs",
+        "pub fn unused() {}",
+    );
+    assert!(dead_code_warnings(&on_the_declaration).is_empty());
+    let reported = parse2(
+        "src/lib.rs",
+        "pub mod inner;",
+        "src/inner.rs",
+        "pub fn unused() {}",
+    );
+    assert_eq!(
+        dead_code_warnings(&reported).len(),
+        1,
+        "without the allow it is still dead"
+    );
 }

@@ -64,6 +64,29 @@ Bugfix release for the marker verification 1.8.0 shipped.
   because the test-reached set only suppresses findings.
 
 ### Fixed
+- **A lint level is inherited across the file boundary (DRY-002, DRY-006).**
+  `#![allow(dead_code)]` at the top of `inner/mod.rs`, or
+  `#[allow(dead_code)] mod inner;` in the parent, covers everything the module
+  contains — including what lives in its child *files*. Both dead-code checks
+  read only the declaring file's own attributes, so a declaration the author
+  had excused one level up was still reported: a false finding by the rule the
+  checks themselves document, and the expensive direction. `dry/inherited_allow`
+  resolves the level each file arrives with, over the same module-tree walk that
+  propagates `#[cfg(test)]` (`shared::cfg_test_files::external_mods` +
+  `child_paths`), so the two cannot disagree about which file a `mod` names. The
+  level is a level, not a flag: a `#[deny]` in the child revokes an inherited
+  `#[allow]`, and `forbid` stays sticky.
+- **`src/adapters/**` is analysed again.** The subtree carried
+  `#![allow(dead_code, unused_imports)]` — a Phase-3 migration measure whose
+  Phase 5 never came. It silenced rustc across the bulk of the code, so
+  `RUSTFLAGS="-Dwarnings" cargo clippy` could not fail on an unused import or a
+  dead item there, and with the inheritance fix above it would have silenced
+  rustqual's own dead-code checks for the same subtree. Removing it surfaced 110
+  unused imports (gone) and a dozen unread fields and unreachable helpers. What
+  only the tests use now carries `#[cfg_attr(not(test), allow(dead_code))]`:
+  rustc is quiet for a production build while rustqual still judges it, because
+  `cfg_attr` is invisible to `dead_code_level` — the day the last test goes, the
+  item surfaces rather than staying hidden.
 - **Stale-marker output no longer guesses the exemption.** `dead_code_exempt`
   covers both a lint level and an export, and the explanation still said
   "carries #[allow(dead_code)]" — right verdict, provably wrong reason on a

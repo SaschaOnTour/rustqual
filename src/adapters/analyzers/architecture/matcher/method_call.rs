@@ -12,7 +12,6 @@
 //! `my_utils::unwrap(x)`) are rare and addressable by `qual:allow`.
 
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
-use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Find all method-call matches in the given parsed file.

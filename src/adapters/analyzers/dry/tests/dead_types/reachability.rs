@@ -4,7 +4,7 @@
 
 use std::collections::HashSet;
 
-use super::{detect, detect_with, markers, names, Markers};
+use super::{detect, names, Markers};
 use crate::adapters::analyzers::dry::dead_types::*;
 
 #[test]

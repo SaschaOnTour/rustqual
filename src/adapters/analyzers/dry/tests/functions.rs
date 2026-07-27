@@ -1,9 +1,6 @@
 use crate::adapters::analyzers::dry::functions::*;
 use crate::adapters::analyzers::dry::FunctionHashEntry;
 use crate::config::sections::DuplicatesConfig;
-use std::collections::HashMap;
-use syn::spanned::Spanned;
-use syn::visit::Visit;
 
 fn parse(code: &str) -> Vec<(String, String, syn::File)> {
     let syntax = syn::parse_file(code).expect("parse failed");

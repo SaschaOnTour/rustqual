@@ -21,7 +21,6 @@ pub use html::print_html;
 pub use json::print_json;
 pub use sarif::print_sarif;
 pub use suggestions::print_suggestions;
-pub use text::print_text;
 
 use crate::adapters::analyzers::iosp::{Classification, FunctionAnalysis};
 

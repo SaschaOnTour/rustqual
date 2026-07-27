@@ -3,7 +3,6 @@ use crate::adapters::analyzers::tq::{TqWarning, TqWarningKind};
 use crate::adapters::shared::declared_function::DeclaredFunction;
 use crate::adapters::shared::project_scope::ProjectScope;
 use std::collections::HashSet;
-use syn::visit::Visit;
 
 fn make_declared(name: &str, is_test: bool) -> DeclaredFunction {
     DeclaredFunction {

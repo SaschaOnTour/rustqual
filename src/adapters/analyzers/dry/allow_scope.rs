@@ -40,11 +40,20 @@ impl Default for AllowScope {
 }
 
 impl AllowScope {
+    /// Start with the level this file inherits from the module that declares
+    /// it — see `inherited_allow`. `Report` for a file no module chain reaches.
+    /// Operation: struct construction, no own calls.
+    pub(crate) fn with_baseline(inherited: DeadCodeLevel) -> Self {
+        Self { inherited }
+    }
+
     /// Start a file: its inner attributes (`#![allow(dead_code)]`) apply to
-    /// everything below.
-    /// Operation: level lookup, own call in the argument.
+    /// everything below, over whatever it inherited — a file's own `#[deny]`
+    /// revokes an `#[allow]` on the module that declares it, exactly as it
+    /// would one item up in the same file.
+    /// Trivial: delegates to `effective`.
     pub(crate) fn enter_file(&mut self, attrs: &[syn::Attribute]) {
-        self.inherited = dead_code_level(attrs).unwrap_or(DeadCodeLevel::Report);
+        self.inherited = self.effective(attrs);
     }
 
     /// Enter a scope-forming item, returning the level to restore afterwards.
@@ -68,14 +77,10 @@ impl AllowScope {
         self.effective(attrs) == DeadCodeLevel::Allow || is_export_root(attrs)
     }
 
-    /// The level in force for a declaration carrying `attrs`: its own, unless
-    /// the surrounding scope forbids, which nothing narrower may relax.
-    /// Operation: inherited-level dispatch, own call in the arm.
+    /// The level in force for a declaration carrying `attrs`.
+    /// Trivial: delegates to the free form.
     fn effective(&self, attrs: &[syn::Attribute]) -> DeadCodeLevel {
-        match self.inherited {
-            DeadCodeLevel::Forbid => DeadCodeLevel::Forbid,
-            inherited => dead_code_level(attrs).unwrap_or(inherited),
-        }
+        level_under(self.inherited, attrs)
     }
 }
 
@@ -111,4 +116,18 @@ fn wraps_export(attr: &syn::Attribute) -> bool {
     };
     crate::adapters::shared::macro_tokens::all_idents(&list.tokens)
         .any(|ident| EXPORT_ATTRS.contains(&ident.as_str()))
+}
+
+/// The level `attrs` set under an `inherited` one: their own, unless the
+/// surrounding scope forbids, which nothing narrower may relax.
+///
+/// Free rather than a method because the same rule applies one level up, where
+/// there is no scope object yet — `inherited_allow` combines a parent module's
+/// level with a `mod` declaration's attributes before any file is walked.
+/// Operation: inherited-level dispatch, own call in the arm.
+pub(crate) fn level_under(inherited: DeadCodeLevel, attrs: &[syn::Attribute]) -> DeadCodeLevel {
+    match inherited {
+        DeadCodeLevel::Forbid => DeadCodeLevel::Forbid,
+        inherited => dead_code_level(attrs).unwrap_or(inherited),
+    }
 }

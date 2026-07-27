@@ -2,7 +2,8 @@ use std::collections::HashSet;
 
 use syn::visit::Visit;
 
-use super::allow_scope::AllowScope;
+use super::allow_scope::{AllowScope, DeadCodeLevel};
+use super::inherited_allow::InheritedLevels;
 use super::{has_cfg_test, has_test_attr, qualify_name};
 use crate::adapters::shared::declared_function::DeclaredFunction;
 use crate::adapters::shared::file_visitor::FileVisitor;
@@ -19,10 +20,13 @@ pub(crate) struct DeclaredFnCollector {
     parent_type: Option<String>,
     is_trait_impl: bool,
     allow: AllowScope,
+    /// The `dead_code` level each file arrives with, from the module that
+    /// declares it — a lint level does not stop at a file boundary.
+    inherited: InheritedLevels,
 }
 
 impl DeclaredFnCollector {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(inherited: InheritedLevels) -> Self {
         Self {
             file: String::new(),
             functions: Vec::new(),
@@ -30,6 +34,7 @@ impl DeclaredFnCollector {
             parent_type: None,
             is_trait_impl: false,
             allow: AllowScope::default(),
+            inherited,
         }
     }
 }
@@ -38,6 +43,12 @@ impl FileVisitor for DeclaredFnCollector {
     fn reset_for_file(&mut self, file_path: &str) {
         self.file = file_path.to_string();
         self.in_test = false;
+        let inherited = self
+            .inherited
+            .get(file_path)
+            .copied()
+            .unwrap_or(DeadCodeLevel::Report);
+        self.allow = AllowScope::with_baseline(inherited);
         self.parent_type = None;
         self.is_trait_impl = false;
     }

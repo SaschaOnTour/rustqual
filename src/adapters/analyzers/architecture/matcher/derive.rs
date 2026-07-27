@@ -10,7 +10,6 @@
 //! `#[must_use]`). Other rules cover those.
 
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
-use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
 
 /// Find every `#[derive(Name)]` match in `ast`.

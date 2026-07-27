@@ -246,7 +246,7 @@ impl<'ast, 'a> Visit<'ast> for ImplMethodCollector<'a> {
             } else {
                 (Vec::new(), false)
             };
-        let Some(type_name) = self_ty_path.last().cloned() else {
+        let Some(_type_name) = self_ty_path.last().cloned() else {
             syn::visit::visit_item_impl(self, node);
             return;
         };
@@ -266,7 +266,7 @@ impl<'ast, 'a> Visit<'ast> for ImplMethodCollector<'a> {
 
         for item in &node.items {
             if let syn::ImplItem::Fn(method) = item {
-                if let Some(data) = method_field_data(method, &type_name, &key) {
+                if let Some(data) = method_field_data(method, &key) {
                     if is_bridge {
                         self.bridges.push(data);
                     } else {
@@ -282,11 +282,7 @@ impl<'ast, 'a> Visit<'ast> for ImplMethodCollector<'a> {
 /// Build the field/call footprint for one impl method, or `None` when it is
 /// neither an instance method nor a constructor (a plain associated fn — not a
 /// cohesion node). Operation: receiver/return classification + body walk.
-fn method_field_data(
-    method: &syn::ImplItemFn,
-    parent_type: &str,
-    owner_key: &str,
-) -> Option<MethodFieldData> {
+fn method_field_data(method: &syn::ImplItemFn, owner_key: &str) -> Option<MethodFieldData> {
     let is_instance = method.sig.receiver().is_some();
     let is_constructor = !is_instance && returns_self(&method.sig.output);
     if !is_instance && !is_constructor {
@@ -300,7 +296,6 @@ fn method_field_data(
     body_visitor.visit_block(&method.block);
     Some(MethodFieldData {
         method_name: method.sig.ident.to_string(),
-        parent_type: parent_type.to_string(),
         owner_key: owner_key.to_string(),
         field_accesses: body_visitor.field_accesses,
         call_targets: body_visitor.call_targets,

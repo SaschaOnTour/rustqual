@@ -223,7 +223,6 @@ fn one_entry_dup(suppressed: bool) -> DuplicateGroup {
 fn one_entry_frag(suppressed: bool) -> FragmentGroup {
     FragmentGroup {
         entries: vec![FragmentEntry {
-            function_name: "f".into(),
             qualified_name: "f".into(),
             file: "test.rs".into(),
             start_line: 1,

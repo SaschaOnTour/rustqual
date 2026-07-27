@@ -7,18 +7,13 @@ pub(crate) mod declared_types;
 pub(crate) mod doc_scan;
 pub mod fragments;
 pub mod functions;
+pub(crate) mod inherited_allow;
 pub(crate) mod liveness;
 pub(crate) mod macro_reach;
 pub mod match_patterns;
 pub(crate) mod split_names;
 pub(crate) mod type_references;
 pub mod wildcards;
-
-pub use boilerplate::BoilerplateFind;
-pub use dead_code::{DeadCodeKind, DeadCodeWarning};
-pub use dead_types::{DeadTypeKind, DeadTypeWarning};
-pub use fragments::FragmentGroup;
-pub use functions::{DuplicateGroup, DuplicateKind};
 
 use crate::adapters::shared::declared_function::DeclaredFunction;
 use crate::adapters::shared::file_visitor::visit_all_files;
@@ -55,7 +50,8 @@ pub(crate) fn collect_function_hashes(
 pub(crate) fn collect_declared_functions(
     parsed: &[(String, String, syn::File)],
 ) -> Vec<DeclaredFunction> {
-    let mut collector = dead_code::DeclaredFnCollector::new();
+    let mut collector =
+        dead_code::DeclaredFnCollector::new(inherited_allow::inherited_levels(parsed));
     visit_all_files(parsed, &mut collector);
     collector.functions
 }
@@ -72,7 +68,8 @@ pub(crate) fn collect_declared_types(
     parsed: &[(String, String, syn::File)],
     cfg_test_files: &std::collections::HashSet<String>,
 ) -> Vec<crate::adapters::shared::declared_type::DeclaredType> {
-    let mut collector = declared_types::DeclaredTypeCollector::new();
+    let mut collector =
+        declared_types::DeclaredTypeCollector::new(inherited_allow::inherited_levels(parsed));
     visit_all_files(parsed, &mut collector);
     let mut declared = collector.types;
     declared

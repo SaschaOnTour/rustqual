@@ -3,7 +3,7 @@ use crate::adapters::analyzers::iosp::{
 };
 use crate::adapters::analyzers::tq::coverage::*;
 use crate::adapters::analyzers::tq::lcov::LcovFileData;
-use crate::adapters::analyzers::tq::{TqWarning, TqWarningKind};
+use crate::adapters::analyzers::tq::TqWarningKind;
 use std::collections::HashMap;
 
 fn make_func(name: &str, file: &str, line: usize) -> FunctionAnalysis {

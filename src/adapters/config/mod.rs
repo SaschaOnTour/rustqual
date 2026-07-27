@@ -7,7 +7,6 @@ use serde::Deserialize;
 use std::path::Path;
 
 pub use architecture::ArchitectureConfig;
-pub use init::{generate_default_config, generate_tailored_config};
 use sections::DEFAULT_MAX_SUPPRESSION_RATIO;
 pub use sections::{
     BoilerplateConfig, ComplexityConfig, CouplingConfig, DuplicatesConfig, ReportConfig, SrpConfig,

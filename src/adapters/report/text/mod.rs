@@ -32,7 +32,6 @@ use crate::report::findings_list::{orphan_to_finding_entry, FindingEntry};
 
 use super::Summary;
 
-pub use files::format_files_section as files_section;
 use views::{ArchitectureView, CouplingTableView, CouplingView, DryView, SrpView, TqView};
 
 /// Text reporter — produces plain-text output for the terminal. Compact

@@ -13,9 +13,8 @@ use serde_json::{json, Value};
 
 use crate::domain::analysis_data::{FunctionRecord, ModuleCouplingRecord};
 use crate::domain::findings::{
-    ArchitectureFinding, ComplexityFinding, ComplexityFindingKind, CouplingFinding,
-    CouplingFindingDetails, DryFinding, DryFindingDetails, DryFindingKind, IospFinding, OrphanKind,
-    OrphanSuppression, SrpFinding, SrpFindingDetails, SrpFindingKind, TqFinding, TqFindingKind,
+    ArchitectureFinding, ComplexityFinding, CouplingFinding, DryFinding, IospFinding, OrphanKind,
+    OrphanSuppression, SrpFinding, TqFinding,
 };
 use crate::ports::reporter::{ReporterImpl, Snapshot};
 use crate::ports::Reporter;
@@ -305,6 +304,11 @@ pub fn build_sarif_string(analysis: &AnalysisResult) -> String {
 /// Build the SARIF v2.1.0 JSON value from an analysis result.
 /// Convenience wrapper for tests; production callers use
 /// `build_sarif_string` or `print_sarif`.
+/// Only the tests construct or read this; rustc's lint sees a production
+/// build that never touches it. rustqual still judges it — `cfg_attr` is
+/// invisible to `dead_code_level`, deliberately, so the day the last test
+/// goes it surfaces as DRY-002/DRY-006 rather than staying silent.
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn build_sarif_value(analysis: &AnalysisResult) -> Value {
     serde_json::from_str(&build_sarif_string(analysis))
         .unwrap_or_else(|e| json!({ "error": format!("SARIF parse failed: {e}") }))

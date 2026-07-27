@@ -3,12 +3,10 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::{make_declared, untested_via_graph};
+use super::make_declared;
 use crate::adapters::analyzers::dry::dead_code::DeadCodeWarning;
-use crate::adapters::analyzers::tq::build_reaches_prod_set;
 use crate::adapters::analyzers::tq::untested::*;
-use crate::adapters::analyzers::tq::{TqWarning, TqWarningKind};
-use crate::adapters::shared::declared_function::DeclaredFunction;
+use crate::adapters::analyzers::tq::TqWarningKind;
 
 #[test]
 fn coverage_seeds_the_tested_set() {

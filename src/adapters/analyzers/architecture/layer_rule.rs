@@ -29,7 +29,6 @@ use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use crate::adapters::shared::use_tree::gather_imports;
 use globset::{GlobMatcher, GlobSet};
 use std::collections::HashMap;
-use syn::spanned::Spanned;
 
 /// Behaviour when a file matches no layer glob.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

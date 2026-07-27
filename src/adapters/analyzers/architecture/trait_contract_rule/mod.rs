@@ -22,6 +22,11 @@ use globset::GlobSet;
 /// A compiled trait-contract rule, ready to run against parsed files.
 #[derive(Debug)]
 pub struct CompiledTraitContract {
+    /// Only the tests construct or read this; rustc's lint sees a production
+    /// build that never touches it. rustqual still judges it — `cfg_attr` is
+    /// invisible to `dead_code_level`, deliberately, so the day the last test
+    /// goes it surfaces as DRY-002/DRY-006 rather than staying silent.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub name: String,
     pub scope: GlobSet,
     pub receiver_may_be: Option<Vec<String>>,

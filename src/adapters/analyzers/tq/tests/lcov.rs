@@ -1,5 +1,4 @@
 use crate::adapters::analyzers::tq::lcov::*;
-use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;

@@ -6,7 +6,6 @@
 pub(super) use crate::adapters::analyzers::srp::module::*;
 pub(super) use crate::config::sections::SrpConfig;
 pub(super) use std::collections::HashMap;
-pub(super) use syn::visit::Visit;
 
 mod clusters;
 mod production_lines;
