@@ -107,8 +107,10 @@ pub(crate) struct JsonSummary {
     pub(crate) duplicate_groups: usize,
     pub(crate) dead_code_warnings: usize,
     pub(crate) dead_type_warnings: usize,
-    /// `"measured"` when a coverage report answered `untested`,
-    /// `"call-graph-only"` when it was inferred.
+    /// How `untested` was answered across the run: `"measured"` (a report
+    /// answered every one), `"coverage-augmented"` (a report was read, some
+    /// findings still came from the call graph) or `"call-graph-only"`. Each
+    /// TQ warning carries its own `coverage` — this one describes the run.
     pub(crate) coverage: String,
     pub(crate) fragment_groups: usize,
     pub(crate) boilerplate_warnings: usize,
