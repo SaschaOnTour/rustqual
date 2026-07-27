@@ -8,10 +8,6 @@ mod dimensions;
 
 pub(crate) use dimensions::*;
 
-use std::collections::BTreeMap;
-
-use crate::adapters::analyzers::iosp::Severity;
-
 #[derive(serde::Serialize)]
 pub(crate) struct JsonOutput {
     pub(crate) summary: JsonSummary,
