@@ -49,6 +49,11 @@ pub struct TextReporter<'a> {
     pub(crate) findings_entries: &'a [FindingEntry],
     pub(crate) verbose: bool,
     pub(crate) suggestions_text: Option<&'a str>,
+    /// Whether a coverage report was supplied. Without one, `untested` is
+    /// answered from the call graph alone, which cannot follow a macro it does
+    /// not expand — so the run says so rather than letting the reader assume
+    /// the answer is measured.
+    pub(crate) has_coverage: bool,
 }
 
 impl<'a> ReporterImpl for TextReporter<'a> {
@@ -135,6 +140,7 @@ impl<'a> ReporterImpl for TextReporter<'a> {
             out.push_str(&format_findings_list(&all_entries));
         }
         if !all_entries.is_empty() {
+            out.push_str(&coverage_hint(&all_entries, self.has_coverage));
             out.push_str(&suppression_footer());
         }
         if let Some(s) = self.suggestions_text {
@@ -155,6 +161,25 @@ fn suppression_footer() -> String {
      reason and re-fires when the code worsens.\n   \
      Rule details:       rustqual --explain <RULE-ID>   (e.g. rustqual --explain BP-009)\n   \
      Suppression syntax: rustqual --explain allow\n"
+        .to_string()
+}
+
+/// Told when `untested` findings were derived without a coverage report.
+///
+/// TQ-003 asks whether a test reaches the function, and without `--coverage` it
+/// can only answer from the call graph — which does not follow a macro it
+/// cannot expand, a trait object, or generated code. With a report it is
+/// measurement instead, so the reader should know which of the two they are
+/// looking at before deleting anything.
+/// Operation: presence check + constant, no own calls.
+fn coverage_hint(entries: &[FindingEntry], has_coverage: bool) -> String {
+    let untested = entries.iter().any(|e| e.category == "TQ_UNTESTED");
+    if has_coverage || !untested {
+        return String::new();
+    }
+    "\n── TQ_UNTESTED was derived from the call graph alone. Pass --coverage <lcov>\n   \
+     for a measured answer: a function a test reaches only through a macro, a\n   \
+     trait object or generated code is invisible here, but recorded there.\n"
         .to_string()
 }
 
@@ -225,6 +250,7 @@ pub fn print_text(
     findings_entries: &[FindingEntry],
     verbose: bool,
     suggestions_text: Option<&str>,
+    has_coverage: bool,
 ) {
     use crate::ports::Reporter;
     let reporter = TextReporter {
@@ -233,6 +259,7 @@ pub fn print_text(
         findings_entries,
         verbose,
         suggestions_text,
+        has_coverage,
     };
     print!("{}", reporter.render(&analysis.findings, &analysis.data));
 }

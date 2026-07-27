@@ -20,6 +20,12 @@ Bugfix release for the marker verification 1.8.0 shipped.
   report was read and thrown away. Names are read by splitting on the
   length prefixes and cutting at the CamelCase boundary, so every instantiation
   aggregates onto one base name.
+- **A run without `--coverage` says so when it reports `untested`.** TQ-003 is
+  answered from the call graph then, and the call graph does not follow a macro
+  rustqual cannot expand, a trait object, or generated code. With a report it is
+  measurement instead. The footer names the flag when — and only when — an
+  `untested` finding was derived without one, so the reader knows which of the
+  two answers they are looking at before deleting anything.
 - **TQ-004 (uncovered) works again — same cause, opposite effect.** It looked a
   function up by name in a map keyed by mangled symbols, so every lookup missed
   and the check silently never fired. Both consumers now read one aggregation,
