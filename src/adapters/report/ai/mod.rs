@@ -186,6 +186,12 @@ impl<'a> ReporterImpl for AiReporter<'a> {
         let mut value = json!({
             "version": env!("CARGO_PKG_VERSION"),
             "findings": total,
+            // How `untested` was answered. "measured" means a coverage report
+            // said a test ran the function; "call-graph-only" means it was
+            // inferred, and inference cannot follow a macro rustqual does not
+            // expand, a trait object, or generated code. A consumer deciding
+            // whether to delete something needs to know which it is holding.
+            "coverage": coverage_mode(self.config.test_quality.coverage_file.is_some()),
         });
         if total > 0 {
             value["findings_by_file"] = output::group_by_file(all_entries);
@@ -196,6 +202,14 @@ impl<'a> ReporterImpl for AiReporter<'a> {
                 serde_json::to_string(&value).unwrap_or_else(|_| format!("{value}"))
             }
         }
+    }
+}
+
+/// Operation: flag → token, no own calls.
+fn coverage_mode(measured: bool) -> &'static str {
+    match measured {
+        true => "measured",
+        false => "call-graph-only",
     }
 }
 

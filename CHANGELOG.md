@@ -20,12 +20,14 @@ Bugfix release for the marker verification 1.8.0 shipped.
   report was read and thrown away. Names are read by splitting on the
   length prefixes and cutting at the CamelCase boundary, so every instantiation
   aggregates onto one base name.
-- **A run without `--coverage` says so when it reports `untested`.** TQ-003 is
-  answered from the call graph then, and the call graph does not follow a macro
-  rustqual cannot expand, a trait object, or generated code. With a report it is
-  measurement instead. The footer names the flag when — and only when — an
-  `untested` finding was derived without one, so the reader knows which of the
-  two answers they are looking at before deleting anything.
+- **Every format states how `untested` was answered.** TQ-003 is measurement
+  when a coverage report is present and inference from the call graph when it is
+  not, and the call graph does not follow a macro rustqual cannot expand, a
+  trait object, or generated code. `json`, `ai` and `ai-json` carry
+  `coverage: "measured" | "call-graph-only"` — a field, not prose, because the
+  consumer deciding whether to delete something is usually a program. The text
+  footer names the flag when, and only when, an `untested` finding was derived
+  without a report.
 - **TQ-004 (uncovered) works again — same cause, opposite effect.** It looked a
   function up by name in a map keyed by mangled symbols, so every lookup missed
   and the check silently never fired. Both consumers now read one aggregation,

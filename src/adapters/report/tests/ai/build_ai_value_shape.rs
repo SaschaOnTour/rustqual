@@ -137,3 +137,18 @@ fn every_entry_has_the_same_keys() {
         "one row shape, or the table falls back to a list: {shapes:?}"
     );
 }
+
+#[test]
+fn the_envelope_states_how_untested_was_answered() {
+    // The agent-facing formats are where this matters most: a consumer deciding
+    // whether to delete something needs to know whether `untested` was measured
+    // or inferred, and a prose footer is the wrong shape for that.
+    let value = build_ai_value(&empty_analysis(), &Config::default());
+    assert_eq!(value["coverage"], "call-graph-only");
+    let mut config = Config::default();
+    config.test_quality.coverage_file = Some("lcov.info".into());
+    assert_eq!(
+        build_ai_value(&empty_analysis(), &config)["coverage"],
+        "measured"
+    );
+}

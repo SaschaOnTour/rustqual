@@ -83,6 +83,10 @@ pub struct Summary {
     pub dead_code_warnings: usize,
     /// Number of dead type / constant warnings (DRY-006).
     pub dead_type_warnings: usize,
+    /// Whether a coverage report was supplied. `untested` is measured when it
+    /// was and inferred from the call graph when it was not, and the two are
+    /// not equally good — every reporter says which one it is showing.
+    pub coverage_measured: bool,
     /// Number of individual entries across all duplicate fragment groups.
     pub fragment_groups: usize,
     /// Number of boilerplate pattern findings.
