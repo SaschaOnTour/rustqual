@@ -255,16 +255,19 @@ pub(crate) fn analyze_test_quality(ctx: &TqContext<'_>) -> TqAnalysis {
 /// helper reached only through a macro, a trait object, a build-time-generated
 /// caller. It only ever adds to the tested set, so a missing or stale report
 /// leaves the call-graph answer untouched.
-/// Operation: filter over the report, no own calls.
+///
+/// Reads the same per-name aggregation TQ-004 uses, so the two cannot disagree
+/// about which function a mangled symbol belongs to.
+/// Operation: filter over the aggregated report, own call in the closure.
 fn executed_under_test(
     coverage: Option<&std::collections::HashMap<String, lcov::LcovFileData>>,
 ) -> Vec<String> {
     coverage
         .into_iter()
         .flat_map(|files| files.values())
-        .flat_map(|file| file.function_hits.iter())
-        .filter(|(_, hits)| **hits > 0)
-        .flat_map(|(symbol, _)| lcov::symbol_base_names(symbol))
+        .flat_map(lcov::hits_by_function_name)
+        .filter(|(_, hits)| *hits > 0)
+        .map(|(name, _)| name)
         .collect()
 }
 

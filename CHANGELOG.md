@@ -19,7 +19,13 @@ Bugfix release for the marker verification 1.8.0 shipped.
   matched nothing, which is why full line coverage cleared no finding — the
   report was read and thrown away. Names are read by splitting on the
   length prefixes and cutting at the CamelCase boundary, so every instantiation
-  aggregates onto one base name. That answers the cases no call graph can:
+  aggregates onto one base name.
+- **TQ-004 (uncovered) works again — same cause, opposite effect.** It looked a
+  function up by name in a map keyed by mangled symbols, so every lookup missed
+  and the check silently never fired. Both consumers now read one aggregation,
+  so they cannot disagree about which function a symbol belongs to. Note the
+  direction: this *adds* findings, on projects whose coverage genuinely has
+  gaps. A function absent from the report is still skipped — no data, no claim. That answers the cases no call graph can:
   a helper reached only through a macro rustqual does not expand, a trait
   object, generated code. It only ever adds to the set, so a missing or stale
   report leaves the call-graph answer exactly as it was.
