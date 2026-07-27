@@ -15,6 +15,7 @@ fn render_text(results: &[FunctionAnalysis], verbose: bool) -> String {
         findings_entries: &[],
         verbose,
         suggestions_text: None,
+        has_coverage: true,
     };
     let findings = AnalysisFindings::default();
     let data = AnalysisData::default();
@@ -143,6 +144,7 @@ fn text_reporter_renders_orphans_via_snapshot_view() {
         findings_entries: &[],
         verbose: true,
         suggestions_text: None,
+        has_coverage: true,
     };
     let findings = AnalysisFindings {
         orphan_suppressions: vec![OrphanSuppression {
@@ -215,6 +217,7 @@ fn footer_with_findings_points_at_rule_cards_and_allow_guide() {
         findings_entries: &entries,
         verbose: false,
         suggestions_text: None,
+        has_coverage: true,
     };
     let out = reporter.render(&AnalysisFindings::default(), &AnalysisData::default());
     assert!(
@@ -264,6 +267,7 @@ fn orphan_not_double_counted_when_present_in_findings_entries() {
         findings_entries: &findings_entries,
         verbose: false,
         suggestions_text: None,
+        has_coverage: true,
     };
     let findings = AnalysisFindings {
         orphan_suppressions: vec![orphan],
@@ -274,5 +278,36 @@ fn orphan_not_double_counted_when_present_in_findings_entries() {
     assert_eq!(
         hits, 1,
         "orphan must render exactly once, not once per source; got {hits}:\n{output}"
+    );
+}
+
+#[test]
+fn untested_findings_without_coverage_say_so() {
+    // Without `--coverage`, TQ-003 is answered from the call graph, which
+    // cannot follow a macro it does not expand. The reader has to know which of
+    // the two answers they are looking at before deleting anything.
+    let entries = vec![FindingEntry {
+        file: "src/lib.rs".into(),
+        line: 3,
+        category: "TQ_UNTESTED",
+        function_name: "helper".into(),
+        detail: String::new(),
+    }];
+    let with_hint = coverage_hint(&entries, false);
+    assert!(
+        with_hint.contains("--coverage"),
+        "must name the flag: {with_hint}"
+    );
+    assert!(
+        coverage_hint(&entries, true).is_empty(),
+        "a measured answer needs no hint"
+    );
+    let others = vec![FindingEntry {
+        category: "DEAD_CODE",
+        ..entries[0].clone()
+    }];
+    assert!(
+        coverage_hint(&others, false).is_empty(),
+        "only the check that depends on coverage says it"
     );
 }

@@ -231,7 +231,14 @@ pub(crate) fn output_results(
         crate::cli::OutputFormat::AiJson => report::print_ai_json(analysis, config),
         crate::cli::OutputFormat::Text => {
             let findings_entries = collect_all_findings(analysis);
-            crate::report::text::print_text(analysis, &findings_entries, verbose, None);
+            let has_coverage = config.test_quality.coverage_file.is_some();
+            crate::report::text::print_text(
+                analysis,
+                &findings_entries,
+                verbose,
+                None,
+                has_coverage,
+            );
             if suggestions {
                 report::print_suggestions(&analysis.results);
             }
