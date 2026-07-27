@@ -7,7 +7,7 @@ use super::rows::{
     AiArchRow, AiComplexityRow, AiCouplingRow, AiDryRow, AiIospRow, AiSrpRow, AiTqRow,
 };
 use crate::config::Config;
-use crate::domain::findings::ComplexityFindingKind;
+use crate::domain::findings::{ComplexityFindingKind, TqFindingKind};
 
 pub(crate) fn format_iosp_entry(r: AiIospRow) -> Value {
     let logic_lines: Vec<String> = r
@@ -93,12 +93,24 @@ pub(crate) fn format_coupling_entry(r: AiCouplingRow) -> Value {
 
 pub(crate) fn format_tq_entry(r: AiTqRow) -> Value {
     let category = r.finding.kind.meta().ai_category;
+    // In `detail` rather than as its own key: every entry of every dimension
+    // shares one shape here, and a key only TQ carries would drop the whole
+    // findings table into the per-entry fallback. `--format json` has the
+    // structured field.
+    let detail = match r.finding.kind {
+        TqFindingKind::Untested => format!(
+            "{} [{}]",
+            r.finding.common.message,
+            r.finding.coverage.json()
+        ),
+        _ => r.finding.common.message.clone(),
+    };
     build_value_entry(
         &r.finding.common.file,
         r.finding.common.line,
         &r.function_name,
         category,
-        r.finding.common.message.clone(),
+        detail,
     )
 }
 

@@ -26,9 +26,24 @@ Bugfix release for the marker verification 1.8.0 shipped.
   trait object, or generated code. `json`, `ai` and `ai-json` carry
   `coverage: "measured" | "call-graph-only"` — a field, not prose, because the
   consumer deciding whether to delete something is usually a program.
-  "measured" follows the *parsed* report, not a configured path: a file that is
-  missing or unreadable makes the analysis fall back to the call graph silently,
-  and claiming measurement there is the belief this field exists to prevent. The text
+  The value follows what the report *answered*, per finding. Three earlier
+  versions of it missed: "does the path parse" said measured for any readable
+  text file (an LLVM-IR dump parses into an empty report); "did anything
+  execute anywhere" said measured for the whole run as soon as one unrelated
+  function had a hit; and requiring a positive hit then said *call-graph-only*
+  about a report of nothing but `FNDA:0` records — which is an answer, not a
+  silence. Run-level flag and per-finding evidence are now decided by the same
+  set, the function names the report mentions, so they cannot contradict each
+  other. Partial coverage is the normal case, so each `untested`
+  finding now carries its own evidence — `measured` when the report names that
+  function and recorded no execution, `call-graph` when the report never saw
+  it — and the run-level value has three states: `measured` (a report answered
+  every one), `coverage-augmented` (a report was read, some findings still came
+  from the call graph), `call-graph-only` (no usable report). `json` carries the
+  per-finding value as a field on every TQ warning; the `ai` formats put it in
+  `detail`, since one key only TQ carries would drop the findings table into the
+  per-entry fallback. The text footer now names how many findings were inferred
+  rather than only firing when no report was passed at all. The text
   footer names the flag when, and only when, an `untested` finding was derived
   without a report.
 - **TQ-004 (uncovered) works again — same cause, opposite effect.** It looked a
@@ -49,14 +64,50 @@ Bugfix release for the marker verification 1.8.0 shipped.
   because the test-reached set only suppresses findings.
 
 ### Fixed
-- **A type naming itself does not keep itself alive (DRY-006).**
+- **Stale-marker output no longer guesses the exemption.** `dead_code_exempt`
+  covers both a lint level and an export, and the explanation still said
+  "carries #[allow(dead_code)]" — right verdict, provably wrong reason on a
+  `#[no_mangle]` item. It now names both possibilities.
+- **`#[no_mangle]` and friends are live roots.** An FFI or plugin export is
+  reached by a linker, not by any line of Rust in the workspace, so "nothing
+  refers to it" is its normal state — rustc's own `dead_code` lint treats it as
+  a root. Reporting one was already a false finding for both dead-code checks;
+  with reachability it dragged everything the export names down with it. Both
+  spellings count, including Rust 2024's `#[unsafe(no_mangle)]`.
+- **A type is kept alive by being reached, not by being mentioned (DRY-006).**
   `struct Node { next: Option<Box<Node>> }` referenced `Node` in its own body,
   which counted as a use — so a linked list nobody builds stayed invisible,
-  while rustc calls the same type never constructed. A declaration's body no
-  longer counts its own name. A *cycle* still does: `A` naming `B` and `B`
-  naming `A` keep each other alive with no outside user, which needs
-  reachability from an external entry point rather than a name set, and is
-  recorded in the rule card as a known limit.
+  while rustc calls the same type never constructed. A cycle did the same one
+  step out: `A` naming `B` and `B` naming `A` kept each other alive with no
+  outside user, as did a ring of three, of four, of any length, and the shape
+  that occurs most in real code — two types whose `impl` methods convert between
+  each other. Suppressing the self-reference and then the mutual one would have
+  been a treadmill with a new rule per cycle length, so the flat name set became
+  a graph: every reference is attributed to the declaration whose body made it,
+  and the verdict is a walk from the roots (`dry/liveness.rs`). Cycle length is
+  no longer a parameter — a ring no root enters stays unmarked whatever its
+  size. Roots are references from code that is not itself a candidate (a
+  function body, a trait, a `use`); references made inside an `impl` belong to
+  the type the impl is for, since everything in it is only compiled because that
+  type is. Being `pub` is deliberately *not* a root — a public type nobody in
+  the workspace uses is the finding, and a library whose consumers live
+  elsewhere says so with `// qual:api`; neither is an owner the check does not
+  judge — `impl Ext for Vec<u8>` and `impl<T> Ext for T` name a foreign type and
+  a type parameter, so their bodies are rooted rather than tied to a verdict that
+  can never arrive. Declarations whose own liveness is not in
+  question — `#[allow(dead_code)]`, `qual:api`, a leading `_`, and
+  `qual:test_helper` — contribute their references without being marked alive
+  themselves, so a marked fixture keeps its field types alive while a fixture
+  nothing refers to is still reported. A cycle reached only from tests is reported as
+  test-only all the way down, never as unused.
+  *Upgrade note:* a public type tree nothing in the workspace enters now yields one
+  finding per type instead of one for the root. Both one-line remedies clear the
+  whole cluster: a `// qual:api` on the entry point, or a `pub use` of it from the
+  crate root. A blanket impl is not attributed
+  to its own type parameter, so `impl<Item> Ext for Item` cannot be tied to a
+  `struct Item` elsewhere in the workspace, and the marker check ignores a
+  declaration's mention of itself — a `qual:api` on a self-referential type is
+  doing its job precisely because nothing else names it.
 - **A `pub use` re-export is not a production call (TQ-003).** The call
   collector recorded a re-exported name as production usage, which DRY-002 needs
   — a re-exported function is not dead — but TQ-003 asks a different question:

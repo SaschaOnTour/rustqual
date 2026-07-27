@@ -14,7 +14,7 @@ fn make_declared(name: &str, is_test: bool) -> DeclaredFunction {
         is_test,
         is_main: false,
         is_trait_impl: false,
-        has_allow_dead_code: false,
+        dead_code_exempt: false,
         is_api: false,
         is_test_helper: false,
     }

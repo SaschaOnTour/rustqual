@@ -38,7 +38,10 @@ pub struct DeclaredType {
     pub line: usize,
     /// Declared in test code — a `#[cfg(test)]` module or a test-only file.
     pub is_test: bool,
-    pub has_allow_dead_code: bool,
+    /// Excused from the dead-code question by an attribute: an
+    /// `#[allow(dead_code)]` in force at the declaration, or an export
+    /// (`#[no_mangle]` and friends), which rustc treats as a live root.
+    pub dead_code_exempt: bool,
     /// Marked `// qual:api`: an entry point whose consumers live outside the
     /// analysed code, so having no in-workspace user is expected.
     pub is_api: bool,

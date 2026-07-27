@@ -35,4 +35,4 @@ pub use dry::{
 pub use iosp::{CallLocation, IospFinding, LogicLocation};
 pub use orphan::{MarkerKind, OrphanKind, OrphanSuppression};
 pub use srp::{ResponsibilityCluster, SrpFinding, SrpFindingDetails, SrpFindingKind};
-pub use tq::{TqFinding, TqFindingKind};
+pub use tq::{CoverageEvidence, TqFinding, TqFindingKind};

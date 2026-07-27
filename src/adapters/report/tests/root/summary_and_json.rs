@@ -273,3 +273,22 @@ fn test_baseline_roundtrip() {
     assert!(parsed["iosp_score"].as_f64().is_some());
     assert_eq!(parsed["violations"].as_u64().unwrap(), 1);
 }
+
+#[test]
+fn the_coverage_mode_distinguishes_partial_coverage() {
+    // Three states, not two. A report that covered every untested finding is
+    // measurement; a report that covered some of them is not, and calling it
+    // "measured" told a consumer that a call-graph guess had been verified.
+    let mut s = Summary::default();
+    assert_eq!(s.coverage_mode(), "call-graph-only");
+    s.coverage_measured = true;
+    assert_eq!(s.coverage_mode(), "measured");
+    s.tq_untested_call_graph_only = 1;
+    assert_eq!(s.coverage_mode(), "coverage-augmented");
+    s.coverage_measured = false;
+    assert_eq!(
+        s.coverage_mode(),
+        "call-graph-only",
+        "no report at all outranks the count"
+    );
+}

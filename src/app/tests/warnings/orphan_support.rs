@@ -116,6 +116,7 @@ pub(crate) fn make_tq_finding(
         kind,
         function_name: "test_it".into(),
         uncovered_lines: None,
+        coverage: crate::domain::findings::CoverageEvidence::NotApplicable,
     }
 }
 

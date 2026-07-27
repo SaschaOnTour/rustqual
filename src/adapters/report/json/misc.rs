@@ -25,10 +25,7 @@ pub(super) fn build_summary(s: &super::super::Summary) -> JsonSummary {
         duplicate_groups: s.duplicate_groups,
         dead_code_warnings: s.dead_code_warnings,
         dead_type_warnings: s.dead_type_warnings,
-        coverage: match s.coverage_measured {
-            true => "measured".to_string(),
-            false => "call-graph-only".to_string(),
-        },
+        coverage: s.coverage_mode().to_string(),
         fragment_groups: s.fragment_groups,
         boilerplate_warnings: s.boilerplate_warnings,
         srp_struct_warnings: s.srp_struct_warnings,
@@ -63,6 +60,7 @@ pub(super) fn build_tq(findings: &[TqFinding]) -> Vec<JsonTqWarning> {
             line: f.common.line,
             function_name: f.function_name.clone(),
             kind: f.kind.meta().json_kind.to_string(),
+            coverage: f.coverage.json().to_string(),
             suppressed: f.common.suppressed,
         })
         .collect()

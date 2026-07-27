@@ -93,7 +93,7 @@ fn a_marker_on_an_exempt_type_changes_nothing() {
     // `#[allow(dead_code)]` already excludes it from DRY-006, so the marker
     // cannot be doing any work.
     let mut d = declared_type("Kept", 10, true, false);
-    d.has_allow_dead_code = true;
+    d.dead_code_exempt = true;
     let out = detect_type(&[d], &HashSet::new(), &marker_lines(&[9]), &public_entry());
     assert_eq!(out.len(), 1, "{out:?}");
     assert!(out[0]
