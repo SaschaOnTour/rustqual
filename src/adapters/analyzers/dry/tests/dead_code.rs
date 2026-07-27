@@ -40,9 +40,9 @@ fn collected_calls(code: &str) -> (HashSet<String>, HashSet<String>) {
     let calls = collect_all_calls(&parsed, &cfg_test_files);
     // The helper keeps the pre-split shape: a re-export is production usage for
     // every consumer but TQ-003.
-    let mut production = calls.production;
+    let mut production = calls.refs.production;
     production.extend(calls.reexported);
-    (production, calls.tests)
+    (production, calls.refs.tests)
 }
 
 /// Run dead-code detection over `parsed` with the default config and no
@@ -1371,4 +1371,19 @@ fn allow_dead_code_is_inherited_from_an_enclosing_impl() {
         found.iter().all(|w| w.function_name != "helper"),
         "impl-level allow covers its methods: {found:?}"
     );
+}
+
+#[test]
+fn an_ffi_export_is_not_dead_code() {
+    // The counterpart of the DRY-006 case: an exported function's caller is a
+    // linker, so no call site exists in the workspace by design. Both spellings
+    // count, including Rust 2024's `#[unsafe(no_mangle)]`.
+    let bare = dead_code_warnings(&parse(
+        "#[no_mangle]\npub extern \"C\" fn plugin_entry() {}",
+    ));
+    assert!(bare.is_empty(), "{bare:?}");
+    let edition_2024 = dead_code_warnings(&parse(
+        "#[unsafe(no_mangle)]\npub extern \"C\" fn plugin_entry() {}",
+    ));
+    assert!(edition_2024.is_empty(), "{edition_2024:?}");
 }

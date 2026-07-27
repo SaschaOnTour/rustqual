@@ -269,7 +269,7 @@ fn test_collect_declared_functions_allow_dead_code() {
     let parsed = parse(code);
     let declared = collect_declared_functions(&parsed);
     assert_eq!(declared.len(), 1);
-    assert!(declared[0].has_allow_dead_code);
+    assert!(declared[0].dead_code_exempt);
 }
 
 #[test]
@@ -282,7 +282,7 @@ fn test_collect_declared_functions_allow_dead_code_in_list() {
     let declared = collect_declared_functions(&parsed);
     assert_eq!(declared.len(), 1);
     assert!(
-        declared[0].has_allow_dead_code,
+        declared[0].dead_code_exempt,
         "dead_code inside a multi-lint allow list must be detected"
     );
 }
@@ -294,5 +294,5 @@ fn test_collect_declared_functions_allow_list_without_dead_code() {
     let parsed = parse(code);
     let declared = collect_declared_functions(&parsed);
     assert_eq!(declared.len(), 1);
-    assert!(!declared[0].has_allow_dead_code);
+    assert!(!declared[0].dead_code_exempt);
 }

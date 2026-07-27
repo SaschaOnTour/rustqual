@@ -78,16 +78,31 @@ By default, the dead-code analysis treats a package's `tests/**` files as call-s
 ## Dead types and constants
 
 `DRY-006` asks the same question of everything that is not a function: a
-`struct`, `enum`, `union`, type alias, `const` or `static` that no name in the
-workspace refers to. References are counted across macro bodies and attribute
+`struct`, `enum`, `union`, type alias, `const` or `static` that nothing in the
+workspace reaches. References are counted across macro bodies and attribute
 arguments too, and a type's own `impl` blocks deliberately do not count —
 carrying methods keeps nothing alive, which is the same verdict rustc reaches
 with "never constructed".
 
+*Reaches*, not *mentions*: being named is only evidence if whoever named it is
+reached in turn. Two types that refer to each other, a ring of three, or the
+common shape where the mutual references sit in `impl` methods — none of them
+keeps anything alive without an entry point from outside the group. The walk
+starts at references made from code that is not itself a candidate (a function
+body, a trait, a `use`), and at declarations that are excused anyway
+(`#[allow(dead_code)]`, `qual:api`, `qual:test_helper`), so what those name keeps
+its user — one marker on the entry point covers the cluster behind it. Being
+`pub` is deliberately not an entry point: a public type nobody in the workspace
+uses is exactly the finding, and a library whose consumers live elsewhere says
+so with `// qual:api`.
+
 The value over rustc's own `dead_code` lint is the crate boundary: a `pub` type
 nobody in the workspace uses is invisible to the compiler. Deliberate
 exceptions take `#[allow(dead_code)]`, and a leading underscore (`_Marker`) is
-honoured exactly as rustc honours it.
+honoured exactly as rustc honours it. Exports — `#[no_mangle]`, `#[used]`,
+`#[export_name]`, in either spelling — are exempt without any marker, in both
+dead-code checks: their caller is a linker, so having no call site in the
+workspace is the normal state.
 
 Traits are out of scope: every `impl Trait for X` names the trait, so a trait
 with one implementation would always look used.

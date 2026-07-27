@@ -42,7 +42,7 @@ impl DeclaredTypeCollector {
             file: self.file.clone(),
             line: name.span().start().line,
             is_test: self.in_test || has_cfg_test(attrs),
-            has_allow_dead_code: self.allow.covers(attrs),
+            dead_code_exempt: self.allow.covers(attrs),
             is_api: false,
             is_test_helper: false,
         });

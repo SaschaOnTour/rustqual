@@ -71,7 +71,7 @@ impl CallTargetCollector {
             .and_then(|s| self.macro_reach.get(&s.ident.to_string()))
             .cloned()
             .unwrap_or_default();
-        self.names.tests.extend(reached);
+        self.names.refs.tests.extend(reached);
     }
 
     /// Extract function names referenced by serde field attributes.
@@ -207,7 +207,7 @@ impl<'ast> Visit<'ast> for CallTargetCollector {
         // test-side usage, and folding it into production would report every
         // marker on a test-only helper as spent.
         let target = match self.names.in_test {
-            true => &mut self.names.tests,
+            true => &mut self.names.refs.tests,
             false => &mut self.names.reexported,
         };
         // Iterative UseTree walk

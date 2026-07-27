@@ -60,7 +60,11 @@ fn tq_targeted_suppression_is_per_kind() {
     assert!(tq_targeted(5, TqWarningKind::NoAssertion, "no_assertion"));
     assert!(!tq_targeted(5, TqWarningKind::NoAssertion, "untested"));
     // An untested target silences an Untested warning.
-    assert!(tq_targeted(5, TqWarningKind::Untested, "untested"));
+    assert!(tq_targeted(
+        5,
+        TqWarningKind::Untested { measured: false },
+        "untested"
+    ));
 }
 
 #[test]
@@ -71,7 +75,7 @@ fn count_tq_warnings_splits_by_kind() {
         warnings: vec![
             warning(1, TqWarningKind::NoAssertion, false),
             warning(2, TqWarningKind::NoSut, false),
-            warning(3, TqWarningKind::Untested, false),
+            warning(3, TqWarningKind::Untested { measured: false }, false),
             warning(4, TqWarningKind::Uncovered, false),
             warning(
                 5,

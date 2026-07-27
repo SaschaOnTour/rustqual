@@ -151,6 +151,7 @@ fn rich_findings() -> AnalysisFindings {
             kind: TqFindingKind::NoAssertion,
             function_name: "t".into(),
             uncovered_lines: None,
+            coverage: crate::domain::findings::CoverageEvidence::NotApplicable,
         }],
         architecture: vec![ArchitectureFinding {
             common: common(Dimension::Architecture),

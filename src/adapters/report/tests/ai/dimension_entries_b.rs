@@ -80,6 +80,7 @@ fn build_test_quality_emit_correct_categories() {
         kind: TqFindingKind::NoAssertion,
         function_name: "test_fn".into(),
         uncovered_lines: None,
+        coverage: crate::domain::findings::CoverageEvidence::NotApplicable,
     };
     let config = Config::default();
     let data = crate::domain::AnalysisData::default();

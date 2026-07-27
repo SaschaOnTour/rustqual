@@ -44,8 +44,8 @@ pub(super) fn compute_tq(
     // TQ-003 asks whether production *calls* a function, so a `pub use`
     // re-export does not qualify it — the marker check and DRY-002 do want the
     // re-export, since there the question is whether anything uses it at all.
-    let prod_calls = calls.production;
-    let test_calls = calls.tests;
+    let prod_calls = calls.refs.production;
+    let test_calls = calls.refs.tests;
     let mut used_in_production = prod_calls.clone();
     used_in_production.extend(calls.reexported);
     let coverage_path = config
@@ -88,8 +88,14 @@ fn detect_stale_markers(
     mark_annotated(&mut declared_types, annotation_lines.test_helper, |d| {
         d.is_test_helper = true
     });
-    let (prod_refs, _) =
-        crate::adapters::analyzers::dry::collect_type_references(parsed, &cfg_test_files);
+    // Flattened: verifying a marker asks whether production *mentions* the name
+    // at all, which is a weaker question than reachability — a mention from a
+    // declaration that turns out to be dead itself still means the marker is
+    // not the thing keeping the item from a finding.
+    let prod_refs =
+        crate::adapters::analyzers::dry::collect_reference_graph(parsed, &cfg_test_files)
+            .flatten()
+            .production;
     let reach = crate::adapters::shared::reachability::compute_external_reach(parsed);
     crate::app::stale_markers::detect_stale_marker_orphans(
         &crate::app::stale_markers::MarkerContext {
@@ -135,7 +141,7 @@ fn tq_target_name(kind: &crate::adapters::analyzers::tq::TqWarningKind) -> &'sta
     match kind {
         K::NoAssertion => "no_assertion",
         K::NoSut => "no_sut",
-        K::Untested => "untested",
+        K::Untested { .. } => "untested",
         K::Uncovered => "uncovered",
         K::UntestedLogic { .. } => "untested_logic",
     }
@@ -156,8 +162,13 @@ pub(super) fn count_tq_warnings(
                 summary.tq_no_assertion_warnings += 1
             }
             crate::adapters::analyzers::tq::TqWarningKind::NoSut => summary.tq_no_sut_warnings += 1,
-            crate::adapters::analyzers::tq::TqWarningKind::Untested => {
-                summary.tq_untested_warnings += 1
+            crate::adapters::analyzers::tq::TqWarningKind::Untested { measured } => {
+                summary.tq_untested_warnings += 1;
+                // Counted here rather than derived later: only the warning knows
+                // whether the report covered *this* function, and the coverage
+                // mode every format prints is exactly "did any finding have to
+                // fall back to the call graph".
+                summary.tq_untested_call_graph_only += usize::from(!measured);
             }
             crate::adapters::analyzers::tq::TqWarningKind::Uncovered => {
                 summary.tq_uncovered_warnings += 1

@@ -52,7 +52,7 @@ impl<'ast> Visit<'ast> for DeclaredFnCollector {
             is_main: name == "main",
             is_test: self.in_test || has_test_attr(&node.attrs) || has_cfg_test(&node.attrs),
             is_trait_impl: false,
-            has_allow_dead_code: self.allow.covers(&node.attrs),
+            dead_code_exempt: self.allow.covers(&node.attrs),
             is_api: false,
             is_test_helper: false,
             name,
@@ -93,7 +93,7 @@ impl<'ast> Visit<'ast> for DeclaredFnCollector {
             is_main: false,
             is_test: self.in_test || has_test_attr(&node.attrs) || has_cfg_test(&node.attrs),
             is_trait_impl: self.is_trait_impl,
-            has_allow_dead_code: self.allow.covers(&node.attrs),
+            dead_code_exempt: self.allow.covers(&node.attrs),
             is_api: false,
             is_test_helper: false,
             name,
@@ -111,7 +111,7 @@ impl<'ast> Visit<'ast> for DeclaredFnCollector {
                 is_main: false,
                 is_test: self.in_test,
                 is_trait_impl: true,
-                has_allow_dead_code: false,
+                dead_code_exempt: false,
                 is_api: false,
                 is_test_helper: false,
                 name,
@@ -204,9 +204,9 @@ pub fn detect_dead_code(
     mark_test_helper_declarations(&mut declared, test_helper_lines);
     let calls = collect_all_calls(parsed, cfg_test_files);
     // A re-export is usage for DRY-002: a re-exported function is not dead.
-    let mut prod_calls = calls.production;
+    let mut prod_calls = calls.refs.production;
     prod_calls.extend(calls.reexported);
-    let test_calls = calls.tests;
+    let test_calls = calls.refs.tests;
     let uncalled = find_uncalled(&declared, &prod_calls, &test_calls);
     let test_only = find_test_only(&declared, &prod_calls, &test_calls);
     merge_warnings(uncalled, test_only)
@@ -330,7 +330,7 @@ fn find_test_only(
 /// flagging so the user sees that their annotation is stale.
 /// Operation: boolean logic combining multiple exclusion criteria.
 fn should_exclude_uncalled(d: &DeclaredFunction) -> bool {
-    d.is_main || d.is_test || d.is_trait_impl || d.has_allow_dead_code || d.is_api
+    d.is_main || d.is_test || d.is_trait_impl || d.dead_code_exempt || d.is_api
 }
 
 /// Check if a declared function should be excluded from the TestOnly

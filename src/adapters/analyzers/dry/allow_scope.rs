@@ -61,11 +61,11 @@ impl AllowScope {
         self.inherited = previous;
     }
 
-    /// Whether a declaration carrying `attrs` is excused — by its own level or
-    /// by the one it inherits.
-    /// Trivial: delegates to `effective`.
+    /// Whether a declaration carrying `attrs` is excused — by its own lint
+    /// level, by the one it inherits, or by being an export.
+    /// Operation: two conditions, own calls in the operands.
     pub(crate) fn covers(&self, attrs: &[syn::Attribute]) -> bool {
-        self.effective(attrs) == DeadCodeLevel::Allow
+        self.effective(attrs) == DeadCodeLevel::Allow || is_export_root(attrs)
     }
 
     /// The level in force for a declaration carrying `attrs`: its own, unless
@@ -77,4 +77,38 @@ impl AllowScope {
             inherited => dead_code_level(attrs).unwrap_or(inherited),
         }
     }
+}
+
+/// Whether these attributes make the item reachable from outside the compiled
+/// artefact, which rustc's own `dead_code` lint treats as a live root.
+///
+/// `#[no_mangle]`, `#[used]` and `#[export_name = "…"]` are how an FFI or
+/// plugin boundary is spelled: the caller is a linker, not any line of Rust in
+/// the workspace, so "nothing refers to it" is the normal state and reporting
+/// it is a false finding. Since reachability, the mistake no longer costs one
+/// line but everything the export names.
+///
+/// Rust 2024 requires the `#[unsafe(no_mangle)]` spelling, so both forms are
+/// read — a check that knew only the bare one would expire at the next edition
+/// bump.
+/// Operation: attribute scan, own calls in the closure.
+pub(crate) fn is_export_root(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|a| {
+        let path = a.path();
+        EXPORT_ATTRS.iter().any(|n| path.is_ident(n))
+            || (path.is_ident("unsafe") && wraps_export(a))
+    })
+}
+
+/// The attribute names that make an item a linker-visible root.
+const EXPORT_ATTRS: [&str; 3] = ["no_mangle", "used", "export_name"];
+
+/// Whether an `#[unsafe(…)]` wrapper carries one of them.
+/// Operation: token scan, own call in the closure.
+fn wraps_export(attr: &syn::Attribute) -> bool {
+    let syn::Meta::List(list) = &attr.meta else {
+        return false;
+    };
+    crate::adapters::shared::macro_tokens::all_idents(&list.tokens)
+        .any(|ident| EXPORT_ATTRS.contains(&ident.as_str()))
 }

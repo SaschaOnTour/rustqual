@@ -279,31 +279,23 @@ fn orphan_not_double_counted_when_present_in_findings_entries() {
 
 #[test]
 fn untested_findings_without_coverage_say_so() {
-    // Without `--coverage`, TQ-003 is answered from the call graph, which
-    // cannot follow a macro it does not expand. The reader has to know which of
-    // the two answers they are looking at before deleting anything.
-    let entries = vec![FindingEntry {
-        file: "src/lib.rs".into(),
-        line: 3,
-        category: "TQ_UNTESTED",
-        function_name: "helper".into(),
-        detail: String::new(),
-    }];
-    let with_hint = coverage_hint(&entries, false);
+    // Without a report covering them, TQ-003 findings are answered from the
+    // call graph, which cannot follow a macro it does not expand. The reader
+    // has to know which of the two answers they are looking at before deleting
+    // anything — and the trigger is the count, not the mere presence of a
+    // report: partial coverage is the normal case, and one that names some
+    // other function says nothing about these.
+    let with_hint = coverage_hint(2);
     assert!(
         with_hint.contains("--coverage"),
         "must name the flag: {with_hint}"
     );
     assert!(
-        coverage_hint(&entries, true).is_empty(),
-        "a measured answer needs no hint"
+        with_hint.contains('2'),
+        "says how many were inferred: {with_hint}"
     );
-    let others = vec![FindingEntry {
-        category: "DEAD_CODE",
-        ..entries[0].clone()
-    }];
     assert!(
-        coverage_hint(&others, false).is_empty(),
-        "only the check that depends on coverage says it"
+        coverage_hint(0).is_empty(),
+        "every finding measured needs no hint"
     );
 }

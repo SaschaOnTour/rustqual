@@ -203,6 +203,7 @@ fn test_collect_test_quality_uncovered() {
         kind: TqFindingKind::Uncovered,
         function_name: "uncovered_fn".into(),
         uncovered_lines: None,
+        coverage: crate::domain::findings::CoverageEvidence::NotApplicable,
     }];
     let findings = collect_all_findings(&analysis);
     assert_eq!(findings.len(), 1);

@@ -26,12 +26,19 @@ pub(crate) fn build_transitive_tested_set(
 }
 
 /// Detect production functions that are called from prod but never from any test (TQ-003).
+///
+/// `in_report` are the functions the coverage run knows about at all, hits or
+/// not. A finding for one of them is measurement — the report recorded that it
+/// never ran; a finding for a function the report never mentions came from the
+/// call graph alone, and only the finding itself can say which, since a report
+/// covering some other function proves nothing here.
 /// Operation: set comparison logic, no own calls.
 pub(crate) fn detect_untested_functions(
     declared_fns: &[DeclaredFunction],
     prod_calls: &HashSet<String>,
     transitive_tested: &HashSet<String>,
     dead_code: &[DeadCodeWarning],
+    in_report: &HashSet<String>,
 ) -> Vec<TqWarning> {
     // Dead code functions are already flagged — skip them for TQ-003
     let dead_names: HashSet<&str> = dead_code.iter().map(|d| d.function_name.as_str()).collect();
@@ -41,7 +48,7 @@ pub(crate) fn detect_untested_functions(
         .filter(|f| {
             !f.is_test
                 && !f.is_main
-                && !f.has_allow_dead_code
+                && !f.dead_code_exempt
                 && !f.is_api
                 && !f.is_test_helper
                 && !f.is_trait_impl
@@ -53,7 +60,9 @@ pub(crate) fn detect_untested_functions(
             file: f.file.clone(),
             line: f.line,
             function_name: f.name.clone(),
-            kind: TqWarningKind::Untested,
+            kind: TqWarningKind::Untested {
+                measured: in_report.contains(&f.name),
+            },
             suppressed: false,
         })
         .collect()

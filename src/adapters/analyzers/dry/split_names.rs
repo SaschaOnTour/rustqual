@@ -13,11 +13,33 @@ use syn::visit::Visit;
 
 use super::{has_cfg_test, has_test_attr};
 
+/// Names seen in production code and names seen only in test code.
+///
+/// The pair on its own, without the walker state around it: `SplitNames` is one
+/// of these plus the switch, and `liveness::ReferenceGraph` keeps one per
+/// declaration. Both mean the same thing by the two sets, so they say it once.
+#[derive(Debug, Default)]
+pub(crate) struct ContextRefs {
+    pub(crate) production: HashSet<String>,
+    pub(crate) tests: HashSet<String>,
+}
+
+impl ContextRefs {
+    /// The set for a given context.
+    /// Operation: one branch, no own calls.
+    pub(crate) fn set(&mut self, in_test: bool) -> &mut HashSet<String> {
+        if in_test {
+            &mut self.tests
+        } else {
+            &mut self.production
+        }
+    }
+}
+
 /// The two sets plus the switch between them.
 #[derive(Default)]
 pub(crate) struct SplitNames {
-    pub(crate) production: HashSet<String>,
-    pub(crate) tests: HashSet<String>,
+    pub(crate) refs: ContextRefs,
     /// Names a `pub use` re-exports. Usage, but not a *call*: DRY-002 needs it
     /// so a re-exported function is not called dead, while TQ-003 asks whether
     /// production calls the function and must not count it.
@@ -26,22 +48,10 @@ pub(crate) struct SplitNames {
 }
 
 impl SplitNames {
-    /// The test set, whatever the current context. Doc examples are code
-    /// `cargo test` compiles and runs, so what they name is a test reference
-    /// even though the documented item is production code.
-    /// Operation: field access, no own calls.
-    pub(crate) fn test_target(&mut self) -> &mut HashSet<String> {
-        &mut self.tests
-    }
-
     /// The set for the current context.
-    /// Operation: one branch, no own calls.
+    /// Trivial: delegates to the pair.
     pub(crate) fn target(&mut self) -> &mut HashSet<String> {
-        if self.in_test {
-            &mut self.tests
-        } else {
-            &mut self.production
-        }
+        self.refs.set(self.in_test)
     }
 
     /// Enter an item that may be test-only, returning the context to restore

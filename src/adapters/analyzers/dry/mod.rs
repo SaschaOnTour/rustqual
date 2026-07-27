@@ -7,6 +7,7 @@ pub(crate) mod declared_types;
 pub(crate) mod doc_scan;
 pub mod fragments;
 pub mod functions;
+pub(crate) mod liveness;
 pub(crate) mod macro_reach;
 pub mod match_patterns;
 pub(crate) mod split_names;
@@ -87,7 +88,7 @@ pub(crate) fn collect_declared_types(
 // (multi-dimension utility). Re-exports keep existing call sites working.
 pub(crate) use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
 
-pub(crate) use type_references::collect_type_references;
+pub(crate) use type_references::collect_reference_graph;
 
 /// The `dead_code` lint level these attributes set, or `None` when they say
 /// nothing about it and the surrounding scope decides.

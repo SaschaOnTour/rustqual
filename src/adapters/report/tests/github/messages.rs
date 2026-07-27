@@ -199,6 +199,7 @@ fn tq_view_drops_suppressed_rows() {
         kind: TqFindingKind::NoAssertion,
         function_name: "t".into(),
         uncovered_lines: None,
+        coverage: crate::domain::findings::CoverageEvidence::NotApplicable,
     };
     let mut suppressed = live.clone();
     suppressed.common.file = "supp.rs".into();

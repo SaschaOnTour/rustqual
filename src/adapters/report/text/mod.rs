@@ -135,7 +135,7 @@ impl<'a> ReporterImpl for TextReporter<'a> {
             out.push_str(&format_findings_list(&all_entries));
         }
         if !all_entries.is_empty() {
-            out.push_str(&coverage_hint(&all_entries, self.summary.coverage_measured));
+            out.push_str(&coverage_hint(self.summary.tq_untested_call_graph_only));
             out.push_str(&suppression_footer());
         }
         if let Some(s) = self.suggestions_text {
@@ -159,23 +159,26 @@ fn suppression_footer() -> String {
         .to_string()
 }
 
-/// Told when `untested` findings were derived without a coverage report.
+/// Told when `untested` findings were derived without a coverage report — or
+/// without one that covered them.
 ///
-/// TQ-003 asks whether a test reaches the function, and without `--coverage` it
-/// can only answer from the call graph — which does not follow a macro it
-/// cannot expand, a trait object, or generated code. With a report it is
-/// measurement instead, so the reader should know which of the two they are
-/// looking at before deleting anything.
-/// Operation: presence check + constant, no own calls.
-fn coverage_hint(entries: &[FindingEntry], has_coverage: bool) -> String {
-    let untested = entries.iter().any(|e| e.category == "TQ_UNTESTED");
-    if has_coverage || !untested {
+/// TQ-003 asks whether a test reaches the function, and without a report it can
+/// only answer from the call graph, which does not follow a macro it cannot
+/// expand, a trait object, or generated code. Counting the findings rather than
+/// asking whether a report exists is the point: partial coverage is the normal
+/// case, and a report naming some other function says nothing about this one.
+/// Operation: count check + message, no own calls.
+fn coverage_hint(call_graph_only: usize) -> String {
+    if call_graph_only == 0 {
         return String::new();
     }
-    "\n── TQ_UNTESTED was derived from the call graph alone. Pass --coverage <lcov>\n   \
-     for a measured answer: a function a test reaches only through a macro, a\n   \
-     trait object or generated code is invisible here, but recorded there.\n"
-        .to_string()
+    format!(
+        "\n── Coverage did not answer {call_graph_only} of the TQ_UNTESTED findings above: no\n   \
+         report names those functions, so the call graph decided alone. Pass\n   \
+         --coverage <lcov>, or extend the one you passed — a function a test\n   \
+         reaches only through a macro, a trait object or generated code is\n   \
+         invisible here, but recorded there.\n"
+    )
 }
 
 /// Format the findings list with heading.

@@ -47,7 +47,7 @@ pub(super) fn declared_type(name: &str, line: usize, api: bool, helper: bool) ->
         file: "src/lib.rs".to_string(),
         line,
         is_test: false,
-        has_allow_dead_code: false,
+        dead_code_exempt: false,
         is_api: api,
         is_test_helper: helper,
     }
@@ -64,7 +64,7 @@ pub(super) fn declared(name: &str, line: usize, api: bool, helper: bool) -> Decl
         is_test: false,
         is_main: false,
         is_trait_impl: false,
-        has_allow_dead_code: false,
+        dead_code_exempt: false,
         is_api: api,
         is_test_helper: helper,
     }
