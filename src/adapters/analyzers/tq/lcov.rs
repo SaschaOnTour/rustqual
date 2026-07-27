@@ -72,3 +72,77 @@ pub(crate) fn parse_lcov(path: &Path) -> Result<HashMap<String, LcovFileData>, S
 
     Ok(result)
 }
+
+/// The identifiers inside a mangled LCOV symbol.
+///
+/// `llvm-cov` writes Rust's v0 mangling (`_RNvCs…13sha256_digest`) or the
+/// legacy form (`_ZN…17h<hash>E`); a plain name is returned unchanged. Both
+/// encode the path as `<len><name>` segments, so the lengths are read rather
+/// than guessed — splitting on digits would cut `sha256_digest` into `sha` and
+/// `_digest`, and any name with a digit in it with them.
+///
+/// A length is only accepted when it yields a plausible identifier that ends
+/// where the next segment or tag begins. That rejects the crate disambiguator
+/// (`Cs569pcWMmiue_`), whose base-62 body puts digits where a length would be.
+/// Operation: length-prefixed scan, no own calls.
+pub(crate) fn symbol_base_names(symbol: &str) -> Vec<String> {
+    if !symbol.starts_with("_R") && !symbol.starts_with("_ZN") {
+        return vec![symbol.to_string()];
+    }
+    let chars: Vec<char> = symbol.chars().collect();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < chars.len() {
+        match read_segment(&chars, i) {
+            Some((name, next)) => {
+                out.push(name);
+                i = next;
+            }
+            None => i += 1,
+        }
+    }
+    out
+}
+
+/// One `<len><name>` segment at `at`, with the index after it. `None` when the
+/// digits there are not a length — a disambiguator's base-62 body, or a count
+/// that would run past the end or over something that is not an identifier.
+/// Operation: bounds and shape checks, no own calls.
+fn read_segment(chars: &[char], at: usize) -> Option<(String, usize)> {
+    if !chars[at].is_ascii_digit() || chars[at] == '0' {
+        return None;
+    }
+    let mut end = at;
+    while end < chars.len() && chars[end].is_ascii_digit() {
+        end += 1;
+    }
+    let len: usize = chars[at..end].iter().collect::<String>().parse().ok()?;
+    let stop = end.checked_add(len).filter(|s| *s <= chars.len())?;
+    let name: String = chars[end..stop].iter().collect();
+    let starts_ok = name.starts_with(|c: char| c.is_alphabetic() || c == '_');
+    let body_ok = name.chars().all(|c| c.is_alphanumeric() || c == '_');
+    // A segment ends where the next length or tag begins; anything else means
+    // the digits were not a length.
+    let ends_ok = chars
+        .get(stop)
+        .is_none_or(|c| c.is_ascii_digit() || c.is_ascii_uppercase());
+    (starts_ok && body_ok && ends_ok).then_some((name, stop))
+}
+
+/// Execution counts keyed by function name rather than by mangled symbol.
+///
+/// One entry per monomorphisation becomes one entry per function: if any
+/// instantiation ran, the function ran. Every identifier a symbol yields gets
+/// the count, so a module or crate name collects hits too — harmless, since
+/// only declared function names are ever looked up, and an inflated count can
+/// only suppress a finding.
+/// Operation: fold over the raw symbols, own call in the closure.
+pub(crate) fn hits_by_function_name(data: &LcovFileData) -> HashMap<String, u64> {
+    let mut out: HashMap<String, u64> = HashMap::new();
+    data.function_hits.iter().for_each(|(symbol, hits)| {
+        symbol_base_names(symbol).into_iter().for_each(|name| {
+            *out.entry(name).or_insert(0) += hits;
+        });
+    });
+    out
+}

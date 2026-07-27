@@ -21,7 +21,6 @@ pub use html::print_html;
 pub use json::print_json;
 pub use sarif::print_sarif;
 pub use suggestions::print_suggestions;
-pub use text::print_text;
 
 use crate::adapters::analyzers::iosp::{Classification, FunctionAnalysis};
 
@@ -83,6 +82,13 @@ pub struct Summary {
     pub dead_code_warnings: usize,
     /// Number of dead type / constant warnings (DRY-006).
     pub dead_type_warnings: usize,
+    /// Whether a coverage report contributed anything at all.
+    pub coverage_measured: bool,
+    /// How many `untested` findings the report did not cover, so the call graph
+    /// answered them alone. Partial coverage is the normal case, and a report
+    /// naming some other function proves nothing about this one — without this,
+    /// one positive hit anywhere labelled every finding "measured".
+    pub tq_untested_call_graph_only: usize,
     /// Number of individual entries across all duplicate fragment groups.
     pub fragment_groups: usize,
     /// Number of boilerplate pattern findings.
@@ -131,6 +137,23 @@ pub struct Summary {
 }
 
 impl Summary {
+    /// How `untested` was answered across this run.
+    ///
+    /// Three states, not two: `"measured"` only when a report answered every
+    /// one of them, `"coverage-augmented"` when a report was read but some
+    /// findings still came from the call graph — partial coverage is the normal
+    /// case, and one positive hit somewhere is no evidence about a function the
+    /// report never names. Individual findings carry their own
+    /// `CoverageEvidence`; this is the summary of them.
+    /// Operation: two-field dispatch, no own calls.
+    pub fn coverage_mode(&self) -> &'static str {
+        match (self.coverage_measured, self.tq_untested_call_graph_only) {
+            (false, _) => "call-graph-only",
+            (true, 0) => "measured",
+            (true, _) => "coverage-augmented",
+        }
+    }
+
     pub fn from_results(results: &[FunctionAnalysis]) -> Self {
         let mut s = Self {
             total: results.len(),
@@ -251,6 +274,6 @@ impl Summary {
 }
 
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;
 #[cfg(test)]
 mod tests;

@@ -56,7 +56,7 @@ pub struct DryView {
 
 // DRY row types live in `report::projections::dry` and are shared.
 pub(crate) use crate::adapters::report::projections::dry::{
-    BoilerplateRow, DeadCodeRow, DryGroupRow, ParticipantRow, WildcardRow,
+    BoilerplateRow, DeadCodeRow, DryGroupRow, WildcardRow,
 };
 
 // ── SRP ────────────────────────────────────────────────────────────

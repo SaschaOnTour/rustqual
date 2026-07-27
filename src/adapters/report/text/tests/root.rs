@@ -276,3 +276,26 @@ fn orphan_not_double_counted_when_present_in_findings_entries() {
         "orphan must render exactly once, not once per source; got {hits}:\n{output}"
     );
 }
+
+#[test]
+fn untested_findings_without_coverage_say_so() {
+    // Without a report covering them, TQ-003 findings are answered from the
+    // call graph, which cannot follow a macro it does not expand. The reader
+    // has to know which of the two answers they are looking at before deleting
+    // anything — and the trigger is the count, not the mere presence of a
+    // report: partial coverage is the normal case, and one that names some
+    // other function says nothing about these.
+    let with_hint = coverage_hint(2);
+    assert!(
+        with_hint.contains("--coverage"),
+        "must name the flag: {with_hint}"
+    );
+    assert!(
+        with_hint.contains('2'),
+        "says how many were inferred: {with_hint}"
+    );
+    assert!(
+        coverage_hint(0).is_empty(),
+        "every finding measured needs no hint"
+    );
+}

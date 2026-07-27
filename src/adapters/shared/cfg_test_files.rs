@@ -124,10 +124,15 @@ fn integration_test_files(parsed: &ParsedRefs<'_>) -> HashSet<String> {
 /// One out-of-line `mod name;` a file declares, with what locating and
 /// classifying it needs: the inline `mod {}` chain enclosing it, and whether
 /// any block in that chain carries `#[cfg(test)]`.
-struct ExternalMod<'a> {
-    inline_stack: Vec<String>,
-    under_cfg_test: bool,
-    item: &'a syn::ItemMod,
+///
+/// Shared rather than private because two things propagate down the same
+/// module tree: test context, and the `dead_code` lint level (`dry`'s
+/// `inherited_allow`). One walk, so the two cannot disagree about which file a
+/// `mod` names.
+pub(crate) struct ExternalMod<'a> {
+    pub(crate) inline_stack: Vec<String>,
+    pub(crate) under_cfg_test: bool,
+    pub(crate) item: &'a syn::ItemMod,
 }
 
 /// Every out-of-line `mod name;` in a file, descending through inline
@@ -136,7 +141,7 @@ struct ExternalMod<'a> {
 /// in *its* directory, not the file's.
 /// Integration: per-item delegation.
 // qual:recursive
-fn external_mods<'a>(
+pub(crate) fn external_mods<'a>(
     items: &'a [syn::Item],
     inline_stack: &[String],
     under_cfg_test: bool,

@@ -3,7 +3,7 @@ use crate::adapters::analyzers::iosp::{
 };
 use crate::adapters::analyzers::tq::coverage::*;
 use crate::adapters::analyzers::tq::lcov::LcovFileData;
-use crate::adapters::analyzers::tq::{TqWarning, TqWarningKind};
+use crate::adapters::analyzers::tq::TqWarningKind;
 use std::collections::HashMap;
 
 fn make_func(name: &str, file: &str, line: usize) -> FunctionAnalysis {
@@ -281,4 +281,23 @@ fn test_multiple_uncovered_logic_lines_one_warning() {
         }
         _ => panic!("expected UntestedLogic"),
     }
+}
+
+#[test]
+fn coverage_lookup_aggregates_monomorphisations() {
+    use crate::adapters::analyzers::tq::lcov::{hits_by_function_name, LcovFileData};
+    // TQ-004 looked a function up by its bare name in a map keyed by mangled
+    // symbols, so it matched nothing and never fired. Instantiations aggregate
+    // onto the function: if any of them ran, the function ran.
+    let a = "_RINvNtNtCs569pcWMmiue_17sv_test_contracts6suites15run_event_store12append_ticksNtNtCs7gCM0XvToDQ_21sv_adp_storage_sqlite7adapter13SqliteStorageEB1j_";
+    let b = "_RINvNtNtCsgRGDab5B9eV_17sv_test_contracts6suites15run_event_store12append_ticksNtNtB4_21run_event_store_tests19InlineRunEventStoreEB6_";
+    let hits: std::collections::HashMap<String, u64> =
+        [(a.to_string(), 2u64), (b.to_string(), 3u64)]
+            .into_iter()
+            .collect();
+    let by_name = hits_by_function_name(&LcovFileData {
+        function_hits: hits,
+        line_hits: std::collections::HashMap::new(),
+    });
+    assert_eq!(by_name.get("append_ticks"), Some(&5), "both instantiations");
 }

@@ -6,9 +6,7 @@ use super::super::bindings::CanonScope;
 use super::super::file_visibility::collect_file_root_visibility;
 use super::super::local_symbols::{collect_local_symbols_scoped, FileScope, LocalSymbols};
 use super::super::pub_fns_visibility::{collect_visible_type_canonicals_workspace, is_visible};
-use super::super::workspace_graph::{
-    canonical_fn_name, collect_crate_root_modules, resolve_impl_self_type,
-};
+use super::super::workspace_graph::{canonical_fn_name, resolve_impl_self_type};
 use crate::adapters::analyzers::architecture::layer_rule::LayerDefinitions;
 use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
 use crate::adapters::shared::use_tree::{gather_alias_map_scoped, AliasMap};

@@ -176,6 +176,15 @@ fn finalize_summary(
     suppression_lines: &std::collections::HashMap<String, Vec<crate::findings::Suppression>>,
     parsed: &[(String, String, syn::File)],
 ) {
+    // Not `is_some()`, and not "does it parse" either: a path that is missing,
+    // unreadable, or readable but carries no executed function — an LLVM-IR
+    // dump parses into an empty report — leaves the analysis on the call graph,
+    // and claiming "measured" there is the belief this field exists to prevent.
+    summary.coverage_measured = config
+        .test_quality
+        .coverage_file
+        .as_ref()
+        .is_some_and(|p| crate::adapters::analyzers::tq::coverage_is_measured(Path::new(p)));
     summary.compute_quality_score(&config.weights.as_array());
     summary.all_suppressions = count_all_suppressions(suppression_lines, parsed);
     summary.suppression_ratio_exceeded = check_suppression_ratio(

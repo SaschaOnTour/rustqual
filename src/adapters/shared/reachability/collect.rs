@@ -47,6 +47,12 @@ pub(super) struct ModuleTree {
     pub reachable_files: HashSet<String>,
     pub reexports: Vec<ReexportUse>,
     pub globs: Vec<GlobUse>,
+    /// `(file, owner, method)`. A method is reachable exactly when its owner
+    /// is, which the `pub mod` chain alone cannot answer: the common façade
+    /// puts a type in a private module and re-exports it at the crate root, so
+    /// the file is in no public chain while the type — and therefore every
+    /// method on it — is callable from outside.
+    pub methods: Vec<(String, String, String)>,
 }
 
 /// Where the walk currently is.
@@ -169,6 +175,43 @@ impl Walk<'_> {
         if let Some(name) = named {
             self.tree.pub_items.insert((scope.file.to_string(), name));
         }
+        self.associated_names(scope, item);
+    }
+
+    /// Methods, which are `ImplItem`s and `TraitItem`s rather than items — an
+    /// item-level walk never sees them, and `qual:api` sits on a method more
+    /// often than on anything else.
+    ///
+    /// A method's own `pub` is recorded without checking that its type is
+    /// nameable. That over-approximates, which is this module's stated
+    /// direction: an item wrongly called reachable costs a missed finding, one
+    /// wrongly called unreachable accuses an author of writing a marker that
+    /// could never work. Integration: shape dispatch.
+    fn associated_names(&mut self, scope: Scope<'_>, item: &syn::Item) {
+        match item {
+            syn::Item::Impl(i) => {
+                let owner = self_type_name(&i.self_ty);
+                let names = impl_method_names(&i.items, i.trait_.is_some());
+                self.record_methods(scope, owner, names);
+            }
+            syn::Item::Trait(t) => {
+                let owner = Some(t.ident.to_string());
+                self.record_methods(scope, owner, trait_method_names(&t.items));
+            }
+            _ => {}
+        }
+    }
+
+    /// Operation: bulk insert against the owning type, no own calls.
+    fn record_methods(&mut self, scope: Scope<'_>, owner: Option<String>, names: Vec<String>) {
+        let file = scope.file.to_string();
+        owner.into_iter().for_each(|owner| {
+            self.tree.methods.extend(
+                names
+                    .iter()
+                    .map(|name| (file.clone(), owner.clone(), name.clone())),
+            );
+        });
     }
 
     /// One `mod` item: an inline block continues in the same file, an
@@ -331,6 +374,46 @@ fn public_name(item: &syn::Item) -> Option<String> {
     super::super::item_shape::item_ident_and_vis(item)
         .filter(|(_, vis)| is_pub(vis))
         .map(|(ident, _)| ident.to_string())
+}
+
+/// The methods of an `impl` block an outside consumer could name. In an
+/// inherent impl that means the `pub` ones; in a trait impl it means all of
+/// them, since they carry no visibility of their own and are reached through
+/// the trait.
+/// Operation: filter over the associated items, no own calls.
+fn impl_method_names(items: &[syn::ImplItem], is_trait_impl: bool) -> Vec<String> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            syn::ImplItem::Fn(f) => Some(f),
+            _ => None,
+        })
+        .filter(|f| is_trait_impl || is_pub(&f.vis))
+        .map(|f| f.sig.ident.to_string())
+        .collect()
+}
+
+/// A trait's methods, which carry no visibility of their own — they are as
+/// public as the trait.
+/// Operation: filter over the associated items, no own calls.
+fn trait_method_names(items: &[syn::TraitItem]) -> Vec<String> {
+    items
+        .iter()
+        .filter_map(|item| match item {
+            syn::TraitItem::Fn(f) => Some(f.sig.ident.to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The name of the type an `impl` block is for — its final path segment, the
+/// same grain everything else here works at.
+/// Operation: shape lookup, no own calls.
+fn self_type_name(ty: &syn::Type) -> Option<String> {
+    match ty {
+        syn::Type::Path(p) => p.path.segments.last().map(|s| s.ident.to_string()),
+        _ => None,
+    }
 }
 
 /// Operation: visibility match, no own calls.

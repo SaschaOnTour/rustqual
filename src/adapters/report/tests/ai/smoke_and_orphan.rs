@@ -8,6 +8,7 @@ fn ai_toon_render_on_empty_analysis_emits_zero_findings() {
     let config = Config::default();
     let reporter = AiReporter {
         config: &config,
+        coverage_mode: "call-graph-only",
         data: &analysis.data,
         format: AiOutputFormat::Toon,
     };

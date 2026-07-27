@@ -3,9 +3,6 @@
 //! live here and reach the sub-modules via `use super::*`.
 
 pub(super) use crate::adapters::shared::project_scope::*;
-pub(super) use std::collections::{HashMap, HashSet};
-pub(super) use syn::visit::Visit;
-pub(super) use syn::{File, ImplItem, TraitItem};
 
 mod collection_and_ownership;
 mod trivial_and_edge_cases;

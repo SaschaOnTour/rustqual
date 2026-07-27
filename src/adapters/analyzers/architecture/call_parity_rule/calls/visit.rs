@@ -1,11 +1,7 @@
 //! The `syn::Visit` walk driving call collection.
 
 use super::super::bindings::extract_let_binding;
-use super::resolve::{canonical_edges_for_method, trait_dispatch_edges};
-use super::{
-    bare, extract_pat_ident_name, method_unknown, parse_macro_tokens, CanonicalCallCollector,
-};
-use syn::spanned::Spanned;
+use super::{extract_pat_ident_name, method_unknown, parse_macro_tokens, CanonicalCallCollector};
 use syn::visit::Visit;
 
 impl<'a, 'ast> Visit<'ast> for CanonicalCallCollector<'a> {

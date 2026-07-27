@@ -12,14 +12,22 @@ use super::split_names::{collect_split, test_scoped_visits, SplitCollector, Spli
 pub(crate) fn collect_all_calls(
     parsed: &[(String, String, syn::File)],
     cfg_test_files: &HashSet<String>,
-) -> (HashSet<String>, HashSet<String>) {
-    collect_split(parsed, cfg_test_files, &mut CallTargetCollector::default())
+) -> SplitNames {
+    let mut collector = CallTargetCollector {
+        macro_reach: super::macro_reach::collect_macro_reach(parsed),
+        ..Default::default()
+    };
+    collect_split(parsed, cfg_test_files, &mut collector)
 }
 
 /// AST visitor that collects all function/method call targets.
 #[derive(Default)]
 struct CallTargetCollector {
     names: SplitNames,
+    /// What each `macro_rules!` macro's body names. A test that invokes a macro
+    /// runs whatever the definition names, and that edge is invisible to a
+    /// walker that does not expand macros.
+    macro_reach: super::macro_reach::MacroReach,
 }
 
 impl SplitCollector for CallTargetCollector {
@@ -45,6 +53,25 @@ impl CallTargetCollector {
     /// Trivial: delegates to the shared split.
     fn target(&mut self) -> &mut HashSet<String> {
         self.names.target()
+    }
+
+    /// A macro invoked from a test runs what its definition names, so those
+    /// names are test-reached. Only from test context: the same generosity on
+    /// the production side would hide dead code, whereas here it can only
+    /// suppress a finding.
+    /// Operation: lookup + bulk insert, no own calls.
+    fn reach_through_macro(&mut self, node: &syn::Macro) {
+        if !self.names.in_test {
+            return;
+        }
+        let reached = node
+            .path
+            .segments
+            .last()
+            .and_then(|s| self.macro_reach.get(&s.ident.to_string()))
+            .cloned()
+            .unwrap_or_default();
+        self.names.refs.tests.extend(reached);
     }
 
     /// Extract function names referenced by serde field attributes.
@@ -163,6 +190,7 @@ impl<'ast> Visit<'ast> for CallTargetCollector {
                 target.insert(id);
             },
         );
+        self.reach_through_macro(node);
         syn::visit::visit_macro(self, node);
     }
 
@@ -173,7 +201,15 @@ impl<'ast> Visit<'ast> for CallTargetCollector {
         if matches!(node.vis, syn::Visibility::Inherited) {
             return;
         }
-        let target = self.names.target();
+        // A re-export is usage, not a call — it goes to its own set so the two
+        // consumers can ask their own question of it. In test context it stays
+        // with the test calls: a `pub use` inside a `#[cfg(test)]` module is
+        // test-side usage, and folding it into production would report every
+        // marker on a test-only helper as spent.
+        let target = match self.names.in_test {
+            true => &mut self.names.refs.tests,
+            false => &mut self.names.reexported,
+        };
         // Iterative UseTree walk
         let mut stack: Vec<&syn::UseTree> = vec![&node.tree];
         while let Some(tree) = stack.pop() {

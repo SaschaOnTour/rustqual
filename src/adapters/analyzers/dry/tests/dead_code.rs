@@ -1,10 +1,6 @@
 use crate::adapters::analyzers::dry::dead_code::*;
-use crate::adapters::analyzers::dry::{has_cfg_test, has_test_attr, qualify_name};
-use crate::adapters::shared::declared_function::DeclaredFunction;
-use crate::adapters::shared::file_visitor::FileVisitor;
 use crate::config::Config;
 use std::collections::HashSet;
-use syn::visit::Visit;
 
 fn parse(code: &str) -> Vec<(String, String, syn::File)> {
     let syntax = syn::parse_file(code).expect("parse failed");
@@ -37,7 +33,12 @@ fn collected_calls(code: &str) -> (HashSet<String>, HashSet<String>) {
     let parsed = parse(code);
     let cfg_test_files =
         crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(&parsed);
-    collect_all_calls(&parsed, &cfg_test_files)
+    let calls = collect_all_calls(&parsed, &cfg_test_files);
+    // The helper keeps the pre-split shape: a re-export is production usage for
+    // every consumer but TQ-003.
+    let mut production = calls.refs.production;
+    production.extend(calls.reexported);
+    (production, calls.refs.tests)
 }
 
 /// Run dead-code detection over `parsed` with the default config and no
@@ -1365,5 +1366,53 @@ fn allow_dead_code_is_inherited_from_an_enclosing_impl() {
     assert!(
         found.iter().all(|w| w.function_name != "helper"),
         "impl-level allow covers its methods: {found:?}"
+    );
+}
+
+#[test]
+fn an_ffi_export_is_not_dead_code() {
+    // The counterpart of the DRY-006 case: an exported function's caller is a
+    // linker, so no call site exists in the workspace by design. Both spellings
+    // count, including Rust 2024's `#[unsafe(no_mangle)]`.
+    let bare = dead_code_warnings(&parse(
+        "#[no_mangle]\npub extern \"C\" fn plugin_entry() {}",
+    ));
+    assert!(bare.is_empty(), "{bare:?}");
+    let edition_2024 = dead_code_warnings(&parse(
+        "#[unsafe(no_mangle)]\npub extern \"C\" fn plugin_entry() {}",
+    ));
+    assert!(edition_2024.is_empty(), "{edition_2024:?}");
+}
+
+#[test]
+fn allow_dead_code_is_inherited_across_the_file_boundary() {
+    // A lint level covers everything below it and does not stop at the file a
+    // module happens to live in. DRY-002 read only the declaring file's own
+    // attributes, so a function the author had excused one level up was still
+    // reported — a false finding by the rule this check documents.
+    let excused = parse2(
+        "src/lib.rs",
+        "#![allow(dead_code)]\npub mod inner;",
+        "src/inner.rs",
+        "pub fn unused() {}",
+    );
+    assert!(dead_code_warnings(&excused).is_empty());
+    let on_the_declaration = parse2(
+        "src/lib.rs",
+        "#[allow(dead_code)]\npub mod inner;",
+        "src/inner.rs",
+        "pub fn unused() {}",
+    );
+    assert!(dead_code_warnings(&on_the_declaration).is_empty());
+    let reported = parse2(
+        "src/lib.rs",
+        "pub mod inner;",
+        "src/inner.rs",
+        "pub fn unused() {}",
+    );
+    assert_eq!(
+        dead_code_warnings(&reported).len(),
+        1,
+        "without the allow it is still dead"
     );
 }

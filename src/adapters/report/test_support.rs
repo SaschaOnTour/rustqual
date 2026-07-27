@@ -10,6 +10,7 @@
 use crate::adapters::analyzers::iosp::{
     compute_severity, CallOccurrence, Classification, FunctionAnalysis, LogicOccurrence,
 };
+use crate::domain::findings::CoverageEvidence;
 use crate::report::{AnalysisResult, Summary};
 
 /// A `Violation` classification with one logic location (`logic_kind` at
@@ -39,7 +40,6 @@ pub(crate) fn make_result(name: &str, classification: Classification) -> Functio
         file: "test.rs".to_string(),
         line: 1,
         classification,
-        parent_type: None,
         suppressed: false,
         complexity: None,
         qualified_name: name.to_string(),
@@ -53,6 +53,7 @@ pub(crate) fn make_result(name: &str, classification: Classification) -> Functio
         complexity_suppressed: false,
         own_calls: vec![],
         parameter_count: 0,
+        parent_type: None,
         is_trait_impl: false,
         is_test: false,
         effort_score: None,
@@ -73,5 +74,28 @@ pub(crate) fn make_analysis(results: Vec<FunctionAnalysis>) -> AnalysisResult {
         summary,
         findings,
         data,
+    }
+}
+
+/// The coverage evidence a TQ kind carries on its own, for fixtures that build
+/// a `TqFinding` by hand.
+///
+/// Four of the five kinds are constant by construction — TQ-004 and TQ-005
+/// exist only when a coverage report does, TQ-001 and TQ-002 never consult
+/// one. `Untested` is the one kind that varies with what the report named,
+/// and the kind alone cannot say which case it is: this helper answers
+/// `CallGraph` for it, the answer without a report. **A fixture that needs a
+/// measured `Untested` finding sets `coverage` itself** — none does today, so
+/// the helper takes no second argument the call sites would all ignore.
+///
+/// Hardcoding `NotApplicable` everywhere made fixtures that render `[n/a]` on
+/// a finding that can only come from measurement.
+/// Operation: kind dispatch, no own calls.
+pub(crate) fn evidence_for(kind: crate::domain::findings::TqFindingKind) -> CoverageEvidence {
+    use crate::domain::findings::TqFindingKind as K;
+    match kind {
+        K::NoAssertion | K::NoSut => CoverageEvidence::NotApplicable,
+        K::Uncovered | K::UntestedLogic => CoverageEvidence::Measured,
+        K::Untested => CoverageEvidence::CallGraph,
     }
 }

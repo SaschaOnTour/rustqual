@@ -7,7 +7,7 @@ use super::rows::{
     AiArchRow, AiComplexityRow, AiCouplingRow, AiDryRow, AiIospRow, AiSrpRow, AiTqRow,
 };
 use crate::config::Config;
-use crate::domain::findings::ComplexityFindingKind;
+use crate::domain::findings::{ComplexityFindingKind, TqFindingKind};
 
 pub(crate) fn format_iosp_entry(r: AiIospRow) -> Value {
     let logic_lines: Vec<String> = r
@@ -93,12 +93,24 @@ pub(crate) fn format_coupling_entry(r: AiCouplingRow) -> Value {
 
 pub(crate) fn format_tq_entry(r: AiTqRow) -> Value {
     let category = r.finding.kind.meta().ai_category;
+    // In `detail` rather than as its own key: every entry of every dimension
+    // shares one shape here, and a key only TQ carries would drop the whole
+    // findings table into the per-entry fallback. `--format json` has the
+    // structured field.
+    let detail = match r.finding.kind {
+        TqFindingKind::Untested => format!(
+            "{} [{}]",
+            r.finding.common.message,
+            r.finding.coverage.json()
+        ),
+        _ => r.finding.common.message.clone(),
+    };
     build_value_entry(
         &r.finding.common.file,
         r.finding.common.line,
         &r.function_name,
         category,
-        r.finding.common.message.clone(),
+        detail,
     )
 }
 
@@ -113,6 +125,13 @@ pub(crate) fn format_arch_entry(r: AiArchRow) -> Value {
     )
 }
 
+/// One row of the AI envelope. `kind` is empty for everything but an orphan
+/// suppression, and it is present anyway: each file's entries are rendered as a
+/// TOON table, and a table needs one shape — `toon-encode` falls back to a
+/// per-entry list the moment two objects differ in their keys. The fallback is
+/// valid output, but a consumer reading the tabular form silently misses the
+/// rest, so the shape stays uniform even where a column has nothing to say.
+/// Operation: struct construction, no own calls.
 fn build_value_entry(
     file: &str,
     line: usize,
@@ -123,6 +142,7 @@ fn build_value_entry(
     json!({
         "file": file,
         "category": category,
+        "kind": "",
         "line": line,
         "fn": function_name,
         "detail": detail,

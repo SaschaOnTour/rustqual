@@ -32,7 +32,6 @@ use crate::report::findings_list::{orphan_to_finding_entry, FindingEntry};
 
 use super::Summary;
 
-pub use files::format_files_section as files_section;
 use views::{ArchitectureView, CouplingTableView, CouplingView, DryView, SrpView, TqView};
 
 /// Text reporter — produces plain-text output for the terminal. Compact
@@ -135,6 +134,7 @@ impl<'a> ReporterImpl for TextReporter<'a> {
             out.push_str(&format_findings_list(&all_entries));
         }
         if !all_entries.is_empty() {
+            out.push_str(&coverage_hint(self.summary.tq_untested_call_graph_only));
             out.push_str(&suppression_footer());
         }
         if let Some(s) = self.suggestions_text {
@@ -156,6 +156,28 @@ fn suppression_footer() -> String {
      Rule details:       rustqual --explain <RULE-ID>   (e.g. rustqual --explain BP-009)\n   \
      Suppression syntax: rustqual --explain allow\n"
         .to_string()
+}
+
+/// Told when `untested` findings were derived without a coverage report — or
+/// without one that covered them.
+///
+/// TQ-003 asks whether a test reaches the function, and without a report it can
+/// only answer from the call graph, which does not follow a macro it cannot
+/// expand, a trait object, or generated code. Counting the findings rather than
+/// asking whether a report exists is the point: partial coverage is the normal
+/// case, and a report naming some other function says nothing about this one.
+/// Operation: count check + message, no own calls.
+fn coverage_hint(call_graph_only: usize) -> String {
+    if call_graph_only == 0 {
+        return String::new();
+    }
+    format!(
+        "\n── Coverage did not answer {call_graph_only} of the TQ_UNTESTED findings above: no\n   \
+         report names those functions, so the call graph decided alone. A\n   \
+         --coverage <lcov> report that covers them would settle it — a function\n   \
+         a test reaches only through a macro, a trait object or generated code\n   \
+         is invisible here, but recorded there.\n"
+    )
 }
 
 /// Format the findings list with heading.

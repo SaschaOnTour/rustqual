@@ -3,7 +3,7 @@
 //! here and reach the sub-modules via `use super::*`.
 
 pub(super) use crate::adapters::analyzers::iosp::{
-    CallOccurrence, Classification, FunctionAnalysis, LogicOccurrence,
+    CallOccurrence, Classification, LogicOccurrence,
 };
 pub(super) use crate::adapters::report::test_support::{make_analysis, make_result};
 pub(super) use crate::report::sarif::*;

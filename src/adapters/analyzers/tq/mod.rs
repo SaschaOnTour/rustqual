@@ -34,7 +34,13 @@ pub enum TqWarningKind {
     /// TQ-002: Test function does not call any production function.
     NoSut,
     /// TQ-003: Production function is called from prod but never from any test.
-    Untested,
+    ///
+    /// `measured` says how *this* finding was answered: true when the coverage
+    /// report names the function (and recorded no execution), false when the
+    /// report said nothing about it and the call graph decided alone. A global
+    /// "a report was read" cannot stand in for it — a report covering some other
+    /// function proves nothing about this one.
+    Untested { measured: bool },
     /// TQ-004: Production function has 0 execution count in LCOV data.
     Uncovered,
     /// TQ-005: Logic occurrence at a line that is uncovered in LCOV data.
@@ -226,7 +232,9 @@ pub(crate) fn analyze_test_quality(ctx: &TqContext<'_>) -> TqAnalysis {
     // Seed the tested set from test-reached calls only. Visitor `visit_*`
     // overrides and their helpers become reachable through the real dispatch
     // edges added above — no blanket "visitors are implicitly tested" seed.
-    let seed: HashSet<String> = ctx.test_calls.iter().cloned().collect();
+    let coverage = ctx.coverage_path.and_then(|p| lcov::parse_lcov(p).ok());
+    let mut seed: HashSet<String> = ctx.test_calls.iter().cloned().collect();
+    seed.extend(executed_under_test(coverage.as_ref()));
     let transitive_tested = untested::build_transitive_tested_set(&seed, &full_graph);
 
     let untested_fns = untested::detect_untested_functions(
@@ -234,20 +242,75 @@ pub(crate) fn analyze_test_quality(ctx: &TqContext<'_>) -> TqAnalysis {
         ctx.prod_calls,
         &transitive_tested,
         ctx.dead_code,
+        &named_in_report(coverage.as_ref()),
     );
     warnings.extend(untested_fns);
 
-    ctx.coverage_path
-        .and_then(|p| lcov::parse_lcov(p).ok())
-        .iter()
-        .for_each(|lcov_data| {
-            let uncovered = coverage::detect_uncovered_functions(ctx.all_results, lcov_data);
-            let untested_logic = coverage::detect_untested_logic(ctx.all_results, lcov_data);
-            warnings.extend(uncovered);
-            warnings.extend(untested_logic);
-        });
+    coverage.iter().for_each(|lcov_data| {
+        let uncovered = coverage::detect_uncovered_functions(ctx.all_results, lcov_data);
+        let untested_logic = coverage::detect_untested_logic(ctx.all_results, lcov_data);
+        warnings.extend(uncovered);
+        warnings.extend(untested_logic);
+    });
 
     TqAnalysis { warnings }
+}
+
+/// The functions a coverage report knows about at all, executed or not.
+///
+/// The complement of `executed_under_test`: a name in here that is *not* in
+/// that set is a function the run measured and found unexecuted, which is a
+/// measured answer to TQ-003. A name in neither is one the report never saw.
+/// Operation: key collection over the aggregated report, own call in the closure.
+fn named_in_report(
+    coverage: Option<&std::collections::HashMap<String, lcov::LcovFileData>>,
+) -> HashSet<String> {
+    coverage
+        .into_iter()
+        .flat_map(|files| files.values())
+        .flat_map(lcov::hits_by_function_name)
+        .map(|(name, _)| name)
+        .collect()
+}
+
+/// Whether a coverage report at `path` answered anything.
+///
+/// Not "can it be read": any text file parses into an empty result, so an
+/// LLVM-IR dump or a stale artefact handed to `--coverage` reported
+/// `"coverage": "measured"` while the analysis had fallen back to the call
+/// graph entirely — the belief the flag exists to prevent.
+///
+/// Asked of `named_in_report`, the very set that decides each finding's
+/// evidence, so the two cannot contradict each other: a finding is `Measured`
+/// only when the report names its function, which makes this set non-empty.
+/// Asking for a *positive* hit instead looked stricter and was wrong —
+/// `FNDA:0,target` is an answer, not a silence, and the run-level flag then
+/// said "call-graph-only" about a finding it had itself marked measured.
+/// Trivial: delegates to the parser and the report's name set.
+pub(crate) fn coverage_is_measured(path: &std::path::Path) -> bool {
+    !named_in_report(lcov::parse_lcov(path).ok().as_ref()).is_empty()
+}
+
+/// The functions the coverage run actually executed. When a report is present
+/// this is measurement rather than inference: `FNDA` says a test ran the
+/// function, whatever the call graph could or could not follow — a generic
+/// helper reached only through a macro, a trait object, a build-time-generated
+/// caller. It only ever adds to the tested set, so a missing or stale report
+/// leaves the call-graph answer untouched.
+///
+/// Reads the same per-name aggregation TQ-004 uses, so the two cannot disagree
+/// about which function a mangled symbol belongs to.
+/// Operation: filter over the aggregated report, own call in the closure.
+fn executed_under_test(
+    coverage: Option<&std::collections::HashMap<String, lcov::LcovFileData>>,
+) -> Vec<String> {
+    coverage
+        .into_iter()
+        .flat_map(|files| files.values())
+        .flat_map(lcov::hits_by_function_name)
+        .filter(|(_, hits)| *hits > 0)
+        .map(|(name, _)| name)
+        .collect()
 }
 
 #[cfg(test)]

@@ -16,9 +16,7 @@ use crate::adapters::analyzers::architecture::compiled::CompiledArchitecture;
 use crate::adapters::analyzers::architecture::forbidden_rule::{
     check_forbidden_rules, CompiledForbiddenRule,
 };
-use crate::adapters::analyzers::architecture::layer_rule::{
-    check_layer_rule, LayerRuleInput, UnmatchedBehavior,
-};
+use crate::adapters::analyzers::architecture::layer_rule::{check_layer_rule, LayerRuleInput};
 use crate::adapters::analyzers::architecture::{MatchLocation, ViolationKind};
 use crate::adapters::shared::use_tree::gather_imports;
 use std::fmt::Write;

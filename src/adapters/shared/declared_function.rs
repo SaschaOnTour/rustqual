@@ -12,7 +12,10 @@ pub struct DeclaredFunction {
     pub is_test: bool,
     pub is_main: bool,
     pub is_trait_impl: bool,
-    pub has_allow_dead_code: bool,
+    /// Excused from the dead-code question by an attribute: an
+    /// `#[allow(dead_code)]` in force at the declaration, or an export
+    /// (`#[no_mangle]` and friends), which rustc treats as a live root.
+    pub dead_code_exempt: bool,
     /// Whether this function is marked as public API via `// qual:api`.
     pub is_api: bool,
     /// Whether this function is marked as a test-only helper via

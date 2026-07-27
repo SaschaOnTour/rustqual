@@ -16,20 +16,8 @@
 //! See `D-3` and `D-4` in the v1.1.0 plan for the resolution order and
 //! the binding scan patterns.
 
-use super::bindings::{
-    canonical_from_type, extract_let_binding, normalize_alias_expansion, CanonScope,
-};
-use super::local_symbols::{scope_for_local, FileScope};
-use super::type_infer::resolve::{resolve_type, ResolveContext};
-use super::type_infer::self_subst::substitute_bare_self;
-use super::type_infer::{
-    extract_bindings, extract_for_bindings, infer_type, BindingLookup, CanonicalType, InferContext,
-    WorkspaceTypeIndex,
-};
-use crate::adapters::analyzers::architecture::forbidden_rule::{
-    file_to_module_segments, resolve_to_crate_absolute_in,
-};
-use crate::adapters::shared::use_tree::AliasTarget;
+use super::local_symbols::FileScope;
+use super::type_infer::{BindingLookup, CanonicalType, WorkspaceTypeIndex};
 use std::collections::{HashMap, HashSet};
 use syn::visit::Visit;
 

@@ -1,5 +1,4 @@
 use crate::adapters::analyzers::tq::lcov::*;
-use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
@@ -99,4 +98,38 @@ fn test_parse_unknown_line_within_record_does_not_split() {
     let data = &result["src/lib.rs"];
     assert_eq!(data.line_hits.get(&1), Some(&1));
     assert_eq!(data.line_hits.get(&2), Some(&1));
+}
+
+#[test]
+fn a_file_the_run_measured_nothing_in_is_not_measured_coverage() {
+    // Readable and parseable is not the same as usable. Any text file parses
+    // into an empty result — an LLVM-IR dump handed to `--coverage` produced
+    // `"coverage": "measured"` while the analysis had fallen back to the call
+    // graph entirely, which is exactly the belief the flag exists to prevent.
+    let (_tmp, path) = write_lcov("define i32 @main() {\n  ret i32 0\n}\n");
+    assert!(!crate::adapters::analyzers::tq::coverage_is_measured(&path));
+}
+
+#[test]
+fn a_report_that_recorded_no_execution_is_still_measurement() {
+    // `FNDA:0,my_func` is an answer, not a silence: the run recorded that the
+    // function never ran. Asking for a *positive* hit made the run-level flag
+    // say "call-graph-only" while the finding for that very function said
+    // "measured". Both questions are now decided by the same set — the names
+    // the report mentions — so they cannot contradict each other.
+    let (_tmp, path) = write_lcov("SF:src/lib.rs\nFNDA:0,my_func\nend_of_record\n");
+    assert!(crate::adapters::analyzers::tq::coverage_is_measured(&path));
+}
+
+#[test]
+fn a_report_with_an_executed_function_is_measured_coverage() {
+    let (_tmp, path) = write_lcov("SF:src/lib.rs\nFNDA:5,my_func\nend_of_record\n");
+    assert!(crate::adapters::analyzers::tq::coverage_is_measured(&path));
+}
+
+#[test]
+fn a_missing_report_is_not_measured_coverage() {
+    assert!(!crate::adapters::analyzers::tq::coverage_is_measured(
+        Path::new("/nonexistent/lcov.info")
+    ));
 }

@@ -27,7 +27,6 @@ use crate::adapters::analyzers::architecture::call_parity_rule::bindings::{
 use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::resolve_impl_self_type;
 use crate::adapters::shared::cfg_test::{has_cfg_test, has_test_attr};
 use std::collections::HashSet;
-use syn::spanned::Spanned;
 use syn::visit::Visit;
 
 /// Walk `ast` and populate both `trait_methods` and `trait_impls` on

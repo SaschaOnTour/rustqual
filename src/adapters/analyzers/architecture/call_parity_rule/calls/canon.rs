@@ -1,25 +1,12 @@
 //! Path canonicalisation for call targets.
 
-use super::super::bindings::{
-    canonical_from_type, extract_let_binding, normalize_alias_expansion, CanonScope,
-};
-use super::super::local_symbols::{scope_for_local, FileScope};
-use super::super::type_infer::resolve::{resolve_type, ResolveContext};
-use super::super::type_infer::self_subst::substitute_bare_self;
-use super::super::type_infer::{
-    extract_bindings, extract_for_bindings, infer_type, BindingLookup, CanonicalType, InferContext,
-    WorkspaceTypeIndex,
-};
-use super::{
-    bare, collect_pattern_idents, extract_pat_ident_name, method_unknown, parse_macro_tokens,
-    CanonicalCallCollector, CollectorBindings, FnContext,
-};
+use super::super::bindings::{normalize_alias_expansion, CanonScope};
+use super::super::local_symbols::scope_for_local;
+use super::{bare, CanonicalCallCollector};
 use crate::adapters::analyzers::architecture::forbidden_rule::{
     file_to_module_segments, resolve_to_crate_absolute_in,
 };
 use crate::adapters::shared::use_tree::AliasTarget;
-use std::collections::{HashMap, HashSet};
-use syn::spanned::Spanned;
 
 impl<'a> CanonicalCallCollector<'a> {
     /// Resolve `Q::method(...)` where `Q` is a generic type param with

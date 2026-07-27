@@ -1,6 +1,5 @@
 use crate::adapters::analyzers::tq::assertions::*;
 use crate::adapters::analyzers::tq::{TqWarning, TqWarningKind};
-use syn::visit::Visit;
 
 fn parse_and_detect(source: &str) -> Vec<TqWarning> {
     parse_and_detect_with_extras(source, &[])

@@ -93,7 +93,7 @@ fn a_marker_on_an_exempt_type_changes_nothing() {
     // `#[allow(dead_code)]` already excludes it from DRY-006, so the marker
     // cannot be doing any work.
     let mut d = declared_type("Kept", 10, true, false);
-    d.has_allow_dead_code = true;
+    d.dead_code_exempt = true;
     let out = detect_type(&[d], &HashSet::new(), &marker_lines(&[9]), &public_entry());
     assert_eq!(out.len(), 1, "{out:?}");
     assert!(out[0]
@@ -194,5 +194,38 @@ fn the_message_names_the_check_that_will_report_a_type() {
     assert!(
         reason.contains("dead-type finding") && !reason.contains("dead-code"),
         "a type's remedy must name the dead-type check: {reason}"
+    );
+}
+
+#[test]
+fn a_marker_on_a_public_method_is_not_accused() {
+    // The symptom a downstream workspace hit: `qual:api` sits on a method more
+    // often than on anything else, and every one of them was reported as "cannot
+    // be named from outside the crate". The reachability set was built from
+    // item-level declarations only, and a method is an `ImplItem`.
+    let reach = reach_of(&[
+        ("src/lib.rs", "pub mod auth;"),
+        (
+            "src/auth.rs",
+            "pub struct Provider; impl Provider { pub fn resolve(&self) {} }",
+        ),
+    ]);
+    let mut d = declared("resolve", 10, true, false);
+    d.file = "src/auth.rs".to_string();
+    d.qualified_name = "Provider::resolve".to_string();
+    let mut lines = HashMap::new();
+    lines.insert("src/auth.rs".to_string(), [9].into_iter().collect());
+    let out = crate::app::stale_markers::detect_stale_marker_orphans(&MarkerContext {
+        declared_fns: &[d],
+        declared_types: &[],
+        prod_calls: &HashSet::new(),
+        prod_refs: &HashSet::new(),
+        api_lines: &lines,
+        test_helper_lines: &HashMap::new(),
+        reach: &reach,
+    });
+    assert!(
+        out.is_empty(),
+        "a public method on a public type is nameable from outside: {out:?}"
     );
 }

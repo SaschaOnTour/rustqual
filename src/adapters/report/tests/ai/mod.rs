@@ -3,10 +3,6 @@
 //! arch_common/make_reporter helpers live here and reach the sub-modules via
 //! `use super::*`.
 
-pub(super) use crate::adapters::analyzers::iosp::{
-    CallOccurrence, Classification, ComplexityMetrics, FunctionAnalysis, LogicOccurrence,
-    MagicNumberOccurrence,
-};
 pub(super) use crate::config::Config;
 pub(super) use crate::domain::analysis_data::FunctionRecord;
 pub(super) use crate::domain::findings::{
@@ -39,6 +35,7 @@ mod smoke_and_orphan;
 pub(super) fn build_ai_value(analysis: &AnalysisResult, config: &Config) -> Value {
     let reporter = AiReporter {
         config,
+        coverage_mode: analysis.summary.coverage_mode(),
         data: &analysis.data,
         format: AiOutputFormat::Json,
     };
@@ -76,6 +73,7 @@ pub(super) fn make_reporter<'a>(
 ) -> AiReporter<'a> {
     AiReporter {
         config,
+        coverage_mode: "call-graph-only",
         data,
         format: AiOutputFormat::Json,
     }

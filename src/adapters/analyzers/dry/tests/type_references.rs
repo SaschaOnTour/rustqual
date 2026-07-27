@@ -7,7 +7,7 @@
 
 use std::collections::HashSet;
 
-use crate::adapters::analyzers::dry::collect_type_references;
+use crate::adapters::analyzers::dry::collect_reference_graph;
 
 /// `(production, test)` reference sets for one file at `path`, with `path`
 /// itself optionally counted as a test file.
@@ -15,7 +15,8 @@ fn split_refs(path: &str, code: &str, test_files: &[&str]) -> (HashSet<String>, 
     let syntax = syn::parse_file(code).expect("fixture must parse");
     let parsed = vec![(path.to_string(), code.to_string(), syntax)];
     let cfg_test: HashSet<String> = test_files.iter().map(|f| f.to_string()).collect();
-    collect_type_references(&parsed, &cfg_test)
+    let all = collect_reference_graph(&parsed, &cfg_test).flatten();
+    (all.production, all.tests)
 }
 
 fn refs(code: &str) -> HashSet<String> {
@@ -71,10 +72,20 @@ fn an_impl_self_type_is_not_a_use() {
     // verdict rustc reaches with "never constructed".
     assert!(!refs("struct Lonely; impl Lonely { fn m(&self) {} }").contains("Lonely"));
     assert!(
-        refs("struct Lonely; impl Default for Lonely { fn default() -> Self { Lonely } }")
+        !refs("struct Lonely; impl Default for Lonely { fn default() -> Self { Lonely } }")
             .contains("Lonely"),
-        "only the self type is exempt — the impl's body still uses the name"
+        "a type constructing itself in its own impl is not someone else using it"
     );
+}
+
+#[test]
+fn a_declaration_naming_itself_is_not_a_use_either() {
+    // This set feeds the marker check, which asks whether production *refers*
+    // to a declaration. A type naming itself is not somebody else using it, so
+    // a `qual:api` on a self-referential type must not read as spent — the
+    // marker is doing its job precisely because nothing else names the type.
+    assert!(!refs("struct Node { next: Option<Box<Node>> }").contains("Node"));
+    assert!(refs("struct Node { next: Option<Box<Node>> }").contains("Box"));
 }
 
 #[test]

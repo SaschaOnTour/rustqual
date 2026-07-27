@@ -3,15 +3,19 @@ mod collect;
 pub mod module;
 mod union_find;
 
+// rustc reports these as unused: the consumers reach them through a
+// `use super::*` in the test modules, and the lint does not see through the
+// glob. Removing them breaks the test build — `cargo fix` did exactly that
+// once. Scoped to the import, not the module, so a genuinely unused one here
+// still shows up.
+#[allow(unused_imports)]
 pub(crate) use collect::{
     is_self_expr, returns_self, ImplMethodCollector, MethodBodyVisitor, StructCollector,
 };
 
 use std::collections::HashSet;
 
-use syn::visit::Visit;
-
-use crate::adapters::shared::file_visitor::{visit_all_files, FileVisitor};
+use crate::adapters::shared::file_visitor::visit_all_files;
 use crate::config::sections::SrpConfig;
 
 /// Warning about a struct that may violate the Single Responsibility Principle.
@@ -82,7 +86,6 @@ pub(crate) struct StructInfo {
 /// Field access and call data for a single method.
 pub(crate) struct MethodFieldData {
     pub method_name: String,
-    pub parent_type: String,
     /// Pooling identity of the owning type (see [`StructInfo::owner_key`]):
     /// `file::inline_mod_path::parent_type`.
     pub owner_key: String,

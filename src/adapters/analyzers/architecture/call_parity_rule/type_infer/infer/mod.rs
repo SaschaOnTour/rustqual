@@ -35,10 +35,20 @@ pub trait BindingLookup {
 /// starting point for downstream consumers who don't need scoped
 /// push/pop semantics.
 #[derive(Debug, Default)]
+/// Only the tests construct or read this; keeping it live for them while
+/// rustc's own lint sees a production build that never touches it. rustqual
+/// still judges it — the `cfg_attr` wrapper is invisible to `dead_code_level`,
+/// deliberately, so removing the last test would surface it as DRY-002/006.
+#[cfg_attr(not(test), allow(dead_code))]
 pub struct FlatBindings {
     map: HashMap<String, CanonicalType>,
 }
 
+/// Only the tests construct or read this; keeping it live for them while
+/// rustc's own lint sees a production build that never touches it. rustqual
+/// still judges it — the `cfg_attr` wrapper is invisible to `dead_code_level`,
+/// deliberately, so removing the last test would surface it as DRY-002/006.
+#[cfg_attr(not(test), allow(dead_code))]
 impl FlatBindings {
     pub fn new() -> Self {
         Self::default()

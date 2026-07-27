@@ -245,3 +245,98 @@ fn a_public_type_behind_a_private_module_is_not_reachable() {
     let reach = compute_external_reach(&parsed);
     assert!(!reach.is_externally_reachable("src/internal.rs", "Looks"));
 }
+
+#[test]
+fn public_methods_are_reachable_items_too() {
+    // A method is an `ImplItem`, not an `Item`, so an item-level walk never sees
+    // it — and `qual:api` sits on methods more often than on anything else.
+    // Missing them accused every marked method of not being nameable from
+    // outside its crate, which is the worst shape a finding can have.
+    let parsed = parse(&[
+        ("src/lib.rs", "pub mod auth;"),
+        (
+            "src/auth.rs",
+            "pub struct Provider; impl Provider { pub fn resolve(&self) {} fn hidden(&self) {} }",
+        ),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(
+        reach.is_externally_reachable("src/auth.rs", "resolve"),
+        "a pub method on a pub type in a pub module is nameable from outside"
+    );
+    assert!(!reach.is_externally_reachable("src/auth.rs", "hidden"));
+}
+
+#[test]
+fn trait_methods_are_reachable_through_their_trait() {
+    // A trait's methods carry no visibility of their own — they are as public
+    // as the trait.
+    let parsed = parse(&[
+        ("src/lib.rs", "pub mod api;"),
+        (
+            "src/api.rs",
+            "pub trait Port { fn run(&self); } trait Sealed { fn inner(&self); }",
+        ),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(reach.is_externally_reachable("src/api.rs", "run"));
+    assert!(!reach.is_externally_reachable("src/api.rs", "inner"));
+}
+
+#[test]
+fn methods_of_a_reexported_type_are_reachable() {
+    // The common façade shape: a private module, its type re-exported at the
+    // crate root. The type is callable from outside, so its methods are too —
+    // but the file itself sits in no public `mod` chain, and a method's own
+    // name is not what the `pub use` publishes.
+    let parsed = parse(&[
+        ("src/lib.rs", "mod registry;\npub use registry::Registry;"),
+        (
+            "src/registry.rs",
+            "pub struct Registry; impl Registry { pub fn load() {} fn hidden() {} }",
+        ),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(reach.is_externally_reachable("src/registry.rs", "Registry"));
+    assert!(
+        reach.is_externally_reachable("src/registry.rs", "load"),
+        "a method is reachable exactly when its type is"
+    );
+    assert!(!reach.is_externally_reachable("src/registry.rs", "hidden"));
+}
+
+#[test]
+fn methods_of_an_unreachable_type_stay_unreachable() {
+    // The counterpart: no re-export, private module — the method must stay
+    // unreachable or the check stops finding anything.
+    let parsed = parse(&[
+        ("src/lib.rs", "mod registry;"),
+        (
+            "src/registry.rs",
+            "pub struct Registry; impl Registry { pub fn load() {} }",
+        ),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(!reach.is_externally_reachable("src/registry.rs", "load"));
+}
+
+#[test]
+fn methods_in_a_split_impl_find_their_owner() {
+    // An inherent impl often lives in a different file from the type — the
+    // façade shape again, one module per concern. Asking whether the owner is
+    // reachable *in the impl's file* answers no, because the type is not
+    // declared there.
+    let parsed = parse(&[
+        ("src/lib.rs", "pub mod store;\npub use store::Store;"),
+        ("src/store.rs", "mod helpers;\npub struct Store;"),
+        (
+            "src/store/helpers.rs",
+            "use super::Store; impl Store { pub fn with_fault(self) -> Self { self } }",
+        ),
+    ]);
+    let reach = compute_external_reach(&parsed);
+    assert!(
+        reach.is_externally_reachable("src/store/helpers.rs", "with_fault"),
+        "the method's owner is reachable, even though it is declared elsewhere"
+    );
+}

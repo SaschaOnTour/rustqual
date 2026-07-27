@@ -5,8 +5,6 @@
 //! two ways the project currently acquires a working set of `syn::File`
 //! values — everything else is derived from that input.
 
-#![allow(dead_code, unused_imports)]
-
 pub mod filesystem;
 pub mod watch;
 

@@ -30,7 +30,9 @@ pub(super) const CARDS: &[RuleCard] = &[
             what the system does.",
         fix: "Delete the function, or wire it to its intended caller. Public \
             API entry points: mark // qual:api. Integration-test helpers \
-            living in src/: mark // qual:test_helper.",
+            living in src/: mark // qual:test_helper. Exports \
+            (#[no_mangle], #[used], #[export_name]) are already exempt — \
+            their caller is the linker.",
         suppress: "// qual:api (public API) or // qual:test_helper — DRY-002 \
             is deliberately NOT suppressible via qual:allow(dry, …).",
         config: "[duplicates] detect_dead_code (default true).",
@@ -39,19 +41,26 @@ pub(super) const CARDS: &[RuleCard] = &[
         id: "DRY-006",
         title: "Dead type or constant detected",
         detects: "A struct, enum, union, type alias, const or static that \
-            nothing refers to: 'unused type' (no reference anywhere) or \
-            'type test-only' (only test code names it). References are counted \
-            by name across the whole workspace, including inside macro bodies \
-            and attribute arguments, and inside doc-test fences (that code is \
-            compiled by cargo test). A type's own impl blocks do not count — \
-            carrying methods keeps nothing alive.",
+            nothing reaches: 'unused type' (no reference anywhere) or 'type test-only' \
+            (only test code reaches it). References are counted by name across \
+            the whole workspace, including inside macro bodies and attribute \
+            arguments, and inside doc-test fences (that code is compiled by \
+            cargo test). Being mentioned is not enough: a reference counts \
+            only if whatever made it is reached in turn, so types that name \
+            each other in a cycle of any length keep nothing alive. A type's \
+            own impl blocks do not count either — carrying methods keeps \
+            nothing alive, and what those methods name lives or dies with the \
+            type.",
         why: "An unused type is read, maintained and refactored like the rest \
             of the code while modelling nothing. rustc's own dead_code lint \
             stops at the crate boundary, so a pub type nobody in the workspace \
             uses stays invisible there.",
         fix: "Delete it, or wire it to its intended user. Public API types: \
-            mark // qual:api. Types serving integration tests from src/: mark \
-            // qual:test_helper. Deliberate exceptions: #[allow(dead_code)].",
+            mark // qual:api — one marker on the entry point clears everything it \
+            reaches. Types serving integration tests from src/: mark \
+            // qual:test_helper. Deliberate exceptions: #[allow(dead_code)]. \
+            Exports (#[no_mangle], #[used], #[export_name]) are already \
+            exempt — their caller is the linker.",
         suppress: "// qual:api (public API) or // qual:test_helper — DRY-006 \
             is deliberately NOT suppressible via qual:allow(dry, …), matching \
             DRY-002.",

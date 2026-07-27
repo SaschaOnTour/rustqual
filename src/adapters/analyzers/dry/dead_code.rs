@@ -2,7 +2,8 @@ use std::collections::HashSet;
 
 use syn::visit::Visit;
 
-use super::allow_scope::AllowScope;
+use super::allow_scope::{AllowScope, DeadCodeLevel};
+use super::inherited_allow::InheritedLevels;
 use super::{has_cfg_test, has_test_attr, qualify_name};
 use crate::adapters::shared::declared_function::DeclaredFunction;
 use crate::adapters::shared::file_visitor::FileVisitor;
@@ -19,10 +20,13 @@ pub(crate) struct DeclaredFnCollector {
     parent_type: Option<String>,
     is_trait_impl: bool,
     allow: AllowScope,
+    /// The `dead_code` level each file arrives with, from the module that
+    /// declares it — a lint level does not stop at a file boundary.
+    inherited: InheritedLevels,
 }
 
 impl DeclaredFnCollector {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(inherited: InheritedLevels) -> Self {
         Self {
             file: String::new(),
             functions: Vec::new(),
@@ -30,6 +34,7 @@ impl DeclaredFnCollector {
             parent_type: None,
             is_trait_impl: false,
             allow: AllowScope::default(),
+            inherited,
         }
     }
 }
@@ -38,6 +43,12 @@ impl FileVisitor for DeclaredFnCollector {
     fn reset_for_file(&mut self, file_path: &str) {
         self.file = file_path.to_string();
         self.in_test = false;
+        let inherited = self
+            .inherited
+            .get(file_path)
+            .copied()
+            .unwrap_or(DeadCodeLevel::Report);
+        self.allow = AllowScope::with_baseline(inherited);
         self.parent_type = None;
         self.is_trait_impl = false;
     }
@@ -52,7 +63,7 @@ impl<'ast> Visit<'ast> for DeclaredFnCollector {
             is_main: name == "main",
             is_test: self.in_test || has_test_attr(&node.attrs) || has_cfg_test(&node.attrs),
             is_trait_impl: false,
-            has_allow_dead_code: self.allow.covers(&node.attrs),
+            dead_code_exempt: self.allow.covers(&node.attrs),
             is_api: false,
             is_test_helper: false,
             name,
@@ -93,7 +104,7 @@ impl<'ast> Visit<'ast> for DeclaredFnCollector {
             is_main: false,
             is_test: self.in_test || has_test_attr(&node.attrs) || has_cfg_test(&node.attrs),
             is_trait_impl: self.is_trait_impl,
-            has_allow_dead_code: self.allow.covers(&node.attrs),
+            dead_code_exempt: self.allow.covers(&node.attrs),
             is_api: false,
             is_test_helper: false,
             name,
@@ -111,7 +122,7 @@ impl<'ast> Visit<'ast> for DeclaredFnCollector {
                 is_main: false,
                 is_test: self.in_test,
                 is_trait_impl: true,
-                has_allow_dead_code: false,
+                dead_code_exempt: false,
                 is_api: false,
                 is_test_helper: false,
                 name,
@@ -202,7 +213,11 @@ pub fn detect_dead_code(
     let mut declared = mark_cfg_test_declarations(declared, cfg_test_files);
     mark_api_declarations(&mut declared, api_lines);
     mark_test_helper_declarations(&mut declared, test_helper_lines);
-    let (prod_calls, test_calls) = collect_all_calls(parsed, cfg_test_files);
+    let calls = collect_all_calls(parsed, cfg_test_files);
+    // A re-export is usage for DRY-002: a re-exported function is not dead.
+    let mut prod_calls = calls.refs.production;
+    prod_calls.extend(calls.reexported);
+    let test_calls = calls.refs.tests;
     let uncalled = find_uncalled(&declared, &prod_calls, &test_calls);
     let test_only = find_test_only(&declared, &prod_calls, &test_calls);
     merge_warnings(uncalled, test_only)
@@ -326,7 +341,7 @@ fn find_test_only(
 /// flagging so the user sees that their annotation is stale.
 /// Operation: boolean logic combining multiple exclusion criteria.
 fn should_exclude_uncalled(d: &DeclaredFunction) -> bool {
-    d.is_main || d.is_test || d.is_trait_impl || d.has_allow_dead_code || d.is_api
+    d.is_main || d.is_test || d.is_trait_impl || d.dead_code_exempt || d.is_api
 }
 
 /// Check if a declared function should be excluded from the TestOnly

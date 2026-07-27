@@ -162,6 +162,7 @@ fn tq(
         kind,
         function_name: name.into(),
         uncovered_lines: uncovered,
+        coverage: crate::adapters::report::test_support::evidence_for(kind),
     }
 }
 

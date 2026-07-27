@@ -112,7 +112,6 @@ pub(super) fn dry_group_fixtures() -> DryFixtures {
         },
         FragmentGroup {
             entries: vec![FragmentEntry {
-                function_name: "foo".to_string(),
                 qualified_name: "foo".to_string(),
                 file: "test.rs".to_string(),
                 start_line: 5,

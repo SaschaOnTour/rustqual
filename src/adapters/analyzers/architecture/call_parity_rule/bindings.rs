@@ -9,7 +9,7 @@
 
 use super::local_symbols::{scope_for_local, FileScope};
 use crate::adapters::analyzers::architecture::forbidden_rule::{
-    file_to_module_segments, resolve_to_crate_absolute, resolve_to_crate_absolute_in,
+    file_to_module_segments, resolve_to_crate_absolute_in,
 };
 use crate::adapters::shared::use_tree::{AliasMap, AliasTarget, ScopedAliasMap};
 use std::collections::{HashMap, HashSet};

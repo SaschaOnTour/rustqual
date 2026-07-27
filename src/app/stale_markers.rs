@@ -135,8 +135,10 @@ fn marked_fns<'a>(ctx: &'a MarkerContext<'a>, ambiguous: &HashSet<&str>) -> Vec<
             is_test_helper: d.is_test_helper,
             // Mirrors `should_exclude_uncalled` minus the marker flags, and
             // `tq::untested`.
-            exempt: (d.is_main || d.is_test || d.is_trait_impl || d.has_allow_dead_code).then_some(
-                "it is `main`, a test, a trait-impl method, or carries #[allow(dead_code)]",
+            exempt: (d.is_main || d.is_test || d.is_trait_impl || d.dead_code_exempt).then_some(
+                "it is `main`, a test, a trait-impl method, or exempt from dead-code \
+                 analysis (an #[allow(dead_code)] in force, or an export such as \
+                 #[no_mangle])",
             ),
             used: attributed_use(&d.qualified_name, &d.name, ctx.prod_calls, ambiguous),
             kind: FUNCTION,
@@ -156,8 +158,10 @@ fn marked_types<'a>(ctx: &'a MarkerContext<'a>, ambiguous: &HashSet<&str>) -> Ve
             is_api: d.is_api,
             is_test_helper: d.is_test_helper,
             // Mirrors `dead_types::excluded` minus the marker flags.
-            exempt: (d.is_test || d.has_allow_dead_code || d.name.starts_with('_')).then_some(
-                "it is test-only, carries #[allow(dead_code)], or its name starts with `_`",
+            exempt: (d.is_test || d.dead_code_exempt || d.name.starts_with('_')).then_some(
+                "it is test-only, exempt from dead-code analysis (an \
+                 #[allow(dead_code)] in force, or an export such as #[no_mangle]), \
+                 or its name starts with `_`",
             ),
             used: attributed_use(&d.name, &d.name, ctx.prod_refs, ambiguous),
             kind: TYPE,

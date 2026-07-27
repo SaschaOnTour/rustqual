@@ -50,6 +50,11 @@ pub struct CompiledCallParity {
     /// authorial intent; retained here so future macro-expansion
     /// enhancements have the list available without a config-schema
     /// break.
+    /// Only the tests construct or read this; rustc's lint sees a production
+    /// build that never touches it. rustqual still judges it — `cfg_attr` is
+    /// invisible to `dead_code_level`, deliberately, so the day the last test
+    /// goes it surfaces as DRY-002/DRY-006 rather than staying silent.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub transparent_macros: HashSet<String>,
     /// Bare attribute names that lift a private fn onto the adapter-handler
     /// surface. Compiled from `[architecture.call_parity] promoted_attributes`.

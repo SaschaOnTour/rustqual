@@ -5,8 +5,6 @@
 //! (e.g. attribute-based or config-level suppression) would become
 //! siblings under this module.
 
-#![allow(dead_code, unused_imports)]
-
 pub mod qual_allow;
 
 #[cfg(test)]

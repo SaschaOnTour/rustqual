@@ -47,7 +47,6 @@ pub(super) fn make_method(
 ) -> MethodFieldData {
     MethodFieldData {
         method_name: name.to_string(),
-        parent_type: parent.to_string(),
         // Bare parent as the pooling key: these helpers pool by the same bare
         // name used for `make_struct`, so the unit tests stay file/module-free.
         owner_key: parent.to_string(),
@@ -66,7 +65,6 @@ pub(super) fn make_method_with_self_calls(
 ) -> MethodFieldData {
     MethodFieldData {
         method_name: name.to_string(),
-        parent_type: parent.to_string(),
         owner_key: parent.to_string(),
         field_accesses: fields.iter().map(|s| s.to_string()).collect(),
         call_targets: HashSet::new(),
@@ -78,7 +76,6 @@ pub(super) fn make_method_with_self_calls(
 pub(super) fn make_constructor(name: &str, parent: &str, calls: &[&str]) -> MethodFieldData {
     MethodFieldData {
         method_name: name.to_string(),
-        parent_type: parent.to_string(),
         owner_key: parent.to_string(),
         field_accesses: HashSet::new(),
         call_targets: calls.iter().map(|s| s.to_string()).collect(),

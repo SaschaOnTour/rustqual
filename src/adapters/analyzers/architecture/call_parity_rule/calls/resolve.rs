@@ -1,25 +1,7 @@
 //! Method-call target resolution + trait/edge projection.
 
-use super::super::bindings::{
-    canonical_from_type, extract_let_binding, normalize_alias_expansion, CanonScope,
-};
-use super::super::local_symbols::{scope_for_local, FileScope};
-use super::super::type_infer::resolve::{resolve_type, ResolveContext};
-use super::super::type_infer::self_subst::substitute_bare_self;
-use super::super::type_infer::{
-    extract_bindings, extract_for_bindings, infer_type, BindingLookup, CanonicalType, InferContext,
-    WorkspaceTypeIndex,
-};
-use super::{
-    bare, collect_pattern_idents, extract_pat_ident_name, method_unknown, parse_macro_tokens,
-    CanonicalCallCollector, CollectorBindings, FnContext,
-};
-use crate::adapters::analyzers::architecture::forbidden_rule::{
-    file_to_module_segments, resolve_to_crate_absolute_in,
-};
-use crate::adapters::shared::use_tree::AliasTarget;
-use std::collections::{HashMap, HashSet};
-use syn::spanned::Spanned;
+use super::super::type_infer::{infer_type, CanonicalType, InferContext, WorkspaceTypeIndex};
+use super::{CanonicalCallCollector, CollectorBindings};
 
 impl<'a> CanonicalCallCollector<'a> {
     pub(super) fn record_call(&mut self, target: String) {

@@ -59,7 +59,7 @@ fn allow_dead_code_is_recorded() {
     // The author already told the compiler this is intentional; DRY-006 must
     // not contradict it.
     let d = declared("#[allow(dead_code)]\nstruct Kept;");
-    assert!(d[0].has_allow_dead_code);
+    assert!(d[0].dead_code_exempt);
 }
 
 #[test]

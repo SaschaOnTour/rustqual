@@ -16,6 +16,31 @@ pub enum TqFindingKind {
     UntestedLogic,
 }
 
+/// How coverage answered a finding — per finding, because a global "a report
+/// was read" proves nothing about any individual one: a report naming some
+/// other function leaves this one decided by the call graph alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoverageEvidence {
+    /// A coverage report named the function and recorded no execution.
+    Measured,
+    /// No report covered this function; the call graph decided alone.
+    CallGraph,
+    /// Coverage plays no part in this kind of finding.
+    NotApplicable,
+}
+
+impl CoverageEvidence {
+    /// The token machine formats emit.
+    /// Operation: variant → label, no own calls.
+    pub const fn json(self) -> &'static str {
+        match self {
+            Self::Measured => "measured",
+            Self::CallGraph => "call-graph",
+            Self::NotApplicable => "n/a",
+        }
+    }
+}
+
 /// Per-kind static labels used by reporters. Centralised here so the
 /// kind→string mapping happens in one place.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,4 +115,6 @@ pub struct TqFinding {
     pub function_name: String,
     /// Optional uncovered-line pairs for TQ-005 (untested logic).
     pub uncovered_lines: Option<Vec<(String, usize)>>,
+    /// How this finding was answered, where coverage can answer it.
+    pub coverage: CoverageEvidence,
 }

@@ -11,11 +11,6 @@
 //! - `shared/` — utilities used by multiple analyzer adapters
 //!   (AST normalization, helper visitors).
 
-// During the Phase 3 migration, most adapter call sites still come from
-// the pipeline module via direct imports. The allow is lifted as each
-// adapter's integration moves to the Application layer in Phase 5.
-#![allow(dead_code, unused_imports)]
-
 pub mod analyzers;
 pub mod config;
 pub mod report;

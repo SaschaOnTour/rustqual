@@ -5,6 +5,175 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.1] - 2026-07-26
+
+Bugfix release for the marker verification 1.8.0 shipped.
+
+### Added
+- **Coverage settles TQ-003 when a report is present.** `FNDA:<n>,<name>` says a
+  test ran the function — measurement, not inference — so every executed
+  function seeds the tested set. The symbols are demangled first: `llvm-cov`
+  writes Rust's v0 mangling, one entry per monomorphisation, with the function
+  name running straight into the type arguments
+  (`…12append_ticksNtNt…SqliteStorage`). Comparing those to a declared name
+  matched nothing, which is why full line coverage cleared no finding — the
+  report was read and thrown away. Names are read by splitting on the
+  length prefixes and cutting at the CamelCase boundary, so every instantiation
+  aggregates onto one base name.
+- **Every format states how `untested` was answered.** TQ-003 is measurement
+  when a coverage report is present and inference from the call graph when it is
+  not, and the call graph does not follow a macro rustqual cannot expand, a
+  trait object, or generated code. `json`, `ai` and `ai-json` carry
+  `coverage: "measured" | "call-graph-only"` — a field, not prose, because the
+  consumer deciding whether to delete something is usually a program.
+  The value follows what the report *answered*, per finding. Three earlier
+  versions of it missed: "does the path parse" said measured for any readable
+  text file (an LLVM-IR dump parses into an empty report); "did anything
+  execute anywhere" said measured for the whole run as soon as one unrelated
+  function had a hit; and requiring a positive hit then said *call-graph-only*
+  about a report of nothing but `FNDA:0` records — which is an answer, not a
+  silence. Run-level flag and per-finding evidence are now decided by the same
+  set, the function names the report mentions, so they cannot contradict each
+  other. Partial coverage is the normal case, so each `untested`
+  finding now carries its own evidence — `measured` when the report names that
+  function and recorded no execution, `call-graph` when the report never saw
+  it — and the run-level value has three states: `measured` (a report answered
+  every one), `coverage-augmented` (a report was read, some findings still came
+  from the call graph), `call-graph-only` (no usable report). `json` carries the
+  per-finding value as a field on every TQ warning; the `ai` formats put it in
+  `detail`, since one key only TQ carries would drop the findings table into the
+  per-entry fallback. The text footer now names how many findings were inferred
+  rather than only firing when no report was passed at all. The text
+  footer names the flag when, and only when, an `untested` finding was derived
+  without a report.
+- **TQ-004 (uncovered) works again — same cause, opposite effect.** It looked a
+  function up by name in a map keyed by mangled symbols, so every lookup missed
+  and the check silently never fired. Both consumers now read one aggregation,
+  so they cannot disagree about which function a symbol belongs to. Note the
+  direction: this *adds* findings, on projects whose coverage genuinely has
+  gaps. A function absent from the report is still skipped — no data, no claim. That answers the cases no call graph can:
+  a helper reached only through a macro rustqual does not expand, a trait
+  object, generated code. It only ever adds to the set, so a missing or stale
+  report leaves the call-graph answer exactly as it was.
+- **A macro invoked from a test reaches what its definition names.** Not
+  expansion — that means rustc's matcher, fragment types, hygiene, and for a
+  proc macro a full build. The weaker statement is enough for the shape that
+  hurts: a contract suite driven by `run_suite!(store)` really does run the
+  functions the macro body names. Deliberately coarse — a macro naming many
+  functions marks all of them reached — which is acceptable here and only here,
+  because the test-reached set only suppresses findings.
+
+### Fixed
+- **A lint level is inherited across the file boundary (DRY-002, DRY-006).**
+  `#![allow(dead_code)]` at the top of `inner/mod.rs`, or
+  `#[allow(dead_code)] mod inner;` in the parent, covers everything the module
+  contains — including what lives in its child *files*. Both dead-code checks
+  read only the declaring file's own attributes, so a declaration the author
+  had excused one level up was still reported: a false finding by the rule the
+  checks themselves document, and the expensive direction. `dry/inherited_allow`
+  resolves the level each file arrives with, over the same module-tree walk that
+  propagates `#[cfg(test)]` (`shared::cfg_test_files::external_mods` +
+  `child_paths`), so the two cannot disagree about which file a `mod` names. The
+  level is a level, not a flag: a `#[deny]` in the child revokes an inherited
+  `#[allow]`, and `forbid` stays sticky.
+- **`src/adapters/**` is analysed again.** The subtree carried
+  `#![allow(dead_code, unused_imports)]` — a Phase-3 migration measure whose
+  Phase 5 never came. It silenced rustc across the bulk of the code, so
+  `RUSTFLAGS="-Dwarnings" cargo clippy` could not fail on an unused import or a
+  dead item there, and with the inheritance fix above it would have silenced
+  rustqual's own dead-code checks for the same subtree. Removing it surfaced 110
+  unused imports (gone) and a dozen unread fields and unreachable helpers. What
+  only the tests use now carries `#[cfg_attr(not(test), allow(dead_code))]`:
+  rustc is quiet for a production build while rustqual still judges it, because
+  `cfg_attr` is invisible to `dead_code_level` — the day the last test goes, the
+  item surfaces rather than staying hidden.
+- **Stale-marker output no longer guesses the exemption.** `dead_code_exempt`
+  covers both a lint level and an export, and the explanation still said
+  "carries #[allow(dead_code)]" — right verdict, provably wrong reason on a
+  `#[no_mangle]` item. It now names both possibilities.
+- **`#[no_mangle]` and friends are live roots.** An FFI or plugin export is
+  reached by a linker, not by any line of Rust in the workspace, so "nothing
+  refers to it" is its normal state — rustc's own `dead_code` lint treats it as
+  a root. Reporting one was already a false finding for both dead-code checks;
+  with reachability it dragged everything the export names down with it. Both
+  spellings count, including Rust 2024's `#[unsafe(no_mangle)]`.
+- **A type is kept alive by being reached, not by being mentioned (DRY-006).**
+  `struct Node { next: Option<Box<Node>> }` referenced `Node` in its own body,
+  which counted as a use — so a linked list nobody builds stayed invisible,
+  while rustc calls the same type never constructed. A cycle did the same one
+  step out: `A` naming `B` and `B` naming `A` kept each other alive with no
+  outside user, as did a ring of three, of four, of any length, and the shape
+  that occurs most in real code — two types whose `impl` methods convert between
+  each other. Suppressing the self-reference and then the mutual one would have
+  been a treadmill with a new rule per cycle length, so the flat name set became
+  a graph: every reference is attributed to the declaration whose body made it,
+  and the verdict is a walk from the roots (`dry/liveness.rs`). Cycle length is
+  no longer a parameter — a ring no root enters stays unmarked whatever its
+  size. Roots are references from code that is not itself a candidate (a
+  function body, a trait, a `use`); references made inside an `impl` belong to
+  the type the impl is for, since everything in it is only compiled because that
+  type is. Being `pub` is deliberately *not* a root — a public type nobody in
+  the workspace uses is the finding, and a library whose consumers live
+  elsewhere says so with `// qual:api`; neither is an owner the check does not
+  judge — `impl Ext for Vec<u8>` and `impl<T> Ext for T` name a foreign type and
+  a type parameter, so their bodies are rooted rather than tied to a verdict that
+  can never arrive. Declarations whose own liveness is not in
+  question — `#[allow(dead_code)]`, `qual:api`, a leading `_`, and
+  `qual:test_helper` — contribute their references without being marked alive
+  themselves, so a marked fixture keeps its field types alive while a fixture
+  nothing refers to is still reported. A cycle reached only from tests is reported as
+  test-only all the way down, never as unused.
+  *Upgrade note:* a public type tree nothing in the workspace enters now yields one
+  finding per type instead of one for the root. Both one-line remedies clear the
+  whole cluster: a `// qual:api` on the entry point, or a `pub use` of it from the
+  crate root. A blanket impl is not attributed
+  to its own type parameter, so `impl<Item> Ext for Item` cannot be tied to a
+  `struct Item` elsewhere in the workspace, and the marker check ignores a
+  declaration's mention of itself — a `qual:api` on a self-referential type is
+  doing its job precisely because nothing else names it.
+- **A `pub use` re-export is not a production call (TQ-003).** The call
+  collector recorded a re-exported name as production usage, which DRY-002 needs
+  — a re-exported function is not dead — but TQ-003 asks a different question:
+  does production *call* it. Treating the re-export as a call made every
+  re-exported entry point a candidate for "untested", and when the real caller
+  is a macro the tool cannot expand, the candidate became a finding. Contract
+  suites re-exported from a library crate and driven by a `run_suite!` macro hit
+  this squarely. Re-exports now live in their own set: DRY-002 and the marker
+  check still count them as usage, TQ-003 does not. A re-export inside test code
+  stays test-side, or every marker on a test-only helper would read as spent.
+- **Public methods count as externally reachable.** The reachability set was
+  built from item-level declarations only, and a method is an `ImplItem`, not an
+  `Item` — so every `qual:api` on a method was reported as sitting on something
+  that "cannot be named from outside the crate". That is where the marker sits
+  most often, and it is the worst shape a finding can take: a confident,
+  specific, false claim. A downstream workspace saw 305 of them on a first run.
+
+  The message was accurate about what the code had computed; the computation was
+  missing an AST level. Inherent impls now contribute their `pub` methods, trait
+  impls all of theirs (they carry no visibility and are reached through the
+  trait), and a `pub` trait its own. A method is recorded without checking that
+  its type is nameable, which over-approximates in the direction this module
+  documents: calling something reachable costs a missed finding, calling it
+  unreachable accuses an author of writing a marker that could never work.
+
+  Two shapes needed more than the method itself. A type in a private module
+  re-exported at the crate root is callable from outside, so its methods are —
+  but the file sits in no public `mod` chain and a method's name is not what the
+  `pub use` publishes. And an inherent `impl` commonly lives in a different file
+  from its type, so asking whether the owner is reachable *in the impl's file*
+  answers no. A method is now reachable exactly when its owner is, matched by
+  name across the workspace. On a downstream workspace the class fell from 305
+  findings to 9, and those 9 check out: private-module helpers with in-crate
+  callers whose marker claims an external consumer that cannot exist.
+- **`--format ai` rendered part of its output as lists, not tables.** Orphan
+  entries carried a `kind` field the other categories did not, and `toon-encode`
+  falls back to a per-entry list as soon as two objects in an array differ in
+  their keys. Every finding was present and the header count was right, but a
+  consumer reading the tabular rows silently missed the rest — 50 of 138 in one
+  workspace, and the shape only diverges when a file has both kinds, which is
+  why it surfaced with 1.8.0's marker verification rather than before. Every
+  entry now carries the same keys.
+
 ## [1.8.0] - 2026-07-26
 
 Dead-code detection covered functions only. An unused `struct`, `enum`,

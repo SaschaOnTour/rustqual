@@ -25,8 +25,20 @@ pub mod workspace_index;
 
 pub use canonical::CanonicalType;
 
+// rustc reports these as unused: the consumers reach them through a
+// `use super::*` in the test modules, and the lint does not see through the
+// glob. Removing them breaks the test build — `cargo fix` did exactly that
+// once. Scoped to the import, not the module, so a genuinely unused one here
+// still shows up.
+#[allow(unused_imports)]
 pub use combinators::combinator_return;
 
+// rustc reports these as unused: the consumers reach them through a
+// `use super::*` in the test modules, and the lint does not see through the
+// glob. Removing them breaks the test build — `cargo fix` did exactly that
+// once. Scoped to the import, not the module, so a genuinely unused one here
+// still shows up.
+#[allow(unused_imports)]
 pub use infer::{infer_type, BindingLookup, FlatBindings, InferContext};
 
 pub use patterns::{extract_bindings, extract_for_bindings};
