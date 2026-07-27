@@ -23,7 +23,12 @@ spelled-out calls DRY-002 rewards.
   position too* — a callback parameter or a `let`-bound function value is a
   local like any other, so `apply(f)` and `apply(callback)` stay the same body;
   that needs the signature, which is why the duplicate collector now normalises
-  through `normalize_fn` and seeds the parameter names.
+  through `normalize_fn` and reads the parameter names first. Recognising a
+  binding and handing out its index stay separate jobs: the names go in their
+  own set, so an extra unused parameter cannot shift the numbering, and indices
+  are still assigned at first occurrence in the body. Every binding a parameter
+  pattern introduces counts, at any depth — `fn f((cb, x): (F, u8))` binds `cb`
+  just as a plain parameter would.
   *Known limit, now pinned by a test rather than folklore:* a multi-segment
   callee (`audit::check_append(s)`) still contributes no token at all. Naming it
   by its last segment would conflate `Config::default()` with
@@ -43,8 +48,12 @@ spelled-out calls DRY-002 rewards.
   `assert_eq!(x, dead_helper)` still cannot vouch for a dead function. Macros
   that only quote their input are excluded — `stringify!($f())` produces the
   text `"$f()"` and runs nothing, so reading it as a call would have excused a
-  plainly dead function. Nested macros are otherwise descended into, because
-  `println!("{}", $f())` really does run `$f`.
+  plainly dead function (`stringify`, `quote`, `quote_spanned`). Nested macros
+  are otherwise descended into, because `println!("{}", $f())` really does run
+  `$f`. And *naming* a call-through macro is not forwarding to it: the chain is
+  followed through actual invocations that hand over a metavariable, run to a
+  fixpoint, so a body that only mentions `step` inside `stringify!` does not
+  inherit its status.
 
 ## [1.8.1] - 2026-07-26
 

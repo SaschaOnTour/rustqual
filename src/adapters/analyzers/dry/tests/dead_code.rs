@@ -1516,3 +1516,43 @@ fn main() { used(); }
     let found = dead_code_warnings(&parse(code));
     assert!(found.is_empty(), "{found:?}");
 }
+
+#[test]
+fn merely_naming_a_call_through_macro_is_not_forwarding() {
+    // Forwarding means handing a metavariable to the macro that calls it. A
+    // body that only mentions the name — here inside `stringify!` — passes
+    // nothing on, and treating it as a forwarder let its invocation excuse a
+    // function nothing runs.
+    let code = r#"
+macro_rules! step {
+    ($t:path) => { $t(); };
+}
+macro_rules! mention {
+    ($x:path) => { stringify!(step) };
+}
+fn dead_helper() {}
+fn used() -> &'static str { mention!(dead_helper) }
+fn main() { let _ = used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].function_name, "dead_helper");
+}
+
+#[test]
+fn quote_spanned_does_not_execute_either() {
+    // `quote!` was excluded and `quote_spanned!` was not, though both only turn
+    // their input into tokens. A list of names has to be complete to be worth
+    // anything.
+    let code = r#"
+macro_rules! emit {
+    ($f:path) => { quote_spanned!(sp => $f()) };
+}
+fn dead_helper() {}
+fn used() { emit!(dead_helper); }
+fn main() { used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].function_name, "dead_helper");
+}

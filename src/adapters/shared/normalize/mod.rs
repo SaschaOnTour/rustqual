@@ -33,6 +33,7 @@ pub fn normalize_fn(sig: &syn::Signature, body: &syn::Block) -> Vec<NormalizedTo
         tokens: Vec::new(),
         ident_map: HashMap::new(),
         next_ident_id: 0,
+        params: HashSet::new(),
     };
     n.seed_bindings(sig);
     syn::visit::visit_block(&mut n, body);
@@ -47,6 +48,7 @@ pub fn normalize_stmts(stmts: &[syn::Stmt]) -> Vec<NormalizedToken> {
         tokens: Vec::new(),
         ident_map: HashMap::new(),
         next_ident_id: 0,
+        params: HashSet::new(),
     };
     stmts.iter().for_each(|stmt| n.visit_stmt(stmt));
     n.tokens
@@ -106,6 +108,9 @@ struct Normalizer {
     tokens: Vec<NormalizedToken>,
     ident_map: HashMap<String, usize>,
     next_ident_id: usize,
+    /// Names the signature binds. Kept apart from `ident_map` so knowing that a
+    /// name is a local costs no index.
+    params: HashSet<String>,
 }
 
 impl Normalizer {
@@ -121,32 +126,44 @@ impl Normalizer {
         }
     }
 
-    /// Whether `name` is already known as a binding in this body — a parameter
-    /// seeded from the signature, or a `let` seen earlier. In callee position
-    /// that is what separates a callback from a free function; nothing in the
-    /// token stream itself does.
-    /// Operation: map lookup, no own calls.
+    /// Whether `name` is a binding of this body — a parameter, or a `let` seen
+    /// earlier. In callee position that is what separates a callback from a
+    /// free function; nothing in the token stream itself does.
+    ///
+    /// Deliberately **not** the identifier map: recognising a binding and
+    /// handing out its index are two jobs. Seeding parameters into the map made
+    /// the numbering depend on how many parameters a function declares, so one
+    /// unused parameter shifted every index and split two identical bodies
+    /// apart — the very thing alpha-renaming exists to prevent. Indices are
+    /// still assigned at first occurrence in the body.
+    /// Operation: two lookups, no own calls.
     fn is_bound(&self, name: &str) -> bool {
-        self.ident_map.contains_key(name)
+        self.params.contains(name) || self.ident_map.contains_key(name)
     }
 
-    /// Record the parameter names before the body is walked.
-    /// Operation: iteration over the inputs, own call hidden in the closure.
+    /// Record the parameter names before the body is walked. Every binding the
+    /// pattern introduces counts, at any depth: `fn f((cb, x): (F, u8))` binds
+    /// `cb` just as a plain parameter would, and reading only the top-level
+    /// `Pat::Ident` left every destructured callback looking like a free
+    /// function.
+    /// Operation: pattern walk, own calls hidden in the visitor.
     fn seed_bindings(&mut self, sig: &syn::Signature) {
-        let names: Vec<String> = sig
-            .inputs
-            .iter()
-            .filter_map(|arg| match arg {
-                syn::FnArg::Typed(t) => match &*t.pat {
-                    syn::Pat::Ident(p) => Some(p.ident.to_string()),
-                    _ => None,
-                },
-                syn::FnArg::Receiver(_) => None,
-            })
-            .collect();
-        names.iter().for_each(|n| {
-            self.resolve_ident(n);
-        });
+        let mut binds = ParamBindings::default();
+        sig.inputs.iter().for_each(|arg| binds.visit_fn_arg(arg));
+        self.params = binds.names;
+    }
+}
+
+/// Collects every name a parameter pattern binds, at any depth.
+#[derive(Default)]
+struct ParamBindings {
+    names: HashSet<String>,
+}
+
+impl<'ast> Visit<'ast> for ParamBindings {
+    fn visit_pat_ident(&mut self, node: &'ast syn::PatIdent) {
+        self.names.insert(node.ident.to_string());
+        syn::visit::visit_pat_ident(self, node);
     }
 }
 

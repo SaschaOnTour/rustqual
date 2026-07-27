@@ -22,6 +22,8 @@
 //! - [`tokens_reference_ident`] — *raw, presence*: SLM's yes/no "does this body
 //!   reference `self`" check.
 
+use std::collections::HashSet;
+
 use proc_macro2::{Delimiter, TokenStream, TokenTree};
 
 use super::text_names::placeholder_names;
@@ -200,7 +202,12 @@ pub fn all_idents(tokens: &TokenStream) -> impl Iterator<Item = String> {
 /// Macros whose body is turned into tokens or text rather than run. `$f()`
 /// inside one of these is not a call, and reading it as one lets the
 /// invocation excuse a function nothing ever executes.
-const NON_EXECUTING: [&str; 2] = ["stringify", "quote"];
+///
+/// A list of names, because there is no general rule: a macro's arguments are
+/// evaluated or quoted by its own definition, and rustqual does not expand. It
+/// only has to be complete for the ones that quote — `quote_spanned!` was
+/// missing while `quote!` was there, which is exactly how such a list rots.
+const NON_EXECUTING: [&str; 3] = ["stringify", "quote", "quote_spanned"];
 
 /// Whether these tokens use a metavariable in callee position: `$name(…)`.
 ///
@@ -234,6 +241,44 @@ pub fn calls_through_metavariable(tokens: &TokenStream) -> bool {
                 && matches!(trees.get(i + 2), Some(TokenTree::Group(g))
                     if g.delimiter() == proc_macro2::Delimiter::Parenthesis);
             if is_dollar && names_a_call {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Whether these tokens *invoke* one of `names` and hand it a metavariable:
+/// `step!($test, $make)`.
+///
+/// Naming a macro is not forwarding to it. `stringify!(step)` mentions `step`
+/// and passes nothing on, so a body that does only that must not inherit
+/// `step!`'s call-through status — at its own invocation every argument would
+/// then read as a call and excuse whatever is genuinely dead. The `$` is what
+/// separates a forward from a mention.
+/// Operation: positional token-tree scan, no own calls.
+pub fn forwards_metavariable_to(tokens: &TokenStream, names: &HashSet<String>) -> bool {
+    let mut stack: Vec<TokenStream> = vec![tokens.clone()];
+    while let Some(stream) = stack.pop() {
+        let trees: Vec<TokenTree> = stream.into_iter().collect();
+        for (i, tt) in trees.iter().enumerate() {
+            let quoted = i >= 2
+                && matches!(&trees[i - 1], TokenTree::Punct(p) if p.as_char() == '!')
+                && matches!(&trees[i - 2], TokenTree::Ident(id)
+                    if NON_EXECUTING.contains(&id.to_string().as_str()));
+            let TokenTree::Group(g) = tt else { continue };
+            if quoted {
+                continue;
+            }
+            stack.push(g.stream());
+            let invokes = i >= 2
+                && matches!(&trees[i - 1], TokenTree::Punct(p) if p.as_char() == '!')
+                && matches!(&trees[i - 2], TokenTree::Ident(id) if names.contains(&id.to_string()));
+            let hands_over = g
+                .stream()
+                .into_iter()
+                .any(|t| matches!(t, TokenTree::Punct(p) if p.as_char() == '$'));
+            if invokes && hands_over {
                 return true;
             }
         }

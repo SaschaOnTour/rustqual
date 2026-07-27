@@ -444,3 +444,46 @@ fn run_there() {
     let groups = detect_duplicates(&parse(code), &low_threshold_config());
     assert_eq!(groups.len(), 1, "{groups:?}");
 }
+
+#[test]
+fn an_unused_parameter_does_not_shift_the_alpha_indices() {
+    // Recognising a binding and handing out its index are two different jobs.
+    // Consuming an index per parameter made the numbering depend on how many
+    // parameters a function declares — so an extra unused one pushed the
+    // callback from 0 to 1 and split two identical bodies apart again.
+    let code = r#"
+fn apply_here(unused: U, f: F, x: u8) {
+    f(x);
+    f(x);
+    f(x);
+}
+fn apply_there(callback: F, x: u8) {
+    callback(x);
+    callback(x);
+    callback(x);
+}
+"#;
+    let groups = detect_duplicates(&parse(code), &low_threshold_config());
+    assert_eq!(groups.len(), 1, "{groups:?}");
+}
+
+#[test]
+fn a_destructured_callback_parameter_is_a_local_too() {
+    // A binding is a binding wherever the pattern puts it — tuple, struct,
+    // reference, `@`. Reading only the plain `Pat::Ident` case left every other
+    // shape looking like a free function.
+    let code = r#"
+fn apply_here((f, x): (F, u8)) {
+    f(x);
+    f(x);
+    f(x);
+}
+fn apply_there((callback, x): (F, u8)) {
+    callback(x);
+    callback(x);
+    callback(x);
+}
+"#;
+    let groups = detect_duplicates(&parse(code), &low_threshold_config());
+    assert_eq!(groups.len(), 1, "{groups:?}");
+}

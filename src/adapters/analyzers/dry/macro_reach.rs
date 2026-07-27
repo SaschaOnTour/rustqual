@@ -15,6 +15,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use proc_macro2::TokenStream;
+
 use crate::adapters::shared::file_visitor::{visit_all_files, FileVisitor};
 use crate::adapters::shared::macro_tokens;
 
@@ -101,29 +103,43 @@ impl<'ast> syn::visit::Visit<'ast> for MacroBodyCollector {
 pub(crate) fn call_through_macros(parsed: &[(String, String, syn::File)]) -> HashSet<String> {
     let mut collector = CallThroughCollector::default();
     visit_all_files(parsed, &mut collector);
-    let direct = collector.direct;
-    let forwarding = forwarders(&collect_macro_reach(parsed), &direct);
-    direct.union(&forwarding).cloned().collect()
+    close_over_forwarders(collector.bodies, collector.direct)
 }
 
-/// Macros whose body reaches a call-through one. The real shape has two levels:
-/// an entry macro forwards its metavariable to the macro that does the calling,
-/// so only following the chain gets the invocation site right. The chain is the
-/// closure `collect_macro_reach` already computed.
-/// Operation: filter over the reach map, own calls hidden in the closures.
-fn forwarders(reach: &MacroReach, direct: &HashSet<String>) -> HashSet<String> {
-    reach
-        .iter()
-        .filter(|(_, reached)| reached.iter().any(|name| direct.contains(name)))
-        .map(|(name, _)| name.clone())
-        .collect()
+/// Grow the set with the macros that hand a metavariable to one already in it.
+///
+/// The real shape has two levels — an entry macro forwards its metavariable to
+/// the macro that does the calling — and a chain can be longer, so this runs to
+/// a fixpoint rather than one hop. Merely *naming* an inner macro is not
+/// forwarding: `stringify!(step)` mentions `step` and passes nothing on, and
+/// counting that made an invocation excuse whatever was genuinely dead.
+/// Operation: fixpoint over the definition bodies, own calls in the closure.
+fn close_over_forwarders(
+    bodies: HashMap<String, TokenStream>,
+    direct: HashSet<String>,
+) -> HashSet<String> {
+    let mut through = direct;
+    for _ in 0..=bodies.len() {
+        let fresh: Vec<String> = bodies
+            .iter()
+            .filter(|(name, _)| !through.contains(*name))
+            .filter(|(_, body)| macro_tokens::forwards_metavariable_to(body, &through))
+            .map(|(name, _)| name.clone())
+            .collect();
+        if fresh.is_empty() {
+            break;
+        }
+        through.extend(fresh);
+    }
+    through
 }
 
-/// Visitor recording each `macro_rules!` whose body calls through a
-/// metavariable.
+/// Visitor recording each `macro_rules!` definition: its body, and whether that
+/// body already calls through a metavariable.
 #[derive(Default)]
 struct CallThroughCollector {
     direct: HashSet<String>,
+    bodies: HashMap<String, TokenStream>,
 }
 
 impl FileVisitor for CallThroughCollector {
@@ -132,9 +148,11 @@ impl FileVisitor for CallThroughCollector {
 
 impl<'ast> syn::visit::Visit<'ast> for CallThroughCollector {
     fn visit_item_macro(&mut self, node: &'ast syn::ItemMacro) {
-        let named = node.ident.as_ref().map(|i| i.to_string());
-        let calls_through =
-            named.filter(|_| macro_tokens::calls_through_metavariable(&node.mac.tokens));
-        self.direct.extend(calls_through);
+        let Some(name) = node.ident.as_ref().map(|i| i.to_string()) else {
+            return;
+        };
+        let calls_through = macro_tokens::calls_through_metavariable(&node.mac.tokens);
+        self.direct.extend(calls_through.then(|| name.clone()));
+        self.bodies.insert(name, node.mac.tokens.clone());
     }
 }
