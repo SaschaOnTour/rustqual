@@ -49,6 +49,14 @@ Bugfix release for the marker verification 1.8.0 shipped.
   because the test-reached set only suppresses findings.
 
 ### Fixed
+- **A type naming itself does not keep itself alive (DRY-006).**
+  `struct Node { next: Option<Box<Node>> }` referenced `Node` in its own body,
+  which counted as a use — so a linked list nobody builds stayed invisible,
+  while rustc calls the same type never constructed. A declaration's body no
+  longer counts its own name. A *cycle* still does: `A` naming `B` and `B`
+  naming `A` keep each other alive with no outside user, which needs
+  reachability from an external entry point rather than a name set, and is
+  recorded in the rule card as a known limit.
 - **A `pub use` re-export is not a production call (TQ-003).** The call
   collector recorded a re-exported name as production usage, which DRY-002 needs
   — a re-exported function is not dead — but TQ-003 asks a different question:

@@ -24,6 +24,11 @@ use crate::adapters::shared::macro_tokens;
 pub(crate) struct TypeReferenceCollector {
     names: SplitNames,
     docs: DocScanner,
+    /// The declaration currently being walked. A type naming itself in its own
+    /// body — `struct Node { next: Option<Box<Node>> }` — is not a use: it
+    /// would keep itself alive, and rustc calls that same `Node` never
+    /// constructed.
+    declaring: Option<String>,
 }
 
 impl SplitCollector for TypeReferenceCollector {
@@ -59,6 +64,14 @@ impl TypeReferenceCollector {
         self.visit_generics(generics);
     }
 
+    /// Walk a declaration's body with its own name suppressed.
+    /// Operation: save, delegate, restore, own call in the closure.
+    fn declaration(&mut self, name: &syn::Ident, body: impl FnOnce(&mut Self)) {
+        let previous = self.declaring.replace(name.to_string());
+        body(self);
+        self.declaring = previous;
+    }
+
     /// The self type of an `impl` block, whose name does not count as a use.
     /// Integration: shape dispatch.
     fn self_type(&mut self, ty: &syn::Type) {
@@ -85,39 +98,48 @@ impl TypeReferenceCollector {
 impl<'ast> Visit<'ast> for TypeReferenceCollector {
     fn visit_ident(&mut self, node: &'ast syn::Ident) {
         let name = node.to_string();
+        if self.declaring.as_deref() == Some(name.as_str()) {
+            return;
+        }
         self.target().insert(name);
     }
 
     fn visit_item_struct(&mut self, node: &'ast syn::ItemStruct) {
         self.around(&node.attrs, &node.generics);
-        self.visit_fields(&node.fields);
+        self.declaration(&node.ident, |c| c.visit_fields(&node.fields));
     }
 
     fn visit_item_enum(&mut self, node: &'ast syn::ItemEnum) {
         self.around(&node.attrs, &node.generics);
-        node.variants.iter().for_each(|v| self.visit_variant(v));
+        self.declaration(&node.ident, |c| {
+            node.variants.iter().for_each(|v| c.visit_variant(v));
+        });
     }
 
     fn visit_item_union(&mut self, node: &'ast syn::ItemUnion) {
         self.around(&node.attrs, &node.generics);
-        self.visit_fields_named(&node.fields);
+        self.declaration(&node.ident, |c| c.visit_fields_named(&node.fields));
     }
 
     fn visit_item_type(&mut self, node: &'ast syn::ItemType) {
         self.around(&node.attrs, &node.generics);
-        self.visit_type(&node.ty);
+        self.declaration(&node.ident, |c| c.visit_type(&node.ty));
     }
 
     fn visit_item_const(&mut self, node: &'ast syn::ItemConst) {
         self.around(&node.attrs, &node.generics);
-        self.visit_type(&node.ty);
-        self.visit_expr(&node.expr);
+        self.declaration(&node.ident, |c| {
+            c.visit_type(&node.ty);
+            c.visit_expr(&node.expr);
+        });
     }
 
     fn visit_item_static(&mut self, node: &'ast syn::ItemStatic) {
         node.attrs.iter().for_each(|a| self.visit_attribute(a));
-        self.visit_type(&node.ty);
-        self.visit_expr(&node.expr);
+        self.declaration(&node.ident, |c| {
+            c.visit_type(&node.ty);
+            c.visit_expr(&node.expr);
+        });
     }
 
     fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {

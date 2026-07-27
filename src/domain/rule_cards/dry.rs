@@ -60,7 +60,10 @@ pub(super) const CARDS: &[RuleCard] = &[
             is dropped from the analysis (check stderr for parse warnings \
             before acting on a surprising batch), and content pulled in by \
             include! is never parsed at all. An unclosed doc fence errs the \
-            other way — it leaks into the next item, suppressing findings.",
+            other way — it leaks into the next item, suppressing findings, as \
+            does a reference cycle: A naming B and B naming A keep each other \
+            alive with no outside user, which needs reachability rather than a \
+            name set. A type naming itself is handled.",
     },
     RuleCard {
         id: "DRY-003",
