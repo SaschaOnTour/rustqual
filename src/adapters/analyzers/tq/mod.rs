@@ -264,7 +264,7 @@ fn executed_under_test(
         .flat_map(|files| files.values())
         .flat_map(|file| file.function_hits.iter())
         .filter(|(_, hits)| **hits > 0)
-        .map(|(name, _)| name.clone())
+        .flat_map(|(symbol, _)| lcov::symbol_base_names(symbol))
         .collect()
 }
 

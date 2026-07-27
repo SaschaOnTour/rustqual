@@ -12,7 +12,14 @@ Bugfix release for the marker verification 1.8.0 shipped.
 ### Added
 - **Coverage settles TQ-003 when a report is present.** `FNDA:<n>,<name>` says a
   test ran the function — measurement, not inference — so every executed
-  function seeds the tested set. That answers the cases no call graph can:
+  function seeds the tested set. The symbols are demangled first: `llvm-cov`
+  writes Rust's v0 mangling, one entry per monomorphisation, with the function
+  name running straight into the type arguments
+  (`…12append_ticksNtNt…SqliteStorage`). Comparing those to a declared name
+  matched nothing, which is why full line coverage cleared no finding — the
+  report was read and thrown away. Names are read by splitting on the
+  length prefixes and cutting at the CamelCase boundary, so every instantiation
+  aggregates onto one base name. That answers the cases no call graph can:
   a helper reached only through a macro rustqual does not expand, a trait
   object, generated code. It only ever adds to the set, so a missing or stale
   report leaves the call-graph answer exactly as it was.
