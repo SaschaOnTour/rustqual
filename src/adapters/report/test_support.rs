@@ -82,10 +82,14 @@ pub(crate) fn make_analysis(results: Vec<FunctionAnalysis>) -> AnalysisResult {
 ///
 /// Four of the five kinds are constant by construction — TQ-004 and TQ-005
 /// exist only when a coverage report does, TQ-001 and TQ-002 never consult
-/// one — and only `Untested` varies with what the report named, so a fixture
-/// has to say which case it means. Hardcoding `NotApplicable` everywhere made
-/// fixtures that render `[n/a]` on a finding that can only come from
-/// measurement.
+/// one. `Untested` is the one kind that varies with what the report named,
+/// and the kind alone cannot say which case it is: this helper answers
+/// `CallGraph` for it, the answer without a report. **A fixture that needs a
+/// measured `Untested` finding sets `coverage` itself** — none does today, so
+/// the helper takes no second argument the call sites would all ignore.
+///
+/// Hardcoding `NotApplicable` everywhere made fixtures that render `[n/a]` on
+/// a finding that can only come from measurement.
 /// Operation: kind dispatch, no own calls.
 pub(crate) fn evidence_for(kind: crate::domain::findings::TqFindingKind) -> CoverageEvidence {
     use crate::domain::findings::TqFindingKind as K;
