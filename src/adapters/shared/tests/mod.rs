@@ -4,6 +4,7 @@ mod cfg_test_inline_mods;
 mod file_to_module;
 mod item_shape;
 mod macro_expansion;
+mod macro_params;
 mod macro_tokens;
 mod normalize;
 mod normalize_coverage;

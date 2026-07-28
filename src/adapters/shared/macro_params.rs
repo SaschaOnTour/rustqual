@@ -29,7 +29,7 @@ pub(crate) type Fragments = HashMap<String, String>;
 
 /// Fragments that stay transparent when forwarded: rustc lets these be matched
 /// literally or by another specifier, unlike the opaque rest.
-const TRANSPARENT: [&str; 3] = ["ident", "lifetime", "tt"];
+pub(crate) const TRANSPARENT: [&str; 3] = ["ident", "lifetime", "tt"];
 
 /// What a macro does with the arguments it is given, rule by rule.
 ///
@@ -210,8 +210,8 @@ fn selected_positions<'a>(
 }
 
 /// What a rule says about an argument list.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Match {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Match {
     /// Every parameter accepts its argument.
     Accepts,
     /// Some parameter certainly does not — `macro_rules!` moves on.
@@ -293,9 +293,17 @@ const SUBSTITUTE: &str = "__rustqual_fragment";
 /// the mistake this predicate made until the list below grew.
 /// Operation: fragment dispatch, no own calls.
 fn accepts(fragment: &str, arg: &TokenStream, enclosing: &Fragments) -> Match {
-    if let Some(name) = bare_metavariable(arg) {
-        return forwarded_accepts(fragment, enclosing.get(&name));
+    match bare_metavariable(arg) {
+        Some(name) => forwarded_accepts(fragment, enclosing.get(&name)),
+        None => accepts_literal(fragment, arg),
     }
+}
+
+/// Whether a specifier takes an argument made of ordinary tokens. A
+/// metavariable *inside* it is substituted first, since there the surrounding
+/// shape decides — `consume($x)` is a call expression whatever `$x` holds.
+/// Operation: fragment dispatch, no own calls.
+pub(crate) fn accepts_literal(fragment: &str, arg: &TokenStream) -> Match {
     let arg = &without_metavariables(arg);
     let fits = match fragment {
         "ident" => syn::parse2::<syn::Ident>(arg.clone()).is_ok(),
@@ -446,7 +454,7 @@ fn bare_metavariable(arg: &TokenStream) -> Option<String> {
 /// stay transparent and are matched like ordinary tokens. An unknown source
 /// (the enclosing matcher was unreadable) decides nothing.
 /// Operation: two comparisons, no own calls.
-fn forwarded_accepts(fragment: &str, source: Option<&String>) -> Match {
+pub(crate) fn forwarded_accepts(fragment: &str, source: Option<&String>) -> Match {
     let Some(source) = source else {
         return Match::Undecided;
     };
