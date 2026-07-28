@@ -274,14 +274,37 @@ pub fn forwards_metavariable_to(tokens: &TokenStream, names: &HashSet<String>) -
             let invokes = i >= 2
                 && matches!(&trees[i - 1], TokenTree::Punct(p) if p.as_char() == '!')
                 && matches!(&trees[i - 2], TokenTree::Ident(id) if names.contains(&id.to_string()));
-            let hands_over = g
-                .stream()
-                .into_iter()
-                .any(|t| matches!(t, TokenTree::Punct(p) if p.as_char() == '$'));
+            let hands_over = hands_over_metavariable(&g.stream());
             if invokes && hands_over {
                 return true;
             }
         }
     }
     false
+}
+
+/// Whether an invocation's arguments really pass a metavariable on, rather than
+/// merely quoting one.
+///
+/// `step!(live_helper, stringify!($x))` calls `live_helper` and turns `$x` into
+/// text; counting the `$` there made the surrounding macro a forwarder and let
+/// its invocation excuse a function nothing calls. Which argument position the
+/// target actually applies is beyond a token scan — that needs the target's own
+/// matcher — so what is left over-approximates: a metavariable passed to a
+/// position the target never calls still counts. That direction only ever
+/// suppresses a finding.
+/// Operation: positional token-tree scan, no own calls.
+fn hands_over_metavariable(tokens: &TokenStream) -> bool {
+    let trees: Vec<TokenTree> = tokens.clone().into_iter().collect();
+    trees.iter().enumerate().any(|(i, tt)| {
+        let quoted = i >= 2
+            && matches!(&trees[i - 1], TokenTree::Punct(p) if p.as_char() == '!')
+            && matches!(&trees[i - 2], TokenTree::Ident(id)
+                if NON_EXECUTING.contains(&id.to_string().as_str()));
+        match tt {
+            TokenTree::Punct(p) => p.as_char() == '$',
+            TokenTree::Group(g) if !quoted => hands_over_metavariable(&g.stream()),
+            _ => false,
+        }
+    })
 }

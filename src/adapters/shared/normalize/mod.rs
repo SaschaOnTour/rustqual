@@ -12,6 +12,7 @@ use syn::visit::Visit;
 
 mod compound;
 mod expr;
+mod names;
 mod operators;
 mod pat;
 mod token;
@@ -31,11 +32,10 @@ pub use token::NormalizedToken;
 pub fn normalize_fn(sig: &syn::Signature, body: &syn::Block) -> Vec<NormalizedToken> {
     let mut n = Normalizer {
         tokens: Vec::new(),
-        ident_map: HashMap::new(),
-        next_ident_id: 0,
-        params: HashSet::new(),
+        aliases: names::Aliases::default(),
+        scope: names::Scope::default(),
     };
-    n.seed_bindings(sig);
+    n.scope.seed(sig);
     syn::visit::visit_block(&mut n, body);
     n.tokens
 }
@@ -46,9 +46,8 @@ pub fn normalize_fn(sig: &syn::Signature, body: &syn::Block) -> Vec<NormalizedTo
 pub fn normalize_stmts(stmts: &[syn::Stmt]) -> Vec<NormalizedToken> {
     let mut n = Normalizer {
         tokens: Vec::new(),
-        ident_map: HashMap::new(),
-        next_ident_id: 0,
-        params: HashSet::new(),
+        aliases: names::Aliases::default(),
+        scope: names::Scope::default(),
     };
     stmts.iter().for_each(|stmt| n.visit_stmt(stmt));
     n.tokens
@@ -106,85 +105,53 @@ pub fn jaccard_similarity(a: &[NormalizedToken], b: &[NormalizedToken]) -> f64 {
 /// AST walker that produces normalized tokens.
 struct Normalizer {
     tokens: Vec<NormalizedToken>,
-    ident_map: HashMap<String, usize>,
-    next_ident_id: usize,
-    /// Names the signature binds. Kept apart from `ident_map` so knowing that a
-    /// name is a local costs no index.
-    params: HashSet<String>,
-}
-
-impl Normalizer {
-    /// Resolve an identifier name to a positional index (assign on first encounter).
-    fn resolve_ident(&mut self, name: &str) -> usize {
-        if let Some(&id) = self.ident_map.get(name) {
-            id
-        } else {
-            let id = self.next_ident_id;
-            self.next_ident_id += 1;
-            self.ident_map.insert(name.to_string(), id);
-            id
-        }
-    }
-
-    /// Whether `name` is a binding of this body — a parameter, or a `let` seen
-    /// earlier. In callee position that is what separates a callback from a
-    /// free function; nothing in the token stream itself does.
-    ///
-    /// Deliberately **not** the identifier map: recognising a binding and
-    /// handing out its index are two jobs. Seeding parameters into the map made
-    /// the numbering depend on how many parameters a function declares, so one
-    /// unused parameter shifted every index and split two identical bodies
-    /// apart — the very thing alpha-renaming exists to prevent. Indices are
-    /// still assigned at first occurrence in the body.
-    /// Operation: two lookups, no own calls.
-    fn is_bound(&self, name: &str) -> bool {
-        self.params.contains(name) || self.ident_map.contains_key(name)
-    }
-
-    /// Record the parameter names before the body is walked. Every binding the
-    /// pattern introduces counts, at any depth: `fn f((cb, x): (F, u8))` binds
-    /// `cb` just as a plain parameter would, and reading only the top-level
-    /// `Pat::Ident` left every destructured callback looking like a free
-    /// function.
-    /// Operation: pattern walk, own calls hidden in the visitor.
-    fn seed_bindings(&mut self, sig: &syn::Signature) {
-        let mut binds = ParamBindings::default();
-        sig.inputs.iter().for_each(|arg| binds.visit_fn_arg(arg));
-        self.params = binds.names;
-    }
-}
-
-/// Collects every name a parameter pattern binds, at any depth.
-#[derive(Default)]
-struct ParamBindings {
-    names: HashSet<String>,
-}
-
-impl<'ast> Visit<'ast> for ParamBindings {
-    fn visit_pat_ident(&mut self, node: &'ast syn::PatIdent) {
-        self.names.insert(node.ident.to_string());
-        syn::visit::visit_pat_ident(self, node);
-    }
+    /// Split deliberately: handing out an index and knowing that a name is a
+    /// local are two jobs, and mixing them made the numbering depend on how
+    /// many parameters a function declares.
+    aliases: names::Aliases,
+    scope: names::Scope,
 }
 
 // ── syn::visit::Visit implementation ────────────────────────────
 
+impl Normalizer {
+    /// A `let` statement. The pattern is walked first, so the token order
+    /// follows the source — but the names it binds are held back until the
+    /// initializer is done: in `let load = load();` the call on the right is
+    /// the *function*, because the binding is not in scope there yet.
+    /// Operation: scope juggling around two walks, own calls in the closures.
+    fn norm_let(&mut self, local: &syn::Local) {
+        self.tokens.push(NormalizedToken::Keyword("let"));
+        let before = self.scope.snapshot();
+        self.visit_pat(&local.pat);
+        let introduced = self.scope.bound_since(&before);
+        self.scope.restore(before);
+        local.init.iter().for_each(|init| {
+            self.tokens.push(NormalizedToken::Operator("="));
+            self.visit_expr(&init.expr);
+            init.diverge.iter().for_each(|(_, diverge)| {
+                self.tokens.push(NormalizedToken::Keyword("else"));
+                self.visit_expr(diverge);
+            });
+        });
+        self.scope.rebind(introduced);
+        self.tokens.push(NormalizedToken::Semi);
+    }
+}
+
 impl<'ast> Visit<'ast> for Normalizer {
+    /// A block is a scope: what it binds is gone at its end. Without this the
+    /// set of locals only grows, and a function called after an unrelated
+    /// same-named binding reads as that local.
+    fn visit_block(&mut self, node: &'ast syn::Block) {
+        let outer = self.scope.snapshot();
+        syn::visit::visit_block(self, node);
+        self.scope.restore(outer);
+    }
+
     fn visit_stmt(&mut self, stmt: &'ast syn::Stmt) {
         match stmt {
-            syn::Stmt::Local(local) => {
-                self.tokens.push(NormalizedToken::Keyword("let"));
-                self.visit_pat(&local.pat);
-                if let Some(init) = &local.init {
-                    self.tokens.push(NormalizedToken::Operator("="));
-                    self.visit_expr(&init.expr);
-                    if let Some((_, diverge)) = &init.diverge {
-                        self.tokens.push(NormalizedToken::Keyword("else"));
-                        self.visit_expr(diverge);
-                    }
-                }
-                self.tokens.push(NormalizedToken::Semi);
-            }
+            syn::Stmt::Local(local) => self.norm_let(local),
             syn::Stmt::Expr(expr, semi) => {
                 self.visit_expr(expr);
                 if semi.is_some() {

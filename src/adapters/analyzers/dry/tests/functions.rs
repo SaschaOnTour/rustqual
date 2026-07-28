@@ -487,3 +487,50 @@ fn apply_there((callback, x): (F, u8)) {
     let groups = detect_duplicates(&parse(code), &low_threshold_config());
     assert_eq!(groups.len(), 1, "{groups:?}");
 }
+
+#[test]
+fn a_let_binding_is_not_in_scope_in_its_own_initializer() {
+    // `let load = load();` shadows a function with a local of the same name,
+    // and the call on the right is the *function* — the binding does not exist
+    // yet. Treating it as the local made two bodies that call different
+    // functions look identical again.
+    let code = r#"
+fn run_here() {
+    let load = load();
+    consume(load);
+    consume(load);
+}
+fn run_there() {
+    let save = save();
+    consume(save);
+    consume(save);
+}
+"#;
+    let groups = detect_duplicates(&parse(code), &low_threshold_config());
+    assert!(
+        groups.is_empty(),
+        "different functions on the right: {groups:?}"
+    );
+}
+
+#[test]
+fn a_binding_leaves_scope_with_its_block() {
+    // The set of locals is not a growing pile: a name bound inside a block is
+    // gone afterwards, so a later call to a *function* of that name is a
+    // function again. Over-approximating "this is a local" is the direction
+    // that invents duplicates.
+    let code = r#"
+fn run_here() {
+    { let load = 1; consume(load); }
+    load();
+    load();
+}
+fn run_there() {
+    { let save = 1; consume(save); }
+    save();
+    save();
+}
+"#;
+    let groups = detect_duplicates(&parse(code), &low_threshold_config());
+    assert!(groups.is_empty(), "{groups:?}");
+}

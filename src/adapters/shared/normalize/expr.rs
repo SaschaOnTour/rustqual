@@ -30,7 +30,7 @@ impl Normalizer {
     pub(super) fn norm_path(&mut self, p: &syn::ExprPath) {
         if p.path.segments.len() == 1 {
             let name = p.path.segments[0].ident.to_string();
-            let id = self.resolve_ident(&name);
+            let id = self.aliases.index(&name);
             self.tokens.push(NormalizedToken::Ident(id));
         }
     }
@@ -67,8 +67,8 @@ impl Normalizer {
     /// prevent.
     /// Operation: one branch, own call in the arm.
     fn push_callee(&mut self, name: String) {
-        if self.is_bound(&name) {
-            let id = self.resolve_ident(&name);
+        if self.scope.is_bound(&name) {
+            let id = self.aliases.index(&name);
             self.tokens.push(NormalizedToken::Ident(id));
             return;
         }
@@ -133,9 +133,7 @@ impl Normalizer {
             syn::Expr::If(e) => {
                 self.tokens.push(NormalizedToken::Keyword("if"));
                 self.visit_expr(&e.cond);
-                for stmt in &e.then_branch.stmts {
-                    self.visit_stmt(stmt);
-                }
+                self.visit_block(&e.then_branch);
                 if let Some((_, else_branch)) = &e.else_branch {
                     self.tokens.push(NormalizedToken::Keyword("else"));
                     self.visit_expr(else_branch);
@@ -166,27 +164,19 @@ impl Normalizer {
                 self.visit_pat(&e.pat);
                 self.tokens.push(NormalizedToken::Keyword("in"));
                 self.visit_expr(&e.expr);
-                for stmt in &e.body.stmts {
-                    self.visit_stmt(stmt);
-                }
+                self.visit_block(&e.body);
             }
             syn::Expr::While(e) => {
                 self.tokens.push(NormalizedToken::Keyword("while"));
                 self.visit_expr(&e.cond);
-                for stmt in &e.body.stmts {
-                    self.visit_stmt(stmt);
-                }
+                self.visit_block(&e.body);
             }
             syn::Expr::Loop(e) => {
                 self.tokens.push(NormalizedToken::Keyword("loop"));
-                for stmt in &e.body.stmts {
-                    self.visit_stmt(stmt);
-                }
+                self.visit_block(&e.body);
             }
             syn::Expr::Block(e) => {
-                for stmt in &e.block.stmts {
-                    self.visit_stmt(stmt);
-                }
+                self.visit_block(&e.block);
             }
             _ => {}
         }

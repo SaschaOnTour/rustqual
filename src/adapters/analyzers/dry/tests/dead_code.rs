@@ -1556,3 +1556,30 @@ fn main() { used(); }
     assert_eq!(found.len(), 1, "{found:?}");
     assert_eq!(found[0].function_name, "dead_helper");
 }
+
+#[test]
+fn a_metavariable_that_is_only_stringified_is_not_forwarded() {
+    // The target calls its *first* argument; the invocation hands it a fixed
+    // name and only stringifies the metavariable. Reading any `$` in the
+    // invocation as a forward let `wrapper!(dead_helper)` excuse a function
+    // that is never called.
+    let code = r#"
+macro_rules! step {
+    ($f:path, $label:expr) => { $f(); };
+}
+macro_rules! wrapper {
+    ($x:path) => { step!(live_helper, stringify!($x)); };
+}
+fn live_helper() {}
+fn dead_helper() {}
+fn used() { wrapper!(dead_helper); }
+fn main() { used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    let names: Vec<&str> = found.iter().map(|w| w.function_name.as_str()).collect();
+    assert!(names.contains(&"dead_helper"), "{found:?}");
+    // `live_helper` is reported too, and that is a different, older gap: it is
+    // named in the macro *definition* in argument position, and only macro
+    // invocations feed the production call graph. Asserting the total here
+    // would pin that unrelated behaviour into this test.
+}

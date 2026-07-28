@@ -28,7 +28,11 @@ spelled-out calls DRY-002 rewards.
   own set, so an extra unused parameter cannot shift the numbering, and indices
   are still assigned at first occurrence in the body. Every binding a parameter
   pattern introduces counts, at any depth — `fn f((cb, x): (F, u8))` binds `cb`
-  just as a plain parameter would.
+  just as a plain parameter would. Scope is tracked as scope: a `let` binding is
+  not in scope inside its own initializer, so the right-hand side of
+  `let load = load();` is the *function*; and a name bound in a block is gone at
+  its end. Both matter because mistaking a free function for a local is the
+  direction that *invents* duplicates.
   *Known limit, now pinned by a test rather than folklore:* a multi-segment
   callee (`audit::check_append(s)`) still contributes no token at all. Naming it
   by its last segment would conflate `Config::default()` with
@@ -53,7 +57,11 @@ spelled-out calls DRY-002 rewards.
   `$f`. And *naming* a call-through macro is not forwarding to it: the chain is
   followed through actual invocations that hand over a metavariable, run to a
   fixpoint, so a body that only mentions `step` inside `stringify!` does not
-  inherit its status.
+  inherit its status — and a metavariable that is only quoted at the invocation
+  (`step!(live_helper, stringify!($x))`) is not handed over either. Which
+  argument position the target actually calls is beyond a token scan; what
+  remains over-approximates in the direction that suppresses a finding rather
+  than inventing one.
 
 ## [1.8.1] - 2026-07-26
 
