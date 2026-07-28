@@ -14,9 +14,11 @@ pub(crate) fn collect_all_calls(
     parsed: &[(String, String, syn::File)],
     cfg_test_files: &HashSet<String>,
 ) -> SplitNames {
+    // One walk over the macro definitions, two questions about them.
+    let bodies = super::macro_reach::collect_macro_bodies(parsed);
     let mut collector = CallTargetCollector {
-        macro_reach: super::macro_reach::collect_macro_reach(parsed),
-        call_through: super::macro_reach::call_through_macros(parsed),
+        macro_reach: super::macro_reach::macro_reach_of(&bodies),
+        call_through: super::macro_reach::call_through_macros(&bodies),
         ..Default::default()
     };
     collect_split(parsed, cfg_test_files, &mut collector)

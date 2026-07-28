@@ -23,7 +23,8 @@ pub use token::NormalizedToken;
 
 /// Normalize a function body into a flat token stream.
 ///
-/// The parameter names are seeded into the identifier map first, so a callee
+/// The parameter names are read first — into their own set, not the identifier
+/// map, so knowing that a name is a local costs no index — so a callee
 /// that *is* a parameter — `fn apply(f: F) { f(x) }` — stays positional like
 /// every other local. Without the signature the body alone cannot tell a
 /// callback apart from a free function, and two identical higher-order

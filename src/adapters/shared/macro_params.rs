@@ -232,7 +232,12 @@ fn passed_names(tokens: &TokenStream, shape: &CallShape, enclosing: &Fragments) 
         .collect()
 }
 
-/// Every `$name` in a token slice, skipping what a quoting macro holds.
+/// The metavariable `macro_rules!` reserves for the defining crate. It is
+/// hygiene, never a matcher parameter, so it is not a name anything forwards.
+const CRATE_METAVARIABLE: &str = "crate";
+
+/// Every `$name` in a token slice, skipping what a quoting macro holds and the
+/// reserved `$crate`.
 /// Operation: positional scan, own call in the closure.
 // qual:recursive
 fn metavariables_in(trees: &[TokenTree]) -> HashSet<String> {
@@ -240,7 +245,8 @@ fn metavariables_in(trees: &[TokenTree]) -> HashSet<String> {
     for (i, tt) in trees.iter().enumerate() {
         let dollar = matches!(tt, TokenTree::Punct(p) if p.as_char() == '$');
         if let (true, Some(TokenTree::Ident(name))) = (dollar, trees.get(i + 1)) {
-            out.insert(name.to_string());
+            let named = name.to_string();
+            out.extend((named != CRATE_METAVARIABLE).then_some(named));
         }
         match tt {
             TokenTree::Group(g) if !is_quoted_at(trees, i) => {
@@ -311,13 +317,15 @@ fn flat_parameters(matcher: &TokenStream) -> Option<Vec<(String, String)>> {
 /// The invocation's top-level arguments, split on commas.
 /// Operation: fold over the token trees, no own calls.
 pub(crate) fn split_arguments(tokens: &TokenStream) -> Vec<Vec<TokenTree>> {
-    let mut args: Vec<Vec<TokenTree>> = vec![Vec::new()];
-    tokens.clone().into_iter().for_each(|tt| {
+    let mut args: Vec<Vec<TokenTree>> = Vec::new();
+    let mut current: Vec<TokenTree> = Vec::new();
+    for tt in tokens.clone() {
         let comma = matches!(&tt, TokenTree::Punct(p) if p.as_char() == ',');
         match comma {
-            true => args.push(Vec::new()),
-            false => args.last_mut().unwrap_or(&mut Vec::new()).push(tt),
+            true => args.push(std::mem::take(&mut current)),
+            false => current.push(tt),
         }
-    });
+    }
+    args.push(current);
     args
 }

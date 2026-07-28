@@ -24,12 +24,27 @@ use crate::adapters::shared::{macro_params, macro_tokens};
 /// invocations to their own bodies.
 pub(crate) type MacroReach = HashMap<String, Vec<String>>;
 
-/// Collect what each `macro_rules!` macro in the workspace reaches.
-/// Integration: collection then transitive closure.
-pub(crate) fn collect_macro_reach(parsed: &[(String, String, syn::File)]) -> MacroReach {
+/// Every `macro_rules!` body in the workspace, keyed by name.
+///
+/// One walk for both derivations below: what a macro *reaches* and which
+/// arguments it *applies* are two questions about the same bodies, and
+/// collecting them twice meant a second traversal that grows with the repo.
+/// Operation: one visit, no own calls beyond the driver.
+pub(crate) fn collect_macro_bodies(
+    parsed: &[(String, String, syn::File)],
+) -> HashMap<String, TokenStream> {
     let mut collector = MacroBodyCollector::default();
     visit_all_files(parsed, &mut collector);
-    close_over_nested(collector.bodies)
+    collector.bodies
+}
+
+/// What each `macro_rules!` macro in the workspace reaches.
+/// Integration: per-body idents, then the transitive closure.
+pub(crate) fn macro_reach_of(bodies: &HashMap<String, TokenStream>) -> MacroReach {
+    let named = bodies
+        .iter()
+        .map(|(name, body)| (name.clone(), macro_tokens::all_idents(body).collect()));
+    close_over_nested(named.collect())
 }
 
 /// Follow a macro that invokes another macro to what that one reaches. Bounded
@@ -66,10 +81,10 @@ fn close_over_nested(bodies: MacroReach) -> MacroReach {
     out
 }
 
-/// Visitor recording each `macro_rules!` definition and the names in its body.
+/// Visitor recording each `macro_rules!` definition body, keyed by its name.
 #[derive(Default)]
 struct MacroBodyCollector {
-    bodies: MacroReach,
+    bodies: HashMap<String, TokenStream>,
 }
 
 impl FileVisitor for MacroBodyCollector {
@@ -81,8 +96,7 @@ impl<'ast> syn::visit::Visit<'ast> for MacroBodyCollector {
         let Some(name) = node.ident.as_ref().map(|i| i.to_string()) else {
             return;
         };
-        let names: Vec<String> = macro_tokens::all_idents(&node.mac.tokens).collect();
-        self.bodies.insert(name, names);
+        self.bodies.insert(name, node.mac.tokens.clone());
     }
 }
 
@@ -101,11 +115,9 @@ impl<'ast> syn::visit::Visit<'ast> for MacroBodyCollector {
 /// a dead function — the mistake that costs a real finding.
 /// Integration: direct set, then the reach map decides the rest.
 pub(crate) fn call_through_macros(
-    parsed: &[(String, String, syn::File)],
+    bodies: &HashMap<String, TokenStream>,
 ) -> macro_params::CalledPositions {
-    let mut collector = CallThroughCollector::default();
-    visit_all_files(parsed, &mut collector);
-    close_over_forwarders(collector.bodies)
+    close_over_forwarders(bodies)
 }
 
 /// Grow the set until nothing new calls through.
@@ -116,7 +128,7 @@ pub(crate) fn call_through_macros(
 /// asks about the right argument — dropping them after the first hop let any
 /// metavariable count again, and an invocation excused whatever was dead.
 /// Operation: fixpoint over the definitions, own calls in the closures.
-fn close_over_forwarders(bodies: HashMap<String, TokenStream>) -> macro_params::CalledPositions {
+fn close_over_forwarders(bodies: &HashMap<String, TokenStream>) -> macro_params::CalledPositions {
     let mut through = macro_params::CalledPositions::new();
     for _ in 0..=bodies.len() {
         let fresh: Vec<(String, macro_params::CallShape)> = bodies
@@ -132,23 +144,4 @@ fn close_over_forwarders(bodies: HashMap<String, TokenStream>) -> macro_params::
         through.extend(fresh);
     }
     through
-}
-
-/// Visitor recording each `macro_rules!` definition body, keyed by its name.
-#[derive(Default)]
-struct CallThroughCollector {
-    bodies: HashMap<String, TokenStream>,
-}
-
-impl FileVisitor for CallThroughCollector {
-    fn reset_for_file(&mut self, _file_path: &str) {}
-}
-
-impl<'ast> syn::visit::Visit<'ast> for CallThroughCollector {
-    fn visit_item_macro(&mut self, node: &'ast syn::ItemMacro) {
-        let named = node.ident.as_ref().map(|i| i.to_string());
-        named.into_iter().for_each(|name| {
-            self.bodies.insert(name, node.mac.tokens.clone());
-        });
-    }
 }

@@ -53,7 +53,7 @@ impl FunctionCollector<'_> {
             return None;
         }
 
-        // Closure hides own calls to normalize_body/structural_hash (lenient mode).
+        // Closure hides own calls to normalize_fn/structural_hash (lenient mode).
         let compute = |b: &syn::Block| {
             let tokens = crate::adapters::shared::normalize::normalize_fn(sig, b);
             let hash = crate::adapters::shared::normalize::structural_hash(&tokens);

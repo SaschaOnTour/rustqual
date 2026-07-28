@@ -1942,3 +1942,26 @@ fn main() { used(); }
     let found = dead_code_warnings(&parse(code));
     assert!(found.is_empty(), "{found:?}");
 }
+
+#[test]
+fn dollar_crate_is_not_a_metavariable() {
+    // `$crate` is hygiene, not a parameter: it names the defining crate and is
+    // never bound by a matcher. Counting it as an applied metavariable made any
+    // macro that uses it call-through, and its invocation then harvested every
+    // identifier — excusing whatever was dead.
+    let code = r#"
+macro_rules! step {
+    ($f:path) => { $f(); };
+}
+macro_rules! wrapper {
+    ($x:path) => { step!($crate::live_helper); };
+}
+pub fn live_helper() {}
+fn dead_helper() {}
+fn used() { wrapper!(dead_helper); }
+fn main() { used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    let names: Vec<&str> = found.iter().map(|w| w.function_name.as_str()).collect();
+    assert!(names.contains(&"dead_helper"), "{found:?}");
+}
