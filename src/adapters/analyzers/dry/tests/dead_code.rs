@@ -1583,3 +1583,47 @@ fn main() { used(); }
     // invocations feed the production call graph. Asserting the total here
     // would pin that unrelated behaviour into this test.
 }
+
+#[test]
+fn a_metavariable_at_a_position_the_target_never_calls_is_not_forwarded() {
+    // `step!` applies its *first* argument. The wrapper passes a fixed name
+    // there and only consumes `$x`, so nothing it is invoked with is ever
+    // called — reading any metavariable in the argument list as a forward
+    // excused a plainly dead function.
+    let code = r#"
+macro_rules! step {
+    ($f:path, $label:expr) => { $f(); };
+}
+macro_rules! wrapper {
+    ($x:path) => { step!(live_helper, consume($x)); };
+}
+fn live_helper() {}
+fn consume(_: u8) {}
+fn dead_helper() {}
+fn used() { wrapper!(dead_helper); }
+fn main() { used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    let names: Vec<&str> = found.iter().map(|w| w.function_name.as_str()).collect();
+    assert!(names.contains(&"dead_helper"), "{found:?}");
+}
+
+#[test]
+fn a_metavariable_at_the_called_position_is_forwarded() {
+    // The counterpart: same target, and now the wrapper really does hand its
+    // own metavariable to the argument `step!` applies.
+    let code = r#"
+macro_rules! step {
+    ($f:path, $label:expr) => { $f(); };
+}
+macro_rules! wrapper {
+    ($x:path) => { step!($x, consume(1)); };
+}
+fn consume(_: u8) {}
+fn live_helper() {}
+fn used() { wrapper!(live_helper); }
+fn main() { used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    assert!(found.is_empty(), "{found:?}");
+}

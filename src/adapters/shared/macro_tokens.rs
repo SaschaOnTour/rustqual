@@ -224,87 +224,40 @@ const NON_EXECUTING: [&str; 3] = ["stringify", "quote", "quote_spanned"];
 /// the case this predicate exists for.
 /// Operation: positional token-tree scan, no own calls.
 pub fn calls_through_metavariable(tokens: &TokenStream) -> bool {
+    !called_metavariables(tokens).is_empty()
+}
+
+/// Whether the tree at `at` is the body of a macro that only quotes its input.
+/// Operation: two-token lookback, no own calls.
+pub fn is_quoted_at(trees: &[TokenTree], at: usize) -> bool {
+    at >= 2
+        && matches!(&trees[at - 1], TokenTree::Punct(p) if p.as_char() == '!')
+        && matches!(&trees[at - 2], TokenTree::Ident(id)
+            if NON_EXECUTING.contains(&id.to_string().as_str()))
+}
+
+/// The metavariable names this transcriber applies as a callee: the `f` of
+/// `$f(…)`. Quoting macros are skipped, since `stringify!($f())` calls nothing.
+/// Operation: positional token-tree scan, no own calls.
+pub fn called_metavariables(tokens: &TokenStream) -> HashSet<String> {
+    let mut out = HashSet::new();
     let mut stack: Vec<TokenStream> = vec![tokens.clone()];
     while let Some(stream) = stack.pop() {
         let trees: Vec<TokenTree> = stream.into_iter().collect();
         for (i, tt) in trees.iter().enumerate() {
-            let quoted = i >= 2
-                && matches!(&trees[i - 1], TokenTree::Punct(p) if p.as_char() == '!')
-                && matches!(&trees[i - 2], TokenTree::Ident(id)
-                    if NON_EXECUTING.contains(&id.to_string().as_str()));
             match tt {
-                TokenTree::Group(g) if !quoted => stack.push(g.stream()),
+                TokenTree::Group(g) if !is_quoted_at(&trees, i) => stack.push(g.stream()),
                 _ => {}
             }
             let is_dollar = matches!(tt, TokenTree::Punct(p) if p.as_char() == '$');
-            let names_a_call = matches!(trees.get(i + 1), Some(TokenTree::Ident(_)))
-                && matches!(trees.get(i + 2), Some(TokenTree::Group(g))
-                    if g.delimiter() == proc_macro2::Delimiter::Parenthesis);
-            if is_dollar && names_a_call {
-                return true;
+            let called = matches!(trees.get(i + 2), Some(TokenTree::Group(g))
+                if g.delimiter() == Delimiter::Parenthesis);
+            if let (true, true, Some(TokenTree::Ident(name))) =
+                (is_dollar, called, trees.get(i + 1))
+            {
+                out.insert(name.to_string());
             }
         }
     }
-    false
-}
-
-/// Whether these tokens *invoke* one of `names` and hand it a metavariable:
-/// `step!($test, $make)`.
-///
-/// Naming a macro is not forwarding to it. `stringify!(step)` mentions `step`
-/// and passes nothing on, so a body that does only that must not inherit
-/// `step!`'s call-through status — at its own invocation every argument would
-/// then read as a call and excuse whatever is genuinely dead. The `$` is what
-/// separates a forward from a mention.
-/// Operation: positional token-tree scan, no own calls.
-pub fn forwards_metavariable_to(tokens: &TokenStream, names: &HashSet<String>) -> bool {
-    let mut stack: Vec<TokenStream> = vec![tokens.clone()];
-    while let Some(stream) = stack.pop() {
-        let trees: Vec<TokenTree> = stream.into_iter().collect();
-        for (i, tt) in trees.iter().enumerate() {
-            let quoted = i >= 2
-                && matches!(&trees[i - 1], TokenTree::Punct(p) if p.as_char() == '!')
-                && matches!(&trees[i - 2], TokenTree::Ident(id)
-                    if NON_EXECUTING.contains(&id.to_string().as_str()));
-            let TokenTree::Group(g) = tt else { continue };
-            if quoted {
-                continue;
-            }
-            stack.push(g.stream());
-            let invokes = i >= 2
-                && matches!(&trees[i - 1], TokenTree::Punct(p) if p.as_char() == '!')
-                && matches!(&trees[i - 2], TokenTree::Ident(id) if names.contains(&id.to_string()));
-            let hands_over = hands_over_metavariable(&g.stream());
-            if invokes && hands_over {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-/// Whether an invocation's arguments really pass a metavariable on, rather than
-/// merely quoting one.
-///
-/// `step!(live_helper, stringify!($x))` calls `live_helper` and turns `$x` into
-/// text; counting the `$` there made the surrounding macro a forwarder and let
-/// its invocation excuse a function nothing calls. Which argument position the
-/// target actually applies is beyond a token scan — that needs the target's own
-/// matcher — so what is left over-approximates: a metavariable passed to a
-/// position the target never calls still counts. That direction only ever
-/// suppresses a finding.
-/// Operation: positional token-tree scan, no own calls.
-fn hands_over_metavariable(tokens: &TokenStream) -> bool {
-    let trees: Vec<TokenTree> = tokens.clone().into_iter().collect();
-    trees.iter().enumerate().any(|(i, tt)| {
-        let quoted = i >= 2
-            && matches!(&trees[i - 1], TokenTree::Punct(p) if p.as_char() == '!')
-            && matches!(&trees[i - 2], TokenTree::Ident(id)
-                if NON_EXECUTING.contains(&id.to_string().as_str()));
-        match tt {
-            TokenTree::Punct(p) => p.as_char() == '$',
-            TokenTree::Group(g) if !quoted => hands_over_metavariable(&g.stream()),
-            _ => false,
-        }
-    })
+    out
 }

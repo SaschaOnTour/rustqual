@@ -115,6 +115,30 @@ struct Normalizer {
 // ── syn::visit::Visit implementation ────────────────────────────
 
 impl Normalizer {
+    /// Walk `inner` with whatever it binds confined to it — a block, a match
+    /// arm, a closure, the covered branch of an `if let`. Without it the set of
+    /// locals is a pile that only grows, and a free function called later reads
+    /// as one of them.
+    /// Operation: save + restore around the walk, own call in the closure.
+    pub(super) fn scoped(&mut self, inner: impl FnOnce(&mut Self)) {
+        let outer = self.scope.snapshot();
+        inner(self);
+        self.scope.restore(outer);
+    }
+
+    /// Walk `pat` for its tokens, then `rhs` — with what the pattern binds held
+    /// back, because it is not in scope there. `let load = load()` and
+    /// `for load in load()` both call the *function* on the right.
+    /// Operation: bind, withhold, walk, rebind; own calls in the closure.
+    pub(super) fn binding_after(&mut self, pat: &syn::Pat, rhs: impl FnOnce(&mut Self)) {
+        let before = self.scope.snapshot();
+        self.visit_pat(pat);
+        let introduced = self.scope.bound_since(&before);
+        self.scope.restore(before);
+        rhs(self);
+        self.scope.rebind(introduced);
+    }
+
     /// A `let` statement. The pattern is walked first, so the token order
     /// follows the source — but the names it binds are held back until the
     /// initializer is done: in `let load = load();` the call on the right is
@@ -122,19 +146,16 @@ impl Normalizer {
     /// Operation: scope juggling around two walks, own calls in the closures.
     fn norm_let(&mut self, local: &syn::Local) {
         self.tokens.push(NormalizedToken::Keyword("let"));
-        let before = self.scope.snapshot();
-        self.visit_pat(&local.pat);
-        let introduced = self.scope.bound_since(&before);
-        self.scope.restore(before);
-        local.init.iter().for_each(|init| {
-            self.tokens.push(NormalizedToken::Operator("="));
-            self.visit_expr(&init.expr);
-            init.diverge.iter().for_each(|(_, diverge)| {
-                self.tokens.push(NormalizedToken::Keyword("else"));
-                self.visit_expr(diverge);
+        self.binding_after(&local.pat, |n| {
+            local.init.iter().for_each(|init| {
+                n.tokens.push(NormalizedToken::Operator("="));
+                n.visit_expr(&init.expr);
+                init.diverge.iter().for_each(|(_, diverge)| {
+                    n.tokens.push(NormalizedToken::Keyword("else"));
+                    n.visit_expr(diverge);
+                });
             });
         });
-        self.scope.rebind(introduced);
         self.tokens.push(NormalizedToken::Semi);
     }
 }

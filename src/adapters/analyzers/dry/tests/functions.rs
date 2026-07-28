@@ -534,3 +534,58 @@ fn run_there() {
     let groups = detect_duplicates(&parse(code), &low_threshold_config());
     assert!(groups.is_empty(), "{groups:?}");
 }
+
+/// Two bodies of the same shape whose only difference is which free function
+/// they call. Any scope leak that turns that call into a local makes them
+/// duplicates — which is what these cases are for.
+fn differ_only_in_callee(shape: &str) -> Vec<DuplicateGroup> {
+    let code = format!(
+        "fn run_here() {{ {} }}\nfn run_there() {{ {} }}",
+        shape.replace("NAME", "load"),
+        shape.replace("NAME", "save")
+    );
+    detect_duplicates(&parse(&code), &low_threshold_config())
+}
+
+#[test]
+fn a_for_binding_is_not_in_scope_in_the_iterator_expression() {
+    // `for load in load()` iterates what the *function* returns; the loop
+    // variable does not exist yet on the right of `in`.
+    let groups = differ_only_in_callee("for NAME in NAME() { consume(1); consume(2); }");
+    assert!(groups.is_empty(), "{groups:?}");
+}
+
+#[test]
+fn a_for_binding_does_not_outlive_its_loop() {
+    // It was bound *before* the body's snapshot was taken, so restoring the
+    // block put it back rather than removing it.
+    let groups = differ_only_in_callee("for NAME in [1] { consume(NAME); }\nNAME();\nNAME();");
+    assert!(groups.is_empty(), "{groups:?}");
+}
+
+#[test]
+fn a_match_arm_binding_stays_in_its_arm() {
+    // Arms are alternatives, not a sequence: what one binds is not in scope in
+    // the next, nor after the match.
+    let groups = differ_only_in_callee(
+        "match pick() { Some(NAME) => consume(1), None => consume(2) }\nNAME();\nNAME();",
+    );
+    assert!(groups.is_empty(), "{groups:?}");
+}
+
+#[test]
+fn a_closure_parameter_stays_in_its_closure() {
+    let groups = differ_only_in_callee("let f = |NAME| consume(NAME);\nNAME();\nNAME();");
+    assert!(groups.is_empty(), "{groups:?}");
+}
+
+#[test]
+fn an_if_let_binding_stays_in_its_branch() {
+    // `if let Some(load) = load()` — the call on the right is the function, and
+    // the binding covers the then-branch only, not the `else` and not what
+    // follows.
+    let groups = differ_only_in_callee(
+        "if let Some(v) = NAME() { consume(v); } else { consume(2); }\nNAME();",
+    );
+    assert!(groups.is_empty(), "{groups:?}");
+}

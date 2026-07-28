@@ -131,26 +131,34 @@ impl Normalizer {
     pub(super) fn norm_branch(&mut self, expr: &syn::Expr) {
         match expr {
             syn::Expr::If(e) => {
-                self.tokens.push(NormalizedToken::Keyword("if"));
-                self.visit_expr(&e.cond);
-                self.visit_block(&e.then_branch);
-                if let Some((_, else_branch)) = &e.else_branch {
+                // The condition may be an `if let`, whose binding covers the
+                // then-branch and nothing after it — not the `else`.
+                self.scoped(|n| {
+                    n.tokens.push(NormalizedToken::Keyword("if"));
+                    n.visit_expr(&e.cond);
+                    n.visit_block(&e.then_branch);
+                });
+                e.else_branch.iter().for_each(|(_, else_branch)| {
                     self.tokens.push(NormalizedToken::Keyword("else"));
                     self.visit_expr(else_branch);
-                }
+                });
             }
             syn::Expr::Match(e) => {
                 self.tokens.push(NormalizedToken::Keyword("match"));
                 self.visit_expr(&e.expr);
-                for arm in &e.arms {
-                    self.visit_pat(&arm.pat);
-                    if let Some((_, guard)) = &arm.guard {
-                        self.tokens.push(NormalizedToken::Keyword("if"));
-                        self.visit_expr(guard);
-                    }
-                    self.tokens.push(NormalizedToken::Operator("=>"));
-                    self.visit_expr(&arm.body);
-                }
+                // Arms are alternatives: what one binds is not in scope in the
+                // next, nor after the match.
+                e.arms.iter().for_each(|arm| {
+                    self.scoped(|n| {
+                        n.visit_pat(&arm.pat);
+                        arm.guard.iter().for_each(|(_, guard)| {
+                            n.tokens.push(NormalizedToken::Keyword("if"));
+                            n.visit_expr(guard);
+                        });
+                        n.tokens.push(NormalizedToken::Operator("=>"));
+                        n.visit_expr(&arm.body);
+                    });
+                });
             }
             _ => {}
         }
@@ -160,11 +168,16 @@ impl Normalizer {
     pub(super) fn norm_loop(&mut self, expr: &syn::Expr) {
         match expr {
             syn::Expr::ForLoop(e) => {
-                self.tokens.push(NormalizedToken::Keyword("for"));
-                self.visit_pat(&e.pat);
-                self.tokens.push(NormalizedToken::Keyword("in"));
-                self.visit_expr(&e.expr);
-                self.visit_block(&e.body);
+                // The loop variable is not in scope in the iterator expression,
+                // and it is gone after the loop.
+                self.scoped(|n| {
+                    n.tokens.push(NormalizedToken::Keyword("for"));
+                    n.binding_after(&e.pat, |n| {
+                        n.tokens.push(NormalizedToken::Keyword("in"));
+                        n.visit_expr(&e.expr);
+                    });
+                    n.visit_block(&e.body);
+                });
             }
             syn::Expr::While(e) => {
                 self.tokens.push(NormalizedToken::Keyword("while"));

@@ -30,9 +30,12 @@ spelled-out calls DRY-002 rewards.
   pattern introduces counts, at any depth — `fn f((cb, x): (F, u8))` binds `cb`
   just as a plain parameter would. Scope is tracked as scope: a `let` binding is
   not in scope inside its own initializer, so the right-hand side of
-  `let load = load();` is the *function*; and a name bound in a block is gone at
-  its end. Both matter because mistaking a free function for a local is the
-  direction that *invents* duplicates.
+  `let load = load();` is the *function*; a `for` pattern is not in scope in the
+  iterator expression and is gone after the loop; a match arm's bindings stay in
+  that arm; a closure's parameters stay in the closure; an `if let` binding
+  covers the then-branch and neither the `else` nor what follows. All of it for
+  one reason: mistaking a free function for a local is the direction that
+  *invents* duplicates.
   *Known limit, now pinned by a test rather than folklore:* a multi-segment
   callee (`audit::check_append(s)`) still contributes no token at all. Naming it
   by its last segment would conflate `Config::default()` with
@@ -58,10 +61,14 @@ spelled-out calls DRY-002 rewards.
   followed through actual invocations that hand over a metavariable, run to a
   fixpoint, so a body that only mentions `step` inside `stringify!` does not
   inherit its status — and a metavariable that is only quoted at the invocation
-  (`step!(live_helper, stringify!($x))`) is not handed over either. Which
-  argument position the target actually calls is beyond a token scan; what
-  remains over-approximates in the direction that suppresses a finding rather
-  than inventing one.
+  (`step!(live_helper, stringify!($x))`) is not handed over either — and neither
+  is one passed to a position the target never applies: `step!(live_helper,
+  consume($x))` calls `live_helper` and consumes `$x`. Which position a macro
+  calls is read from its own matcher (`macro_params`), for the flat
+  comma-separated shape where a position means anything; a repetition
+  (`$($t:path),*`) or a custom separator puts it out of reach of a token scan,
+  and the answer falls back to "any metavariable" — over-approximating in the
+  direction that suppresses a finding rather than inventing one.
 
 ## [1.8.1] - 2026-07-26
 
