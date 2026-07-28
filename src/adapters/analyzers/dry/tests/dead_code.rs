@@ -1741,3 +1741,43 @@ fn main() { used(); }
     let found = dead_code_warnings(&parse(code));
     assert!(found.is_empty(), "{found:?}");
 }
+
+#[test]
+fn a_rule_that_calls_nothing_can_still_be_the_one_that_matches() {
+    // The first arm accepts the invocation and applies no parameter at all, so
+    // neither name is called. Dropping the silent arms before selection let the
+    // second one answer for it and registered `live_helper` as called.
+    let code = r#"
+macro_rules! choose {
+    ($value:expr, $label:path) => { consume($value); };
+    ($f:path, $value:expr) => { $f(); };
+}
+fn consume(_: u8) {}
+fn live_helper() {}
+fn dead_helper() {}
+fn used() { choose!(live_helper, dead_helper); }
+fn main() { used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    let names: Vec<&str> = found.iter().map(|w| w.function_name.as_str()).collect();
+    assert!(names.contains(&"live_helper"), "{found:?}");
+    assert!(names.contains(&"dead_helper"), "{found:?}");
+}
+
+#[test]
+fn a_macro_that_applies_nothing_is_not_call_through() {
+    // A matcher no position model fits does not make a macro call-through: it
+    // has to apply a metavariable somewhere. Otherwise every macro with a
+    // repetition would harvest its whole invocation.
+    let code = r#"
+macro_rules! report {
+    ($($x:expr),*) => { let _ = ($($x),*); };
+}
+fn dead_helper() {}
+fn used() { report!(1, dead_helper); }
+fn main() { used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    let names: Vec<&str> = found.iter().map(|w| w.function_name.as_str()).collect();
+    assert!(names.contains(&"dead_helper"), "{found:?}");
+}

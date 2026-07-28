@@ -65,28 +65,34 @@ const PARAMETER_TOKENS: usize = 4;
 /// are read from `targets` and mapped back onto this matcher.
 /// Integration: rules, names, then the positions those names sit at.
 pub(crate) fn called_positions(def: &TokenStream, targets: &CalledPositions) -> Option<CallShape> {
-    let rules = rules_of(def);
-    let shapes: Vec<Option<RuleShape>> = rules
+    let per_rule: Vec<(Option<RuleShape>, bool)> = rules_of(def)
         .iter()
         .map(|rule| shape_of(rule, targets))
-        .filter(|shape| shape.as_ref().is_none_or(|s| !s.called.is_empty()))
         .collect();
-    let readable: Option<Vec<RuleShape>> = shapes.iter().cloned().collect();
-    (!shapes.is_empty()).then(|| CallShape {
+    let applies = per_rule.iter().any(|(_, applies)| *applies);
+    // Every rule, in declaration order, including the ones that apply nothing:
+    // such a rule can still be the first one that matches, and dropping it let
+    // a later arm answer for an invocation it never sees. One unreadable
+    // matcher costs the position model for the whole macro, not the rule list.
+    let readable: Option<Vec<RuleShape>> = per_rule.into_iter().map(|(shape, _)| shape).collect();
+    applies.then(|| CallShape {
         rules: readable.unwrap_or_default(),
     })
 }
 
-/// One rule's shape, or `None` when its matcher does not admit positions.
+/// One rule's shape — `None` when its matcher admits no positions — and whether
+/// it applies a metavariable at all. The two are independent: a rule with a
+/// readable matcher may apply nothing, and a rule that applies something may
+/// have a matcher no position model fits.
 /// Operation: parameters + called names, own calls in the operands.
-fn shape_of(rule: &Rule, targets: &CalledPositions) -> Option<RuleShape> {
+fn shape_of(rule: &Rule, targets: &CalledPositions) -> (Option<RuleShape>, bool) {
     let names = called_names(rule, targets);
-    let params = flat_parameters(&rule.matcher)?;
     let hit = |(i, (name, _)): (usize, &(String, String))| names.contains(name).then_some(i);
-    Some(RuleShape {
+    let shape = flat_parameters(&rule.matcher).map(|params| RuleShape {
         fragments: params.iter().map(|(_, frag)| frag.clone()).collect(),
         called: params.iter().enumerate().filter_map(hit).collect(),
-    })
+    });
+    (shape, !names.is_empty())
 }
 
 /// The metavariables this rule applies as a callee — directly, or by handing
