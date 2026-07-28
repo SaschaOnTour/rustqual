@@ -158,6 +158,21 @@ const LITERAL_CASES: &[(&str, &str, Match)] = &[
     ("expr", "consume(1)", Match::Accepts),
     ("path", "consume(1)", Match::Rejects),
     ("literal", "42", Match::Accepts),
+    // Edition-sensitive rows, verified against rustc. `expr` took `_` and
+    // `const { … }` only from 2024 on, and the analysis knows no edition — so
+    // it may not claim either verdict. `expr_2021` is the frozen older shape
+    // and rejects both in every edition.
+    ("expr", "_", Match::Undecided),
+    ("expr", "const { 1 }", Match::Undecided),
+    ("expr_2021", "_", Match::Rejects),
+    ("expr_2021", "const { 1 }", Match::Rejects),
+    ("expr_2021", "consume(1)", Match::Accepts),
+    // A top-level or-pattern is `pat` from 2021 on and was not before;
+    // `pat_param` is the shape that never took one.
+    ("pat", "1", Match::Accepts),
+    ("pat", "1 | 2", Match::Undecided),
+    ("pat_param", "1", Match::Accepts),
+    ("pat_param", "1 | 2", Match::Rejects),
     ("tt", "42", Match::Accepts),
     ("tt", "1 + 2", Match::Rejects),
     ("item", "fn f() {}", Match::Accepts),

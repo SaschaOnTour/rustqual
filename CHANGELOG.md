@@ -96,7 +96,12 @@ spelled-out calls DRY-002 rewards.
   safeguards follow from that list being a copy of something the compiler owns:
   an unknown specifier decides *nothing* instead of rejecting, so a future
   addition falls back to the coarse rule rather than inventing a finding, and a
-  test asks the local rustc for its own list and fails when the two disagree. An
+  test asks the local rustc for its own list and fails when the two disagree.
+  What an *edition* changed is the same problem and gets the same answer: since
+  no edition is known, `expr` is undecided about `const { … }` and `_`
+  (expressions only from 2024) and `pat` about a top-level or-pattern (a `pat`
+  only from 2021), while `expr_2021` and `pat_param` — the frozen spellings —
+  reject them in every edition. An
   argument that merely *contains* a metavariable (`consume($x)`) keeps the
   substitution, since there the surrounding shape is what decides. Rules that apply nothing stay in the list — such a rule can be the
   first one that matches, and dropping it let a later arm answer for an

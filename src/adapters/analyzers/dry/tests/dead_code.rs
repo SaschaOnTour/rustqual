@@ -1871,6 +1871,25 @@ fn main() { used(); }
         ),
         &["live_helper"],
     ),
+    (
+        (
+            // `const { … }` is an `expr` from edition 2024 and never an
+            // `expr_2021`. Parsing both with the same parser let the first arm
+            // take it, and that arm applies nothing.
+            "an edition-2024 expression is not an expr_2021",
+            r#"
+macro_rules! choose {
+    ($ignored:expr_2021, $also:path) => {};
+    ($modern:expr, $f:path) => { $f(); };
+}
+fn live_helper() {}
+fn used() { choose!(const { 1 }, live_helper); }
+fn main() { used(); }
+"#,
+            &[],
+        ),
+        &["live_helper"],
+    ),
 ];
 
 #[test]

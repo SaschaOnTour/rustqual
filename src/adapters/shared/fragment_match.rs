@@ -97,18 +97,16 @@ pub(crate) fn accepts_literal(fragment: &str, arg: &TokenStream) -> Match {
     let fits = match fragment {
         "ident" => syn::parse2::<syn::Ident>(arg.clone()).is_ok(),
         "path" => syn::parse2::<syn::Path>(arg.clone()).is_ok(),
-        "expr" | "expr_2021" => syn::parse2::<syn::Expr>(arg.clone()).is_ok(),
+        "expr" => return expr_accepts(arg, EditionSpan::Any),
+        "expr_2021" => return expr_accepts(arg, EditionSpan::Before2024),
         "ty" => syn::parse2::<syn::Type>(arg.clone()).is_ok(),
         "literal" => syn::parse2::<syn::Lit>(arg.clone()).is_ok(),
         "block" => syn::parse2::<syn::Block>(arg.clone()).is_ok(),
         "item" => syn::parse2::<syn::Item>(arg.clone()).is_ok(),
         "meta" => syn::parse2::<syn::Meta>(arg.clone()).is_ok(),
         "lifetime" => syn::parse2::<syn::Lifetime>(arg.clone()).is_ok(),
-        // `pat` takes a top-level `|` since edition 2021; `pat_param` is the
-        // older shape that does not.
-        "pat" => syn::Pat::parse_multi_with_leading_vert
-            .parse2(arg.clone())
-            .is_ok(),
+        "pat" => return pat_accepts(arg),
+        // The shape that never took a top-level `|`, in any edition.
         "pat_param" => syn::Pat::parse_single.parse2(arg.clone()).is_ok(),
         "stmt" => is_single_statement(arg),
         "tt" => arg.clone().into_iter().count() == 1,
@@ -219,5 +217,51 @@ fn bare_metavariable(arg: &TokenStream) -> Option<String> {
     match (trees.len(), dollar, trees.get(1)) {
         (2, true, Some(TokenTree::Ident(name))) => Some(name.to_string()),
         _ => None,
+    }
+}
+
+/// Which editions a specifier's *name* covers.
+enum EditionSpan {
+    /// `expr` — its meaning moved with the editions.
+    Any,
+    /// `expr_2021` — the frozen shape, whatever the crate's edition.
+    Before2024,
+}
+
+/// Whether an expression specifier takes this argument.
+///
+/// `const { … }` and `_` became expressions for `expr` in edition 2024 and are
+/// not `expr_2021` in any edition. rustqual reads no `Cargo.toml` and so knows
+/// no edition, which is exactly why `expr` must answer `Undecided` for those
+/// two rather than guess: guessing "accepts" picks an arm a 2021 crate never
+/// takes, guessing "rejects" picks one a 2024 crate never takes, and one of
+/// those directions reports a live function as dead.
+/// Operation: parse + variant check, no own calls.
+fn expr_accepts(arg: &TokenStream, span: EditionSpan) -> Match {
+    let Ok(expr) = syn::parse2::<syn::Expr>(arg.clone()) else {
+        return Match::Rejects;
+    };
+    let since_2024 = matches!(expr, syn::Expr::Const(_) | syn::Expr::Infer(_));
+    match (span, since_2024) {
+        (_, false) => Match::Accepts,
+        (EditionSpan::Before2024, true) => Match::Rejects,
+        (EditionSpan::Any, true) => Match::Undecided,
+    }
+}
+
+/// Whether `pat` takes this argument.
+///
+/// A top-level or-pattern is a `pat` from edition 2021 on and was not before,
+/// so an argument that needs one is edition-dependent and stays `Undecided`.
+/// Anything that parses without the leading alternation is a `pat` in every
+/// edition.
+/// Operation: two parses, no own calls.
+fn pat_accepts(arg: &TokenStream) -> Match {
+    if syn::Pat::parse_single.parse2(arg.clone()).is_ok() {
+        return Match::Accepts;
+    }
+    match syn::Pat::parse_multi_with_leading_vert.parse2(arg.clone()) {
+        Ok(_) => Match::Undecided,
+        Err(_) => Match::Rejects,
     }
 }
