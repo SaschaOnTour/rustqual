@@ -78,10 +78,14 @@ spelled-out calls DRY-002 rewards.
   picks the first rule that accepts it — the same one `macro_rules!` itself
   takes. Merging the rules of a macro whose second rule mirrors its first said
   every argument was called; selection compares arity and checks each argument
-  against its fragment specifier (`path`, `expr`, `ty`, `ident`, `literal`; the
-  rest accept, since failing to disprove a match must not narrow the answer, and
-  a metavariable accepts anything because what it stands for was decided one
-  level up). Rules that apply nothing stay in the list — such a rule can be the
+  against its fragment specifier — `ident`, `path`, `expr`, `ty`, `literal`,
+  `block`, `item`, `meta`, `lifetime`, `pat`, `stmt`, `tt`. A kind it cannot
+  check is *undecided*, not a match: accepting one picked an arm rustc rejects,
+  and where that arm applies nothing, the function the real arm calls was
+  reported dead — the expensive direction. Undecided stops the walk and every
+  argument counts, the same as an unreadable matcher; a definite rejection
+  outranks it. A metavariable accepts anything, because what it stands for was
+  decided one level up. Rules that apply nothing stay in the list — such a rule can be the
   first one that matches, and dropping it let a later arm answer for an
   invocation it never sees. Whether a macro is call-through at all is a separate
   question: at least one rule has to apply a metavariable, so a matcher no
