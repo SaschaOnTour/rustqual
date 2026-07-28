@@ -22,6 +22,8 @@
 //! - [`tokens_reference_ident`] — *raw, presence*: SLM's yes/no "does this body
 //!   reference `self`" check.
 
+use std::collections::HashSet;
+
 use proc_macro2::{Delimiter, TokenStream, TokenTree};
 
 use super::text_names::placeholder_names;
@@ -195,4 +197,49 @@ pub fn all_idents(tokens: &TokenStream) -> impl Iterator<Item = String> {
         }
     }
     out.into_iter()
+}
+
+/// Macros whose body is turned into tokens or text rather than run. `$f()`
+/// inside one of these is not a call, and reading it as one lets the
+/// invocation excuse a function nothing ever executes.
+///
+/// A list of names, because there is no general rule: a macro's arguments are
+/// evaluated or quoted by its own definition, and rustqual does not expand. It
+/// only has to be complete for the ones that quote — `quote_spanned!` was
+/// missing while `quote!` was there, which is exactly how such a list rots.
+const NON_EXECUTING: [&str; 3] = ["stringify", "quote", "quote_spanned"];
+
+/// Whether the tree at `at` is the body of a macro that only quotes its input.
+/// Operation: two-token lookback, no own calls.
+pub fn is_quoted_at(trees: &[TokenTree], at: usize) -> bool {
+    at >= 2
+        && matches!(&trees[at - 1], TokenTree::Punct(p) if p.as_char() == '!')
+        && matches!(&trees[at - 2], TokenTree::Ident(id)
+            if NON_EXECUTING.contains(&id.to_string().as_str()))
+}
+
+/// The metavariable names this transcriber applies as a callee: the `f` of
+/// `$f(…)`. Quoting macros are skipped, since `stringify!($f())` calls nothing.
+/// Operation: positional token-tree scan, no own calls.
+pub fn called_metavariables(tokens: &TokenStream) -> HashSet<String> {
+    let mut out = HashSet::new();
+    let mut stack: Vec<TokenStream> = vec![tokens.clone()];
+    while let Some(stream) = stack.pop() {
+        let trees: Vec<TokenTree> = stream.into_iter().collect();
+        for (i, tt) in trees.iter().enumerate() {
+            match tt {
+                TokenTree::Group(g) if !is_quoted_at(&trees, i) => stack.push(g.stream()),
+                _ => {}
+            }
+            let is_dollar = matches!(tt, TokenTree::Punct(p) if p.as_char() == '$');
+            let called = matches!(trees.get(i + 2), Some(TokenTree::Group(g))
+                if g.delimiter() == Delimiter::Parenthesis);
+            if let (true, true, Some(TokenTree::Ident(name))) =
+                (is_dollar, called, trees.get(i + 1))
+            {
+                out.insert(name.to_string());
+            }
+        }
+    }
+    out
 }

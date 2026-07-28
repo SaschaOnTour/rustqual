@@ -1,13 +1,18 @@
 use crate::adapters::shared::normalize::*;
 
-/// Parse a function body from source code.
-fn parse_body(code: &str) -> syn::Block {
+/// Parse a function from source code wrapping `code` as its body.
+fn parse_body(code: &str) -> syn::ItemFn {
     let wrapped = format!("fn test_fn() {{ {} }}", code);
     let file = syn::parse_file(&wrapped).expect("parse failed");
     let syn::Item::Fn(f) = &file.items[0] else {
         unreachable!("wrapped code is always a function")
     };
-    *f.block.clone()
+    f.clone()
+}
+
+/// The token stream of a parsed fixture function.
+fn normalize_body(f: &syn::ItemFn) -> Vec<NormalizedToken> {
+    normalize_fn(&f.sig, &f.block)
 }
 
 #[test]
@@ -151,7 +156,7 @@ fn test_normalize_field_access_preserves_name() {
 fn test_normalize_stmts_subset() {
     let body = parse_body("let a = 1; let b = 2; let c = 3;");
     // Normalize only the first two statements
-    let tokens_first_two = normalize_stmts(&body.stmts[..2]);
+    let tokens_first_two = normalize_stmts(&body.block.stmts[..2]);
     let tokens_all = normalize_body(&body);
     assert!(tokens_first_two.len() < tokens_all.len());
     // Both start with the same prefix (same normalization)

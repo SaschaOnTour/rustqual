@@ -1416,3 +1416,552 @@ fn allow_dead_code_is_inherited_across_the_file_boundary() {
         "without the allow it is still dead"
     );
 }
+
+#[test]
+fn a_function_handed_to_a_call_through_macro_is_called() {
+    // `$test:path` in callee position: the invocation passes a bare name, and
+    // nothing in the token walk sees it as a call — an ident followed by a
+    // comma is not in call position. The functions the suite really runs were
+    // reported as never called, which is how a codebase ends up papering over
+    // it with `qual:api` and hiding the genuinely dead code underneath.
+    let code = r#"
+macro_rules! run_step {
+    ($test:path, $make:path) => {
+        $test(&$make());
+    };
+}
+fn make_store() -> S { S }
+fn check_append(s: &S) {}
+fn suite() { run_step!(check_append, make_store); }
+fn main() { suite(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn the_call_through_reaches_a_macro_that_only_forwards() {
+    // The real shape has two levels: the entry macro forwards its metavariable
+    // to the one that does the calling. Only following the chain gets the
+    // invocation site right.
+    let code = r#"
+macro_rules! step {
+    ($test:path, $make:path) => {
+        $test(&$make());
+    };
+}
+macro_rules! run_suite {
+    ($make:path; $($test:path),*) => {
+        $( step!($test, $make); )*
+    };
+}
+fn make_store() -> S { S }
+fn check_append(s: &S) {}
+fn suite() { run_suite!(make_store; check_append); }
+fn main() { suite(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn an_ordinary_macro_invocation_does_not_vouch_for_its_arguments() {
+    // The bound the fix needs: only a macro that really calls through a
+    // metavariable licenses harvesting every ident at its invocation. Without
+    // that trigger, `assert_eq!(a, dead_helper)` would mark a plainly dead
+    // function as called — which is the mistake that costs a real finding.
+    let code = r#"
+fn dead_helper() -> u8 { 1 }
+fn used() { let x = 1u8; assert_eq!(x, 1); }
+fn main() { used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].function_name, "dead_helper");
+}
+
+#[test]
+fn a_macro_that_only_stringifies_does_not_vouch_for_its_argument() {
+    // `stringify!($f())` turns the tokens into text and calls nothing. Reading
+    // every `$name(` in a macro body as a call classified this as
+    // call-through, and the invocation then excused a plainly dead function
+    // from DRY-002 and TQ-003 — a masked finding, which is the whole thing
+    // these checks exist to prevent.
+    let code = r#"
+macro_rules! name_of {
+    ($f:path) => { stringify!($f()) };
+}
+fn dead_helper() -> u8 { 1 }
+fn used() -> &'static str { name_of!(dead_helper) }
+fn main() { let _ = used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].function_name, "dead_helper");
+}
+
+#[test]
+fn a_macro_that_formats_the_result_still_calls_through() {
+    // The counterpart: `println!("{}", $f())` really does run `$f`. Excluding
+    // every nested macro would have re-opened the bug this fix closed, so only
+    // the token-to-text macros are excluded.
+    let code = r#"
+macro_rules! report {
+    ($f:path) => { println!("{}", $f()); };
+}
+fn live_helper() -> u8 { 1 }
+fn used() { report!(live_helper); }
+fn main() { used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn merely_naming_a_call_through_macro_is_not_forwarding() {
+    // Forwarding means handing a metavariable to the macro that calls it. A
+    // body that only mentions the name — here inside `stringify!` — passes
+    // nothing on, and treating it as a forwarder let its invocation excuse a
+    // function nothing runs.
+    let code = r#"
+macro_rules! step {
+    ($t:path) => { $t(); };
+}
+macro_rules! mention {
+    ($x:path) => { stringify!(step) };
+}
+fn dead_helper() {}
+fn used() -> &'static str { mention!(dead_helper) }
+fn main() { let _ = used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].function_name, "dead_helper");
+}
+
+#[test]
+fn quote_spanned_does_not_execute_either() {
+    // `quote!` was excluded and `quote_spanned!` was not, though both only turn
+    // their input into tokens. A list of names has to be complete to be worth
+    // anything.
+    let code = r#"
+macro_rules! emit {
+    ($f:path) => { quote_spanned!(sp => $f()) };
+}
+fn dead_helper() {}
+fn used() { emit!(dead_helper); }
+fn main() { used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].function_name, "dead_helper");
+}
+
+#[test]
+fn a_metavariable_that_is_only_stringified_is_not_forwarded() {
+    // The target calls its *first* argument; the invocation hands it a fixed
+    // name and only stringifies the metavariable. Reading any `$` in the
+    // invocation as a forward let `wrapper!(dead_helper)` excuse a function
+    // that is never called.
+    let code = r#"
+macro_rules! step {
+    ($f:path, $label:expr) => { $f(); };
+}
+macro_rules! wrapper {
+    ($x:path) => { step!(live_helper, stringify!($x)); };
+}
+fn live_helper() {}
+fn dead_helper() {}
+fn used() { wrapper!(dead_helper); }
+fn main() { used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    let names: Vec<&str> = found.iter().map(|w| w.function_name.as_str()).collect();
+    assert!(names.contains(&"dead_helper"), "{found:?}");
+    // `live_helper` is reported too, and that is a different, older gap: it is
+    // named in the macro *definition* in argument position, and only macro
+    // invocations feed the production call graph. Asserting the total here
+    // would pin that unrelated behaviour into this test.
+}
+
+#[test]
+fn a_metavariable_at_a_position_the_target_never_calls_is_not_forwarded() {
+    // `step!` applies its *first* argument. The wrapper passes a fixed name
+    // there and only consumes `$x`, so nothing it is invoked with is ever
+    // called — reading any metavariable in the argument list as a forward
+    // excused a plainly dead function.
+    let code = r#"
+macro_rules! step {
+    ($f:path, $label:expr) => { $f(); };
+}
+macro_rules! wrapper {
+    ($x:path) => { step!(live_helper, consume($x)); };
+}
+fn live_helper() {}
+fn consume(_: u8) {}
+fn dead_helper() {}
+fn used() { wrapper!(dead_helper); }
+fn main() { used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    let names: Vec<&str> = found.iter().map(|w| w.function_name.as_str()).collect();
+    assert!(names.contains(&"dead_helper"), "{found:?}");
+}
+
+#[test]
+fn a_metavariable_at_the_called_position_is_forwarded() {
+    // The counterpart: same target, and now the wrapper really does hand its
+    // own metavariable to the argument `step!` applies.
+    let code = r#"
+macro_rules! step {
+    ($f:path, $label:expr) => { $f(); };
+}
+macro_rules! wrapper {
+    ($x:path) => { step!($x, consume(1)); };
+}
+fn consume(_: u8) {}
+fn live_helper() {}
+fn used() { wrapper!(live_helper); }
+fn main() { used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn a_forwarder_keeps_its_called_position_for_the_next_hop() {
+    // Three levels: `step!` applies argument 0, `middle!` hands its own
+    // argument 0 there, and `outer!` passes a fixed name to that position while
+    // only consuming its metavariable. Storing "unknown" for every forwarder
+    // threw away what had just been computed, so the second hop accepted any
+    // metavariable again and excused a dead function.
+    let code = r#"
+macro_rules! step {
+    ($f:path, $label:expr) => { $f(); };
+}
+macro_rules! middle {
+    ($g:path, $note:expr) => { step!($g, $note); };
+}
+macro_rules! outer {
+    ($x:path) => { middle!(live_helper, consume($x)); };
+}
+fn live_helper() {}
+fn consume(_: u8) {}
+fn dead_helper() {}
+fn used() { outer!(dead_helper); }
+fn main() { used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    let names: Vec<&str> = found.iter().map(|w| w.function_name.as_str()).collect();
+    assert!(names.contains(&"dead_helper"), "{found:?}");
+}
+
+#[test]
+fn a_chain_that_really_forwards_still_reaches_the_callee() {
+    // The counterpart over the same three levels: each hop hands its
+    // metavariable to the position the next one calls.
+    let code = r#"
+macro_rules! step {
+    ($f:path, $label:expr) => { $f(); };
+}
+macro_rules! middle {
+    ($g:path, $note:expr) => { step!($g, $note); };
+}
+macro_rules! outer {
+    ($x:path) => { middle!($x, consume(1)); };
+}
+fn consume(_: u8) {}
+fn live_helper() {}
+fn used() { outer!(live_helper); }
+fn main() { used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    assert!(found.is_empty(), "{found:?}");
+}
+
+/// Which names an invocation really calls, decided by the arm `macro_rules!`
+/// itself would take: `(label, code, reported_dead, treated_as_called)`.
+type PositionCase = (&'static str, &'static str, &'static [&'static str]);
+
+const CALLED_POSITION_CASES: &[(PositionCase, &[&str])] = &[
+    (
+        (
+            "one rule applies argument 0",
+            r#"
+macro_rules! step {
+    ($f:path, $label:path) => { $f(); };
+}
+fn live_helper() {}
+fn dead_helper() {}
+fn used() { step!(live_helper, dead_helper); }
+fn main() { used(); }
+"#,
+            &["dead_helper"],
+        ),
+        &["live_helper"],
+    ),
+    (
+        (
+            // Two rules, mirrored. `macro_rules!` takes the first that matches,
+            // so unioning the positions across rules said both arguments were
+            // called and the second name lost its finding.
+            "the first matching rule",
+            r#"
+macro_rules! choose {
+    ($f:path, $value:expr) => { $f(); };
+    ($value:expr, $f:path) => { $f(); };
+}
+fn live_helper() {}
+fn dead_helper() {}
+fn used() { choose!(live_helper, dead_helper); }
+fn main() { used(); }
+"#,
+            &["dead_helper"],
+        ),
+        &["live_helper"],
+    ),
+    (
+        (
+            // The first arm matches and applies nothing; the later arm applies
+            // its first parameter. Dropping the silent arms before selection
+            // let that one answer for an invocation it never sees.
+            "a silent first arm, a later applying one",
+            r#"
+macro_rules! choose {
+    ($value:expr, $label:path) => { consume($value); };
+    ($f:path, $value:expr) => { $f(); };
+}
+fn consume(_: u8) {}
+fn live_helper() {}
+fn dead_helper() {}
+fn used() { choose!(live_helper, dead_helper); }
+fn main() { used(); }
+"#,
+            &["live_helper", "dead_helper"],
+        ),
+        &[],
+    ),
+    (
+        (
+            // Same, with the later arm unreadable instead. That says nothing
+            // about an invocation the first arm already matches; collapsing the
+            // list on it fell back to "every argument is a call".
+            "a silent first arm, a later unreadable one",
+            r#"
+macro_rules! choose {
+    ($value:expr, $label:path) => { consume($value); };
+    ($($f:path),*) => { $( $f(); )* };
+}
+fn consume(_: u8) {}
+fn live_helper() {}
+fn dead_helper() {}
+fn used() { choose!(live_helper, dead_helper); }
+fn main() { used(); }
+"#,
+            &["live_helper", "dead_helper"],
+        ),
+        &[],
+    ),
+    (
+        (
+            // `$body:block` does not accept a bare path, so rustc takes the
+            // second arm and calls the function. Treating an unchecked fragment
+            // as a match picked the first arm, registered no call, and reported
+            // a live function as dead — the expensive direction.
+            "a fragment that rejects the argument",
+            r#"
+macro_rules! choose {
+    ($body:block) => { $body };
+    ($f:path) => { $f(); };
+}
+fn live_helper() {}
+fn used() { choose!(live_helper); }
+fn main() { used(); }
+"#,
+            &[],
+        ),
+        &["live_helper"],
+    ),
+    (
+        (
+            // `vis` is the one fragment this cannot decide — it matches the
+            // empty token stream too. Undecidable has to mean undecidable: the
+            // walk stops and every argument counts.
+            "a fragment that cannot be decided",
+            r#"
+macro_rules! choose {
+    ($v:vis) => { };
+    ($f:path) => { $f(); };
+}
+fn live_helper() {}
+fn used() { choose!(live_helper); }
+fn main() { used(); }
+"#,
+            &[],
+        ),
+        &["live_helper"],
+    ),
+    (
+        (
+            // Forwarded: `$f` was captured as a `path`, and rustc keeps that
+            // when it is handed on — the `block` arm does not take it. Reading
+            // a metavariable as "accepts anything" picked that arm, which
+            // applies nothing, and reported the function the real arm calls as
+            // dead.
+            "a metavariable keeps its fragment when forwarded",
+            r#"
+macro_rules! choose {
+    ($body:block) => { $body };
+    ($f:path) => { $f(); };
+}
+macro_rules! wrapper {
+    ($f:path) => { choose!($f); };
+}
+fn live_helper() {}
+fn used() { wrapper!(live_helper); }
+fn main() { used(); }
+"#,
+            &[],
+        ),
+        &["live_helper"],
+    ),
+    (
+        (
+            // The same one step subtler: substituting the metavariable by a
+            // plain identifier let an `ident` arm take a forwarded `path`.
+            // rustc keeps a matched fragment opaque — only a matcher of the
+            // same kind consumes it.
+            "a forwarded path is not an ident",
+            r#"
+macro_rules! choose {
+    ($ignored:ident) => {};
+    ($f:path) => { $f(); };
+}
+macro_rules! wrapper {
+    ($f:path) => { choose!($f); };
+}
+fn live_helper() {}
+fn used() { wrapper!(live_helper); }
+fn main() { used(); }
+"#,
+            &[],
+        ),
+        &["live_helper"],
+    ),
+    (
+        (
+            // `expr_2021` and `expr` are one fragment under two names — rustc
+            // takes the first arm and calls the function. Comparing the names
+            // alone rejected it, picked the empty arm, and could report a live
+            // function as dead.
+            "an edition variant of the same fragment",
+            r#"
+macro_rules! choose {
+    ($f:expr) => { $f(); };
+    ($ignored:expr_2021) => {};
+}
+macro_rules! wrapper {
+    ($f:expr_2021) => { choose!($f); };
+}
+fn live_helper() {}
+fn used() { wrapper!(live_helper); }
+fn main() { used(); }
+"#,
+            &[],
+        ),
+        &["live_helper"],
+    ),
+    (
+        (
+            // `const { … }` is an `expr` from edition 2024 and never an
+            // `expr_2021`. Parsing both with the same parser let the first arm
+            // take it, and that arm applies nothing.
+            "an edition-2024 expression is not an expr_2021",
+            r#"
+macro_rules! choose {
+    ($ignored:expr_2021, $also:path) => {};
+    ($modern:expr, $f:path) => { $f(); };
+}
+fn live_helper() {}
+fn used() { choose!(const { 1 }, live_helper); }
+fn main() { used(); }
+"#,
+            &[],
+        ),
+        &["live_helper"],
+    ),
+];
+
+#[test]
+fn only_the_called_argument_positions_count_as_calls() {
+    for ((label, code, dead), called) in CALLED_POSITION_CASES {
+        let found = dead_code_warnings(&parse(code));
+        let names: Vec<&str> = found.iter().map(|w| w.function_name.as_str()).collect();
+        dead.iter()
+            .for_each(|name| assert!(names.contains(name), "{label}: {name} {found:?}"));
+        called
+            .iter()
+            .for_each(|name| assert!(!names.contains(name), "{label}: {name} {found:?}"));
+    }
+}
+
+#[test]
+fn a_macro_that_applies_nothing_is_not_call_through() {
+    // A matcher no position model fits does not make a macro call-through: it
+    // has to apply a metavariable somewhere. Otherwise every macro with a
+    // repetition would harvest its whole invocation.
+    let code = r#"
+macro_rules! report {
+    ($($x:expr),*) => { let _ = ($($x),*); };
+}
+fn dead_helper() {}
+fn used() { report!(1, dead_helper); }
+fn main() { used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    let names: Vec<&str> = found.iter().map(|w| w.function_name.as_str()).collect();
+    assert!(names.contains(&"dead_helper"), "{found:?}");
+}
+
+#[test]
+fn an_earlier_unreadable_arm_does_trigger_the_fallback() {
+    // The other order: nothing can say whether the repetition arm matches
+    // first, so the coarse rule has to hold — a suite runner really does call
+    // all of them, and inventing "never called" there is the expensive mistake.
+    let code = r#"
+macro_rules! choose {
+    ($($f:path),*) => { $( $f(); )* };
+    ($value:expr, $label:path) => { consume($value); };
+}
+fn consume(_: u8) {}
+fn live_helper() {}
+fn dead_helper() {}
+fn used() { choose!(live_helper, dead_helper); }
+fn main() { used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn dollar_crate_is_not_a_metavariable() {
+    // `$crate` is hygiene, not a parameter: it names the defining crate and is
+    // never bound by a matcher. Counting it as an applied metavariable made any
+    // macro that uses it call-through, and its invocation then harvested every
+    // identifier — excusing whatever was dead.
+    let code = r#"
+macro_rules! step {
+    ($f:path) => { $f(); };
+}
+macro_rules! wrapper {
+    ($x:path) => { step!($crate::live_helper); };
+}
+pub fn live_helper() {}
+fn dead_helper() {}
+fn used() { wrapper!(dead_helper); }
+fn main() { used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    let names: Vec<&str> = found.iter().map(|w| w.function_name.as_str()).collect();
+    assert!(names.contains(&"dead_helper"), "{found:?}");
+}

@@ -15,19 +15,36 @@
 
 use std::collections::{HashMap, HashSet};
 
+use proc_macro2::TokenStream;
+
 use crate::adapters::shared::file_visitor::{visit_all_files, FileVisitor};
-use crate::adapters::shared::macro_tokens;
+use crate::adapters::shared::{macro_params, macro_tokens};
 
 /// Macro name → every name its body mentions, following nested macro
 /// invocations to their own bodies.
 pub(crate) type MacroReach = HashMap<String, Vec<String>>;
 
-/// Collect what each `macro_rules!` macro in the workspace reaches.
-/// Integration: collection then transitive closure.
-pub(crate) fn collect_macro_reach(parsed: &[(String, String, syn::File)]) -> MacroReach {
+/// Every `macro_rules!` body in the workspace, keyed by name.
+///
+/// One walk for both derivations below: what a macro *reaches* and which
+/// arguments it *applies* are two questions about the same bodies, and
+/// collecting them twice meant a second traversal that grows with the repo.
+/// Operation: one visit, no own calls beyond the driver.
+pub(crate) fn collect_macro_bodies(
+    parsed: &[(String, String, syn::File)],
+) -> HashMap<String, TokenStream> {
     let mut collector = MacroBodyCollector::default();
     visit_all_files(parsed, &mut collector);
-    close_over_nested(collector.bodies)
+    collector.bodies
+}
+
+/// What each `macro_rules!` macro in the workspace reaches.
+/// Integration: per-body idents, then the transitive closure.
+pub(crate) fn macro_reach_of(bodies: &HashMap<String, TokenStream>) -> MacroReach {
+    let named = bodies
+        .iter()
+        .map(|(name, body)| (name.clone(), macro_tokens::all_idents(body).collect()));
+    close_over_nested(named.collect())
 }
 
 /// Follow a macro that invokes another macro to what that one reaches. Bounded
@@ -64,10 +81,10 @@ fn close_over_nested(bodies: MacroReach) -> MacroReach {
     out
 }
 
-/// Visitor recording each `macro_rules!` definition and the names in its body.
+/// Visitor recording each `macro_rules!` definition body, keyed by its name.
 #[derive(Default)]
 struct MacroBodyCollector {
-    bodies: MacroReach,
+    bodies: HashMap<String, TokenStream>,
 }
 
 impl FileVisitor for MacroBodyCollector {
@@ -79,7 +96,52 @@ impl<'ast> syn::visit::Visit<'ast> for MacroBodyCollector {
         let Some(name) = node.ident.as_ref().map(|i| i.to_string()) else {
             return;
         };
-        let names: Vec<String> = macro_tokens::all_idents(&node.mac.tokens).collect();
-        self.bodies.insert(name, names);
+        self.bodies.insert(name, node.mac.tokens.clone());
     }
+}
+
+/// Macros that call *through* a metavariable: their body contains `$name(…)`,
+/// or they hand a metavariable to a macro that does.
+///
+/// `run_suite!(make; check_append, check_rotate)` names the functions it runs
+/// as bare idents — an ident followed by a comma is not in call position, so
+/// the token walk sees nothing and the functions read as never called. That is
+/// how a suite ends up papered over with `qual:api`, which then hides whatever
+/// is genuinely dead underneath.
+///
+/// Precise trigger, coarse payload: only at an invocation of one of *these*
+/// macros does the caller harvest every ident as a possible callee. Doing it
+/// for every macro invocation would let `assert_eq!(x, dead_helper)` vouch for
+/// a dead function — the mistake that costs a real finding.
+/// Integration: direct set, then the reach map decides the rest.
+pub(crate) fn call_through_macros(
+    bodies: &HashMap<String, TokenStream>,
+) -> macro_params::CalledPositions {
+    close_over_forwarders(bodies)
+}
+
+/// Grow the set until nothing new calls through.
+///
+/// One rule for every hop: a macro calls through when it applies a metavariable
+/// itself, or hands one to a position an already-known macro calls. The
+/// positions it calls are then read back onto *its* matcher, so the next hop
+/// asks about the right argument — dropping them after the first hop let any
+/// metavariable count again, and an invocation excused whatever was dead.
+/// Operation: fixpoint over the definitions, own calls in the closures.
+fn close_over_forwarders(bodies: &HashMap<String, TokenStream>) -> macro_params::CalledPositions {
+    let mut through = macro_params::CalledPositions::new();
+    for _ in 0..=bodies.len() {
+        let fresh: Vec<(String, macro_params::CallShape)> = bodies
+            .iter()
+            .filter(|(name, _)| !through.contains_key(*name))
+            .filter_map(|(name, body)| {
+                macro_params::called_positions(body, &through).map(|p| (name.clone(), p))
+            })
+            .collect();
+        if fresh.is_empty() {
+            break;
+        }
+        through.extend(fresh);
+    }
+    through
 }

@@ -7,7 +7,7 @@
 //! (which falls through to the catch-all / default walk and loses the token)
 //! now fails a test.
 
-use crate::adapters::shared::normalize::{normalize_body, NormalizedToken};
+use crate::adapters::shared::normalize::{normalize_fn, NormalizedToken};
 use NormalizedToken::{BoolLit, CharLit, FloatLit, IntLit, Keyword, MacroCall, Operator, StrLit};
 
 /// Normalize statement-level `code` into its token stream.
@@ -17,7 +17,7 @@ fn toks(code: &str) -> Vec<NormalizedToken> {
     let syn::Item::Fn(f) = &file.items[0] else {
         unreachable!("wrapped code is a fn")
     };
-    normalize_body(&f.block)
+    normalize_fn(&f.sig, &f.block)
 }
 
 fn assert_emits(code: &str, want: &NormalizedToken) {

@@ -5,6 +5,114 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.2] - 2026-07-27
+
+Two false findings that pulled against each other: DRY-001 punished exactly the
+spelled-out calls DRY-002 rewards.
+
+### Fixed
+- **A callee's name counts (DRY-001).** Normalisation replaced a called
+  function with a positional index, so a body whose whole meaning is *which*
+  functions it names — a suite runner, a dispatch list, a registration table —
+  matched every other body of the same shape and length. Eleven calls to eleven
+  different functions produced the same token stream as eleven calls to eleven
+  others: reported as an **exact** duplicate with not one callee in common. The
+  vocabulary already conceded the principle for method calls
+  ("name preserved (structurally significant)") and field access; the free
+  function call was the gap. Locals and parameters stay alpha-renamed *in call
+  position too* — a callback parameter or a `let`-bound function value is a
+  local like any other, so `apply(f)` and `apply(callback)` stay the same body;
+  that needs the signature, which is why the duplicate collector now normalises
+  through `normalize_fn` and reads the parameter names first. Recognising a
+  binding and handing out its index stay separate jobs: the names go in their
+  own set, so an extra unused parameter cannot shift the numbering, and indices
+  are still assigned at first occurrence in the body. Every binding a parameter
+  pattern introduces counts, at any depth — `fn f((cb, x): (F, u8))` binds `cb`
+  just as a plain parameter would. Scope is tracked as scope: a `let` binding is
+  not in scope inside its own initializer, so the right-hand side of
+  `let load = load();` is the *function*; a `for` pattern is not in scope in the
+  iterator expression and is gone after the loop; a `while let` binding stays in
+  its loop; a match arm's bindings stay in that arm; a closure's parameters stay in the closure; an `if let` binding
+  covers the then-branch and neither the `else` nor what follows. All of it for
+  one reason: mistaking a free function for a local is the direction that
+  *invents* duplicates.
+  *Known limit, now pinned by a test rather than folklore:* a multi-segment
+  callee (`audit::check_append(s)`) still contributes no token at all. Naming it
+  by its last segment would conflate `Config::default()` with
+  `Summary::default()`, and emitting any token there raises the count of every
+  body that calls a qualified function, which shifts what clears `min_tokens`.
+  That is its own change.
+- **A function handed to a macro that calls it is called (DRY-002, TQ-003).**
+  `run_suite!(make; check_append, check_rotate)` passes the functions it runs as
+  bare idents, and an ident followed by a comma is not in call position — so a
+  whole test suite read as never called. Papering over that with `// qual:api`
+  is how genuinely dead code disappears behind markers. A `macro_rules!` whose
+  body applies a metavariable (`$test(&$make())`) is now recognised as
+  *call-through*, and so is one that forwards a metavariable to such a macro —
+  the two-level shape the real thing has, resolved over the macro-reach closure
+  that was already there. Only at an invocation of one of those macros is every
+  ident harvested as a possible callee: the trigger is narrow so an ordinary
+  `assert_eq!(x, dead_helper)` still cannot vouch for a dead function. Macros
+  that only quote their input are excluded — `stringify!($f())` produces the
+  text `"$f()"` and runs nothing, so reading it as a call would have excused a
+  plainly dead function (`stringify`, `quote`, `quote_spanned`). Nested macros
+  are otherwise descended into, because `println!("{}", $f())` really does run
+  `$f`. And *naming* a call-through macro is not forwarding to it: the chain is
+  followed through actual invocations that hand over a metavariable, run to a
+  fixpoint, so a body that only mentions `step` inside `stringify!` does not
+  inherit its status — and a metavariable that is only quoted at the invocation
+  (`step!(live_helper, stringify!($x))`) is not handed over either — and neither
+  is one passed to a position the target never applies: `step!(live_helper,
+  consume($x))` calls `live_helper` and consumes `$x`. Which position a macro
+  calls is read from its own matcher (`macro_params`), for the flat
+  comma-separated shape where a position means anything; a repetition
+  (`$($t:path),*`) or a custom separator puts it out of reach of a token scan,
+  and the answer falls back to "any metavariable" — over-approximating in the
+  direction that suppresses a finding rather than inventing one. The position
+  survives every hop: a macro that forwards to a forwarder reads the target's
+  called positions back onto its *own* matcher, so a three-level chain still
+  asks about the right argument — and it survives to the invocation, where only
+  the arguments at those positions become call-graph edges.
+  `step!(live_helper, dead_helper)` on a macro that applies its first argument
+  says nothing about the second. Positions stay **per rule**, and the invocation
+  picks the first rule that accepts it — the same one `macro_rules!` itself
+  takes. Merging the rules of a macro whose second rule mirrors its first said
+  every argument was called; selection compares arity and checks each argument
+  against its fragment specifier — `ident`, `path`, `expr`, `ty`, `literal`,
+  `block`, `item`, `meta`, `lifetime`, `pat`, `stmt`, `tt`. A kind it cannot
+  check is *undecided*, not a match: accepting one picked an arm rustc rejects,
+  and where that arm applies nothing, the function the real arm calls was
+  reported dead — the expensive direction. Undecided stops the walk and every
+  argument counts, the same as an unreadable matcher; a definite rejection
+  outranks it. A forwarded metavariable is checked, not waved through: `$f:path`
+  handed on as `choose!($f)` still carries `path`, and neither a `$body:block`
+  nor a `$ignored:ident` arm takes it. rustc keeps a matched fragment **opaque**:
+  only a specifier of the same kind consumes it, with `ident`, `lifetime` and
+  `tt` the documented exceptions. A bare forwarded metavariable is therefore
+  compared by kind, read from the forwarding rule's own matcher — a syntactic
+  substitution said `ident` accepts a forwarded `path`, which it does not.
+  `expr`/`expr_2021` and `pat`/`pat_param` are one fragment under two spellings
+  and take each other, checked against rustc rather than remembered. Two
+  safeguards follow from that list being a copy of something the compiler owns:
+  an unknown specifier decides *nothing* instead of rejecting, so a future
+  addition falls back to the coarse rule rather than inventing a finding, and a
+  test asks the local rustc for its own list and fails when the two disagree.
+  What an *edition* changed is the same problem and gets the same answer: since
+  no edition is known, `expr` is undecided about `const { … }` and `_`
+  (expressions only from 2024) and `pat` about a top-level or-pattern (a `pat`
+  only from 2021), while `expr_2021` and `pat_param` — the frozen spellings —
+  reject them in every edition. An
+  argument that merely *contains* a metavariable (`consume($x)`) keeps the
+  substitution, since there the surrounding shape is what decides. Rules that apply nothing stay in the list — such a rule can be the
+  first one that matches, and dropping it let a later arm answer for an
+  invocation it never sees. Whether a macro is call-through at all is a separate
+  question: at least one rule has to apply a metavariable, so a matcher no
+  position model fits no longer makes every macro with a repetition harvest its
+  whole invocation. An unreadable arm also stays in its place instead of
+  collapsing the list: it triggers the coarse fallback only once every *earlier*
+  arm has been ruled out on its own terms, so a first arm that matches still
+  decides.
+
 ## [1.8.1] - 2026-07-26
 
 Bugfix release for the marker verification 1.8.0 shipped.

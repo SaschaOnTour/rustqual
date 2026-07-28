@@ -30,9 +30,49 @@ impl Normalizer {
     pub(super) fn norm_path(&mut self, p: &syn::ExprPath) {
         if p.path.segments.len() == 1 {
             let name = p.path.segments[0].ident.to_string();
-            let id = self.resolve_ident(&name);
+            let id = self.aliases.index(&name);
             self.tokens.push(NormalizedToken::Ident(id));
         }
+    }
+
+    /// The callee of a call expression.
+    ///
+    /// A **single-segment** path keeps its name instead of becoming a
+    /// positional index: `check_append(x)` and `check_rotate(x)` are different
+    /// bodies, and a runner whose whole content is *which* functions it names
+    /// must not match every other runner of the same length.
+    ///
+    /// A multi-segment path is walked as before, which drops it — see
+    /// `norm_path`. Two limits in one there: `Config::default()` and
+    /// `Summary::default()` share a last segment that says nothing, so naming
+    /// by it would conflate more than it separates, and emitting anything at
+    /// all raises the token count of every body that calls a qualified
+    /// function, which changes which bodies clear `min_tokens`. Both deserve
+    /// their own change; this one keeps the token count identical.
+    /// Operation: shape match, own calls in the arms.
+    pub(super) fn norm_callee(&mut self, func: &syn::Expr) {
+        match func {
+            syn::Expr::Path(p) if p.path.segments.len() == 1 => {
+                let name = p.path.segments[0].ident.to_string();
+                self.push_callee(name);
+            }
+            other => self.visit_expr(other),
+        }
+    }
+
+    /// A single-segment callee: its name, unless it is a local. A callback
+    /// parameter or a `let`-bound function value is a local like any other and
+    /// keeps its positional index — otherwise `apply(f)` and `apply(callback)`
+    /// would differ on a rename, which is exactly what alpha-renaming exists to
+    /// prevent.
+    /// Operation: one branch, own call in the arm.
+    fn push_callee(&mut self, name: String) {
+        if self.scope.is_bound(&name) {
+            let id = self.aliases.index(&name);
+            self.tokens.push(NormalizedToken::Ident(id));
+            return;
+        }
+        self.tokens.push(NormalizedToken::Call(name));
     }
 
     /// Binary, unary, and assignment operators. Operation: per-variant emission.
@@ -62,7 +102,7 @@ impl Normalizer {
     pub(super) fn norm_call_field(&mut self, expr: &syn::Expr) {
         match expr {
             syn::Expr::Call(e) => {
-                self.visit_expr(&e.func);
+                self.norm_callee(&e.func);
                 for arg in &e.args {
                     self.visit_expr(arg);
                 }
@@ -91,28 +131,34 @@ impl Normalizer {
     pub(super) fn norm_branch(&mut self, expr: &syn::Expr) {
         match expr {
             syn::Expr::If(e) => {
-                self.tokens.push(NormalizedToken::Keyword("if"));
-                self.visit_expr(&e.cond);
-                for stmt in &e.then_branch.stmts {
-                    self.visit_stmt(stmt);
-                }
-                if let Some((_, else_branch)) = &e.else_branch {
+                // The condition may be an `if let`, whose binding covers the
+                // then-branch and nothing after it — not the `else`.
+                self.scoped(|n| {
+                    n.tokens.push(NormalizedToken::Keyword("if"));
+                    n.visit_expr(&e.cond);
+                    n.visit_block(&e.then_branch);
+                });
+                e.else_branch.iter().for_each(|(_, else_branch)| {
                     self.tokens.push(NormalizedToken::Keyword("else"));
                     self.visit_expr(else_branch);
-                }
+                });
             }
             syn::Expr::Match(e) => {
                 self.tokens.push(NormalizedToken::Keyword("match"));
                 self.visit_expr(&e.expr);
-                for arm in &e.arms {
-                    self.visit_pat(&arm.pat);
-                    if let Some((_, guard)) = &arm.guard {
-                        self.tokens.push(NormalizedToken::Keyword("if"));
-                        self.visit_expr(guard);
-                    }
-                    self.tokens.push(NormalizedToken::Operator("=>"));
-                    self.visit_expr(&arm.body);
-                }
+                // Arms are alternatives: what one binds is not in scope in the
+                // next, nor after the match.
+                e.arms.iter().for_each(|arm| {
+                    self.scoped(|n| {
+                        n.visit_pat(&arm.pat);
+                        arm.guard.iter().for_each(|(_, guard)| {
+                            n.tokens.push(NormalizedToken::Keyword("if"));
+                            n.visit_expr(guard);
+                        });
+                        n.tokens.push(NormalizedToken::Operator("=>"));
+                        n.visit_expr(&arm.body);
+                    });
+                });
             }
             _ => {}
         }
@@ -122,31 +168,32 @@ impl Normalizer {
     pub(super) fn norm_loop(&mut self, expr: &syn::Expr) {
         match expr {
             syn::Expr::ForLoop(e) => {
-                self.tokens.push(NormalizedToken::Keyword("for"));
-                self.visit_pat(&e.pat);
-                self.tokens.push(NormalizedToken::Keyword("in"));
-                self.visit_expr(&e.expr);
-                for stmt in &e.body.stmts {
-                    self.visit_stmt(stmt);
-                }
+                // The loop variable is not in scope in the iterator expression,
+                // and it is gone after the loop.
+                self.scoped(|n| {
+                    n.tokens.push(NormalizedToken::Keyword("for"));
+                    n.binding_after(&e.pat, |n| {
+                        n.tokens.push(NormalizedToken::Keyword("in"));
+                        n.visit_expr(&e.expr);
+                    });
+                    n.visit_block(&e.body);
+                });
             }
             syn::Expr::While(e) => {
-                self.tokens.push(NormalizedToken::Keyword("while"));
-                self.visit_expr(&e.cond);
-                for stmt in &e.body.stmts {
-                    self.visit_stmt(stmt);
-                }
+                // `while let` binds for the body and nothing after it — the
+                // same reason `for` and `if` are wrapped.
+                self.scoped(|n| {
+                    n.tokens.push(NormalizedToken::Keyword("while"));
+                    n.visit_expr(&e.cond);
+                    n.visit_block(&e.body);
+                });
             }
             syn::Expr::Loop(e) => {
                 self.tokens.push(NormalizedToken::Keyword("loop"));
-                for stmt in &e.body.stmts {
-                    self.visit_stmt(stmt);
-                }
+                self.visit_block(&e.body);
             }
             syn::Expr::Block(e) => {
-                for stmt in &e.block.stmts {
-                    self.visit_stmt(stmt);
-                }
+                self.visit_block(&e.block);
             }
             _ => {}
         }

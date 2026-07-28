@@ -43,11 +43,12 @@ impl Normalizer {
                 }
             }
             syn::Expr::Closure(e) => {
-                self.tokens.push(NormalizedToken::Keyword("closure"));
-                for input in &e.inputs {
-                    self.visit_pat(input);
-                }
-                self.visit_expr(&e.body);
+                // Parameters belong to the closure, not to what surrounds it.
+                self.scoped(|n| {
+                    n.tokens.push(NormalizedToken::Keyword("closure"));
+                    e.inputs.iter().for_each(|input| n.visit_pat(input));
+                    n.visit_expr(&e.body);
+                });
             }
             syn::Expr::Await(e) => {
                 self.visit_expr(&e.base);
@@ -91,9 +92,10 @@ impl Normalizer {
         match expr {
             syn::Expr::Let(e) => {
                 self.tokens.push(NormalizedToken::Keyword("let"));
-                self.visit_pat(&e.pat);
-                self.tokens.push(NormalizedToken::Operator("="));
-                self.visit_expr(&e.expr);
+                self.binding_after(&e.pat, |n| {
+                    n.tokens.push(NormalizedToken::Operator("="));
+                    n.visit_expr(&e.expr);
+                });
             }
             syn::Expr::Struct(e) => {
                 self.tokens.push(NormalizedToken::Keyword("struct"));

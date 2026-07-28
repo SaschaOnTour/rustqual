@@ -12,7 +12,9 @@ impl Normalizer {
                 if p.mutability.is_some() {
                     self.tokens.push(NormalizedToken::Keyword("mut"));
                 }
-                let id = self.resolve_ident(&p.ident.to_string());
+                let name = p.ident.to_string();
+                let id = self.aliases.index(&name);
+                self.scope.bind(&name);
                 self.tokens.push(NormalizedToken::Ident(id));
                 if let Some((_, sub)) = &p.subpat {
                     self.tokens.push(NormalizedToken::Operator("@"));
