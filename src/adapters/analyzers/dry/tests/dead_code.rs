@@ -1679,12 +1679,15 @@ fn main() { used(); }
     assert!(found.is_empty(), "{found:?}");
 }
 
-/// Macros that apply one argument and merely name the other, with the name the
-/// invocation puts at the called position and the one it does not.
-const CALLED_POSITION_CASES: &[(&str, &str)] = &[
+/// Which names an invocation really calls, decided by the arm `macro_rules!`
+/// itself would take: `(label, code, reported_dead, treated_as_called)`.
+type PositionCase = (&'static str, &'static str, &'static [&'static str]);
+
+const CALLED_POSITION_CASES: &[(PositionCase, &[&str])] = &[
     (
-        "one rule",
-        r#"
+        (
+            "one rule applies argument 0",
+            r#"
 macro_rules! step {
     ($f:path, $label:path) => { $f(); };
 }
@@ -1693,14 +1696,17 @@ fn dead_helper() {}
 fn used() { step!(live_helper, dead_helper); }
 fn main() { used(); }
 "#,
+            &["dead_helper"],
+        ),
+        &["live_helper"],
     ),
     (
-        // Two rules, mirrored: the first applies argument 0, the second
-        // argument 1. `macro_rules!` takes the first that matches, so unioning
-        // the positions across rules said both and the second name lost its
-        // finding.
-        "the first matching rule",
-        r#"
+        (
+            // Two rules, mirrored. `macro_rules!` takes the first that matches,
+            // so unioning the positions across rules said both arguments were
+            // called and the second name lost its finding.
+            "the first matching rule",
+            r#"
 macro_rules! choose {
     ($f:path, $value:expr) => { $f(); };
     ($value:expr, $f:path) => { $f(); };
@@ -1710,44 +1716,17 @@ fn dead_helper() {}
 fn used() { choose!(live_helper, dead_helper); }
 fn main() { used(); }
 "#,
+            &["dead_helper"],
+        ),
+        &["live_helper"],
     ),
-];
-
-#[test]
-fn only_the_called_argument_of_an_invocation_counts_as_a_call() {
-    // Harvesting every identifier of the invocation made the argument a macro
-    // only *names* look called too.
-    for (label, code) in CALLED_POSITION_CASES {
-        let found = dead_code_warnings(&parse(code));
-        let names: Vec<&str> = found.iter().map(|w| w.function_name.as_str()).collect();
-        assert!(names.contains(&"dead_helper"), "{label}: {found:?}");
-        assert!(!names.contains(&"live_helper"), "{label}: {found:?}");
-    }
-}
-
-#[test]
-fn a_rule_is_skipped_when_its_arity_does_not_fit() {
-    // Selection is by matching, not by declaration order alone: the one-argument
-    // invocation belongs to the second rule.
-    let code = r#"
-macro_rules! choose {
-    ($value:expr, $f:path) => { $f(); };
-    ($f:path) => { $f(); };
-}
-fn live_helper() {}
-fn used() { choose!(live_helper); }
-fn main() { used(); }
-"#;
-    let found = dead_code_warnings(&parse(code));
-    assert!(found.is_empty(), "{found:?}");
-}
-
-#[test]
-fn a_rule_that_calls_nothing_can_still_be_the_one_that_matches() {
-    // The first arm accepts the invocation and applies no parameter at all, so
-    // neither name is called. Dropping the silent arms before selection let the
-    // second one answer for it and registered `live_helper` as called.
-    let code = r#"
+    (
+        (
+            // The first arm matches and applies nothing; the later arm applies
+            // its first parameter. Dropping the silent arms before selection
+            // let that one answer for an invocation it never sees.
+            "a silent first arm, a later applying one",
+            r#"
 macro_rules! choose {
     ($value:expr, $label:path) => { consume($value); };
     ($f:path, $value:expr) => { $f(); };
@@ -1757,11 +1736,45 @@ fn live_helper() {}
 fn dead_helper() {}
 fn used() { choose!(live_helper, dead_helper); }
 fn main() { used(); }
-"#;
-    let found = dead_code_warnings(&parse(code));
-    let names: Vec<&str> = found.iter().map(|w| w.function_name.as_str()).collect();
-    assert!(names.contains(&"live_helper"), "{found:?}");
-    assert!(names.contains(&"dead_helper"), "{found:?}");
+"#,
+            &["live_helper", "dead_helper"],
+        ),
+        &[],
+    ),
+    (
+        (
+            // Same, with the later arm unreadable instead. That says nothing
+            // about an invocation the first arm already matches; collapsing the
+            // list on it fell back to "every argument is a call".
+            "a silent first arm, a later unreadable one",
+            r#"
+macro_rules! choose {
+    ($value:expr, $label:path) => { consume($value); };
+    ($($f:path),*) => { $( $f(); )* };
+}
+fn consume(_: u8) {}
+fn live_helper() {}
+fn dead_helper() {}
+fn used() { choose!(live_helper, dead_helper); }
+fn main() { used(); }
+"#,
+            &["live_helper", "dead_helper"],
+        ),
+        &[],
+    ),
+];
+
+#[test]
+fn only_the_called_argument_positions_count_as_calls() {
+    for ((label, code, dead), called) in CALLED_POSITION_CASES {
+        let found = dead_code_warnings(&parse(code));
+        let names: Vec<&str> = found.iter().map(|w| w.function_name.as_str()).collect();
+        dead.iter()
+            .for_each(|name| assert!(names.contains(name), "{label}: {name} {found:?}"));
+        called
+            .iter()
+            .for_each(|name| assert!(!names.contains(name), "{label}: {name} {found:?}"));
+    }
 }
 
 #[test]
@@ -1780,4 +1793,24 @@ fn main() { used(); }
     let found = dead_code_warnings(&parse(code));
     let names: Vec<&str> = found.iter().map(|w| w.function_name.as_str()).collect();
     assert!(names.contains(&"dead_helper"), "{found:?}");
+}
+
+#[test]
+fn an_earlier_unreadable_arm_does_trigger_the_fallback() {
+    // The other order: nothing can say whether the repetition arm matches
+    // first, so the coarse rule has to hold — a suite runner really does call
+    // all of them, and inventing "never called" there is the expensive mistake.
+    let code = r#"
+macro_rules! choose {
+    ($($f:path),*) => { $( $f(); )* };
+    ($value:expr, $label:path) => { consume($value); };
+}
+fn consume(_: u8) {}
+fn live_helper() {}
+fn dead_helper() {}
+fn used() { choose!(live_helper, dead_helper); }
+fn main() { used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    assert!(found.is_empty(), "{found:?}");
 }

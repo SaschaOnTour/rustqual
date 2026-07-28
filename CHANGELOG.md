@@ -86,7 +86,10 @@ spelled-out calls DRY-002 rewards.
   invocation it never sees. Whether a macro is call-through at all is a separate
   question: at least one rule has to apply a metavariable, so a matcher no
   position model fits no longer makes every macro with a repetition harvest its
-  whole invocation.
+  whole invocation. An unreadable arm also stays in its place instead of
+  collapsing the list: it triggers the coarse fallback only once every *earlier*
+  arm has been ruled out on its own terms, so a first arm that matches still
+  decides.
 
 ## [1.8.1] - 2026-07-26
 

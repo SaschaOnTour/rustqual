@@ -30,9 +30,10 @@ pub(crate) type CalledPositions = HashMap<String, CallShape>;
 /// argument look called.
 #[derive(Clone, Default)]
 pub(crate) struct CallShape {
-    /// In declaration order. Empty when no matcher could be read, which is the
-    /// coarse case: every argument counts.
-    rules: Vec<RuleShape>,
+    /// In declaration order, `None` for an arm whose matcher admits no
+    /// positions. Kept in place rather than collapsing the list: an unreadable
+    /// arm says nothing about an invocation an *earlier* arm already matches.
+    rules: Vec<Option<RuleShape>>,
 }
 
 /// One rule's parameters and the positions it applies as a callee.
@@ -70,14 +71,12 @@ pub(crate) fn called_positions(def: &TokenStream, targets: &CalledPositions) -> 
         .map(|rule| shape_of(rule, targets))
         .collect();
     let applies = per_rule.iter().any(|(_, applies)| *applies);
-    // Every rule, in declaration order, including the ones that apply nothing:
-    // such a rule can still be the first one that matches, and dropping it let
-    // a later arm answer for an invocation it never sees. One unreadable
-    // matcher costs the position model for the whole macro, not the rule list.
-    let readable: Option<Vec<RuleShape>> = per_rule.into_iter().map(|(shape, _)| shape).collect();
-    applies.then(|| CallShape {
-        rules: readable.unwrap_or_default(),
-    })
+    // Every rule, in declaration order, including the ones that apply nothing
+    // and the ones no position model fits: such a rule can still be the first
+    // one that matches, and dropping either kind let a later arm answer for an
+    // invocation it never sees.
+    let rules = per_rule.into_iter().map(|(shape, _)| shape).collect();
+    applies.then_some(CallShape { rules })
 }
 
 /// One rule's shape — `None` when its matcher admits no positions — and whether
@@ -148,8 +147,8 @@ pub(crate) fn called_arguments(tokens: &TokenStream, shape: &CallShape) -> Vec<T
         .into_iter()
         .map(TokenStream::from_iter)
         .collect();
-    let called = matching_rule(shape, &args).map(|rule| rule.called.clone());
-    let takes = |i: &usize| called.as_ref().is_none_or(|set| set.contains(i));
+    let called = selected_positions(shape, &args);
+    let takes = |i: &usize| called.is_none_or(|set| set.contains(i));
     args.into_iter()
         .enumerate()
         .filter(|(i, _)| takes(i))
@@ -157,11 +156,24 @@ pub(crate) fn called_arguments(tokens: &TokenStream, shape: &CallShape) -> Vec<T
         .collect()
 }
 
-/// The first rule whose parameters accept these arguments — what `macro_rules!`
-/// itself picks. `None` when no rule was readable, or none fits.
-/// Operation: find over the rules, own call in the closure.
-fn matching_rule<'a>(shape: &'a CallShape, args: &[TokenStream]) -> Option<&'a RuleShape> {
-    shape.rules.iter().find(|rule| accepts_all(rule, args))
+/// The positions the first matching rule applies — what `macro_rules!` itself
+/// picks. `None` means "take every argument": the first arm that could not be
+/// ruled out has no readable matcher, or nothing matched at all.
+///
+/// Walking in order is the whole point. A readable arm that does not match is
+/// stepped over; an unreadable one stops the walk, because nothing here can say
+/// it would not have matched — but only once every earlier arm has been ruled
+/// out on its own terms.
+/// Operation: first decisive rule, own call in the closure.
+fn selected_positions<'a>(
+    shape: &'a CallShape,
+    args: &[TokenStream],
+) -> Option<&'a HashSet<usize>> {
+    let decides = |rule: &'a Option<RuleShape>| match rule {
+        Some(readable) => accepts_all(readable, args).then_some(Some(&readable.called)),
+        None => Some(None),
+    };
+    shape.rules.iter().find_map(decides).flatten()
 }
 
 /// Whether one rule's parameters accept these arguments.
