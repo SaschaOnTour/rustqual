@@ -31,8 +31,8 @@ spelled-out calls DRY-002 rewards.
   just as a plain parameter would. Scope is tracked as scope: a `let` binding is
   not in scope inside its own initializer, so the right-hand side of
   `let load = load();` is the *function*; a `for` pattern is not in scope in the
-  iterator expression and is gone after the loop; a match arm's bindings stay in
-  that arm; a closure's parameters stay in the closure; an `if let` binding
+  iterator expression and is gone after the loop; a `while let` binding stays in
+  its loop; a match arm's bindings stay in that arm; a closure's parameters stay in the closure; an `if let` binding
   covers the then-branch and neither the `else` nor what follows. All of it for
   one reason: mistaking a free function for a local is the direction that
   *invents* duplicates.
@@ -68,7 +68,10 @@ spelled-out calls DRY-002 rewards.
   comma-separated shape where a position means anything; a repetition
   (`$($t:path),*`) or a custom separator puts it out of reach of a token scan,
   and the answer falls back to "any metavariable" — over-approximating in the
-  direction that suppresses a finding rather than inventing one.
+  direction that suppresses a finding rather than inventing one. The position
+  survives every hop: a macro that forwards to a forwarder reads the target's
+  called positions back onto its *own* matcher, so a three-level chain still
+  asks about the right argument.
 
 ## [1.8.1] - 2026-07-26
 

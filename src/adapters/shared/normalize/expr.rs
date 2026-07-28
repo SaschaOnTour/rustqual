@@ -180,9 +180,13 @@ impl Normalizer {
                 });
             }
             syn::Expr::While(e) => {
-                self.tokens.push(NormalizedToken::Keyword("while"));
-                self.visit_expr(&e.cond);
-                self.visit_block(&e.body);
+                // `while let` binds for the body and nothing after it — the
+                // same reason `for` and `if` are wrapped.
+                self.scoped(|n| {
+                    n.tokens.push(NormalizedToken::Keyword("while"));
+                    n.visit_expr(&e.cond);
+                    n.visit_block(&e.body);
+                });
             }
             syn::Expr::Loop(e) => {
                 self.tokens.push(NormalizedToken::Keyword("loop"));

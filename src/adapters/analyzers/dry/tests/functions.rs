@@ -589,3 +589,13 @@ fn an_if_let_binding_stays_in_its_branch() {
     );
     assert!(groups.is_empty(), "{groups:?}");
 }
+
+#[test]
+fn a_while_let_binding_stays_in_its_loop() {
+    // `while let Some(load) = next()` binds for the loop body only. The `for`
+    // case was wrapped and this one was not, so the name survived the loop and
+    // the call after it read as the local.
+    let groups =
+        differ_only_in_callee("while let Some(NAME) = next() { consume(NAME); }\nNAME();\nNAME();");
+    assert!(groups.is_empty(), "{groups:?}");
+}

@@ -15,7 +15,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use proc_macro2::{TokenStream, TokenTree};
+use proc_macro2::TokenStream;
 
 use crate::adapters::shared::file_visitor::{visit_all_files, FileVisitor};
 use crate::adapters::shared::{macro_params, macro_tokens};
@@ -103,106 +103,38 @@ impl<'ast> syn::visit::Visit<'ast> for MacroBodyCollector {
 pub(crate) fn call_through_macros(parsed: &[(String, String, syn::File)]) -> HashSet<String> {
     let mut collector = CallThroughCollector::default();
     visit_all_files(parsed, &mut collector);
-    close_over_forwarders(collector.bodies, collector.direct)
+    close_over_forwarders(collector.bodies)
 }
 
-/// Which argument positions each call-through macro applies, when its matcher
-/// says. `None` means "unreadable shape" — the caller then accepts any
-/// metavariable, over-approximating toward suppressing a finding.
-type CalledPositions = HashMap<String, Option<HashSet<usize>>>;
-
-/// Whether this body invokes one of `targets` and hands it a metavariable at a
-/// position that target really calls.
+/// Grow the set until nothing new calls through.
 ///
-/// Naming a macro is not forwarding to it, and neither is passing a
-/// metavariable to an argument the target only reads:
-/// `step!(live_helper, consume($x))` calls `live_helper` and consumes `$x`.
-/// Both mistakes let an invocation excuse whatever is genuinely dead.
-/// Operation: positional scan over the trees, own calls in the closures.
-fn forwards_to(tokens: &TokenStream, targets: &CalledPositions) -> bool {
-    let trees: Vec<TokenTree> = tokens.clone().into_iter().collect();
-    trees.iter().enumerate().any(|(i, tt)| {
-        let TokenTree::Group(g) = tt else {
-            return false;
-        };
-        let quoted = macro_tokens::is_quoted_at(&trees, i);
-        let invoked = invoked_target(&trees, i, targets);
-        let descends = !quoted && forwards_to(&g.stream(), targets);
-        let here = macro_params::is_argument_list(g.delimiter())
-            && invoked.is_some_and(|positions| passes_a_callee(&g.stream(), positions));
-        here || descends
-    })
-}
-
-/// The positions the macro invoked just before tree `at` calls, if it is one of
-/// `targets`.
-/// Operation: two-token lookback + map lookup, no own calls.
-fn invoked_target<'a>(
-    trees: &[TokenTree],
-    at: usize,
-    targets: &'a CalledPositions,
-) -> Option<&'a Option<HashSet<usize>>> {
-    let bang = at >= 2 && matches!(&trees[at - 1], TokenTree::Punct(p) if p.as_char() == '!');
-    let TokenTree::Ident(name) = trees.get(at.checked_sub(2)?)? else {
-        return None;
-    };
-    bang.then(|| targets.get(&name.to_string())).flatten()
-}
-
-/// Whether the arguments hand a metavariable to a called position.
-/// Operation: split + position filter, own calls in the closures.
-fn passes_a_callee(tokens: &TokenStream, positions: &Option<HashSet<usize>>) -> bool {
-    let args = macro_params::split_arguments(tokens);
-    let called = |i: &usize| positions.as_ref().is_none_or(|set| set.contains(i));
-    args.iter()
-        .enumerate()
-        .filter(|(i, _)| called(i))
-        .any(|(_, arg)| macro_params::hands_over(arg))
-}
-
-/// Grow the set with the macros that hand a metavariable to one already in it.
-///
-/// The real shape has two levels — an entry macro forwards its metavariable to
-/// the macro that does the calling — and a chain can be longer, so this runs to
-/// a fixpoint rather than one hop. Merely *naming* an inner macro is not
-/// forwarding: `stringify!(step)` mentions `step` and passes nothing on, and
-/// counting that made an invocation excuse whatever was genuinely dead.
-/// Operation: fixpoint over the definition bodies, own calls in the closure.
-fn close_over_forwarders(
-    bodies: HashMap<String, TokenStream>,
-    direct: HashSet<String>,
-) -> HashSet<String> {
-    let mut through: CalledPositions = direct
-        .iter()
-        .map(|name| {
-            let positions = bodies
-                .get(name)
-                .and_then(macro_params::called_argument_positions);
-            (name.clone(), positions)
-        })
-        .collect();
+/// One rule for every hop: a macro calls through when it applies a metavariable
+/// itself, or hands one to a position an already-known macro calls. The
+/// positions it calls are then read back onto *its* matcher, so the next hop
+/// asks about the right argument — dropping them after the first hop let any
+/// metavariable count again, and an invocation excused whatever was dead.
+/// Operation: fixpoint over the definitions, own calls in the closures.
+fn close_over_forwarders(bodies: HashMap<String, TokenStream>) -> HashSet<String> {
+    let mut through = macro_params::CalledPositions::new();
     for _ in 0..=bodies.len() {
-        let fresh: Vec<String> = bodies
+        let fresh: Vec<(String, Option<HashSet<usize>>)> = bodies
             .iter()
             .filter(|(name, _)| !through.contains_key(*name))
-            .filter(|(_, body)| forwards_to(body, &through))
-            .map(|(name, _)| name.clone())
+            .filter_map(|(name, body)| {
+                macro_params::called_positions(body, &through).map(|p| (name.clone(), p))
+            })
             .collect();
         if fresh.is_empty() {
             break;
         }
-        // A forwarder's own called positions are unknown: what it passes on
-        // depends on the target, so accept any metavariable at its invocation.
-        through.extend(fresh.into_iter().map(|name| (name, None)));
+        through.extend(fresh);
     }
     through.into_keys().collect()
 }
 
-/// Visitor recording each `macro_rules!` definition: its body, and whether that
-/// body already calls through a metavariable.
+/// Visitor recording each `macro_rules!` definition body, keyed by its name.
 #[derive(Default)]
 struct CallThroughCollector {
-    direct: HashSet<String>,
     bodies: HashMap<String, TokenStream>,
 }
 
@@ -212,11 +144,9 @@ impl FileVisitor for CallThroughCollector {
 
 impl<'ast> syn::visit::Visit<'ast> for CallThroughCollector {
     fn visit_item_macro(&mut self, node: &'ast syn::ItemMacro) {
-        let Some(name) = node.ident.as_ref().map(|i| i.to_string()) else {
-            return;
-        };
-        let calls_through = macro_tokens::calls_through_metavariable(&node.mac.tokens);
-        self.direct.extend(calls_through.then(|| name.clone()));
-        self.bodies.insert(name, node.mac.tokens.clone());
+        let named = node.ident.as_ref().map(|i| i.to_string());
+        named.into_iter().for_each(|name| {
+            self.bodies.insert(name, node.mac.tokens.clone());
+        });
     }
 }

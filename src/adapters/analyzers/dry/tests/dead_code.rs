@@ -1627,3 +1627,54 @@ fn main() { used(); }
     let found = dead_code_warnings(&parse(code));
     assert!(found.is_empty(), "{found:?}");
 }
+
+#[test]
+fn a_forwarder_keeps_its_called_position_for_the_next_hop() {
+    // Three levels: `step!` applies argument 0, `middle!` hands its own
+    // argument 0 there, and `outer!` passes a fixed name to that position while
+    // only consuming its metavariable. Storing "unknown" for every forwarder
+    // threw away what had just been computed, so the second hop accepted any
+    // metavariable again and excused a dead function.
+    let code = r#"
+macro_rules! step {
+    ($f:path, $label:expr) => { $f(); };
+}
+macro_rules! middle {
+    ($g:path, $note:expr) => { step!($g, $note); };
+}
+macro_rules! outer {
+    ($x:path) => { middle!(live_helper, consume($x)); };
+}
+fn live_helper() {}
+fn consume(_: u8) {}
+fn dead_helper() {}
+fn used() { outer!(dead_helper); }
+fn main() { used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    let names: Vec<&str> = found.iter().map(|w| w.function_name.as_str()).collect();
+    assert!(names.contains(&"dead_helper"), "{found:?}");
+}
+
+#[test]
+fn a_chain_that_really_forwards_still_reaches_the_callee() {
+    // The counterpart over the same three levels: each hop hands its
+    // metavariable to the position the next one calls.
+    let code = r#"
+macro_rules! step {
+    ($f:path, $label:expr) => { $f(); };
+}
+macro_rules! middle {
+    ($g:path, $note:expr) => { step!($g, $note); };
+}
+macro_rules! outer {
+    ($x:path) => { middle!($x, consume(1)); };
+}
+fn consume(_: u8) {}
+fn live_helper() {}
+fn used() { outer!(live_helper); }
+fn main() { used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    assert!(found.is_empty(), "{found:?}");
+}

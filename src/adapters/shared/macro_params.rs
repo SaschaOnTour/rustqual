@@ -13,11 +13,22 @@
 //! coarse "any metavariable" rule, which over-approximates in the direction that
 //! suppresses a finding rather than inventing one.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use proc_macro2::{Delimiter, TokenStream, TokenTree};
+use proc_macro2::{TokenStream, TokenTree};
 
 use super::macro_tokens::{called_metavariables, is_quoted_at};
+
+/// Which argument positions each known call-through macro applies. `None` for a
+/// macro whose matcher is not flat, where the caller accepts a metavariable at
+/// any position.
+pub(crate) type CalledPositions = HashMap<String, Option<HashSet<usize>>>;
+
+/// One `matcher => transcriber` rule of a definition.
+struct Rule {
+    matcher: TokenStream,
+    transcriber: TokenStream,
+}
 
 /// `(matcher) => {transcriber}`: the body sits three trees past the matcher —
 /// the `=`, the `>`, then the group.
@@ -26,28 +37,122 @@ const TRANSCRIBER_OFFSET: usize = 3;
 /// `$name : fragment` — four trees per matcher parameter.
 const PARAMETER_TOKENS: usize = 4;
 
-/// One `matcher => transcriber` rule of a definition.
-struct Rule {
-    matcher: TokenStream,
-    transcriber: TokenStream,
+/// The argument positions this definition applies as a callee, given what is
+/// already known about the macros it invokes. `None` when it calls nothing
+/// through; `Some(None)` when it does but its matcher does not admit positions.
+///
+/// The recursion is in the caller's fixpoint, not here: a macro that forwards to
+/// a macro that forwards keeps its own position, because the target's positions
+/// are read from `targets` and mapped back onto this matcher.
+/// Integration: rules, names, then the positions those names sit at.
+pub(crate) fn called_positions(
+    def: &TokenStream,
+    targets: &CalledPositions,
+) -> Option<Option<HashSet<usize>>> {
+    let rules = rules_of(def);
+    let named: Vec<(&Rule, HashSet<String>)> = rules
+        .iter()
+        .map(|rule| (rule, called_names(rule, targets)))
+        .filter(|(_, names)| !names.is_empty())
+        .collect();
+    let positions: Option<HashSet<usize>> = named
+        .iter()
+        .map(|(rule, names)| positions_of(&rule.matcher, names))
+        .try_fold(HashSet::new(), |acc, set| Some(union(acc, set?)));
+    (!named.is_empty()).then_some(positions)
 }
 
-/// The argument positions this definition applies as a callee, or `None` when
-/// its matcher is not a flat comma-separated parameter list.
-/// Integration: split into rules, then fold each rule's positions.
-pub(crate) fn called_argument_positions(tokens: &TokenStream) -> Option<HashSet<usize>> {
-    let rules = rules_of(tokens);
-    let per_rule: Option<Vec<HashSet<usize>>> = rules.iter().map(positions_in).collect();
-    per_rule.map(|sets| sets.into_iter().flatten().collect())
+/// Operation: set union, no own calls.
+fn union(mut acc: HashSet<usize>, other: HashSet<usize>) -> HashSet<usize> {
+    acc.extend(other);
+    acc
 }
 
-/// The positions one rule calls. `None` when its matcher is not flat.
-/// Operation: parameter list + called names, own calls in the operands.
-fn positions_in(rule: &Rule) -> Option<HashSet<usize>> {
-    let params = flat_parameters(&rule.matcher)?;
-    let called = called_metavariables(&rule.transcriber);
-    let hit = |(i, p): (usize, &String)| called.contains(p).then_some(i);
+/// The metavariables this rule applies as a callee — directly, or by handing
+/// them to a position one of `targets` calls.
+/// Operation: two collections merged, own calls in the operands.
+fn called_names(rule: &Rule, targets: &CalledPositions) -> HashSet<String> {
+    let mut names = called_metavariables(&rule.transcriber);
+    names.extend(forwarded_names(&rule.transcriber, targets));
+    names
+}
+
+/// Where `names` sit in a flat matcher. `None` for any other matcher shape,
+/// where a position says nothing.
+/// Operation: parameter list + index filter, own call in the operand.
+fn positions_of(matcher: &TokenStream, names: &HashSet<String>) -> Option<HashSet<usize>> {
+    let params = flat_parameters(matcher)?;
+    let hit = |(i, p): (usize, &String)| names.contains(p).then_some(i);
     Some(params.iter().enumerate().filter_map(hit).collect())
+}
+
+/// The metavariables this transcriber hands to a position one of `targets`
+/// really calls. `stringify!($x)` hands over nothing, and neither does an
+/// argument at a position the target only reads.
+/// Operation: positional scan, own calls in the closures.
+// qual:recursive
+fn forwarded_names(tokens: &TokenStream, targets: &CalledPositions) -> HashSet<String> {
+    let trees: Vec<TokenTree> = tokens.clone().into_iter().collect();
+    let mut out = HashSet::new();
+    for (i, tt) in trees.iter().enumerate() {
+        let TokenTree::Group(g) = tt else { continue };
+        if is_quoted_at(&trees, i) {
+            continue;
+        }
+        out.extend(forwarded_names(&g.stream(), targets));
+        let called = invoked_target(&trees, i, targets);
+        let passed = called.map(|positions| passed_names(&g.stream(), positions));
+        out.extend(passed.unwrap_or_default());
+    }
+    out
+}
+
+/// The positions the macro invoked just before tree `at` calls, if it is known.
+/// Operation: two-token lookback + map lookup, no own calls.
+fn invoked_target<'a>(
+    trees: &[TokenTree],
+    at: usize,
+    targets: &'a CalledPositions,
+) -> Option<&'a Option<HashSet<usize>>> {
+    let bang = at >= 2 && matches!(&trees[at - 1], TokenTree::Punct(p) if p.as_char() == '!');
+    let TokenTree::Ident(name) = trees.get(at.checked_sub(2)?)? else {
+        return None;
+    };
+    bang.then(|| targets.get(&name.to_string())).flatten()
+}
+
+/// The metavariable names sitting at a called argument position.
+/// Operation: split + position filter, own calls in the closures.
+fn passed_names(tokens: &TokenStream, positions: &Option<HashSet<usize>>) -> HashSet<String> {
+    let called = |i: &usize| positions.as_ref().is_none_or(|set| set.contains(i));
+    split_arguments(tokens)
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| called(i))
+        .flat_map(|(_, arg)| metavariables_in(arg))
+        .collect()
+}
+
+/// Every `$name` in a token slice, skipping what a quoting macro holds.
+/// Operation: positional scan, own call in the closure.
+// qual:recursive
+fn metavariables_in(trees: &[TokenTree]) -> HashSet<String> {
+    let mut out = HashSet::new();
+    for (i, tt) in trees.iter().enumerate() {
+        let dollar = matches!(tt, TokenTree::Punct(p) if p.as_char() == '$');
+        if let (true, Some(TokenTree::Ident(name))) = (dollar, trees.get(i + 1)) {
+            out.insert(name.to_string());
+        }
+        match tt {
+            TokenTree::Group(g) if !is_quoted_at(trees, i) => {
+                out.extend(metavariables_in(
+                    &g.stream().into_iter().collect::<Vec<_>>(),
+                ));
+            }
+            _ => {}
+        }
+    }
+    out
 }
 
 /// Every `(…) => {…}` pair in a definition body.
@@ -87,7 +192,7 @@ fn flat_parameters(matcher: &TokenStream) -> Option<Vec<String>> {
             return None;
         };
         let colon = matches!(trees.get(i + 2), Some(TokenTree::Punct(p)) if p.as_char() == ':');
-        let fragment = matches!(trees.get(i + 3), Some(TokenTree::Ident(_)));
+        let fragment = matches!(trees.get(i + TRANSCRIBER_OFFSET), Some(TokenTree::Ident(_)));
         if !(dollar && colon && fragment) {
             return None;
         }
@@ -104,7 +209,7 @@ fn flat_parameters(matcher: &TokenStream) -> Option<Vec<String>> {
 
 /// The invocation's top-level arguments, split on commas.
 /// Operation: fold over the token trees, no own calls.
-pub(crate) fn split_arguments(tokens: &TokenStream) -> Vec<Vec<TokenTree>> {
+fn split_arguments(tokens: &TokenStream) -> Vec<Vec<TokenTree>> {
     let mut args: Vec<Vec<TokenTree>> = vec![Vec::new()];
     tokens.clone().into_iter().for_each(|tt| {
         let comma = matches!(&tt, TokenTree::Punct(p) if p.as_char() == ',');
@@ -114,22 +219,4 @@ pub(crate) fn split_arguments(tokens: &TokenStream) -> Vec<Vec<TokenTree>> {
         }
     });
     args
-}
-
-/// Whether these tokens pass a metavariable on rather than quoting one.
-/// Operation: positional scan, own call in the closure.
-pub(crate) fn hands_over(trees: &[TokenTree]) -> bool {
-    trees.iter().enumerate().any(|(i, tt)| match tt {
-        TokenTree::Punct(p) => p.as_char() == '$',
-        TokenTree::Group(g) if !is_quoted_at(trees, i) => {
-            hands_over(&g.stream().into_iter().collect::<Vec<_>>())
-        }
-        _ => false,
-    })
-}
-
-/// Whether a group delimited by parentheses holds the invocation's arguments.
-/// Operation: delimiter check, no own calls.
-pub(crate) fn is_argument_list(delimiter: Delimiter) -> bool {
-    matches!(delimiter, Delimiter::Parenthesis | Delimiter::Bracket)
 }

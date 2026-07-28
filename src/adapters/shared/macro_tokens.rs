@@ -209,24 +209,6 @@ pub fn all_idents(tokens: &TokenStream) -> impl Iterator<Item = String> {
 /// missing while `quote!` was there, which is exactly how such a list rots.
 const NON_EXECUTING: [&str; 3] = ["stringify", "quote", "quote_spanned"];
 
-/// Whether these tokens use a metavariable in callee position: `$name(…)`.
-///
-/// The transcriber of `macro_rules! step { ($t:path) => { $t(&make()); } }`
-/// holds `$`, `t`, `(…)` as three consecutive trees. What the invocation binds
-/// to `$t` is the function that really runs, and no walk over the invocation
-/// can know that without first asking the definition — an ident followed by a
-/// comma is not in call position.
-///
-/// A nested macro is descended into, because `println!("{}", $f())` really does
-/// run `$f` — except for the ones that only quote their input: `stringify!($f())`
-/// produces the string `"$f()"` and calls nothing. Skipping *all* nested macros
-/// would be the safer-looking choice and the wrong one, since it would reopen
-/// the case this predicate exists for.
-/// Operation: positional token-tree scan, no own calls.
-pub fn calls_through_metavariable(tokens: &TokenStream) -> bool {
-    !called_metavariables(tokens).is_empty()
-}
-
 /// Whether the tree at `at` is the body of a macro that only quotes its input.
 /// Operation: two-token lookback, no own calls.
 pub fn is_quoted_at(trees: &[TokenTree], at: usize) -> bool {
