@@ -1678,3 +1678,42 @@ fn main() { used(); }
     let found = dead_code_warnings(&parse(code));
     assert!(found.is_empty(), "{found:?}");
 }
+
+#[test]
+fn only_the_called_argument_of_an_invocation_counts_as_a_call() {
+    // `step!` applies argument 0 and only names argument 1. Harvesting every
+    // identifier of the invocation made the second one look called too — the
+    // positions were computed and then dropped on the way to the call graph.
+    let code = r#"
+macro_rules! step {
+    ($f:path, $label:path) => { $f(); };
+}
+fn live_helper() {}
+fn dead_helper() {}
+fn used() { step!(live_helper, dead_helper); }
+fn main() { used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    let names: Vec<&str> = found.iter().map(|w| w.function_name.as_str()).collect();
+    assert!(names.contains(&"dead_helper"), "{found:?}");
+    assert!(!names.contains(&"live_helper"), "{found:?}");
+}
+
+#[test]
+fn an_unreadable_matcher_still_falls_back_to_every_argument() {
+    // A repetition puts the position out of reach, and the coarse rule has to
+    // stay: a suite runner driven by `$($t:path),*` really does call all of
+    // them, and inventing "never called" there is the expensive mistake.
+    let code = r#"
+macro_rules! run_all {
+    ($make:path; $($t:path),*) => { $( $t(&$make()); )* };
+}
+fn make_store() -> u8 { 1 }
+fn check_append(_: &u8) {}
+fn check_rotate(_: &u8) {}
+fn used() { run_all!(make_store; check_append, check_rotate); }
+fn main() { used(); }
+"#;
+    let found = dead_code_warnings(&parse(code));
+    assert!(found.is_empty(), "{found:?}");
+}

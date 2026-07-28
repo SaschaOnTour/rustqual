@@ -100,7 +100,9 @@ impl<'ast> syn::visit::Visit<'ast> for MacroBodyCollector {
 /// for every macro invocation would let `assert_eq!(x, dead_helper)` vouch for
 /// a dead function — the mistake that costs a real finding.
 /// Integration: direct set, then the reach map decides the rest.
-pub(crate) fn call_through_macros(parsed: &[(String, String, syn::File)]) -> HashSet<String> {
+pub(crate) fn call_through_macros(
+    parsed: &[(String, String, syn::File)],
+) -> macro_params::CalledPositions {
     let mut collector = CallThroughCollector::default();
     visit_all_files(parsed, &mut collector);
     close_over_forwarders(collector.bodies)
@@ -114,7 +116,7 @@ pub(crate) fn call_through_macros(parsed: &[(String, String, syn::File)]) -> Has
 /// asks about the right argument — dropping them after the first hop let any
 /// metavariable count again, and an invocation excused whatever was dead.
 /// Operation: fixpoint over the definitions, own calls in the closures.
-fn close_over_forwarders(bodies: HashMap<String, TokenStream>) -> HashSet<String> {
+fn close_over_forwarders(bodies: HashMap<String, TokenStream>) -> macro_params::CalledPositions {
     let mut through = macro_params::CalledPositions::new();
     for _ in 0..=bodies.len() {
         let fresh: Vec<(String, Option<HashSet<usize>>)> = bodies
@@ -129,7 +131,7 @@ fn close_over_forwarders(bodies: HashMap<String, TokenStream>) -> HashSet<String
         }
         through.extend(fresh);
     }
-    through.into_keys().collect()
+    through
 }
 
 /// Visitor recording each `macro_rules!` definition body, keyed by its name.

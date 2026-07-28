@@ -71,7 +71,10 @@ spelled-out calls DRY-002 rewards.
   direction that suppresses a finding rather than inventing one. The position
   survives every hop: a macro that forwards to a forwarder reads the target's
   called positions back onto its *own* matcher, so a three-level chain still
-  asks about the right argument.
+  asks about the right argument — and it survives to the invocation, where only
+  the arguments at those positions become call-graph edges.
+  `step!(live_helper, dead_helper)` on a macro that applies its first argument
+  says nothing about the second.
 
 ## [1.8.1] - 2026-07-26
 

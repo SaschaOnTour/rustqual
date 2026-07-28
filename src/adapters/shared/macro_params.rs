@@ -121,6 +121,23 @@ fn invoked_target<'a>(
     bang.then(|| targets.get(&name.to_string())).flatten()
 }
 
+/// The arguments a macro with these `positions` actually applies. An unreadable
+/// matcher (`None`) yields all of them — the coarse fallback, which suppresses a
+/// finding rather than inventing one.
+/// Operation: split + position filter, own calls in the closures.
+pub(crate) fn called_arguments(
+    tokens: &TokenStream,
+    positions: &Option<HashSet<usize>>,
+) -> Vec<TokenStream> {
+    let called = |i: &usize| positions.as_ref().is_none_or(|set| set.contains(i));
+    split_arguments(tokens)
+        .into_iter()
+        .enumerate()
+        .filter(|(i, _)| called(i))
+        .map(|(_, arg)| TokenStream::from_iter(arg))
+        .collect()
+}
+
 /// The metavariable names sitting at a called argument position.
 /// Operation: split + position filter, own calls in the closures.
 fn passed_names(tokens: &TokenStream, positions: &Option<HashSet<usize>>) -> HashSet<String> {
@@ -209,7 +226,7 @@ fn flat_parameters(matcher: &TokenStream) -> Option<Vec<String>> {
 
 /// The invocation's top-level arguments, split on commas.
 /// Operation: fold over the token trees, no own calls.
-fn split_arguments(tokens: &TokenStream) -> Vec<Vec<TokenTree>> {
+pub(crate) fn split_arguments(tokens: &TokenStream) -> Vec<Vec<TokenTree>> {
     let mut args: Vec<Vec<TokenTree>> = vec![Vec::new()];
     tokens.clone().into_iter().for_each(|tt| {
         let comma = matches!(&tt, TokenTree::Punct(p) if p.as_char() == ',');

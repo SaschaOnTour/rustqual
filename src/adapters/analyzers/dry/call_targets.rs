@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use syn::visit::Visit;
 
 use super::split_names::{collect_split, test_scoped_visits, SplitCollector, SplitNames};
-use crate::adapters::shared::macro_tokens;
+use crate::adapters::shared::{macro_params, macro_tokens};
 
 // ── Call target collection ──────────────────────────────────────
 
@@ -30,11 +30,12 @@ struct CallTargetCollector {
     /// runs whatever the definition names, and that edge is invisible to a
     /// walker that does not expand macros.
     macro_reach: super::macro_reach::MacroReach,
-    /// Macros that call through a metavariable — see
-    /// `macro_reach::call_through_macros`. At an invocation of one of these the
-    /// arguments are the functions that really run, and they arrive as bare
-    /// idents no token walk can recognise as calls.
-    call_through: HashSet<String>,
+    /// Macros that call through a metavariable, and which argument positions
+    /// they apply — see `macro_reach::call_through_macros`. At an invocation of
+    /// one of these, the argument at a called position is the function that
+    /// really runs, and it arrives as a bare ident no token walk can recognise
+    /// as a call.
+    call_through: macro_params::CalledPositions,
 }
 
 impl SplitCollector for CallTargetCollector {
@@ -81,19 +82,25 @@ impl CallTargetCollector {
         self.names.refs.tests.extend(reached);
     }
 
-    /// At an invocation of a call-through macro, every ident in the invocation
-    /// is a possible callee — the one the macro body applies arrives as a bare
-    /// name, with nothing syntactic to mark it. The consumer intersects the
-    /// result against declared function names, so the over-collection is bounded
-    /// by that; it can only suppress a finding, never raise one. The narrowness
-    /// is in the trigger, not here: an ordinary `assert_eq!` never qualifies.
+    /// At an invocation of a call-through macro, the arguments at the positions
+    /// it applies are possible callees — each arrives as a bare name, with
+    /// nothing syntactic to mark it as a call. Only those positions: `step!`
+    /// applying its first argument says nothing about the second, and taking
+    /// every identifier made a plainly dead function look called. When the
+    /// target's matcher does not admit positions the coarse form remains, which
+    /// suppresses a finding rather than inventing one. The consumer intersects
+    /// the result against declared function names, and an ordinary `assert_eq!`
+    /// never reaches here at all.
     /// Operation: membership check + bulk insert, no own calls.
     fn arguments_of_a_call_through(&mut self, node: &syn::Macro) {
         let invoked = node.path.segments.last().map(|s| s.ident.to_string());
-        if !invoked.is_some_and(|name| self.call_through.contains(&name)) {
+        let Some(positions) = invoked.and_then(|name| self.call_through.get(&name).cloned()) else {
             return;
-        }
-        let idents: Vec<String> = macro_tokens::all_idents(&node.tokens).collect();
+        };
+        let idents: Vec<String> = macro_params::called_arguments(&node.tokens, &positions)
+            .iter()
+            .flat_map(macro_tokens::all_idents)
+            .collect();
         self.target().extend(idents);
     }
 
