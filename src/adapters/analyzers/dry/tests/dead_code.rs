@@ -1762,6 +1762,45 @@ fn main() { used(); }
         ),
         &[],
     ),
+    (
+        (
+            // `$body:block` does not accept a bare path, so rustc takes the
+            // second arm and calls the function. Treating an unchecked fragment
+            // as a match picked the first arm, registered no call, and reported
+            // a live function as dead — the expensive direction.
+            "a fragment that rejects the argument",
+            r#"
+macro_rules! choose {
+    ($body:block) => { $body };
+    ($f:path) => { $f(); };
+}
+fn live_helper() {}
+fn used() { choose!(live_helper); }
+fn main() { used(); }
+"#,
+            &[],
+        ),
+        &["live_helper"],
+    ),
+    (
+        (
+            // `vis` is the one fragment this cannot decide — it matches the
+            // empty token stream too. Undecidable has to mean undecidable: the
+            // walk stops and every argument counts.
+            "a fragment that cannot be decided",
+            r#"
+macro_rules! choose {
+    ($v:vis) => { };
+    ($f:path) => { $f(); };
+}
+fn live_helper() {}
+fn used() { choose!(live_helper); }
+fn main() { used(); }
+"#,
+            &[],
+        ),
+        &["live_helper"],
+    ),
 ];
 
 #[test]

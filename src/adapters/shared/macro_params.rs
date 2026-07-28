@@ -15,7 +15,8 @@
 
 use std::collections::{HashMap, HashSet};
 
-use proc_macro2::{TokenStream, TokenTree};
+use proc_macro2::{Delimiter, Group, TokenStream, TokenTree};
+use syn::parse::Parser;
 
 use super::macro_tokens::{called_metavariables, is_quoted_at};
 
@@ -170,17 +171,47 @@ fn selected_positions<'a>(
     args: &[TokenStream],
 ) -> Option<&'a HashSet<usize>> {
     let decides = |rule: &'a Option<RuleShape>| match rule {
-        Some(readable) => accepts_all(readable, args).then_some(Some(&readable.called)),
+        Some(readable) => match accepts_all(readable, args) {
+            Match::Accepts => Some(Some(&readable.called)),
+            Match::Rejects => None,
+            Match::Undecided => Some(None),
+        },
         None => Some(None),
     };
     shape.rules.iter().find_map(decides).flatten()
 }
 
-/// Whether one rule's parameters accept these arguments.
-/// Operation: arity check + per-argument fragment check, own call in the closure.
-fn accepts_all(rule: &RuleShape, args: &[TokenStream]) -> bool {
-    let fits = |(frag, arg): (&String, &TokenStream)| accepts(frag, arg);
-    rule.fragments.len() == args.len() && rule.fragments.iter().zip(args).all(fits)
+/// What a rule says about an argument list.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Match {
+    /// Every parameter accepts its argument.
+    Accepts,
+    /// Some parameter certainly does not — `macro_rules!` moves on.
+    Rejects,
+    /// Cannot be decided here, so nothing may be concluded from it.
+    Undecided,
+}
+
+/// What one rule says about these arguments.
+///
+/// A definite rejection outranks an undecidable parameter: if any argument
+/// certainly does not fit, the rule does not match whatever the rest says.
+/// Operation: arity check + fold over the parameters, own call in the closure.
+fn accepts_all(rule: &RuleShape, args: &[TokenStream]) -> Match {
+    if rule.fragments.len() != args.len() {
+        return Match::Rejects;
+    }
+    let verdicts: Vec<Match> = rule
+        .fragments
+        .iter()
+        .zip(args)
+        .map(|(frag, arg)| accepts(frag, arg))
+        .collect();
+    match verdicts {
+        v if v.contains(&Match::Rejects) => Match::Rejects,
+        v if v.contains(&Match::Undecided) => Match::Undecided,
+        _ => Match::Accepts,
+    }
 }
 
 /// Whether a metavariable appears anywhere in these tokens, at any depth —
@@ -198,22 +229,44 @@ fn contains_metavariable(tokens: &TokenStream) -> bool {
 
 /// Whether a fragment specifier accepts this argument.
 ///
-/// Only the kinds a token stream can be checked against cheaply; everything else
-/// accepts, since failing to disprove a match must not narrow the answer. A
-/// metavariable accepts anything: what it stands for was decided one level up.
+/// A metavariable accepts anything: what it stands for was decided one level up.
+/// A kind this cannot check is `Undecided`, **not** a match — treating it as one
+/// picks an arm rustc rejects, and if that arm applies nothing, the function the
+/// real arm calls is reported dead. That is the expensive direction, and it is
+/// the mistake this predicate made until the list below grew.
 /// Operation: fragment dispatch, no own calls.
-fn accepts(fragment: &str, arg: &TokenStream) -> bool {
+fn accepts(fragment: &str, arg: &TokenStream) -> Match {
     if contains_metavariable(arg) {
-        return true;
+        return Match::Accepts;
     }
-    match fragment {
+    let fits = match fragment {
         "ident" => syn::parse2::<syn::Ident>(arg.clone()).is_ok(),
         "path" => syn::parse2::<syn::Path>(arg.clone()).is_ok(),
         "expr" => syn::parse2::<syn::Expr>(arg.clone()).is_ok(),
         "ty" => syn::parse2::<syn::Type>(arg.clone()).is_ok(),
         "literal" => syn::parse2::<syn::Lit>(arg.clone()).is_ok(),
-        _ => true,
+        "block" => syn::parse2::<syn::Block>(arg.clone()).is_ok(),
+        "item" => syn::parse2::<syn::Item>(arg.clone()).is_ok(),
+        "meta" => syn::parse2::<syn::Meta>(arg.clone()).is_ok(),
+        "lifetime" => syn::parse2::<syn::Lifetime>(arg.clone()).is_ok(),
+        "pat" => syn::Pat::parse_single.parse2(arg.clone()).is_ok(),
+        "stmt" => is_single_statement(arg),
+        "tt" => arg.clone().into_iter().count() == 1,
+        // `vis` matches the empty token stream as readily as a keyword, so a
+        // parse says nothing about whether this argument is the one it took.
+        _ => return Match::Undecided,
+    };
+    match fits {
+        true => Match::Accepts,
+        false => Match::Rejects,
     }
+}
+
+/// Whether these tokens are exactly one statement.
+/// Operation: brace-wrap + parse, no own calls.
+fn is_single_statement(arg: &TokenStream) -> bool {
+    let braced = TokenStream::from(TokenTree::Group(Group::new(Delimiter::Brace, arg.clone())));
+    syn::parse2::<syn::Block>(braced).is_ok_and(|block| block.stmts.len() == 1)
 }
 
 /// The metavariable names sitting at a called argument position.
