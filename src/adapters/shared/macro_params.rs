@@ -15,7 +15,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use proc_macro2::{Delimiter, Group, TokenStream, TokenTree};
+use proc_macro2::{Delimiter, Group, Ident, Span, TokenStream, TokenTree};
 use syn::parse::Parser;
 
 use super::macro_tokens::{called_metavariables, is_quoted_at};
@@ -214,31 +214,58 @@ fn accepts_all(rule: &RuleShape, args: &[TokenStream]) -> Match {
     }
 }
 
-/// Whether a metavariable appears anywhere in these tokens, at any depth —
-/// `consume($x)` holds one, and asking only at the top level made the argument
-/// look like ordinary code that fails to parse.
-/// Operation: recursive token scan, own call in the closure.
+/// The same tokens with every `$name` replaced by a plain identifier.
+///
+/// A forwarded metavariable is not a wildcard: `$f:path` handed to
+/// `choose!($f)` still carries `path`, and a `$body:block` arm does not take
+/// it. Accepting any argument that holds a metavariable therefore picked arms
+/// rustc rejects — and where such an arm applies nothing, the function the real
+/// arm calls was reported dead.
+///
+/// Substituting keeps the argument's *shape* — `consume($x)` stays a call
+/// expression, a bare `$f` stays a single name — so the ordinary fragment
+/// parsers answer, and they answer the way rustc does for the cases that matter.
+/// A `$` that names nothing (the head of a repetition) is dropped rather than
+/// left to fail the parse.
+/// Operation: token rewrite, own call in the closure.
 // qual:recursive
-fn contains_metavariable(tokens: &TokenStream) -> bool {
-    tokens.clone().into_iter().any(|tt| match tt {
-        TokenTree::Punct(p) => p.as_char() == '$',
-        TokenTree::Group(g) => contains_metavariable(&g.stream()),
-        _ => false,
-    })
+fn without_metavariables(tokens: &TokenStream) -> TokenStream {
+    let trees: Vec<TokenTree> = tokens.clone().into_iter().collect();
+    let mut out: Vec<TokenTree> = Vec::new();
+    let mut i = 0;
+    while i < trees.len() {
+        let dollar = matches!(&trees[i], TokenTree::Punct(p) if p.as_char() == '$');
+        let named = matches!(trees.get(i + 1), Some(TokenTree::Ident(_)));
+        match (&trees[i], dollar, named) {
+            (_, true, true) => {
+                out.push(TokenTree::Ident(Ident::new(SUBSTITUTE, Span::call_site())));
+                i += 1;
+            }
+            (_, true, false) => {}
+            (TokenTree::Group(g), ..) => out.push(TokenTree::Group(Group::new(
+                g.delimiter(),
+                without_metavariables(&g.stream()),
+            ))),
+            (other, ..) => out.push(other.clone()),
+        }
+        i += 1;
+    }
+    out.into_iter().collect()
 }
+
+/// The identifier a metavariable is replaced by. Any name would do; this one
+/// cannot collide with a real one.
+const SUBSTITUTE: &str = "__rustqual_fragment";
 
 /// Whether a fragment specifier accepts this argument.
 ///
-/// A metavariable accepts anything: what it stands for was decided one level up.
 /// A kind this cannot check is `Undecided`, **not** a match — treating it as one
 /// picks an arm rustc rejects, and if that arm applies nothing, the function the
 /// real arm calls is reported dead. That is the expensive direction, and it is
 /// the mistake this predicate made until the list below grew.
 /// Operation: fragment dispatch, no own calls.
 fn accepts(fragment: &str, arg: &TokenStream) -> Match {
-    if contains_metavariable(arg) {
-        return Match::Accepts;
-    }
+    let arg = &without_metavariables(arg);
     let fits = match fragment {
         "ident" => syn::parse2::<syn::Ident>(arg.clone()).is_ok(),
         "path" => syn::parse2::<syn::Path>(arg.clone()).is_ok(),

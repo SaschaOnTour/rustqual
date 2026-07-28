@@ -1801,6 +1801,30 @@ fn main() { used(); }
         ),
         &["live_helper"],
     ),
+    (
+        (
+            // Forwarded: `$f` was captured as a `path`, and rustc keeps that
+            // when it is handed on — the `block` arm does not take it. Reading
+            // a metavariable as "accepts anything" picked that arm, which
+            // applies nothing, and reported the function the real arm calls as
+            // dead.
+            "a metavariable keeps its fragment when forwarded",
+            r#"
+macro_rules! choose {
+    ($body:block) => { $body };
+    ($f:path) => { $f(); };
+}
+macro_rules! wrapper {
+    ($f:path) => { choose!($f); };
+}
+fn live_helper() {}
+fn used() { wrapper!(live_helper); }
+fn main() { used(); }
+"#,
+            &[],
+        ),
+        &["live_helper"],
+    ),
 ];
 
 #[test]
