@@ -1825,6 +1825,29 @@ fn main() { used(); }
         ),
         &["live_helper"],
     ),
+    (
+        (
+            // The same one step subtler: substituting the metavariable by a
+            // plain identifier let an `ident` arm take a forwarded `path`.
+            // rustc keeps a matched fragment opaque — only a matcher of the
+            // same kind consumes it.
+            "a forwarded path is not an ident",
+            r#"
+macro_rules! choose {
+    ($ignored:ident) => {};
+    ($f:path) => { $f(); };
+}
+macro_rules! wrapper {
+    ($f:path) => { choose!($f); };
+}
+fn live_helper() {}
+fn used() { wrapper!(live_helper); }
+fn main() { used(); }
+"#,
+            &[],
+        ),
+        &["live_helper"],
+    ),
 ];
 
 #[test]

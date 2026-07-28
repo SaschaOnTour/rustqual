@@ -85,10 +85,14 @@ spelled-out calls DRY-002 rewards.
   reported dead — the expensive direction. Undecided stops the walk and every
   argument counts, the same as an unreadable matcher; a definite rejection
   outranks it. A forwarded metavariable is checked, not waved through: `$f:path`
-  handed on as `choose!($f)` still carries `path`, and a `$body:block` arm does
-  not take it — every `$name` is substituted by a plain identifier so the
-  ordinary parsers answer, which keeps the argument's shape (`consume($x)` stays
-  a call expression) and reaches rustc's verdict for the cases that matter. Rules that apply nothing stay in the list — such a rule can be the
+  handed on as `choose!($f)` still carries `path`, and neither a `$body:block`
+  nor a `$ignored:ident` arm takes it. rustc keeps a matched fragment **opaque**:
+  only a specifier of the same kind consumes it, with `ident`, `lifetime` and
+  `tt` the documented exceptions. A bare forwarded metavariable is therefore
+  compared by kind, read from the forwarding rule's own matcher — a syntactic
+  substitution said `ident` accepts a forwarded `path`, which it does not. An
+  argument that merely *contains* a metavariable (`consume($x)`) keeps the
+  substitution, since there the surrounding shape is what decides. Rules that apply nothing stay in the list — such a rule can be the
   first one that matches, and dropping it let a later arm answer for an
   invocation it never sees. Whether a macro is call-through at all is a separate
   question: at least one rule has to apply a metavariable, so a matcher no

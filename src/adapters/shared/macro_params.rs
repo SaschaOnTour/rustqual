@@ -23,6 +23,14 @@ use super::macro_tokens::{called_metavariables, is_quoted_at};
 /// Which argument positions each known call-through macro applies.
 pub(crate) type CalledPositions = HashMap<String, CallShape>;
 
+/// The fragment each metavariable of the *enclosing* rule was captured as.
+/// Empty at a real invocation, where no metavariable can appear.
+pub(crate) type Fragments = HashMap<String, String>;
+
+/// Fragments that stay transparent when forwarded: rustc lets these be matched
+/// literally or by another specifier, unlike the opaque rest.
+const TRANSPARENT: [&str; 3] = ["ident", "lifetime", "tt"];
+
 /// What a macro does with the arguments it is given, rule by rule.
 ///
 /// Per rule, not unioned: `macro_rules!` takes the **first** rule that matches,
@@ -99,8 +107,12 @@ fn shape_of(rule: &Rule, targets: &CalledPositions) -> (Option<RuleShape>, bool)
 /// them to a position one of `targets` calls.
 /// Operation: two collections merged, own calls in the operands.
 fn called_names(rule: &Rule, targets: &CalledPositions) -> HashSet<String> {
+    let enclosing: Fragments = flat_parameters(&rule.matcher)
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
     let mut names = called_metavariables(&rule.transcriber);
-    names.extend(forwarded_names(&rule.transcriber, targets));
+    names.extend(forwarded_names(&rule.transcriber, targets, &enclosing));
     names
 }
 
@@ -109,7 +121,11 @@ fn called_names(rule: &Rule, targets: &CalledPositions) -> HashSet<String> {
 /// argument at a position the target only reads.
 /// Operation: positional scan, own calls in the closures.
 // qual:recursive
-fn forwarded_names(tokens: &TokenStream, targets: &CalledPositions) -> HashSet<String> {
+fn forwarded_names(
+    tokens: &TokenStream,
+    targets: &CalledPositions,
+    enclosing: &Fragments,
+) -> HashSet<String> {
     let trees: Vec<TokenTree> = tokens.clone().into_iter().collect();
     let mut out = HashSet::new();
     for (i, tt) in trees.iter().enumerate() {
@@ -117,9 +133,9 @@ fn forwarded_names(tokens: &TokenStream, targets: &CalledPositions) -> HashSet<S
         if is_quoted_at(&trees, i) {
             continue;
         }
-        out.extend(forwarded_names(&g.stream(), targets));
+        out.extend(forwarded_names(&g.stream(), targets, enclosing));
         let called = invoked_target(&trees, i, targets);
-        let passed = called.map(|shape| passed_names(&g.stream(), shape));
+        let passed = called.map(|shape| passed_names(&g.stream(), shape, enclosing));
         out.extend(passed.unwrap_or_default());
     }
     out
@@ -144,11 +160,22 @@ fn invoked_target<'a>(
 /// suppresses a finding rather than inventing one.
 /// Operation: split, select, filter; own calls in the closures.
 pub(crate) fn called_arguments(tokens: &TokenStream, shape: &CallShape) -> Vec<TokenStream> {
+    called_arguments_within(tokens, shape, &Fragments::new())
+}
+
+/// The same, inside a macro body — where an argument may be a metavariable the
+/// enclosing rule captured, and `enclosing` says as what.
+/// Operation: split, select, filter; own calls in the closures.
+pub(crate) fn called_arguments_within(
+    tokens: &TokenStream,
+    shape: &CallShape,
+    enclosing: &Fragments,
+) -> Vec<TokenStream> {
     let args: Vec<TokenStream> = split_arguments(tokens)
         .into_iter()
         .map(TokenStream::from_iter)
         .collect();
-    let called = selected_positions(shape, &args);
+    let called = selected_positions(shape, &args, enclosing);
     let takes = |i: &usize| called.is_none_or(|set| set.contains(i));
     args.into_iter()
         .enumerate()
@@ -169,9 +196,10 @@ pub(crate) fn called_arguments(tokens: &TokenStream, shape: &CallShape) -> Vec<T
 fn selected_positions<'a>(
     shape: &'a CallShape,
     args: &[TokenStream],
+    enclosing: &Fragments,
 ) -> Option<&'a HashSet<usize>> {
     let decides = |rule: &'a Option<RuleShape>| match rule {
-        Some(readable) => match accepts_all(readable, args) {
+        Some(readable) => match accepts_all(readable, args, enclosing) {
             Match::Accepts => Some(Some(&readable.called)),
             Match::Rejects => None,
             Match::Undecided => Some(None),
@@ -197,7 +225,7 @@ enum Match {
 /// A definite rejection outranks an undecidable parameter: if any argument
 /// certainly does not fit, the rule does not match whatever the rest says.
 /// Operation: arity check + fold over the parameters, own call in the closure.
-fn accepts_all(rule: &RuleShape, args: &[TokenStream]) -> Match {
+fn accepts_all(rule: &RuleShape, args: &[TokenStream], enclosing: &Fragments) -> Match {
     if rule.fragments.len() != args.len() {
         return Match::Rejects;
     }
@@ -205,7 +233,7 @@ fn accepts_all(rule: &RuleShape, args: &[TokenStream]) -> Match {
         .fragments
         .iter()
         .zip(args)
-        .map(|(frag, arg)| accepts(frag, arg))
+        .map(|(frag, arg)| accepts(frag, arg, enclosing))
         .collect();
     match verdicts {
         v if v.contains(&Match::Rejects) => Match::Rejects,
@@ -264,7 +292,10 @@ const SUBSTITUTE: &str = "__rustqual_fragment";
 /// real arm calls is reported dead. That is the expensive direction, and it is
 /// the mistake this predicate made until the list below grew.
 /// Operation: fragment dispatch, no own calls.
-fn accepts(fragment: &str, arg: &TokenStream) -> Match {
+fn accepts(fragment: &str, arg: &TokenStream, enclosing: &Fragments) -> Match {
+    if let Some(name) = bare_metavariable(arg) {
+        return forwarded_accepts(fragment, enclosing.get(&name));
+    }
     let arg = &without_metavariables(arg);
     let fits = match fragment {
         "ident" => syn::parse2::<syn::Ident>(arg.clone()).is_ok(),
@@ -298,8 +329,8 @@ fn is_single_statement(arg: &TokenStream) -> bool {
 
 /// The metavariable names sitting at a called argument position.
 /// Operation: reuse the invocation selection, own calls in the closure.
-fn passed_names(tokens: &TokenStream, shape: &CallShape) -> HashSet<String> {
-    called_arguments(tokens, shape)
+fn passed_names(tokens: &TokenStream, shape: &CallShape, enclosing: &Fragments) -> HashSet<String> {
+    called_arguments_within(tokens, shape, enclosing)
         .iter()
         .flat_map(|arg| metavariables_in(&arg.clone().into_iter().collect::<Vec<_>>()))
         .collect()
@@ -393,4 +424,35 @@ pub(crate) fn split_arguments(tokens: &TokenStream) -> Vec<Vec<TokenTree>> {
         }
     });
     args
+}
+
+/// The single metavariable this argument consists of, if that is all it is.
+/// Operation: shape check over two trees, no own calls.
+fn bare_metavariable(arg: &TokenStream) -> Option<String> {
+    let trees: Vec<TokenTree> = arg.clone().into_iter().collect();
+    let dollar = matches!(trees.first(), Some(TokenTree::Punct(p)) if p.as_char() == '$');
+    match (trees.len(), dollar, trees.get(1)) {
+        (2, true, Some(TokenTree::Ident(name))) => Some(name.to_string()),
+        _ => None,
+    }
+}
+
+/// Whether a matcher of kind `fragment` takes a forwarded metavariable captured
+/// as `source`.
+///
+/// rustc keeps a matched fragment **opaque**: only a specifier of the same kind
+/// consumes it, so a forwarded `path` is not an `ident` however much it looks
+/// like one. `ident`, `lifetime` and `tt` are the documented exceptions — they
+/// stay transparent and are matched like ordinary tokens. An unknown source
+/// (the enclosing matcher was unreadable) decides nothing.
+/// Operation: two comparisons, no own calls.
+fn forwarded_accepts(fragment: &str, source: Option<&String>) -> Match {
+    let Some(source) = source else {
+        return Match::Undecided;
+    };
+    match (source.as_str(), fragment) {
+        (from, to) if from == to => Match::Accepts,
+        (from, _) if TRANSPARENT.contains(&from) => Match::Undecided,
+        _ => Match::Rejects,
+    }
 }
