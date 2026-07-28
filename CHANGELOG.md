@@ -92,7 +92,11 @@ spelled-out calls DRY-002 rewards.
   compared by kind, read from the forwarding rule's own matcher — a syntactic
   substitution said `ident` accepts a forwarded `path`, which it does not.
   `expr`/`expr_2021` and `pat`/`pat_param` are one fragment under two spellings
-  and take each other, checked against rustc rather than remembered. An
+  and take each other, checked against rustc rather than remembered. Two
+  safeguards follow from that list being a copy of something the compiler owns:
+  an unknown specifier decides *nothing* instead of rejecting, so a future
+  addition falls back to the coarse rule rather than inventing a finding, and a
+  test asks the local rustc for its own list and fails when the two disagree. An
   argument that merely *contains* a metavariable (`consume($x)`) keeps the
   substitution, since there the surrounding shape is what decides. Rules that apply nothing stay in the list — such a rule can be the
   first one that matches, and dropping it let a later arm answer for an

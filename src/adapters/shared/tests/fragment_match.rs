@@ -14,7 +14,9 @@
 //! Enumerating every pair pins that sentence instead of the last example that
 //! went wrong. A row that drifts fails here, not three rounds later.
 
-use crate::adapters::shared::macro_params::{forwarded_accepts, Match, TRANSPARENT};
+use crate::adapters::shared::fragment_match::{
+    accepts_literal, forwarded_accepts, Match, KNOWN_FRAGMENTS, TRANSPARENT,
+};
 
 /// Every fragment specifier `macro_rules!` knows, checked against rustc rather
 /// than remembered: a previous version of this list claimed completeness and
@@ -171,7 +173,62 @@ const LITERAL_CASES: &[(&str, &str, Match)] = &[
 fn a_literal_argument_is_checked_against_its_specifier() {
     for (fragment, argument, want) in LITERAL_CASES {
         let tokens: proc_macro2::TokenStream = argument.parse().expect("fixture tokenises");
-        let got = crate::adapters::shared::macro_params::accepts_literal(fragment, &tokens);
+        let got = accepts_literal(fragment, &tokens);
         assert_eq!(got, *want, "{fragment} offered {argument:?}");
     }
+}
+
+#[test]
+fn an_unknown_specifier_decides_nothing() {
+    // A future edition adds a name, as 2021 added `expr_2021` and `pat_param`.
+    // Whatever it accepts is unknown here, and reading "different name" as a
+    // rejection picks an arm rustc never takes — which is how a live function
+    // gets reported dead. Rejection is claimed only between known kinds.
+    for known in KINDS {
+        assert_eq!(
+            forwarded_accepts("fragment_2030", Some(&known.to_string())),
+            Match::Undecided,
+            "{known} into an unknown specifier"
+        );
+        assert_eq!(
+            forwarded_accepts(known, Some(&"fragment_2030".to_string())),
+            Match::Undecided,
+            "an unknown specifier into {known}"
+        );
+    }
+}
+
+#[test]
+fn the_known_specifiers_match_the_compiler() {
+    // The list above is a copy of something the compiler owns, and the last
+    // copy was two names short — which is how `expr_2021` accepting `expr` went
+    // unnoticed. rustc names them all when it rejects an invalid one, so ask it
+    // rather than remember.
+    let dir = tempfile::Builder::new()
+        .prefix("test_fragments")
+        .tempdir()
+        .expect("temp dir");
+    let source = dir.path().join("probe.rs");
+    std::fs::write(&source, "macro_rules! m { ($x:frobnicate) => {}; }\n").expect("write probe");
+    let out = std::process::Command::new("rustc")
+        .args(["--edition", "2021", "--emit=metadata", "-o"])
+        .arg(dir.path().join("probe.rmeta"))
+        .arg(&source)
+        .output()
+        .expect("rustc runs — this is a Rust project being built");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let help = stderr
+        .lines()
+        .find(|line| line.contains("valid fragment specifiers are"))
+        .unwrap_or_else(|| {
+            panic!("rustc no longer lists the specifiers; check KNOWN_FRAGMENTS by hand:\n{stderr}")
+        });
+    let mut from_rustc: Vec<&str> = help.split('`').skip(1).step_by(2).collect();
+    from_rustc.sort_unstable();
+    let mut ours: Vec<&str> = KNOWN_FRAGMENTS.to_vec();
+    ours.sort_unstable();
+    assert_eq!(
+        from_rustc, ours,
+        "the compiler knows a different set of fragment specifiers than this analysis does"
+    );
 }
