@@ -119,7 +119,7 @@ pub(crate) fn call_through_macros(
 fn close_over_forwarders(bodies: HashMap<String, TokenStream>) -> macro_params::CalledPositions {
     let mut through = macro_params::CalledPositions::new();
     for _ in 0..=bodies.len() {
-        let fresh: Vec<(String, Option<HashSet<usize>>)> = bodies
+        let fresh: Vec<(String, macro_params::CallShape)> = bodies
             .iter()
             .filter(|(name, _)| !through.contains_key(*name))
             .filter_map(|(name, body)| {

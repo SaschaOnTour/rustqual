@@ -1679,12 +1679,12 @@ fn main() { used(); }
     assert!(found.is_empty(), "{found:?}");
 }
 
-#[test]
-fn only_the_called_argument_of_an_invocation_counts_as_a_call() {
-    // `step!` applies argument 0 and only names argument 1. Harvesting every
-    // identifier of the invocation made the second one look called too — the
-    // positions were computed and then dropped on the way to the call graph.
-    let code = r#"
+/// Macros that apply one argument and merely name the other, with the name the
+/// invocation puts at the called position and the one it does not.
+const CALLED_POSITION_CASES: &[(&str, &str)] = &[
+    (
+        "one rule",
+        r#"
 macro_rules! step {
     ($f:path, $label:path) => { $f(); };
 }
@@ -1692,26 +1692,50 @@ fn live_helper() {}
 fn dead_helper() {}
 fn used() { step!(live_helper, dead_helper); }
 fn main() { used(); }
-"#;
-    let found = dead_code_warnings(&parse(code));
-    let names: Vec<&str> = found.iter().map(|w| w.function_name.as_str()).collect();
-    assert!(names.contains(&"dead_helper"), "{found:?}");
-    assert!(!names.contains(&"live_helper"), "{found:?}");
+"#,
+    ),
+    (
+        // Two rules, mirrored: the first applies argument 0, the second
+        // argument 1. `macro_rules!` takes the first that matches, so unioning
+        // the positions across rules said both and the second name lost its
+        // finding.
+        "the first matching rule",
+        r#"
+macro_rules! choose {
+    ($f:path, $value:expr) => { $f(); };
+    ($value:expr, $f:path) => { $f(); };
+}
+fn live_helper() {}
+fn dead_helper() {}
+fn used() { choose!(live_helper, dead_helper); }
+fn main() { used(); }
+"#,
+    ),
+];
+
+#[test]
+fn only_the_called_argument_of_an_invocation_counts_as_a_call() {
+    // Harvesting every identifier of the invocation made the argument a macro
+    // only *names* look called too.
+    for (label, code) in CALLED_POSITION_CASES {
+        let found = dead_code_warnings(&parse(code));
+        let names: Vec<&str> = found.iter().map(|w| w.function_name.as_str()).collect();
+        assert!(names.contains(&"dead_helper"), "{label}: {found:?}");
+        assert!(!names.contains(&"live_helper"), "{label}: {found:?}");
+    }
 }
 
 #[test]
-fn an_unreadable_matcher_still_falls_back_to_every_argument() {
-    // A repetition puts the position out of reach, and the coarse rule has to
-    // stay: a suite runner driven by `$($t:path),*` really does call all of
-    // them, and inventing "never called" there is the expensive mistake.
+fn a_rule_is_skipped_when_its_arity_does_not_fit() {
+    // Selection is by matching, not by declaration order alone: the one-argument
+    // invocation belongs to the second rule.
     let code = r#"
-macro_rules! run_all {
-    ($make:path; $($t:path),*) => { $( $t(&$make()); )* };
+macro_rules! choose {
+    ($value:expr, $f:path) => { $f(); };
+    ($f:path) => { $f(); };
 }
-fn make_store() -> u8 { 1 }
-fn check_append(_: &u8) {}
-fn check_rotate(_: &u8) {}
-fn used() { run_all!(make_store; check_append, check_rotate); }
+fn live_helper() {}
+fn used() { choose!(live_helper); }
 fn main() { used(); }
 "#;
     let found = dead_code_warnings(&parse(code));

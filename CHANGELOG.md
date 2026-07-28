@@ -74,7 +74,14 @@ spelled-out calls DRY-002 rewards.
   asks about the right argument — and it survives to the invocation, where only
   the arguments at those positions become call-graph edges.
   `step!(live_helper, dead_helper)` on a macro that applies its first argument
-  says nothing about the second.
+  says nothing about the second. Positions stay **per rule**, and the invocation
+  picks the first rule that accepts it — the same one `macro_rules!` itself
+  takes. Merging the rules of a macro whose second rule mirrors its first said
+  every argument was called; selection compares arity and checks each argument
+  against its fragment specifier (`path`, `expr`, `ty`, `ident`, `literal`; the
+  rest accept, since failing to disprove a match must not narrow the answer, and
+  a metavariable accepts anything because what it stands for was decided one
+  level up).
 
 ## [1.8.1] - 2026-07-26
 
