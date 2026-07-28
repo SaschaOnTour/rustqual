@@ -90,7 +90,9 @@ spelled-out calls DRY-002 rewards.
   only a specifier of the same kind consumes it, with `ident`, `lifetime` and
   `tt` the documented exceptions. A bare forwarded metavariable is therefore
   compared by kind, read from the forwarding rule's own matcher — a syntactic
-  substitution said `ident` accepts a forwarded `path`, which it does not. An
+  substitution said `ident` accepts a forwarded `path`, which it does not.
+  `expr`/`expr_2021` and `pat`/`pat_param` are one fragment under two spellings
+  and take each other, checked against rustc rather than remembered. An
   argument that merely *contains* a metavariable (`consume($x)`) keeps the
   substitution, since there the surrounding shape is what decides. Rules that apply nothing stay in the list — such a rule can be the
   first one that matches, and dropping it let a later arm answer for an

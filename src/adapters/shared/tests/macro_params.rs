@@ -16,11 +16,39 @@
 
 use crate::adapters::shared::macro_params::{forwarded_accepts, Match, TRANSPARENT};
 
-/// Every fragment specifier `macro_rules!` knows.
-const KINDS: [&str; 13] = [
-    "block", "expr", "ident", "item", "lifetime", "literal", "meta", "pat", "path", "stmt", "tt",
-    "ty", "vis",
+/// Every fragment specifier `macro_rules!` knows, checked against rustc rather
+/// than remembered: a previous version of this list claimed completeness and
+/// left out `expr_2021` and `pat_param`, which is how the compatible pairs
+/// below went unnoticed.
+const KINDS: [&str; 15] = [
+    "block",
+    "expr",
+    "expr_2021",
+    "ident",
+    "item",
+    "lifetime",
+    "literal",
+    "meta",
+    "pat",
+    "pat_param",
+    "path",
+    "stmt",
+    "tt",
+    "ty",
+    "vis",
 ];
+
+/// Kinds that accept each other when forwarded. Verified against rustc 1.95:
+/// `expr`/`expr_2021` and `pat`/`pat_param` are edition variants of one
+/// fragment, and a matcher of either takes the other.
+const COMPATIBLE: [[&str; 2]; 2] = [["expr", "expr_2021"], ["pat", "pat_param"]];
+
+/// Whether two kinds are the same fragment under different names.
+fn interchangeable(a: &str, b: &str) -> bool {
+    COMPATIBLE
+        .iter()
+        .any(|pair| pair.contains(&a) && pair.contains(&b))
+}
 
 #[test]
 fn the_same_kind_always_matches() {
@@ -37,6 +65,25 @@ fn the_same_kind_always_matches() {
 }
 
 #[test]
+fn an_edition_variant_is_the_same_fragment() {
+    // `expr_2021` forwarded into an `expr` matcher compiles and rustc takes
+    // that arm. Comparing the names alone said "rejects", picked a later empty
+    // arm, and could report the function the real arm calls as dead.
+    for [a, b] in COMPATIBLE {
+        assert_eq!(
+            forwarded_accepts(b, Some(&a.to_string())),
+            Match::Accepts,
+            "{a} into {b}"
+        );
+        assert_eq!(
+            forwarded_accepts(a, Some(&b.to_string())),
+            Match::Accepts,
+            "{b} into {a}"
+        );
+    }
+}
+
+#[test]
 fn an_opaque_kind_is_rejected_by_every_other_one() {
     // The direction that cost three rounds: `path` into `ident` looked fine to
     // a syntactic check and is a rejection to rustc. Reading it as a match
@@ -48,7 +95,10 @@ fn an_opaque_kind_is_rejected_by_every_other_one() {
         .filter(|k| !TRANSPARENT.contains(k))
         .collect();
     for source in &opaque {
-        for target in KINDS.iter().filter(|t| *t != source) {
+        for target in KINDS
+            .iter()
+            .filter(|t| *t != source && !interchangeable(source, t))
+        {
             assert_eq!(
                 forwarded_accepts(target, Some(&source.to_string())),
                 Match::Rejects,
@@ -64,7 +114,10 @@ fn a_transparent_kind_decides_nothing_on_its_own() {
     // kind alone does not say whether the arm takes them. Undecided, not
     // accepted: claiming a match here is what invents a finding.
     for source in TRANSPARENT {
-        for target in KINDS.iter().filter(|t| **t != source) {
+        for target in KINDS
+            .iter()
+            .filter(|t| **t != source && !interchangeable(source, t))
+        {
             assert_eq!(
                 forwarded_accepts(target, Some(&source.to_string())),
                 Match::Undecided,

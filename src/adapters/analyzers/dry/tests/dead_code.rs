@@ -1848,6 +1848,29 @@ fn main() { used(); }
         ),
         &["live_helper"],
     ),
+    (
+        (
+            // `expr_2021` and `expr` are one fragment under two names — rustc
+            // takes the first arm and calls the function. Comparing the names
+            // alone rejected it, picked the empty arm, and could report a live
+            // function as dead.
+            "an edition variant of the same fragment",
+            r#"
+macro_rules! choose {
+    ($f:expr) => { $f(); };
+    ($ignored:expr_2021) => {};
+}
+macro_rules! wrapper {
+    ($f:expr_2021) => { choose!($f); };
+}
+fn live_helper() {}
+fn used() { wrapper!(live_helper); }
+fn main() { used(); }
+"#,
+            &[],
+        ),
+        &["live_helper"],
+    ),
 ];
 
 #[test]

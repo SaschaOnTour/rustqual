@@ -31,6 +31,12 @@ pub(crate) type Fragments = HashMap<String, String>;
 /// literally or by another specifier, unlike the opaque rest.
 pub(crate) const TRANSPARENT: [&str; 3] = ["ident", "lifetime", "tt"];
 
+/// Fragment names that are the same fragment under an edition's spelling. A
+/// matcher of either takes the other when forwarded — verified against rustc,
+/// which is also how the pair was found: comparing names alone called
+/// `expr_2021` and `expr` incompatible.
+const EDITION_VARIANTS: [[&str; 2]; 2] = [["expr", "expr_2021"], ["pat", "pat_param"]];
+
 /// What a macro does with the arguments it is given, rule by rule.
 ///
 /// Per rule, not unioned: `macro_rules!` takes the **first** rule that matches,
@@ -308,14 +314,19 @@ pub(crate) fn accepts_literal(fragment: &str, arg: &TokenStream) -> Match {
     let fits = match fragment {
         "ident" => syn::parse2::<syn::Ident>(arg.clone()).is_ok(),
         "path" => syn::parse2::<syn::Path>(arg.clone()).is_ok(),
-        "expr" => syn::parse2::<syn::Expr>(arg.clone()).is_ok(),
+        "expr" | "expr_2021" => syn::parse2::<syn::Expr>(arg.clone()).is_ok(),
         "ty" => syn::parse2::<syn::Type>(arg.clone()).is_ok(),
         "literal" => syn::parse2::<syn::Lit>(arg.clone()).is_ok(),
         "block" => syn::parse2::<syn::Block>(arg.clone()).is_ok(),
         "item" => syn::parse2::<syn::Item>(arg.clone()).is_ok(),
         "meta" => syn::parse2::<syn::Meta>(arg.clone()).is_ok(),
         "lifetime" => syn::parse2::<syn::Lifetime>(arg.clone()).is_ok(),
-        "pat" => syn::Pat::parse_single.parse2(arg.clone()).is_ok(),
+        // `pat` takes a top-level `|` since edition 2021; `pat_param` is the
+        // older shape that does not.
+        "pat" => syn::Pat::parse_multi_with_leading_vert
+            .parse2(arg.clone())
+            .is_ok(),
+        "pat_param" => syn::Pat::parse_single.parse2(arg.clone()).is_ok(),
         "stmt" => is_single_statement(arg),
         "tt" => arg.clone().into_iter().count() == 1,
         // `vis` matches the empty token stream as readily as a keyword, so a
@@ -459,8 +470,16 @@ pub(crate) fn forwarded_accepts(fragment: &str, source: Option<&String>) -> Matc
         return Match::Undecided;
     };
     match (source.as_str(), fragment) {
-        (from, to) if from == to => Match::Accepts,
+        (from, to) if from == to || same_fragment(from, to) => Match::Accepts,
         (from, _) if TRANSPARENT.contains(&from) => Match::Undecided,
         _ => Match::Rejects,
     }
+}
+
+/// Whether two specifier names denote one fragment.
+/// Operation: table lookup, own calls in the closure.
+fn same_fragment(a: &str, b: &str) -> bool {
+    EDITION_VARIANTS
+        .iter()
+        .any(|pair| pair.contains(&a) && pair.contains(&b))
 }
