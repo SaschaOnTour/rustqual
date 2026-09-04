@@ -34,11 +34,7 @@ fn collected_calls(code: &str) -> (HashSet<String>, HashSet<String>) {
     let cfg_test_files =
         crate::adapters::shared::cfg_test_files::collect_cfg_test_file_paths(&parsed);
     let calls = collect_all_calls(&parsed, &cfg_test_files);
-    // The helper keeps the pre-split shape: a re-export is production usage for
-    // every consumer but TQ-003.
-    let mut production = calls.refs.production;
-    production.extend(calls.reexported);
-    (production, calls.refs.tests)
+    (calls.refs.production, calls.refs.tests)
 }
 
 /// Run dead-code detection over `parsed` with the default config and no
@@ -388,70 +384,48 @@ fn test_qualified_call_detected() {
     );
 }
 
+/// A re-export in each of its spellings, with the function it names never
+/// called anywhere.
+const REEXPORT_ONLY: &[(&str, &str)] = &[
+    (
+        "plain",
+        "mod foo { pub fn do_work() { let x = 1; } }\npub use foo::do_work;\nfn main() {}",
+    ),
+    (
+        "renamed",
+        "mod foo { pub fn do_work() { let x = 1; } }\npub use foo::do_work as perform_work;\nfn main() {}",
+    ),
+    (
+        "grouped",
+        "mod foo { pub fn do_work() { let x = 1; } pub fn other() {} }\npub use foo::{do_work, other};\nfn main() {}",
+    ),
+];
+
 #[test]
-fn test_pub_use_reexport_not_dead_code() {
-    let code = r#"
-        mod foo { pub fn do_work() { let x = 1; } }
-        pub use foo::do_work;
-        fn main() {}
-    "#;
-    let parsed = parse(code);
-    let warnings = detect_dead_code(
-        &parsed,
-        &std::collections::HashMap::new(),
-        &std::collections::HashMap::new(),
-        &std::collections::HashSet::new(),
-    );
-    assert!(
-        !warnings.iter().any(|w| w.function_name == "do_work"),
-        "pub use re-exported function should not be flagged as dead code"
-    );
+fn a_re_export_is_exposure_not_consumption() {
+    // `pub use` says where an item can be *named from*; it says nothing about
+    // whether anything names it. Counting it as usage hid dead items behind
+    // their own facade — in one workspace audit, 56 of them. A re-exported
+    // entry point that the workspace really does not consume is `qual:api`
+    // territory, and a spent `qual:api` is already a finding.
+    for (label, code) in REEXPORT_ONLY {
+        let found = dead_code_warnings(&parse(code));
+        assert!(
+            found.iter().any(|w| w.function_name == "do_work"),
+            "{label}: re-exported but never called is dead: {found:?}"
+        );
+    }
 }
 
 #[test]
-fn test_pub_use_rename_not_dead_code() {
-    let code = r#"
-        mod foo { pub fn do_work() { let x = 1; } }
-        pub use foo::do_work as perform_work;
-        fn main() {}
-    "#;
-    let parsed = parse(code);
-    let warnings = detect_dead_code(
-        &parsed,
-        &std::collections::HashMap::new(),
-        &std::collections::HashMap::new(),
-        &std::collections::HashSet::new(),
-    );
+fn a_re_exported_function_called_through_the_re_export_is_alive() {
+    // The counterpart: consumption through the exposed name still counts, by
+    // the name the call site uses.
+    let code = "mod foo { pub fn do_work() { let x = 1; } }\npub use foo::do_work;\nfn main() { do_work(); }";
+    let found = dead_code_warnings(&parse(code));
     assert!(
-        !warnings.iter().any(|w| w.function_name == "do_work"),
-        "pub use rename re-export should record original name, not alias"
-    );
-}
-
-#[test]
-fn test_pub_use_group_reexport_not_dead_code() {
-    let code = r#"
-        mod foo {
-            pub fn bar() { let x = 1; }
-            pub fn baz() { let y = 2; }
-        }
-        pub use foo::{bar, baz};
-        fn main() {}
-    "#;
-    let parsed = parse(code);
-    let warnings = detect_dead_code(
-        &parsed,
-        &std::collections::HashMap::new(),
-        &std::collections::HashMap::new(),
-        &std::collections::HashSet::new(),
-    );
-    assert!(
-        !warnings.iter().any(|w| w.function_name == "bar"),
-        "grouped pub use re-export: bar should not be flagged"
-    );
-    assert!(
-        !warnings.iter().any(|w| w.function_name == "baz"),
-        "grouped pub use re-export: baz should not be flagged"
+        !found.iter().any(|w| w.function_name == "do_work"),
+        "{found:?}"
     );
 }
 

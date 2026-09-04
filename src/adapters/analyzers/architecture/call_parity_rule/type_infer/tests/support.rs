@@ -8,7 +8,7 @@
 
 use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::FileScope;
 use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::{
-    BindingLookup, FlatBindings, InferContext, WorkspaceTypeIndex,
+    BindingLookup, CanonicalType, InferContext, WorkspaceTypeIndex,
 };
 use crate::adapters::shared::use_tree::{AliasMap, ScopedAliasMap};
 use std::collections::{HashMap, HashSet};
@@ -97,5 +97,29 @@ impl TypeInferFixture {
             generic_params: None,
             reexports: None,
         }
+    }
+}
+
+/// A flat `BindingLookup` for tests: name → type, no scopes. Production only
+/// ever needs the scoped push/pop form, so this lives with the fixtures.
+#[derive(Debug, Default)]
+pub(super) struct FlatBindings {
+    map: HashMap<String, CanonicalType>,
+}
+
+impl FlatBindings {
+    pub(super) fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record a binding, replacing an existing entry for the same name.
+    pub(super) fn insert(&mut self, name: &str, ty: CanonicalType) {
+        self.map.insert(name.to_string(), ty);
+    }
+}
+
+impl BindingLookup for FlatBindings {
+    fn lookup(&self, ident: &str) -> Option<CanonicalType> {
+        self.map.get(ident).cloned()
     }
 }

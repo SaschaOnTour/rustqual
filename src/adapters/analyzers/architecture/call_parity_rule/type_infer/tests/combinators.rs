@@ -195,9 +195,10 @@ fn test_result_chain_unwrap_then_field() {
     // Verifies that combinator lookup produces a `Path` the next layer
     // of inference can index — the unblocking pattern for
     // method-chain-constructor receiver tracing.
+    use super::support::FlatBindings;
     use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::FileScope;
     use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::{
-        infer_type, FlatBindings, InferContext, WorkspaceTypeIndex,
+        infer_type, InferContext, WorkspaceTypeIndex,
     };
     use crate::adapters::shared::use_tree::ScopedAliasMap;
     use std::collections::{HashMap, HashSet};

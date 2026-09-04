@@ -10,10 +10,10 @@ pub(super) use crate::adapters::analyzers::architecture::call_parity_rule::calls
     collect_canonical_calls, FnContext,
 };
 pub(super) use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::FileScope;
+pub(super) use crate::adapters::analyzers::architecture::call_parity_rule::tests::collect_local_symbols;
 pub(super) use crate::adapters::analyzers::architecture::call_parity_rule::type_infer::{
     CanonicalType, WorkspaceTypeIndex,
 };
-pub(super) use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::collect_local_symbols;
 pub(super) use crate::adapters::shared::use_tree::{
     gather_alias_map, gather_alias_map_scoped, AliasMap, ScopedAliasMap,
 };

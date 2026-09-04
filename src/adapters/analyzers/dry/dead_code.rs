@@ -214,9 +214,9 @@ pub fn detect_dead_code(
     mark_api_declarations(&mut declared, api_lines);
     mark_test_helper_declarations(&mut declared, test_helper_lines);
     let calls = collect_all_calls(parsed, cfg_test_files);
-    // A re-export is usage for DRY-002: a re-exported function is not dead.
-    let mut prod_calls = calls.refs.production;
-    prod_calls.extend(calls.reexported);
+    // A re-export is exposure, not consumption — it does not keep a function
+    // alive. See `call_targets::visit_item_use`.
+    let prod_calls = calls.refs.production;
     let test_calls = calls.refs.tests;
     let uncalled = find_uncalled(&declared, &prod_calls, &test_calls);
     let test_only = find_test_only(&declared, &prod_calls, &test_calls);

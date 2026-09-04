@@ -33,7 +33,9 @@ pub(super) const CARDS: &[RuleCard] = &[
             ($test(&$make())), or forwards one to a macro that does, counts \
             every ident at its invocation as a possible callee — the \
             functions a run_suite!(make; a, b) really runs arrive as bare \
-            names nothing syntactic marks as calls.",
+            names nothing syntactic marks as calls. An import or a pub use is \
+            not a call: a re-exported function nothing calls is dead, and a \
+            genuine entry point for code outside the workspace says qual:api.",
         why: "Dead code is maintained, reviewed, and refactored without ever \
             running — pure carrying cost that also misleads readers about \
             what the system does.",
@@ -59,7 +61,8 @@ pub(super) const CARDS: &[RuleCard] = &[
             each other in a cycle of any length keep nothing alive. A type's \
             own impl blocks do not count either — carrying methods keeps \
             nothing alive, and what those methods name lives or dies with the \
-            type.",
+            type. Neither does a use or pub use: an import is exposure, not a \
+            reference, and a facade type nothing consumes is the finding.",
         why: "An unused type is read, maintained and refactored like the rest \
             of the code while modelling nothing. rustc's own dead_code lint \
             stops at the crate boundary, so a pub type nobody in the workspace \

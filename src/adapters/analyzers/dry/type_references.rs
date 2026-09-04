@@ -273,6 +273,12 @@ impl<'ast> Visit<'ast> for TypeReferenceCollector {
         self.record_all(idents);
     }
 
+    /// A `use` is exposure, not a reference — see `call_targets::visit_item_use`
+    /// for the rule; the same one holds for types. syn's default walk would
+    /// feed the path's idents to `visit_ident`, and that kept a type alive
+    /// whose only mention was its own facade.
+    fn visit_item_use(&mut self, _node: &'ast syn::ItemUse) {}
+
     test_scoped_visits!();
 
     /// The one attributed kind the shared list leaves out, because the call

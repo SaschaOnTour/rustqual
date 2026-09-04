@@ -774,3 +774,38 @@ fn test_analyze_and_output_returns_analyzed_functions() {
         analysis.results.iter().map(|f| &f.name).collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn a_qual_api_on_a_re_exported_but_unconsumed_function_is_not_spent() {
+    // The end-to-end shape of "a `use` is exposure, not consumption": a library
+    // root re-exports an entry point nothing in the workspace calls, and the
+    // author has marked it. That marker is doing its job. Counting the
+    // `pub use` as a production call reported it as spent — the one advice
+    // that makes an author delete a marker holding back a real finding.
+    let lib = "pub mod inner;\npub use inner::entry;";
+    let inner = "// qual:api\npub fn entry() {}";
+    let parsed = vec![
+        (
+            "src/lib.rs".to_string(),
+            lib.to_string(),
+            syn::parse_file(lib).unwrap(),
+        ),
+        (
+            "src/inner.rs".to_string(),
+            inner.to_string(),
+            syn::parse_file(inner).unwrap(),
+        ),
+    ];
+    let analysis = run_analysis(parsed, &Config::default());
+    let orphans = &analysis.findings.orphan_suppressions;
+    assert!(orphans.is_empty(), "marker still does its job: {orphans:?}");
+    assert!(
+        analysis
+            .findings
+            .dry
+            .iter()
+            .all(|f| !f.common.message.contains("entry")),
+        "and the marker keeps the finding away: {:?}",
+        analysis.findings.dry
+    );
+}
