@@ -73,6 +73,8 @@ pub fn assert_in_range(actual: f64, expected: f64, tol: f64) { /* … */ }
 
 `qual:api` and `qual:test_helper` exclude the declaration from `DRY-002` / `DRY-006` *and* from `TQ-003` (untested), without counting against `max_suppression_ratio`. Use them on things exported to consumers outside the crate or used only by integration tests. Both markers are verified — see [reference-suppression.md](./reference-suppression.md).
 
+A `use` — plain import or `pub use` re-export — is not a call. It says where a name can be reached from, not that anything reaches for it, so a function whose only mention is its own re-export is dead, and a re-export that is a real entry point for code outside the workspace is what `qual:api` is for. Calls *through* the re-exported name count as calls, by that name.
+
 By default, the dead-code analysis treats a package's `tests/**` files as call-sites — both the analysis-root crate's `tests/**` and each member's `crates/*/tests/**` — so a function used only from integration tests is not dead.
 
 ## Dead types and constants

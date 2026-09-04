@@ -40,10 +40,6 @@ impl ContextRefs {
 #[derive(Default)]
 pub(crate) struct SplitNames {
     pub(crate) refs: ContextRefs,
-    /// Names a `pub use` re-exports. Usage, but not a *call*: DRY-002 needs it
-    /// so a re-exported function is not called dead, while TQ-003 asks whether
-    /// production calls the function and must not count it.
-    pub(crate) reexported: HashSet<String>,
     pub(crate) in_test: bool,
 }
 

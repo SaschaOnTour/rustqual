@@ -31,42 +31,6 @@ pub trait BindingLookup {
     fn lookup(&self, ident: &str) -> Option<CanonicalType>;
 }
 
-/// Simple flat-map `BindingLookup` impl. Used by unit tests and as a
-/// starting point for downstream consumers who don't need scoped
-/// push/pop semantics.
-#[derive(Debug, Default)]
-/// Only the tests construct or read this; keeping it live for them while
-/// rustc's own lint sees a production build that never touches it. rustqual
-/// still judges it — the `cfg_attr` wrapper is invisible to `dead_code_level`,
-/// deliberately, so removing the last test would surface it as DRY-002/006.
-#[cfg_attr(not(test), allow(dead_code))]
-pub struct FlatBindings {
-    map: HashMap<String, CanonicalType>,
-}
-
-/// Only the tests construct or read this; keeping it live for them while
-/// rustc's own lint sees a production build that never touches it. rustqual
-/// still judges it — the `cfg_attr` wrapper is invisible to `dead_code_level`,
-/// deliberately, so removing the last test would surface it as DRY-002/006.
-#[cfg_attr(not(test), allow(dead_code))]
-impl FlatBindings {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Record a binding. Replaces an existing entry for the same name.
-    /// Operation.
-    pub fn insert(&mut self, name: &str, ty: CanonicalType) {
-        self.map.insert(name.to_string(), ty);
-    }
-}
-
-impl BindingLookup for FlatBindings {
-    fn lookup(&self, ident: &str) -> Option<CanonicalType> {
-        self.map.get(ident).cloned()
-    }
-}
-
 /// Inputs to the inference engine. Per-file lookup tables live in
 /// `file`; the rest is per-call-site.
 pub struct InferContext<'a> {
