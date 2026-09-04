@@ -225,8 +225,7 @@ fn crate_root_module_of(path: &str) -> Option<String> {
 // still shows up.
 #[allow(unused_imports)]
 pub(crate) use super::local_symbols::{
-    build_workspace_files_map, collect_local_symbols, collect_local_symbols_scoped, FileScope,
-    LocalSymbols,
+    build_workspace_files_map, collect_local_symbols_scoped, FileScope, LocalSymbols,
 };
 
 /// Canonicalise an impl block's self-type through the same alias /

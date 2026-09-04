@@ -272,28 +272,6 @@ pub(crate) struct WorkspaceLookup<'a> {
     pub workspace_module_paths: &'a HashSet<Vec<String>>,
 }
 
-/// Top-level-only name set for callers that don't track mod scope.
-/// Names declared exclusively inside nested inline `mod`s are
-/// reachable through `collect_local_symbols_scoped` only — exposing
-/// them flat would let the legacy resolution path (which falls back
-/// to "treat any hit as top-level" when `local_decl_scopes` is empty)
-/// produce bogus `crate::<file>::Inner` paths for inner-module-only
-/// names. Operation: project the names with at least one top-level
-/// declaration scope.
-/// Only the tests construct or read this; keeping it live for them while
-/// rustc's own lint sees a production build that never touches it. rustqual
-/// still judges it — the `cfg_attr` wrapper is invisible to `dead_code_level`,
-/// deliberately, so removing the last test would surface it as DRY-002/006.
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn collect_local_symbols(ast: &syn::File) -> HashSet<String> {
-    let scoped = collect_local_symbols_scoped(ast);
-    scoped
-        .by_name
-        .into_iter()
-        .filter_map(|(name, scopes)| scopes.iter().any(|p| p.is_empty()).then_some(name))
-        .collect()
-}
-
 /// Scoped variant. Returns both views in one walk so the `flat` set
 /// and the `by_name` map are always consistent. Operation.
 pub(crate) fn collect_local_symbols_scoped(ast: &syn::File) -> LocalSymbols {

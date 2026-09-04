@@ -10,6 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Two false findings that pulled against each other: DRY-001 punished exactly the
 spelled-out calls DRY-002 rewards.
 
+### Changed
+- **A `use` is exposure, not consumption (DRY-002, DRY-006, marker check).** An
+  import says where a name can be reached from; a `pub use` says where it can be
+  reached from *outside*. Neither is a call, a read or a construction, and both
+  used to count as one: a re-exported function was "not dead", a facade type was
+  "referenced", and a `qual:api` on a merely re-exported item was reported as
+  spent. In one workspace audit, 56 dead items hid behind their own facade that
+  way. Now a `use` contributes nothing to any use set. Consumption *through* the
+  exposed name is still seen — a call site records whatever name it calls — so
+  a re-exported function that something calls stays alive. What surfaces is the
+  re-export nobody consumes; where that re-export is a genuine entry point for
+  code outside the workspace, `// qual:api` is the word, and it is verified like
+  every other marker. Re-exports keep their one legitimate meaning: for the
+  marker check they still decide whether an item is *nameable* from outside a
+  library crate.
+
 ### Fixed
 - **A callee's name counts (DRY-001).** Normalisation replaced a called
   function with a positional index, so a body whose whole meaning is *which*

@@ -5,6 +5,7 @@
 
 pub(super) use crate::adapters::analyzers::architecture::call_parity_rule::calls::*;
 pub(super) use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::FileScope;
+pub(super) use crate::adapters::analyzers::architecture::call_parity_rule::tests::collect_local_symbols;
 pub(super) use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::*;
 pub(super) use crate::adapters::shared::use_tree::{gather_alias_map, AliasMap, ScopedAliasMap};
 pub(super) use std::collections::{HashMap, HashSet};

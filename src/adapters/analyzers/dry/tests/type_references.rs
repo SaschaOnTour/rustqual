@@ -212,13 +212,19 @@ fn prose_outside_a_doc_fence_is_still_not_a_reference() {
 }
 
 #[test]
-fn a_use_path_counts_as_a_reference() {
-    // Load-bearing and easy to remove by accident: it works only because syn's
-    // default `visit_item_use` walk feeds the path idents to `visit_ident`. A
-    // "don't count imports" cleanup would turn every re-exported facade type
-    // into a finding.
-    assert!(refs("use crate::inner::Facade;").contains("Facade"));
-    assert!(refs("pub use crate::inner::Facade;").contains("Facade"));
+fn a_use_path_is_exposure_not_a_reference() {
+    // The reverse of what an earlier version pinned. An import says where a
+    // name can be reached from; a `pub use` says where it can be reached from
+    // *outside*. Neither is a use of the thing. Counting them kept a type alive
+    // whose only mention was its own facade, and the facade type nobody
+    // consumes is exactly the finding — `qual:api` is the word for the ones
+    // that are consumed from beyond the workspace.
+    assert!(!refs("use crate::inner::Facade;").contains("Facade"));
+    assert!(!refs("pub use crate::inner::Facade;").contains("Facade"));
+    assert!(
+        refs("use crate::inner::Facade;\nfn f() -> Facade { Facade }").contains("Facade"),
+        "a use followed by a real use still counts, through the body"
+    );
 }
 
 #[test]

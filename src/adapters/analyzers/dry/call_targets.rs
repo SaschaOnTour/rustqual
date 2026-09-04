@@ -227,38 +227,11 @@ impl<'ast> Visit<'ast> for CallTargetCollector {
         syn::visit::visit_macro(self, node);
     }
 
-    fn visit_item_use(&mut self, node: &'ast syn::ItemUse) {
-        // Only pub/pub(crate) re-exports count as usage of the original function.
-        // Private `use` imports are not re-exports; their call targets are already
-        // captured via visit_expr_call when the imported name is actually called.
-        if matches!(node.vis, syn::Visibility::Inherited) {
-            return;
-        }
-        // A re-export is usage, not a call — it goes to its own set so the two
-        // consumers can ask their own question of it. In test context it stays
-        // with the test calls: a `pub use` inside a `#[cfg(test)]` module is
-        // test-side usage, and folding it into production would report every
-        // marker on a test-only helper as spent.
-        let target = match self.names.in_test {
-            true => &mut self.names.refs.tests,
-            false => &mut self.names.reexported,
-        };
-        // Iterative UseTree walk
-        let mut stack: Vec<&syn::UseTree> = vec![&node.tree];
-        while let Some(tree) = stack.pop() {
-            match tree {
-                syn::UseTree::Name(n) => {
-                    target.insert(n.ident.to_string());
-                }
-                syn::UseTree::Rename(r) => {
-                    // Record the ORIGINAL name (r.ident), not the alias (r.rename).
-                    target.insert(r.ident.to_string());
-                }
-                syn::UseTree::Path(p) => stack.push(&p.tree),
-                syn::UseTree::Group(g) => stack.extend(&g.items),
-                syn::UseTree::Glob(_) => {} // Can't enumerate; skip
-            }
-        }
-        // No need to recurse — ItemUse has no child expressions to visit.
-    }
+    /// A `use` is exposure, not consumption. An import says where a name can be
+    /// reached from, a `pub use` says where it can be reached from *outside*;
+    /// neither is a call. Counting a re-export as usage hid dead items behind
+    /// their own facade. Consumption through the exposed name is still seen —
+    /// the call site records whatever name it calls. A re-exported entry point
+    /// the workspace really does not consume is what `// qual:api` is for.
+    fn visit_item_use(&mut self, _node: &'ast syn::ItemUse) {}
 }
