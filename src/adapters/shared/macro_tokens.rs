@@ -114,7 +114,9 @@ pub fn idents_in_call_position(tokens: &TokenStream) -> impl Iterator<Item = Str
         let trees: Vec<TokenTree> = stream.into_iter().collect();
         for (i, tt) in trees.iter().enumerate() {
             match tt {
-                TokenTree::Ident(id) if is_call_position(id, trees.get(i + 1)) => {
+                TokenTree::Ident(id)
+                    if is_call_position(id, trees.get(i + 1)) && !is_metavariable_at(&trees, i) =>
+                {
                     out.push(id.to_string());
                 }
                 TokenTree::Group(g) => stack.push(g.stream()),
@@ -187,9 +189,10 @@ pub fn all_idents(tokens: &TokenStream) -> impl Iterator<Item = String> {
     let mut out = Vec::new();
     let mut stack: Vec<TokenStream> = vec![tokens.clone()];
     while let Some(stream) = stack.pop() {
-        for tt in stream {
+        let trees: Vec<TokenTree> = stream.into_iter().collect();
+        for (i, tt) in trees.iter().enumerate() {
             match tt {
-                TokenTree::Ident(id) => out.push(id.to_string()),
+                TokenTree::Ident(id) if !is_metavariable_at(&trees, i) => out.push(id.to_string()),
                 TokenTree::Group(g) => stack.push(g.stream()),
                 TokenTree::Literal(lit) => out.extend(placeholder_names(&lit.to_string())),
                 _ => {}
@@ -197,6 +200,18 @@ pub fn all_idents(tokens: &TokenStream) -> impl Iterator<Item = String> {
         }
     }
     out.into_iter()
+}
+
+/// Whether the ident at `at` is a `macro_rules!` metavariable — `$f`, `$T`.
+/// It stands for whatever an invocation passes, never for the declaration
+/// that happens to share its name; reading `$f()` as a call of `fn f` hid a
+/// dead function and, since TQ-003 and the marker check read the same call
+/// set, reported it untested and a working `qual:api` spent.
+/// Operation: one-token lookback, no own calls.
+fn is_metavariable_at(trees: &[TokenTree], at: usize) -> bool {
+    at.checked_sub(1)
+        .and_then(|i| trees.get(i))
+        .is_some_and(|tt| matches!(tt, TokenTree::Punct(p) if p.as_char() == '$'))
 }
 
 /// Macros whose body is turned into tokens or text rather than run. `$f()`

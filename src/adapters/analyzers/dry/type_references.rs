@@ -331,7 +331,12 @@ impl<'ast> Visit<'ast> for TypeReferenceCollector {
     /// appears again; dropping the whole item reported such enums dead, and
     /// recording the path prefix instead kept an enum alive whose variants
     /// nothing used.
+    ///
+    /// Its attributes are walked like any other item's: a doc comment on a
+    /// `pub use` carries intra-doc links and doc-test fences, both real
+    /// references, and skipping them with the rest of the `use` lost them.
     fn visit_item_use(&mut self, node: &'ast syn::ItemUse) {
+        node.attrs.iter().for_each(|a| self.visit_attribute(a));
         self.names.record_use(use_tree::leaves(&node.tree));
     }
 

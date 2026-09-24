@@ -503,3 +503,25 @@ fn a_crate_shadowed_by_a_same_named_type_elsewhere_still_carries_its_bindings() 
     );
     assert!(found.is_empty(), "{found:?}");
 }
+
+#[test]
+fn a_metavariable_is_not_a_reference_to_a_same_named_type() {
+    // `$T` in a transcriber is whatever the invocation passes, not the
+    // struct `T`.
+    let found = names(
+        "pub struct T;\nmacro_rules! hold { ($T:ty) => { let _: Option<$T> = None; }; }\nfn f() {}",
+    );
+    assert_eq!(found, vec!["T"]);
+}
+
+#[test]
+fn a_doc_comment_on_a_use_still_counts() {
+    // A `use` records no name, but its attributes are attributes like any
+    // other: an intra-doc link documents the API, a doc-test fence is code
+    // `cargo test` runs. Skipping them with the rest of the `use` lost both.
+    let found = names(
+        "pub struct Linked;\npub struct Tested;\nmod inner { pub fn f() {} }\n\
+         /// See [`Linked`].\n///\n/// ```\n/// let _ = Tested;\n/// ```\npub use inner::f;",
+    );
+    assert_eq!(found, vec!["Tested"], "the doc-test use is test-only");
+}
