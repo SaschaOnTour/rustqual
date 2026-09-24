@@ -63,22 +63,19 @@ fn test_zero_impls_not_flagged() {
 }
 
 #[test]
-fn single_impl_in_non_test_module_collected() {
+fn an_impl_in_a_non_test_module_is_collected() {
     // The metadata collector must descend into regular (non-test) modules: an
-    // impl living in `mod inner` must still count toward the trait's impl set
-    // so SIT sees the single implementor. Guards the metadata-recursion guard
-    // in `collect_item_metadata` against being skipped.
-    // The impl is collected (it counts toward the total), but through
-    // `super::` it is not *certain* — see
-    // `a_single_impl_in_a_child_module_is_not_certain_known_limit`. A second
-    // impl next to the trait therefore makes no finding either: two impls.
+    // impl living in `mod inner` must count toward the trait's impl set.
+    // Guards the recursion in `collect_item_metadata` against being skipped.
+    // With it collected, the trait has two impls and no finding; were `mod
+    // inner` skipped, the one impl next to the trait would be reported.
     let w = detect_from(
         "trait Drawable { fn draw(&self); } struct Square; impl Drawable for Square { fn draw(&self) {} } \
          mod inner { struct Circle; impl super::Drawable for Circle { fn draw(&self) {} } }",
     );
     assert!(
         w.is_empty(),
-        "an impl inside a non-test module must be collected into the metadata"
+        "the impl in `mod inner` was not collected: the trait read as single-impl"
     );
 }
 

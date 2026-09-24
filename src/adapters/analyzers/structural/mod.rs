@@ -117,7 +117,6 @@ pub(crate) struct StructuralMetadata {
     /// may share a name, and keeping one let the directory walk order decide
     /// which, so OI flagged a correct impl on one machine and not on another.
     pub type_defs: HashMap<String, Vec<String>>,
-    /// trait_name → TraitInfo
     /// trait_name → every trait of that name, in walk order. All of them,
     /// for the reason `type_defs` keeps all: impls are counted by bare trait
     /// name, and keeping the last definition let the walk order decide which
