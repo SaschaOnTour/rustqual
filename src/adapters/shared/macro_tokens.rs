@@ -219,9 +219,13 @@ pub fn is_quoted_at(trees: &[TokenTree], at: usize) -> bool {
 }
 
 /// The metavariable names this transcriber applies as a callee: the `f` of
-/// `$f(…)`. Quoting macros are skipped, since `stringify!($f())` calls nothing.
-/// Operation: positional token-tree scan, no own calls.
+/// `$f(…)` and of `($f)(…)` — the parenthesised form is the same call, and
+/// looking only for the argument group right after the metavariable reported
+/// a function such a macro really runs as never called. Quoting macros are
+/// skipped, since `stringify!($f())` calls nothing.
+/// Operation: positional token-tree scan, own call hidden in the closure.
 pub fn called_metavariables(tokens: &TokenStream) -> HashSet<String> {
+    let wrapped = |tt: &TokenTree| wrapped_metavariable(tt);
     let mut out = HashSet::new();
     let mut stack: Vec<TokenStream> = vec![tokens.clone()];
     while let Some(stream) = stack.pop() {
@@ -232,14 +236,36 @@ pub fn called_metavariables(tokens: &TokenStream) -> HashSet<String> {
                 _ => {}
             }
             let is_dollar = matches!(tt, TokenTree::Punct(p) if p.as_char() == '$');
-            let called = matches!(trees.get(i + 2), Some(TokenTree::Group(g))
-                if g.delimiter() == Delimiter::Parenthesis);
+            let arguments_at = |at: usize| {
+                matches!(trees.get(at), Some(TokenTree::Group(g))
+                    if g.delimiter() == Delimiter::Parenthesis)
+            };
             if let (true, true, Some(TokenTree::Ident(name))) =
-                (is_dollar, called, trees.get(i + 1))
+                (is_dollar, arguments_at(i + 2), trees.get(i + 1))
             {
                 out.insert(name.to_string());
+            }
+            if arguments_at(i + 1) {
+                out.extend(wrapped(tt));
             }
         }
     }
     out
+}
+
+/// The `f` of a `($f)` group — a metavariable wrapped in parentheses and
+/// nothing else, the callee shape of `($f)(…)`.
+/// Operation: one match over the group's trees, no own calls.
+fn wrapped_metavariable(tt: &TokenTree) -> Option<String> {
+    let TokenTree::Group(g) = tt else { return None };
+    if g.delimiter() != Delimiter::Parenthesis {
+        return None;
+    }
+    let inner: Vec<TokenTree> = g.stream().into_iter().collect();
+    match inner.as_slice() {
+        [TokenTree::Punct(dollar), TokenTree::Ident(name)] if dollar.as_char() == '$' => {
+            Some(name.to_string())
+        }
+        _ => None,
+    }
 }

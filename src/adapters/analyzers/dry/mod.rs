@@ -13,6 +13,7 @@ pub(crate) mod macro_reach;
 pub mod match_patterns;
 pub(crate) mod split_names;
 pub(crate) mod type_references;
+pub(crate) mod use_bindings;
 pub mod wildcards;
 
 use crate::adapters::shared::declared_function::DeclaredFunction;

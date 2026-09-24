@@ -3,7 +3,8 @@ use std::collections::HashSet;
 use syn::visit::Visit;
 
 use super::split_names::{collect_split, test_scoped_visits, SplitCollector, SplitNames};
-use crate::adapters::shared::{macro_params, macro_tokens};
+use super::use_bindings::{self, collect_declared_names, leaf_head};
+use crate::adapters::shared::{macro_params, macro_tokens, use_tree};
 
 // ── Call target collection ──────────────────────────────────────
 
@@ -19,6 +20,7 @@ pub(crate) fn collect_all_calls(
     let mut collector = CallTargetCollector {
         macro_reach: super::macro_reach::macro_reach_of(&bodies),
         call_through: super::macro_reach::call_through_macros(&bodies),
+        modules: collect_declared_names(parsed).modules,
         ..Default::default()
     };
     collect_split(parsed, cfg_test_files, &mut collector)
@@ -38,6 +40,8 @@ struct CallTargetCollector {
     /// really runs, and it arrives as a bare ident no token walk can recognise
     /// as a call.
     call_through: macro_params::CalledPositions,
+    /// The workspace's module names, for the head rule — see `heads_of`.
+    modules: HashSet<String>,
 }
 
 impl SplitCollector for CallTargetCollector {
@@ -46,25 +50,35 @@ impl SplitCollector for CallTargetCollector {
     }
 }
 
-/// Insert the last path segment and qualified `Type::method` form into the target set.
-fn insert_path_segments(target: &mut HashSet<String>, path: &syn::Path) {
+/// A path in call, argument or field-value position names a function or a
+/// constructor. The last segment goes into the target set, the qualified
+/// `Type::method` form with it, and — when a `use` can be behind that last
+/// segment — it is a head (see `leaf_head`) that drives the implications. The
+/// qualifier is never recorded: it is a module or a type, not a call.
+///
+/// Only those positions, deliberately. Every expression path was tried —
+/// `let f: fn() = work;` is a use rustc counts — and reverted: a bare path is
+/// usually a *local*, and this set is read not only by DRY-002, where an extra
+/// name can only hide a finding, but by TQ-003 and the marker check, where
+/// "production calls it" is the trigger. A local named `config` next to a
+/// dead `fn config` turned `DEAD_CODE` into `TQ_UNTESTED` and reported a
+/// working `qual:api` spent. Closing the gap needs the locals scoped out.
+/// Operation: segment shape, a few inserts, own call in the operand.
+fn record_expr_path(names: &mut SplitNames, modules: &HashSet<String>, path: &syn::Path) {
     let segments: Vec<_> = path.segments.iter().map(|s| s.ident.to_string()).collect();
     let Some(last) = segments.last() else {
         return;
     };
-    target.insert(last.clone());
-    if segments.len() >= 2 {
-        target.insert(format!("{}::{}", segments[segments.len() - 2], last));
+    names.target().insert(last.clone());
+    if let Some(qualifier) = segments.len().checked_sub(2).map(|i| &segments[i]) {
+        names.target().insert(format!("{qualifier}::{last}"));
+    }
+    if let Some(head) = leaf_head(&segments, modules) {
+        names.record_head(head.clone());
     }
 }
 
 impl CallTargetCollector {
-    /// The call-target set for the current context (test vs production).
-    /// Trivial: delegates to the shared split.
-    fn target(&mut self) -> &mut HashSet<String> {
-        self.names.target()
-    }
-
     /// A macro invoked from a test runs what its definition names, so those
     /// names are test-reached. Only from test context: the same generosity on
     /// the production side would hide dead code, whereas here it can only
@@ -81,7 +95,8 @@ impl CallTargetCollector {
             .and_then(|s| self.macro_reach.get(&s.ident.to_string()))
             .cloned()
             .unwrap_or_default();
-        self.names.refs.tests.extend(reached);
+        self.names.refs.tests.extend(reached.iter().cloned());
+        self.names.heads.tests.extend(reached);
     }
 
     /// At an invocation of a call-through macro, the arguments at the positions
@@ -103,7 +118,7 @@ impl CallTargetCollector {
             .iter()
             .flat_map(macro_tokens::all_idents)
             .collect();
-        self.target().extend(idents);
+        idents.into_iter().for_each(|id| self.names.record_head(id));
     }
 
     /// Extract function names referenced by serde field attributes.
@@ -146,19 +161,19 @@ impl CallTargetCollector {
         refs
     }
 
-    /// Extract function references from call arguments (e.g., `.for_each(some_fn)`).
+    /// Function references in call arguments (e.g. `.for_each(some_fn)`).
+    /// Operation: iteration with a reference unwrap, own call in the closure.
     fn record_path_args(
         &mut self,
         args: &syn::punctuated::Punctuated<syn::Expr, syn::token::Comma>,
     ) {
-        let target = self.names.target();
         args.iter().for_each(|arg| {
             let expr = match arg {
                 syn::Expr::Reference(r) => &*r.expr,
                 other => other,
             };
             if let syn::Expr::Path(p) = expr {
-                insert_path_segments(target, &p.path);
+                record_expr_path(&mut self.names, &self.modules, &p.path);
             }
         });
     }
@@ -167,7 +182,7 @@ impl CallTargetCollector {
 impl<'ast> Visit<'ast> for CallTargetCollector {
     fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
         if let syn::Expr::Path(p) = &*node.func {
-            insert_path_segments(self.names.target(), &p.path);
+            record_expr_path(&mut self.names, &self.modules, &p.path);
         }
         self.record_path_args(&node.args);
         syn::visit::visit_expr_call(self, node);
@@ -181,10 +196,9 @@ impl<'ast> Visit<'ast> for CallTargetCollector {
     }
 
     fn visit_expr_struct(&mut self, node: &'ast syn::ExprStruct) {
-        let target = self.names.target();
         node.fields.iter().for_each(|field| {
             if let syn::Expr::Path(p) = &field.expr {
-                insert_path_segments(target, &p.path);
+                record_expr_path(&mut self.names, &self.modules, &p.path);
             }
         });
         syn::visit::visit_expr_struct(self, node);
@@ -197,7 +211,7 @@ impl<'ast> Visit<'ast> for CallTargetCollector {
     fn visit_field(&mut self, node: &'ast syn::Field) {
         let previous = self.names.enter(&node.attrs);
         let refs = Self::extract_serde_fn_refs(&node.attrs);
-        self.target().extend(refs);
+        refs.into_iter().for_each(|r| self.names.record_head(r));
         syn::visit::visit_field(self, node);
         self.names.leave(previous);
     }
@@ -216,14 +230,13 @@ impl<'ast> Visit<'ast> for CallTargetCollector {
         // keeps the over-collection tight; for reachability it only ever
         // *suppresses* a finding, never raises a false one (a rare colliding
         // name can mask a true positive — the accepted conservative bias).
-        let target = self.target();
-        crate::adapters::shared::macro_tokens::idents_in_call_position(&node.tokens).for_each(
-            |id| {
-                target.insert(id);
-            },
-        );
+        crate::adapters::shared::macro_tokens::idents_in_call_position(&node.tokens)
+            .for_each(|id| self.names.record_head(id));
         self.arguments_of_a_call_through(node);
         self.reach_through_macro(node);
+        // A `use` a `macro_rules!` transcriber generates binds a name like a
+        // written one — see `use_bindings::generated_items`.
+        self.names.record_use(use_bindings::generated_uses(node));
         syn::visit::visit_macro(self, node);
     }
 
@@ -231,7 +244,12 @@ impl<'ast> Visit<'ast> for CallTargetCollector {
     /// reached from, a `pub use` says where it can be reached from *outside*;
     /// neither is a call. Counting a re-export as usage hid dead items behind
     /// their own facade. Consumption through the exposed name is still seen —
-    /// the call site records whatever name it calls. A re-exported entry point
-    /// the workspace really does not consume is what `// qual:api` is for.
-    fn visit_item_use(&mut self, _node: &'ast syn::ItemUse) {}
+    /// the call site records whatever name it calls, and what the `use` implies
+    /// is kept, in this context, to be resolved after the walk
+    /// (`ContextRefs::widen_by_implications`), so `use work as w; w()` still
+    /// reaches `work`. A re-exported entry point the workspace really does not
+    /// consume is what `// qual:api` is for.
+    fn visit_item_use(&mut self, node: &'ast syn::ItemUse) {
+        self.names.record_use(use_tree::leaves(&node.tree));
+    }
 }

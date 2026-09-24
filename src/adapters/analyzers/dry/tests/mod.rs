@@ -6,6 +6,7 @@ mod functions;
 mod match_patterns;
 mod root;
 mod type_references;
+mod use_bindings;
 mod wildcards;
 
 /// Three free functions (`func_a`/`func_b`/`func_c`) with identical
