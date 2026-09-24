@@ -14,9 +14,9 @@
 //! this is a graph rather than another special case.
 //!
 //! **Roots** are references made from code that is not itself a candidate: a
-//! function body, a trait definition, a `use`. Being `pub` is deliberately *not*
-//! a root — a public type nobody in the workspace uses is exactly the finding,
-//! and a library whose consumers live elsewhere says so with `// qual:api`.
+//! function body, a trait definition. Being `pub` is deliberately *not* a root
+//! — a public type nobody in the workspace uses is exactly the finding, and a
+//! library whose consumers live elsewhere says so with `// qual:api`.
 //! Declarations that are exempt anyway (`#[allow(dead_code)]`, `qual:api`, a
 //! leading `_`) are seeded as live, so what they name keeps its user.
 //!
@@ -29,6 +29,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::split_names::ContextRefs;
+use super::use_bindings::Implications;
 
 /// Who refers to what.
 #[derive(Debug, Default)]
@@ -40,6 +41,15 @@ pub(crate) struct ReferenceGraph {
     /// same grain as the reference set itself: two same-named declarations pool,
     /// which can only keep something alive, never kill it.
     pub(crate) owners: HashMap<String, ContextRefs>,
+    /// Per bucket (`None` for the roots), the names used *unqualified* there —
+    /// the only ones that can consume what a `use` bound. See
+    /// `ContextRefs::widen_by_implications`.
+    heads: HashMap<Option<String>, ContextRefs>,
+    /// What every `use` implied, kept for `widen` to apply. The graph is
+    /// handed out unwidened: the marker check reads it with "production
+    /// refers to it" as the trigger, where a name pooled in by bare grain
+    /// would call a working marker spent. DRY-006 widens its own copy.
+    pub(crate) implied: Implications,
 }
 
 impl ReferenceGraph {
@@ -49,6 +59,17 @@ impl ReferenceGraph {
         self.bucket(owner).set(in_test).insert(name);
     }
 
+    /// Record that `owner` uses `name` unqualified: a reference, and a head.
+    /// Integration: the reference, then the head bucket's insert.
+    pub(crate) fn add_head(&mut self, owner: Option<&str>, in_test: bool, name: String) {
+        self.add(owner, in_test, name.clone());
+        self.heads
+            .entry(owner.map(str::to_string))
+            .or_default()
+            .set(in_test)
+            .insert(name);
+    }
+
     /// The pair of sets a reference from `owner` lands in.
     /// Operation: one branch over the owner, no own calls.
     fn bucket(&mut self, owner: Option<&str>) -> &mut ContextRefs {
@@ -56,6 +77,23 @@ impl ReferenceGraph {
             Some(name) => self.owners.entry(name.to_string()).or_default(),
             None => &mut self.roots,
         }
+    }
+
+    /// Bring every implied name into every bucket, so a body that says `U`
+    /// counts as naming the `T` that `use T as U` stands for, and one that says
+    /// `Circle` as naming the `Shape` it is a variant of — in that body's own
+    /// context, and only from the names it uses unqualified.
+    /// Operation: iteration, own calls hidden in the closure.
+    pub(crate) fn widen(&mut self) {
+        let implied = std::mem::take(&mut self.implied);
+        let none = ContextRefs::default();
+        let heads_of = |owner: Option<&str>| self.heads.get(&owner.map(str::to_string));
+        self.roots
+            .widen_by_implications(heads_of(None).unwrap_or(&none), &implied);
+        self.owners.iter_mut().for_each(|(owner, refs)| {
+            refs.widen_by_implications(heads_of(Some(owner)).unwrap_or(&none), &implied)
+        });
+        self.implied = implied;
     }
 
     /// Every name the graph holds, ignoring who referred to it — except a

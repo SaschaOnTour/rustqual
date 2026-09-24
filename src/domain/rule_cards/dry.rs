@@ -35,7 +35,14 @@ pub(super) const CARDS: &[RuleCard] = &[
             functions a run_suite!(make; a, b) really runs arrive as bare \
             names nothing syntactic marks as calls. An import or a pub use is \
             not a call: a re-exported function nothing calls is dead, and a \
-            genuine entry point for code outside the workspace says qual:api.",
+            genuine entry point for code outside the workspace says qual:api. \
+            A renamed import is followed, so a call to the alias — bare, or \
+            qualified by the module that re-exports it — counts for the \
+            function it stands for; Type::alias() is an associated function \
+            and does not. A function used only as a value (let f = work) \
+            is not seen as called. Names are matched by bare name, so two \
+            functions sharing one name pool — the check errs toward a missed \
+            finding, never a false one.",
         why: "Dead code is maintained, reviewed, and refactored without ever \
             running — pure carrying cost that also misleads readers about \
             what the system does.",
@@ -62,7 +69,17 @@ pub(super) const CARDS: &[RuleCard] = &[
             own impl blocks do not count either — carrying methods keeps \
             nothing alive, and what those methods name lives or dies with the \
             type. Neither does a use or pub use: an import is exposure, not a \
-            reference, and a facade type nothing consumes is the finding.",
+            reference, and a facade type nothing consumes is the finding. What \
+            the import stands for is followed, though: a renamed import to the \
+            type behind the alias, and a consumed variant to its enum, so \
+            use Shape::* keeps Shape alive when a variant is used through the \
+            import — bare, or qualified by the module that re-exports it — \
+            while Kind::Circle or Ordering::Less is a use of that type, not \
+            of the import (CamelCase names a type, unless a module of that \
+            name is declared). \
+            Names are matched by bare name, so a module and an enum called \
+            Shape pool — the check errs toward a missed finding, never a \
+            false one.",
         why: "An unused type is read, maintained and refactored like the rest \
             of the code while modelling nothing. rustc's own dead_code lint \
             stops at the crate boundary, so a pub type nobody in the workspace \

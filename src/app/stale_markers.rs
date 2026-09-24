@@ -280,9 +280,12 @@ fn unattached_orphans(
 /// so the message can tell the author exactly what to do.
 #[derive(Clone, Copy)]
 enum Verdict {
-    /// The marker reaches no function at all — it sits on a type, a constant,
-    /// a `pub use` re-export … Both markers only affect function-level checks,
-    /// so there it changes nothing.
+    /// The marker reaches no declaration at all — it sits on a module, a
+    /// trait, a `pub use` re-export … A `use` is exposure, not a declaration:
+    /// the `qual:api` belongs on the function or type it re-exports, where the
+    /// dead-code checks decide. Note the window: a marker on a `pub use` that
+    /// is followed by a declaration within `ANNOTATION_WINDOW` lines attaches
+    /// to *that* declaration instead and is judged there.
     NotAttached,
     /// Attached, but that declaration is excluded from its checks anyway. The
     /// text names which exemption applies, since it differs by kind.

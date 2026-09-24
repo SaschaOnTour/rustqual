@@ -7,8 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.8.2] - 2026-07-27
 
-Two false findings that pulled against each other: DRY-001 punished exactly the
-spelled-out calls DRY-002 rewards.
+Two false findings that pulled against each other — DRY-001 punished exactly
+the spelled-out calls DRY-002 rewards — plus two more ways the call graph
+misread a `macro_rules!` invocation and a `use`.
 
 ### Changed
 - **A `use` is exposure, not consumption (DRY-002, DRY-006, marker check).** An
@@ -17,10 +18,54 @@ spelled-out calls DRY-002 rewards.
   used to count as one: a re-exported function was "not dead", a facade type was
   "referenced", and a `qual:api` on a merely re-exported item was reported as
   spent. In one workspace audit, 56 dead items hid behind their own facade that
-  way. Now a `use` contributes nothing to any use set. Consumption *through* the
-  exposed name is still seen — a call site records whatever name it calls — so
-  a re-exported function that something calls stays alive. What surfaces is the
-  re-export nobody consumes; where that re-export is a genuine entry point for
+  way. Now the imported name itself contributes nothing to any use set.
+  Consumption *through* the exposed name is still seen — a call site records
+  whatever name it calls, and a rename (`use work as perform`, at any depth) is
+  resolved in the context of the `use` so the alias's caller counts for the
+  original — so a re-exported function that something calls stays alive. A
+  variant import is resolved the same way: after `use Shape::{Circle, Square}`
+  or `use Shape::*` the enum is never named again, so consuming `Circle`
+  consumes `Shape` — and only when `Shape` is a declared enum with that
+  variant, so an unconsumed `use Shape::*` keeps nothing alive and a *module*
+  segment does not vouch for a type that shares its name. A module's name and
+  a variant's name are declarations too, and no longer count as references:
+  the first hid a struct behind a same-named `mod`, the second let one enum's
+  `Other` keep another enum's `Other` — and with it that enum — alive. The
+  alias is seen through before that lookup — with the renames the importing
+  context can see, so a `#[cfg(test)]` alias never resolves a production
+  import: `use Shape as Form; use Form::*` and `use Shape::{self as Form}`
+  both keep `Shape` alive when a variant is used. *Used* means used by its
+  bare name: only a name in head position consumes what a `use` bound — the
+  first segment of a path, which resolves in scope, or the last segment of a
+  path qualified by a module, which resolves there (`facade::Facade` reaches
+  the `pub use Real as Facade` inside `facade`; a bare `MAX` pattern reaches
+  `use LIMIT as MAX`). A path qualified by a *type* names a variant or an
+  associated item, which no `use` can bind: `Kind::Circle` is a use of `Kind`,
+  `std::cmp::Ordering::Less` of `Ordering`, so neither keeps a glob-imported
+  enum with the same variant name alive any more. Module or type follows
+  Rust's naming convention — CamelCase is a type — unless a module of that
+  name is declared, which overrides it, and so does an alias of a declared
+  module, of the crate root or of an external crate (`use shapes as Shapes`,
+  `use crate as API`, `extern crate dep as API`, `use Dep as API` — whatever a
+  `use` path starts with may be an external crate, however it is spelled,
+  and a same-named type declared elsewhere cannot rule that out, so it
+  counts as one). The resolved aliases reach DRY-002
+  and DRY-006 only: TQ-003 and the marker check keep reading what production
+  literally calls or names, because there a name pooled in by bare grain
+  would invent a finding rather than hide one; the test side is read with
+  aliases resolved, since a test reaching a function through one does test
+  it. A `use` that a `macro_rules!` transcriber generates counts like a
+  written one, so `api::Alias()` after `expose!()` reaches `real` — where the
+  transcriber parses as written; what only a metavariable would create is
+  outside this analysis, as all macro-generated code is. Everything
+  is matched by bare name, and what that grain cannot tell apart stays alive;
+  the known shapes are pinned as such.
+  Not in this release: a function used only as a *value* (`let f: fn() =
+  work;`, `vec![work]`) still reads as uncalled — counting every expression
+  path was tried and reverted, because the production call set also feeds
+  TQ-003 and the marker check, where a local named like a function would then
+  read as a production caller. What surfaces is the re-export nobody
+  consumes; where that re-export is a genuine entry point for
   code outside the workspace, `// qual:api` is the word, and it is verified like
   every other marker. Re-exports keep their one legitimate meaning: for the
   marker check they still decide whether an item is *nameable* from outside a
@@ -48,7 +93,8 @@ spelled-out calls DRY-002 rewards.
   not in scope inside its own initializer, so the right-hand side of
   `let load = load();` is the *function*; a `for` pattern is not in scope in the
   iterator expression and is gone after the loop; a `while let` binding stays in
-  its loop; a match arm's bindings stay in that arm; a closure's parameters stay in the closure; an `if let` binding
+  its loop; a match arm's bindings stay in that arm; a closure's parameters
+  stay in the closure; an `if let` binding
   covers the then-branch and neither the `else` nor what follows. All of it for
   one reason: mistaking a free function for a local is the direction that
   *invents* duplicates.
@@ -68,7 +114,8 @@ spelled-out calls DRY-002 rewards.
   the two-level shape the real thing has, resolved over the macro-reach closure
   that was already there. Only at an invocation of one of those macros is every
   ident harvested as a possible callee: the trigger is narrow so an ordinary
-  `assert_eq!(x, dead_helper)` still cannot vouch for a dead function. Macros
+  `name_of!(dead_helper)`, a macro that only spells its argument, still
+  cannot vouch for a dead function. Macros
   that only quote their input are excluded — `stringify!($f())` produces the
   text `"$f()"` and runs nothing, so reading it as a call would have excused a
   plainly dead function (`stringify`, `quote`, `quote_spanned`). Nested macros
@@ -127,7 +174,17 @@ spelled-out calls DRY-002 rewards.
   whole invocation. An unreadable arm also stays in its place instead of
   collapsing the list: it triggers the coarse fallback only once every *earlier*
   arm has been ruled out on its own terms, so a first arm that matches still
-  decides.
+  decides. Three more shapes, each found in review as a function the macro
+  really runs reported `uncalled`: a macro that applies `$a` itself *and*
+  forwards `$b` was read once, in the first round, before its target was known
+  — every macro is now re-read on every round of the fixpoint, and the fixpoint
+  runs until nothing changes rather than for as many rounds as there are
+  macros (two macros forwarding to each other under rules of different arity
+  make a longer chain), so the forwarded position is not lost; `($f)()` is the same call as `$f()` and is now
+  recognised; and a name defined twice (`macro_rules! go` in two modules) was
+  keyed by name so the last definition answered for both — which one an
+  invocation reaches is textual scope this analysis does not model, so such a
+  name is now *undecidable*, which means every argument is a possible callee.
 
 ## [1.8.1] - 2026-07-26
 

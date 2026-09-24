@@ -73,7 +73,7 @@ pub fn assert_in_range(actual: f64, expected: f64, tol: f64) { /* … */ }
 
 `qual:api` and `qual:test_helper` exclude the declaration from `DRY-002` / `DRY-006` *and* from `TQ-003` (untested), without counting against `max_suppression_ratio`. Use them on things exported to consumers outside the crate or used only by integration tests. Both markers are verified — see [reference-suppression.md](./reference-suppression.md).
 
-A `use` — plain import or `pub use` re-export — is not a call. It says where a name can be reached from, not that anything reaches for it, so a function whose only mention is its own re-export is dead, and a re-export that is a real entry point for code outside the workspace is what `qual:api` is for. Calls *through* the re-exported name count as calls, by that name.
+A `use` — plain import or `pub use` re-export — is not a call. It says where a name can be reached from, not that anything reaches for it, so a function whose only mention is its own re-export is dead, and a re-export that is a real entry point for code outside the workspace is what `qual:api` is for. Calls *through* the re-exported name count as calls, by that name, and a renamed import (`use work as perform`) is resolved so that calling `perform` keeps `work` alive. The same holds for a variant import: using `Circle` after `use Shape::*` keeps `Shape` alive, while the unused import alone does not, and neither does a qualified `Kind::Circle` or `Ordering::Less`, which is a use of that type. A re-export reached through its module (`facade::Circle`, `facade::perform()`) counts like a bare use; module or type is told by Rust's naming convention, with declared module names overriding it. All of this matches by bare name: two things sharing a name pool, and the check then errs toward a missed finding, never a false one. Precision beyond that needs a resolver — see the `--lsif` issue.
 
 By default, the dead-code analysis treats a package's `tests/**` files as call-sites — both the analysis-root crate's `tests/**` and each member's `crates/*/tests/**` — so a function used only from integration tests is not dead.
 
@@ -91,7 +91,7 @@ reached in turn. Two types that refer to each other, a ring of three, or the
 common shape where the mutual references sit in `impl` methods — none of them
 keeps anything alive without an entry point from outside the group. The walk
 starts at references made from code that is not itself a candidate (a function
-body, a trait, a `use`), and at declarations that are excused anyway
+body, a trait), and at declarations that are excused anyway
 (`#[allow(dead_code)]`, `qual:api`, `qual:test_helper`), so what those name keeps
 its user — one marker on the entry point covers the cluster behind it. Being
 `pub` is deliberately not an entry point: a public type nobody in the workspace
