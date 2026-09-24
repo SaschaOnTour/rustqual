@@ -26,9 +26,8 @@ use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::F
 use crate::adapters::analyzers::architecture::call_parity_rule::signature_params::{
     extract_signature_params, item_canonical_generics,
 };
-use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::{
-    collect_crate_root_modules, collect_local_symbols,
-};
+use crate::adapters::analyzers::architecture::call_parity_rule::tests::collect_local_symbols;
+use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::collect_crate_root_modules;
 
 mod empty_and_struct_fields;
 mod inline_mod_and_traits;
@@ -140,9 +139,8 @@ pub(super) fn calls_from(
     };
     use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::FileScope;
     use crate::adapters::analyzers::architecture::call_parity_rule::signature_params::extract_signature_params;
-    use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::{
-        collect_crate_root_modules, collect_local_symbols,
-    };
+    use crate::adapters::analyzers::architecture::call_parity_rule::tests::collect_local_symbols;
+    use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::collect_crate_root_modules;
     use crate::adapters::shared::use_tree::gather_alias_map;
 
     let use_site = parse_file(use_site_src);

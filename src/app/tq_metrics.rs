@@ -41,13 +41,14 @@ pub(super) fn compute_tq(
         crate::adapters::analyzers::dry::dead_code::collect_cfg_test_file_paths(parsed);
     let calls =
         crate::adapters::analyzers::dry::dead_code::collect_all_calls(parsed, &cfg_test_files);
-    // TQ-003 asks whether production *calls* a function, so a `pub use`
-    // re-export does not qualify it — the marker check and DRY-002 do want the
-    // re-export, since there the question is whether anything uses it at all.
+    // Does production *call* it — literally. A `pub use` is exposure, not a
+    // call, and counting it here reported a `qual:api` on a merely re-exported
+    // item as spent; the alias implications DRY-002 resolves are left out for
+    // the same reason, since here an extra name invents a finding. The test
+    // side is read widened: a test calling `w()` after `use work as w` does
+    // test `work`.
+    let test_calls = calls.widened().tests;
     let prod_calls = calls.refs.production;
-    let test_calls = calls.refs.tests;
-    let mut used_in_production = prod_calls.clone();
-    used_in_production.extend(calls.reexported);
     let coverage_path = config
         .test_quality
         .coverage_file
@@ -65,7 +66,7 @@ pub(super) fn compute_tq(
         coverage_path,
     };
     let analysis = crate::adapters::analyzers::tq::analyze_test_quality(&ctx);
-    let stale = detect_stale_markers(parsed, annotation_lines, &declared_fns, &used_in_production);
+    let stale = detect_stale_markers(parsed, annotation_lines, &declared_fns, &prod_calls);
     (Some(analysis), stale)
 }
 

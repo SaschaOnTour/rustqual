@@ -3,8 +3,10 @@
 //! Every analyzer that reasons about imports (architecture's layer rule,
 //! forbidden rule, glob-import matcher; coupling's module graph; DRY's
 //! wildcard detector) needs the same traversal: flatten nested `UseTree`
-//! groups into leaf paths with spans. Owning that traversal here keeps
-//! the semantics consistent — a single fix applies everywhere.
+//! groups into leaf paths with spans. The dead-code checks ask a second
+//! question of the same tree (`leaves`): which segments precede each leaf,
+//! and which leaves are renames. Owning both traversals here keeps the
+//! semantics consistent — a single fix applies everywhere.
 
 use std::collections::HashMap;
 use syn::spanned::Spanned;
@@ -240,5 +242,79 @@ fn collect_alias_entries(
                 collect_alias_entries(prefix, sub, absolute_root, out);
             }
         }
+    }
+}
+
+/// What a `use` tree says beyond the names it imports. None of it is a
+/// reference by itself; each is a *conditional* one, to be resolved once the
+/// consumers are known: if the left name is consumed, the right one is.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct UseLeaves {
+    /// Every `… as alias`, as (alias, original). Under a rename no consumer can
+    /// ever say the original's name, so the pair has to come from the `use`.
+    /// `parent::{self as x}` renames the *parent*: usually a module, but
+    /// `Shape::{self as Form}` is how an enum gets a second name, and leaving
+    /// it out reported that enum dead.
+    pub renames: Vec<(String, String)>,
+    /// Every named leaf under a path, as (name, parent segment) — the name is
+    /// the original under a rename. `use Shape::Circle` gives (Circle, Shape):
+    /// when the parent is an enum, consuming the variant consumes the enum,
+    /// and after this import the enum's own name never appears again. Whether
+    /// the parent *is* an enum the consumer decides; a module gives nothing.
+    pub members: Vec<(String, String)>,
+    /// The parent segment of every glob: `use Shape::*` gives Shape, to be
+    /// expanded to (variant, Shape) for each variant the enum declares.
+    pub globs: Vec<String>,
+}
+
+impl UseLeaves {
+    /// Operation: three extends, no own calls.
+    pub fn extend(&mut self, other: UseLeaves) {
+        self.renames.extend(other.renames);
+        self.members.extend(other.members);
+        self.globs.extend(other.globs);
+    }
+}
+
+/// Renames, members and globs of one `use` tree, wherever it sits — a nested
+/// `mod`, a function body, an `impl` block; the caller decides the context.
+/// Integration: one walk, then the result.
+pub fn leaves(tree: &UseTree) -> UseLeaves {
+    let mut out = UseLeaves::default();
+    walk_leaves(tree, &mut Vec::new(), &mut out);
+    out
+}
+
+/// Operation: tree walk over the four leaf shapes, no own calls.
+// qual:recursive
+fn walk_leaves(tree: &UseTree, prefix: &mut Vec<String>, out: &mut UseLeaves) {
+    match tree {
+        UseTree::Path(p) => {
+            prefix.push(p.ident.to_string());
+            walk_leaves(&p.tree, prefix, out);
+            prefix.pop();
+        }
+        UseTree::Group(g) => g.items.iter().for_each(|t| walk_leaves(t, prefix, out)),
+        UseTree::Rename(r) => {
+            let alias = r.rename.to_string();
+            match r.ident.to_string() {
+                original if original == "self" => {
+                    out.renames
+                        .extend(prefix.last().map(|p| (alias, p.clone())));
+                }
+                original => {
+                    out.renames.push((alias, original.clone()));
+                    out.members
+                        .extend(prefix.last().map(|p| (original, p.clone())));
+                }
+            }
+        }
+        UseTree::Name(n) => {
+            let name = n.ident.to_string();
+            if name != "self" {
+                out.members.extend(prefix.last().map(|p| (name, p.clone())));
+            }
+        }
+        UseTree::Glob(_) => out.globs.extend(prefix.last().cloned()),
     }
 }

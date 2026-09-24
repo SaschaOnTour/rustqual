@@ -53,7 +53,8 @@ pub fn detect_dead_types(
     mark_annotated(&mut declared, test_helper_lines, |d| {
         d.is_test_helper = true
     });
-    let graph = collect_reference_graph(parsed, cfg_test_files);
+    let mut graph = collect_reference_graph(parsed, cfg_test_files);
+    graph.widen();
     let alive = liveness::resolve(
         &graph,
         &owner_candidates(&declared),

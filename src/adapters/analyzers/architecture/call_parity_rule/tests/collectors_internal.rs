@@ -7,13 +7,14 @@
 use super::support::{build_graph_only, build_workspace, three_layer};
 use crate::adapters::analyzers::architecture::call_parity_rule::file_visibility::collect_file_root_visibility;
 use crate::adapters::analyzers::architecture::call_parity_rule::local_symbols::{
-    collect_local_symbols, collect_workspace_module_paths, WorkspaceLookup,
+    collect_workspace_module_paths, WorkspaceLookup,
 };
 use crate::adapters::analyzers::architecture::call_parity_rule::pub_fns::build_reexports_for_pub_fns;
 use crate::adapters::analyzers::architecture::call_parity_rule::pub_fns_alias_chain::{
     collect_alias_chain, collect_workspace_type_canonicals,
 };
 use crate::adapters::analyzers::architecture::call_parity_rule::pub_fns_visibility::collect_visible_type_canonicals_workspace;
+use crate::adapters::analyzers::architecture::call_parity_rule::tests::collect_local_symbols;
 use crate::adapters::analyzers::architecture::call_parity_rule::workspace_graph::collect_crate_root_modules;
 use crate::adapters::shared::use_tree::{gather_alias_map, AliasMap};
 use std::collections::{HashMap, HashSet};

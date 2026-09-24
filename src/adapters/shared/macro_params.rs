@@ -29,7 +29,7 @@ pub(crate) type CalledPositions = HashMap<String, CallShape>;
 /// so two mirrored rules — one applying argument 0, the other argument 1 — say
 /// different things about the same invocation, and merging them made every
 /// argument look called.
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq)]
 pub(crate) struct CallShape {
     /// In declaration order, `None` for an arm whose matcher admits no
     /// positions. Kept in place rather than collapsing the list: an unreadable
@@ -38,11 +38,27 @@ pub(crate) struct CallShape {
 }
 
 /// One rule's parameters and the positions it applies as a callee.
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 struct RuleShape {
     /// The fragment specifier of each parameter (`path`, `expr`, …), in order.
     fragments: Vec<String>,
     called: HashSet<usize>,
+}
+
+impl CallShape {
+    /// The shape of a macro whose rules cannot be read at all: one unreadable
+    /// arm, which `selected_positions` answers with "every argument".
+    /// Operation: constructor, no own calls.
+    pub(crate) fn undecided() -> CallShape {
+        CallShape { rules: vec![None] }
+    }
+}
+
+/// The transcriber of every rule of a `macro_rules!` definition — what an
+/// invocation expands to, metavariables and all.
+/// Operation: one mapped collection, own call in the operand.
+pub(crate) fn transcribers(def: &TokenStream) -> Vec<TokenStream> {
+    rules_of(def).into_iter().map(|r| r.transcriber).collect()
 }
 
 /// One `matcher => transcriber` rule of a definition.
