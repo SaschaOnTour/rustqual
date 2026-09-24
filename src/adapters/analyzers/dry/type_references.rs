@@ -7,16 +7,22 @@
 //! a finding, while under-collecting invents one — and telling an author to
 //! delete a type that is in use is the expensive mistake.
 //!
-//! Two positions are not recorded at all: a declaration's own name, and the
-//! self type of an `impl` block. Without the second, a type carrying only its
-//! own methods would keep itself alive and nothing could ever be found.
+//! Three positions are not recorded at all: a declaration's own name — the
+//! item's, a variant's, a module's — the self type of an `impl` block, and a
+//! `use`. Without the second, a type carrying only its own methods would keep
+//! itself alive and nothing could ever be found; without the third, a facade
+//! re-export kept alive whatever it exposed. What a `use` *implies* — a
+//! rename's original, the enum behind an imported variant — is kept in its
+//! context and resolved after the walk, in `collect_reference_graph`, so the
+//! consumer of the alias or the variant counts as a consumer of the
+//! declaration.
 //!
 //! Everything else is attributed to the declaration whose body made it, so that
 //! `liveness` can ask what the roots actually reach rather than what is merely
 //! mentioned. A reference from anything that is not a candidate — a function
-//! body, a trait, a `use` — is rooted. A declaration naming itself in its own
-//! body is recorded, as an edge to itself: harmless for reachability, since it
-//! can only matter once the declaration is already alive, and
+//! body, a trait — is rooted. A declaration naming itself in its own body is
+//! recorded, as an edge to itself: harmless for reachability, since it can only
+//! matter once the declaration is already alive, and
 //! `ReferenceGraph::flatten` drops it for the marker check, which asks whether
 //! somebody *else* names the declaration.
 
@@ -27,7 +33,8 @@ use syn::visit::Visit;
 use super::doc_scan::{DocLine, DocScanner};
 use super::liveness::ReferenceGraph;
 use super::split_names::{collect_split, test_scoped_visits, SplitCollector, SplitNames};
-use crate::adapters::shared::macro_tokens;
+use super::use_bindings::{self, collect_declared_names, heads_of, DeclaredNames};
+use crate::adapters::shared::{macro_tokens, use_tree};
 
 /// AST visitor collecting referenced names, split by production / test context
 /// and attributed to the declaration that made them.
@@ -38,6 +45,11 @@ pub(crate) struct TypeReferenceCollector {
     graph: ReferenceGraph,
     /// The declaration currently being walked, if any.
     owner: Option<String>,
+    /// The enums and module names of the workspace — collected before the
+    /// walk, because deciding whether `Kind::Circle` is a use of the enum
+    /// `Kind` or of a binding named `Circle` in a module `Kind` happens at
+    /// the path.
+    declared: DeclaredNames,
 }
 
 impl SplitCollector for TypeReferenceCollector {
@@ -55,23 +67,27 @@ impl TypeReferenceCollector {
             .for_each(|n| self.graph.add(self.owner.as_deref(), in_test, n));
     }
 
+    /// Record names used unqualified — heads — attributed to the declaration
+    /// being walked. Everything from an opaque token stream lands here too,
+    /// since tokens cannot tell a bare name from a path segment, and reading
+    /// them as heads only ever keeps something alive.
+    /// Operation: field split + iteration, own calls hidden in the closure.
+    fn record_heads_in(&mut self, in_test: bool, names: impl IntoIterator<Item = String>) {
+        names
+            .into_iter()
+            .for_each(|n| self.graph.add_head(self.owner.as_deref(), in_test, n));
+    }
+
     /// Record one reference in the current context.
     /// Trivial: delegates with a single name.
     fn record(&mut self, name: String) {
-        self.record_all(Some(name));
+        self.record_in(self.names.in_test, Some(name));
     }
 
-    /// Record several references in the current context.
+    /// Record several heads in the current context.
     /// Trivial: delegates with the current context.
-    fn record_all(&mut self, names: impl IntoIterator<Item = String>) {
-        self.record_in(self.names.in_test, names);
-    }
-
-    /// Record what a doc example named — test context whatever the surrounding
-    /// item is, because the example is code `cargo test` compiles and runs.
-    /// Trivial: delegates with the context forced.
-    fn record_all_as_test(&mut self, names: impl IntoIterator<Item = String>) {
-        self.record_in(true, names);
+    fn record_heads(&mut self, names: impl IntoIterator<Item = String>) {
+        self.record_heads_in(self.names.in_test, names);
     }
 
     /// One line of a doc comment. A doc example is test code even on a
@@ -81,8 +97,8 @@ impl TypeReferenceCollector {
     fn absorb_doc_line(&mut self, text: &str) {
         match self.docs.line(text) {
             DocLine::Fence => {}
-            DocLine::Example(names) => self.record_all_as_test(names),
-            DocLine::Prose(names) => self.record_all(names),
+            DocLine::Example(names) => self.record_heads_in(true, names),
+            DocLine::Prose(names) => self.record_heads_in(self.names.in_test, names),
         }
     }
 
@@ -128,7 +144,7 @@ impl TypeReferenceCollector {
         let last = path.segments.len().saturating_sub(1);
         path.segments.iter().enumerate().for_each(|(i, seg)| {
             let prefix = (i != last).then(|| seg.ident.to_string());
-            self.record_all(prefix);
+            self.record_in(self.names.in_test, prefix);
             self.visit_path_arguments(&seg.arguments);
         });
     }
@@ -186,11 +202,41 @@ impl<'ast> Visit<'ast> for TypeReferenceCollector {
         self.record(node.to_string());
     }
 
+    /// The names in a path that a `use` may have bound — see `heads_of` for
+    /// the rule. Every segment is still a reference; only the heads drive the
+    /// implications.
+    fn visit_path(&mut self, node: &'ast syn::Path) {
+        let names: Vec<String> = node.segments.iter().map(|s| s.ident.to_string()).collect();
+        self.record_heads(heads_of(&names, &self.declared.modules));
+        syn::visit::visit_path(self, node);
+    }
+
+    /// A bare identifier pattern — `MAX => …`, `Some(Circle) => …` — is not a
+    /// path to syn, yet it is exactly a name resolved in scope: a renamed const
+    /// or an imported variant. Without this, such a const read as dead. Most
+    /// identifier patterns bind a fresh local instead, and reading those as
+    /// heads too is deliberate: a local that happens to shadow an alias keeps
+    /// the original alive, which only ever suppresses a finding. Telling the
+    /// two apart is the resolver's job, not a token's.
+    fn visit_pat_ident(&mut self, node: &'ast syn::PatIdent) {
+        self.record_heads(Some(node.ident.to_string()));
+        syn::visit::visit_pat_ident(self, node);
+    }
+
     fn visit_item_struct(&mut self, node: &'ast syn::ItemStruct) {
         let previous = self.enter_owner(Some(node.ident.to_string()));
         self.around(&node.attrs, &node.generics);
         self.visit_fields(&node.fields);
         self.leave_owner(previous);
+    }
+
+    /// A module's name is a declaration, not a reference: `mod Shape { … }`
+    /// says nothing about a `struct Shape` elsewhere, and recording it hid
+    /// that struct's finding. The attributes and the body are walked as usual.
+    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+        node.attrs.iter().for_each(|a| self.visit_attribute(a));
+        let items = node.content.iter().flat_map(|(_, items)| items);
+        items.for_each(|item| self.visit_item(item));
     }
 
     fn visit_item_enum(&mut self, node: &'ast syn::ItemEnum) {
@@ -261,7 +307,7 @@ impl<'ast> Visit<'ast> for TypeReferenceCollector {
     fn visit_meta_list(&mut self, node: &'ast syn::MetaList) {
         self.visit_path(&node.path);
         let idents: Vec<String> = macro_tokens::all_idents(&node.tokens).collect();
-        self.record_all(idents);
+        self.record_heads(idents);
     }
 
     /// A macro body is an opaque token stream to `syn`, so every reference
@@ -270,7 +316,28 @@ impl<'ast> Visit<'ast> for TypeReferenceCollector {
     fn visit_macro(&mut self, node: &'ast syn::Macro) {
         self.visit_path(&node.path);
         let idents: Vec<String> = macro_tokens::all_idents(&node.tokens).collect();
-        self.record_all(idents);
+        self.record_heads(idents);
+        // A `use` a `macro_rules!` transcriber generates binds a name like a
+        // written one — see `use_bindings::generated_items`.
+        self.names.record_use(use_bindings::generated_uses(node));
+    }
+
+    /// A `use` is exposure, not a reference — see `call_targets::visit_item_use`
+    /// for the rule — so nothing is recorded here. What it *implies* is kept,
+    /// in this context, for `collect_reference_graph` to resolve afterwards:
+    /// a rename's original, and the enum behind an imported variant. The
+    /// second matters because `use Shape::{Circle, Square}` and `use Colour::*`
+    /// are how variants are reached, and after them the enum's own name never
+    /// appears again; dropping the whole item reported such enums dead, and
+    /// recording the path prefix instead kept an enum alive whose variants
+    /// nothing used.
+    ///
+    /// Its attributes are walked like any other item's: a doc comment on a
+    /// `pub use` carries intra-doc links and doc-test fences, both real
+    /// references, and skipping them with the rest of the `use` lost them.
+    fn visit_item_use(&mut self, node: &'ast syn::ItemUse) {
+        node.attrs.iter().for_each(|a| self.visit_attribute(a));
+        self.names.record_use(use_tree::leaves(&node.tree));
     }
 
     test_scoped_visits!();
@@ -300,16 +367,24 @@ fn doc_text(node: &syn::MetaNameValue) -> Option<String> {
 
 /// Collect the reference graph across all parsed files.
 ///
-/// The driver's own `SplitNames` return value is empty by construction here —
-/// this collector routes every name into the graph so it keeps the attribution;
-/// what it takes from the shared driver is the per-file test context and the
-/// `#[cfg(test)]` scoping, which is the part that must not exist twice.
-/// Operation: drive the walk, then take the graph.
+/// The driver's own `SplitNames` return value carries no *names* here — this
+/// collector routes every name into the graph so it keeps the attribution —
+/// but it does carry what every `use` implied, in its context, and that goes
+/// into the graph for `ReferenceGraph::widen`; drop it and `use T as U;
+/// fn f(_: U)` reports `T` dead again. The graph is returned unwidened, see
+/// `ReferenceGraph::implied`. What the shared driver contributes is the
+/// per-file test context and the `#[cfg(test)]` scoping, which is the part
+/// that must not exist twice.
+/// Integration: declared-names pre-pass, drive the walk, then take the graph.
 pub(crate) fn collect_reference_graph(
     parsed: &[(String, String, syn::File)],
     cfg_test_files: &HashSet<String>,
 ) -> ReferenceGraph {
-    let mut collector = TypeReferenceCollector::default();
-    let _ = collect_split(parsed, cfg_test_files, &mut collector);
+    let mut collector = TypeReferenceCollector {
+        declared: collect_declared_names(parsed),
+        ..Default::default()
+    };
+    let names = collect_split(parsed, cfg_test_files, &mut collector);
+    collector.graph.implied = names.uses.implications(&collector.declared.enums);
     collector.graph
 }

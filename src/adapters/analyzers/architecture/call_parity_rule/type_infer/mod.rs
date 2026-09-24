@@ -39,7 +39,7 @@ pub use combinators::combinator_return;
 // once. Scoped to the import, not the module, so a genuinely unused one here
 // still shows up.
 #[allow(unused_imports)]
-pub use infer::{infer_type, BindingLookup, FlatBindings, InferContext};
+pub use infer::{infer_type, BindingLookup, InferContext};
 
 pub use patterns::{extract_bindings, extract_for_bindings};
 

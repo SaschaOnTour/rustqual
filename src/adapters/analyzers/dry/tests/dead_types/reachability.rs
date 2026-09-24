@@ -226,3 +226,302 @@ fn an_impl_on_a_type_alias_does_not_own_the_body() {
     let found = names(code);
     assert!(!found.contains(&"Helper".to_string()), "{found:?}");
 }
+
+#[test]
+fn an_unconsumed_variant_import_keeps_nothing_alive() {
+    // `use Shape::*` is exposure like any other `use`. Recording its prefix
+    // as a reference kept the enum alive with no variant ever used.
+    let found =
+        names("mod inner { pub enum Shape { Circle, Square } }\nuse inner::Shape::*;\nfn f() {}");
+    assert_eq!(found, vec!["Shape"]);
+}
+
+#[test]
+fn a_consumed_variant_keeps_its_enum_alive() {
+    let cases = [
+        "mod inner { pub enum Shape { Circle, Square } }\nuse inner::Shape::*;\nfn f() -> u8 { let _ = Circle; 1 }",
+        "mod inner { pub enum Shape { Circle, Square } }\nuse inner::Shape::{Circle, Square};\nfn f() { let _ = (Circle, Square); }",
+        "mod inner { pub enum Shape { Circle, Square } }\nuse inner::Shape::Circle as C;\nfn f() { let _ = C; }",
+        // `Enum::{self as X}` renames the enum, not a module.
+        "mod inner { pub enum Shape { Circle, Square } }\nuse inner::Shape::{self as Form};\nfn f() { let _ = Form::Circle; }",
+        // A glob or a member through a renamed enum: the parent of the leaf is
+        // the alias, and the enum lookup has to see through it.
+        "mod inner { pub enum Shape { Circle, Square } }\nuse inner::Shape as Form;\nuse Form::*;\nfn f() { let _ = Circle; }",
+        "mod inner { pub enum Shape { Circle, Square } }\nuse inner::Shape as Form;\nuse Form::Circle;\nfn f() { let _ = Circle; }",
+        // The alias resolves transitively, and composes with a renamed member.
+        "mod inner { pub enum Shape { Circle, Square } }\nuse inner::Shape as A;\nuse A as B;\nuse B::*;\nfn f() { let _ = Circle; }",
+        "mod inner { pub enum Shape { Circle, Square } }\nuse inner::Shape as Form;\nuse Form::Circle as C;\nfn f() { let _ = C; }",
+    ];
+    for code in cases {
+        assert!(names(code).is_empty(), "{code}");
+    }
+}
+
+#[test]
+fn a_module_segment_in_a_use_does_not_vouch_for_a_same_named_type() {
+    // The `Shape` in the path is a module; the struct `Shape` has no user. A
+    // prefix recorded as a bare name conflated the two and hid the finding.
+    let found = names(
+        "struct Shape;\nmod inner { pub mod Shape { pub fn foo() {} } }\nuse inner::Shape::foo;\nfn main() { foo(); }",
+    );
+    assert_eq!(found, vec!["Shape"]);
+}
+
+#[test]
+fn a_same_named_variant_of_another_enum_does_not_vouch_for_an_unused_one() {
+    // `Kind::Other` is declared and used; `Shape::Other` exists too and only
+    // the import names `Shape`. A variant's own declaration is not a
+    // reference, so the implication (Other → Shape) must not fire off `Kind`'s
+    // declaration of its own `Other`.
+    let found = names(
+        "mod inner { pub enum Shape { Circle, Other } }\nuse inner::Shape::*;\n\
+         pub enum Kind { Some, Other }\nfn f(_: Kind) {}",
+    );
+    assert_eq!(found, vec!["Shape"]);
+}
+
+#[test]
+fn an_unconsumed_glob_through_a_renamed_enum_keeps_nothing_alive() {
+    // The alias is resolved for the lookup, not counted as consumption: with
+    // no variant used, the renamed enum is as dead as a plainly named one.
+    let found = names(
+        "mod inner { pub enum Shape { Circle, Square } }\nuse inner::Shape as Form;\nuse Form::*;\nfn f() {}",
+    );
+    assert_eq!(found, vec!["Shape"]);
+}
+
+#[test]
+fn a_variant_reached_through_a_test_alias_is_test_only() {
+    // Whichever context declares the alias, resolving it for the lookup must
+    // not move the reference out of the context that made it: the enum is
+    // test-only, never unused, and never production-used.
+    let cases = [
+        "mod inner { pub enum Shape { Circle } }\n#[cfg(test)]\nmod t { use super::inner::Shape as Form; use Form::*; fn t() { let _ = Circle; } }",
+        "mod inner { pub enum Shape { Circle } }\nuse inner::Shape as Form;\n#[cfg(test)]\nmod t { use super::Form::*; fn t() { let _ = Circle; } }",
+    ];
+    for code in cases {
+        let found = detect(code);
+        let kinds: Vec<_> = found.iter().map(|w| (w.name.as_str(), w.kind)).collect();
+        assert_eq!(kinds, vec![("Shape", DeadTypeKind::TestOnly)], "{code}");
+    }
+}
+
+#[test]
+fn a_variant_glob_resolves_across_files_in_either_order() {
+    // The enum map is built over the whole walk and consulted afterwards, so
+    // the file declaring the enum may come before or after the one importing
+    // its variants.
+    let root = "mod shapes;\nuse shapes::Shape::*;\npub fn f() -> u8 { let _ = Circle; 1 }";
+    let shapes = "pub enum Shape { Circle, Square }";
+    for files in [
+        [("src/lib.rs", root), ("src/shapes.rs", shapes)],
+        [("src/shapes.rs", shapes), ("src/lib.rs", root)],
+    ] {
+        let parsed: Vec<_> = files
+            .iter()
+            .map(|(p, c)| (p.to_string(), c.to_string(), syn::parse_file(c).unwrap()))
+            .collect();
+        let found = detect_dead_types(&parsed, &Markers::new(), &Markers::new(), &HashSet::new());
+        assert!(found.is_empty(), "{files:?}: {found:?}");
+    }
+}
+
+#[test]
+fn a_test_alias_does_not_resolve_a_production_import() {
+    // Production has its own `Form`; only the test module says `Shape as
+    // Form`. The production glob is resolved with production renames alone,
+    // so it reaches `Form`, and `Shape` stays what rustc says it is: unused.
+    let found = names(
+        "pub enum Shape { Circle }\npub enum Form { Circle }\nuse Form::*;\nfn f() { let _ = Circle; }\n\
+         #[cfg(test)]\nmod t { use super::Shape as Form; }",
+    );
+    assert_eq!(found, vec!["Shape"]);
+}
+
+#[test]
+fn a_module_and_an_enum_sharing_name_and_member_pool_known_limit() {
+    // `inner::Shape` is a module with a const `Red`; the enum `Shape { Red }`
+    // is dead. By bare name the two are one, and the import's implication
+    // (Red → Shape) keeps the enum alive. Telling them apart needs a resolver;
+    // the limit errs toward a missed finding.
+    let found = names(
+        "pub enum Shape { Red }\nmod inner { pub mod Shape { pub const Red: u8 = 1; } }\n\
+         use inner::Shape::Red;\nfn f() -> u8 { Red }",
+    );
+    assert!(found.is_empty(), "{found:?}");
+}
+
+/// A binding made by a `use` in module `m` is reached as `m::name` from
+/// anywhere — through the path's *last* segment. Each shape here has to keep
+/// the declaration behind the binding alive.
+const CONSUMED_THROUGH_A_QUALIFIED_BINDING: &[(&str, &str)] = &[
+    (
+        "renamed type through a facade module",
+        "mod inner { pub struct Real; }\nmod facade { pub use crate::inner::Real as Facade; }\nfn takes(_: facade::Facade) {}",
+    ),
+    (
+        "renamed type through an alias of the crate root",
+        "mod inner { pub struct Real; }\nuse crate as API;\npub(crate) use inner::Real as Alias;\nfn takes(_: API::Alias) {}",
+    ),
+    (
+        "renamed type through an extern crate self alias",
+        "mod inner { pub struct Real; }\nextern crate self as API;\npub(crate) use inner::Real as Alias;\nfn takes(_: API::Alias) {}",
+    ),
+    // An external crate is a module by definition, whether it is named by
+    // `extern crate` or only by a `use` of it; a CamelCase alias of one is a
+    // module-qualified path. (The re-export lives in this crate here; in the
+    // real two-crate shape it lives in the aliased one, same grain.)
+    (
+        "renamed type through an alias of an extern crate",
+        "mod inner { pub struct Real; }\nextern crate dep as API;\npub(crate) use inner::Real as Alias;\nfn takes(_: API::Alias) {}",
+    ),
+    (
+        "renamed type through a re-export a macro_rules! transcriber generates",
+        "mod inner { pub struct Real; }\n\
+         macro_rules! expose { () => { mod api { pub use crate::inner::Real as Alias; } }; }\nexpose!();\n\
+         fn takes(_: api::Alias) {}",
+    ),
+    (
+        "renamed type through a use alias of an external crate",
+        "mod inner { pub struct Real; }\nuse dep as API;\npub(crate) use inner::Real as Alias;\nfn takes(_: API::Alias) {}",
+    ),
+    (
+        "renamed type through the crate root",
+        "mod inner { pub struct Other; }\npub use inner::Other as TopAlias;\nmod m { fn takes(_: crate::TopAlias) {} }",
+    ),
+    (
+        "variant glob re-exported by a facade module",
+        "mod inner { pub enum Shape { Circle } }\nmod facade { pub use crate::inner::Shape::*; }\nfn f() { let _ = facade::Circle; }",
+    ),
+    (
+        "renamed const used as a pattern",
+        "mod inner { pub const LIMIT: u8 = 3; }\nuse inner::LIMIT as MAX;\nfn classify(n: u8) -> u8 { match n { MAX => 1, _ => 0 } }",
+    ),
+    (
+        "glob-imported variant used only as a pattern",
+        "mod inner { pub enum Shape { Circle } }\nuse inner::Shape::*;\nfn f(s: Option<u8>) -> u8 { match s { Some(Circle) => 1, _ => 0 } }",
+    ),
+    (
+        "struct-like variant constructed and matched after a glob",
+        "mod inner { pub enum Shape { Circle { r: u8 } } }\nuse inner::Shape::*;\nfn f() -> u8 { match (Circle { r: 1 }) { Circle { r } => r } }",
+    ),
+    (
+        "tuple variant called through an enum alias",
+        "mod inner { pub enum Shape { Circle(u8) } }\nuse inner::Shape as Form;\nfn f() -> Form { Form::Circle(1) }",
+    ),
+];
+
+#[test]
+fn a_declaration_consumed_through_a_qualified_binding_is_alive() {
+    for (label, code) in CONSUMED_THROUGH_A_QUALIFIED_BINDING {
+        let found = names(code);
+        assert!(found.is_empty(), "{label}: {found:?}");
+    }
+}
+
+#[test]
+fn a_self_qualified_variant_is_a_use_of_the_impl_owner() {
+    // `Self::Circle` inside `impl Kind` is `Kind::Circle`: a use of `Kind`,
+    // not of the `Circle` that `use Shape::*` brought in.
+    let found = names(
+        "pub enum Shape { Circle }\npub enum Kind { Circle }\nuse Shape::*;\n\
+         impl Kind { fn make() -> Kind { Self::Circle } }\nfn f() -> Kind { Kind::make() }",
+    );
+    assert_eq!(found, vec!["Shape"]);
+}
+
+/// The last segment of a qualified path is a binding only when the qualifier
+/// can be a module. A CamelCase qualifier names a type — a declared enum, an
+/// alias of one, one from another crate — and its last segment is a variant or
+/// an associated item, never something a `use` bound.
+const QUALIFIED_BY_A_TYPE: &[(&str, &str)] = &[
+    (
+        "a declared enum",
+        "pub enum Shape { Circle }\npub enum Kind { Circle }\nuse Shape::*;\nfn f() { let _ = Kind::Circle; }",
+    ),
+    (
+        "an enum from another crate",
+        "pub enum Shape { Less }\nuse Shape::*;\nfn f() -> std::cmp::Ordering { std::cmp::Ordering::Less }",
+    ),
+];
+
+#[test]
+fn a_variant_qualified_by_a_type_is_not_a_use_of_a_glob_import() {
+    for (label, code) in QUALIFIED_BY_A_TYPE {
+        assert_eq!(names(code), vec!["Shape"], "{label}");
+    }
+}
+
+#[test]
+fn a_declared_module_named_like_a_type_still_carries_its_bindings() {
+    // `Facade` is CamelCase, and an unrelated enum `Facade { Alias }` exists
+    // — yet at the use site `Facade` is a *module* re-exporting `Real`.
+    // Deciding by the enum alone reported `Real` dead; a declared module
+    // name overrides the convention, and the ambiguity errs toward alive —
+    // for the enum too, which the path's first segment names by bare name.
+    let found = names(
+        "mod other { pub enum Facade { Alias } }\nmod inner { pub struct Real; }\n\
+         #[allow(non_snake_case)]\nmod Facade { pub use crate::inner::Real as Alias; }\n\
+         fn takes(_: Facade::Alias) {}",
+    );
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn a_camel_case_alias_of_a_module_still_carries_its_bindings() {
+    // `use shapes as Shapes` names a module however it is spelled, so
+    // `Shapes::Circle` reaches the glob re-export inside it.
+    let found = names(
+        "mod shapes { pub enum Shape { Circle, Square } pub use self::Shape::*; }\n\
+         use shapes as Shapes;\nfn f() { let _ = [Shapes::Circle, Shapes::Square]; }",
+    );
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn a_variant_qualified_by_an_enum_alias_pools_known_limit() {
+    // `use Other as Kind; Kind::Circle` is a use of `Other`. But `use Other
+    // as Kind` reads the same when `Other` is an external crate, so the alias
+    // counts as a module, `Circle` is a head, and the glob keeps `Shape`
+    // alive. The limit errs toward a missed finding.
+    let found = names(
+        "pub enum Shape { Circle }\npub enum Other { Circle }\nuse Other as Kind;\nuse Shape::*;\n\
+         fn f() -> Other { Kind::Circle }",
+    );
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn a_crate_shadowed_by_a_same_named_type_elsewhere_still_carries_its_bindings() {
+    // `use Dep as API` at the crate root sees the crate `Dep`; the struct in
+    // `unrelated` is out of scope there. Reading every declared type name as
+    // "not a module" reported `Real` dead. The struct itself pools with the
+    // crate by bare name and stays alive too — the contract's direction.
+    let found = names(
+        "mod unrelated { pub struct Dep; }\nmod inner { pub struct Real; }\n\
+         use Dep as API;\npub(crate) use inner::Real as Alias;\nfn takes(_: API::Alias) {}",
+    );
+    assert!(found.is_empty(), "{found:?}");
+}
+
+#[test]
+fn a_metavariable_is_not_a_reference_to_a_same_named_type() {
+    // `$T` in a transcriber is whatever the invocation passes, not the
+    // struct `T`.
+    let found = names(
+        "pub struct T;\nmacro_rules! hold { ($T:ty) => { let _: Option<$T> = None; }; }\nfn f() {}",
+    );
+    assert_eq!(found, vec!["T"]);
+}
+
+#[test]
+fn a_doc_comment_on_a_use_still_counts() {
+    // A `use` records no name, but its attributes are attributes like any
+    // other: an intra-doc link documents the API, a doc-test fence is code
+    // `cargo test` runs. Skipping them with the rest of the `use` lost both.
+    let found = names(
+        "pub struct Linked;\npub struct Tested;\nmod inner { pub fn f() {} }\n\
+         /// See [`Linked`].\n///\n/// ```\n/// let _ = Tested;\n/// ```\npub use inner::f;",
+    );
+    assert_eq!(found, vec!["Tested"], "the doc-test use is test-only");
+}

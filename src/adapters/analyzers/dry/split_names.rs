@@ -11,6 +11,10 @@ use std::collections::HashSet;
 
 use syn::visit::Visit;
 
+use crate::adapters::shared::use_tree::UseLeaves;
+
+use super::use_bindings::ContextUses;
+
 use super::{has_cfg_test, has_test_attr};
 
 /// Names seen in production code and names seen only in test code.
@@ -40,14 +44,47 @@ impl ContextRefs {
 #[derive(Default)]
 pub(crate) struct SplitNames {
     pub(crate) refs: ContextRefs,
-    /// Names a `pub use` re-exports. Usage, but not a *call*: DRY-002 needs it
-    /// so a re-exported function is not called dead, while TQ-003 asks whether
-    /// production calls the function and must not count it.
-    pub(crate) reexported: HashSet<String>,
+    /// The subset of `refs` used *unqualified*: a bare `perform()`, the first
+    /// segment of `Form::Circle`, and — since a token stream cannot tell —
+    /// every ident recovered from a macro body. Only these can consume what a
+    /// `use` bound, so only these drive the implications.
+    pub(crate) heads: ContextRefs,
+    pub(crate) uses: ContextUses,
     pub(crate) in_test: bool,
 }
 
 impl SplitNames {
+    /// Remember what a `use` implies, in the current context.
+    /// Trivial: delegates with the current context.
+    pub(crate) fn record_use(&mut self, leaves: UseLeaves) {
+        self.uses.record(self.in_test, leaves);
+    }
+
+    /// The call set with every `use` implication resolved — what DRY-002
+    /// reads. It is a separate value on purpose: `refs` itself stays what the
+    /// code literally calls, because TQ-003 and the marker check read it with
+    /// "production calls it" as their trigger, and there a name pooled in by
+    /// bare grain — an unrelated rename, a same-named module — is not a
+    /// missed finding but an invented one. Tests are the other way round:
+    /// a test reaching a function through an alias does test it, so the test
+    /// side may always be read widened.
+    /// Integration: clone, widen, return.
+    pub(crate) fn widened(&self) -> ContextRefs {
+        let mut refs = ContextRefs {
+            production: self.refs.production.clone(),
+            tests: self.refs.tests.clone(),
+        };
+        refs.widen_by_implications(&self.heads, &self.uses.renames());
+        refs
+    }
+
+    /// Record a name that is both a reference and a head.
+    /// Operation: two inserts, no own calls.
+    pub(crate) fn record_head(&mut self, name: String) {
+        self.heads.set(self.in_test).insert(name.clone());
+        self.refs.set(self.in_test).insert(name);
+    }
+
     /// The set for the current context.
     /// Trivial: delegates to the pair.
     pub(crate) fn target(&mut self) -> &mut HashSet<String> {
@@ -154,7 +191,7 @@ macro_rules! test_scoped_visits {
 
         fn visit_variant(&mut self, node: &'ast syn::Variant) {
             let previous = self.names.enter(&node.attrs);
-            syn::visit::visit_variant(self, node);
+            crate::adapters::analyzers::dry::split_names::walk_variant_members(self, node);
             self.names.leave(previous);
         }
 
@@ -257,4 +294,22 @@ where
         collector.visit_file(file);
     });
     std::mem::take(collector.names())
+}
+
+/// Everything of a variant except its name: attributes, fields, discriminant.
+///
+/// The name is a declaration, not a reference — the same rule as for the enum
+/// itself. Recording it put `Other` into the bucket of every enum declaring an
+/// `Other`, and once a variant implies its enum (`use Shape::*`), one enum's
+/// declaration vouched for another enum nothing used.
+/// Operation: three walks, no own calls.
+pub(crate) fn walk_variant_members<'ast, V: Visit<'ast> + ?Sized>(
+    visitor: &mut V,
+    node: &'ast syn::Variant,
+) {
+    node.attrs.iter().for_each(|a| visitor.visit_attribute(a));
+    visitor.visit_fields(&node.fields);
+    if let Some((_, discriminant)) = &node.discriminant {
+        visitor.visit_expr(discriminant);
+    }
 }

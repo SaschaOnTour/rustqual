@@ -15,7 +15,9 @@ fn split_refs(path: &str, code: &str, test_files: &[&str]) -> (HashSet<String>, 
     let syntax = syn::parse_file(code).expect("fixture must parse");
     let parsed = vec![(path.to_string(), code.to_string(), syntax)];
     let cfg_test: HashSet<String> = test_files.iter().map(|f| f.to_string()).collect();
-    let all = collect_reference_graph(&parsed, &cfg_test).flatten();
+    let mut graph = collect_reference_graph(&parsed, &cfg_test);
+    graph.widen();
+    let all = graph.flatten();
     (all.production, all.tests)
 }
 
@@ -212,13 +214,19 @@ fn prose_outside_a_doc_fence_is_still_not_a_reference() {
 }
 
 #[test]
-fn a_use_path_counts_as_a_reference() {
-    // Load-bearing and easy to remove by accident: it works only because syn's
-    // default `visit_item_use` walk feeds the path idents to `visit_ident`. A
-    // "don't count imports" cleanup would turn every re-exported facade type
-    // into a finding.
-    assert!(refs("use crate::inner::Facade;").contains("Facade"));
-    assert!(refs("pub use crate::inner::Facade;").contains("Facade"));
+fn a_use_path_is_exposure_not_a_reference() {
+    // The reverse of what an earlier version pinned. An import says where a
+    // name can be reached from; a `pub use` says where it can be reached from
+    // *outside*. Neither is a use of the thing. Counting them kept a type alive
+    // whose only mention was its own facade, and the facade type nobody
+    // consumes is exactly the finding — `qual:api` is the word for the ones
+    // that are consumed from beyond the workspace.
+    assert!(!refs("use crate::inner::Facade;").contains("Facade"));
+    assert!(!refs("pub use crate::inner::Facade;").contains("Facade"));
+    assert!(
+        refs("use crate::inner::Facade;\nfn f() -> Facade { Facade }").contains("Facade"),
+        "a use followed by a real use still counts, through the body"
+    );
 }
 
 #[test]
@@ -330,4 +338,146 @@ fn test_context_switches_on_every_attributed_node_kind() {
             "{label}: a #[cfg(test)] node must not contribute a production reference: {production:?}"
         );
     }
+}
+
+/// A type or constant reached only through what a `use` exposes, then
+/// consumed. Under a rename the body never speaks the declaration's name; under
+/// a variant import it never speaks the enum's. Both are consumption, and both
+/// are visible only in the `use` item — as the alias's target and as the
+/// path's prefix.
+const CONSUMED_THROUGH_THE_USE: &[(&str, &str, &str)] = &[
+    ("renamed type in a signature", "use inner::T as U;\nfn f(_: U) {}", "T"),
+    ("renamed type constructed", "use inner::T as U;\nfn f() -> U { U }", "T"),
+    (
+        "renamed type through an associated fn",
+        "use inner::T as U;\nfn f() { let _ = U::new(); }",
+        "T",
+    ),
+    ("renamed const", "use inner::LIMIT as MAX;\nfn f() -> u8 { MAX }", "LIMIT"),
+    // The two variant rows declare the enum: the import implies "consuming a
+    // variant consumes its enum" only for a parent that *is* an enum with that
+    // variant — a module segment sharing a type's name says nothing.
+    (
+        "named variant import",
+        "mod inner { pub enum Shape { Circle, Square } }\nuse inner::Shape::{Circle, Square};\nfn f(s: u8) -> u8 { match s { 0 => Circle, _ => Square } }",
+        "Shape",
+    ),
+    (
+        "glob variant import",
+        "mod inner { pub enum Colour { Red } }\nuse inner::Colour::*;\nfn f() -> u8 { Red }",
+        "Colour",
+    ),
+    (
+        "renamed type inside a body",
+        "fn f() { use inner::T as U; let _ = U::new(); }",
+        "T",
+    ),
+    // The next two put the alias in a declaration's own bucket, not the roots:
+    // the owner buckets are widened too, or a field typed by an alias kept
+    // nothing alive.
+    (
+        "renamed type in a field",
+        "use inner::T as U;\nstruct H { u: U }\nfn f(_: H) {}",
+        "T",
+    ),
+    (
+        "renamed type in a method body",
+        "use inner::T as U;\nstruct H;\nimpl H { fn g(&self) -> U { U } }\nfn f(_: H) {}",
+        "T",
+    ),
+    // A binding is reached through the module holding it: the last segment
+    // of `crate::U` / `super::U` / `facade::U` is the head.
+    (
+        "renamed type through crate::",
+        "pub use inner::T as U;\nmod m { pub fn f(_: crate::U) {} }",
+        "T",
+    ),
+    (
+        "renamed type through super::super::",
+        "use inner::T as U;\nmod a { pub mod b { pub fn f(_: super::super::U) {} } }",
+        "T",
+    ),
+    (
+        "renamed type through a facade module",
+        "mod facade { pub use crate::inner::T as U; }\nfn f(_: facade::U) {}",
+        "T",
+    ),
+];
+
+#[test]
+fn two_renames_to_one_alias_keep_both_originals() {
+    let set = refs(
+        "mod one { use crate::t::Foo as Item; fn one() -> Item { Item } }\n\
+         mod two { use crate::t::Baz as Item; fn two() -> Item { Item } }",
+    );
+    assert!(set.contains("Foo") && set.contains("Baz"), "{set:?}");
+}
+
+#[test]
+fn a_variant_glob_inside_a_test_module_is_a_test_reference() {
+    let (production, tests) = split_refs(
+        "src/lib.rs",
+        "pub enum Colour { Red }\n#[cfg(test)]\nmod t { use super::Colour::*; fn f() -> u8 { Red } }",
+        &[],
+    );
+    assert!(tests.contains("Colour") && !production.contains("Colour"));
+}
+
+#[test]
+fn a_test_rename_colliding_with_a_production_name_widens_only_the_tests() {
+    // Production names its own `H`; only the test module says `Fixture as H`.
+    // Resolving that alias against the production set made `Fixture` a
+    // production reference — a `qual:test_helper` on it then read as spent.
+    let (production, tests) = split_refs(
+        "src/lib.rs",
+        "struct Fixture;\nstruct H;\nfn f(_: H) {}\n#[cfg(test)]\nmod t { use super::Fixture as H; fn g(_: H) {} }",
+        &[],
+    );
+    assert!(
+        tests.contains("Fixture") && !production.contains("Fixture"),
+        "{production:?} / {tests:?}"
+    );
+}
+
+#[test]
+fn a_declaration_consumed_through_its_use_is_referenced() {
+    for (label, code, original) in CONSUMED_THROUGH_THE_USE {
+        let set = refs(code);
+        assert!(set.contains(*original), "{label}: {set:?}");
+    }
+}
+
+#[test]
+fn an_unconsumed_alias_still_keeps_nothing_alive() {
+    // The alias is exposure like any other leaf: only consumption *through* it
+    // brings the original back.
+    let set = refs("use inner::T as U;\nfn f() {}");
+    assert!(!set.contains("T"), "{set:?}");
+}
+
+#[test]
+fn a_variant_walk_skips_the_name_and_keeps_the_rest() {
+    // The shared scoped visitor walks a variant through this helper. Its name
+    // is a declaration; its attributes, fields and discriminant are where the
+    // references live.
+    use syn::visit::Visit;
+
+    #[derive(Default)]
+    struct Idents(Vec<String>);
+    impl<'ast> Visit<'ast> for Idents {
+        fn visit_ident(&mut self, node: &'ast syn::Ident) {
+            self.0.push(node.to_string());
+        }
+    }
+
+    let file = syn::parse_file("enum E { #[doc = \"x\"] Named(Inner) = LIMIT }").unwrap();
+    let syn::Item::Enum(e) = &file.items[0] else {
+        panic!("fixture is one enum")
+    };
+    let mut seen = Idents::default();
+    crate::adapters::analyzers::dry::split_names::walk_variant_members(&mut seen, &e.variants[0]);
+    assert!(!seen.0.contains(&"Named".to_string()), "{:?}", seen.0);
+    assert!(seen.0.contains(&"Inner".to_string()), "{:?}", seen.0);
+    assert!(seen.0.contains(&"LIMIT".to_string()), "{:?}", seen.0);
+    assert!(seen.0.contains(&"doc".to_string()), "{:?}", seen.0);
 }

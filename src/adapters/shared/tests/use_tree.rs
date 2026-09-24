@@ -1,8 +1,9 @@
 //! Tests for `gather_alias_map` — per-file mapping of
 //! import-introduced identifiers to their canonical path segments
-//! plus the leading-colon (absolute-root) bit.
+//! plus the leading-colon (absolute-root) bit — and for `leaves`, the
+//! prefix/rename product of one `use` tree.
 
-use crate::adapters::shared::use_tree::{gather_alias_map, AliasTarget};
+use crate::adapters::shared::use_tree::{gather_alias_map, leaves, AliasTarget};
 
 fn parse(src: &str) -> syn::File {
     syn::parse_str(src).expect("parse")
@@ -130,4 +131,33 @@ fn test_alias_map_mixed_absolute_and_relative() {
     let map = gather_alias_map(&f);
     assert_eq!(map.get("A"), Some(&relative(&["foo", "A"])));
     assert_eq!(map.get("B"), Some(&absolute(&["bar", "B"])));
+}
+
+#[test]
+fn leaves_give_the_renames_members_and_globs() {
+    // A plain import is a member of its parent and yields no rename; a rename
+    // is both, under its original name; `self` names the parent itself and is
+    // neither, while `self as E` renames the parent; a glob names only its
+    // parent.
+    let f = parse(
+        "use a::{plain, work as perform, b::{self, Thing as T}, c::*, d::e::Deep, e::{self as E}};",
+    );
+    let syn::Item::Use(u) = &f.items[0] else {
+        panic!("fixture is one use item")
+    };
+    let got = leaves(&u.tree);
+    let pairs = |v: &[(&str, &str)]| {
+        v.iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        got.renames,
+        pairs(&[("perform", "work"), ("T", "Thing"), ("E", "e")])
+    );
+    assert_eq!(
+        got.members,
+        pairs(&[("plain", "a"), ("work", "a"), ("Thing", "b"), ("Deep", "e")])
+    );
+    assert_eq!(got.globs, vec!["c".to_string()]);
 }

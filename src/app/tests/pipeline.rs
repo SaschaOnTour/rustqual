@@ -7,6 +7,7 @@ use crate::app::metrics::count_coupling_warnings;
 use crate::app::pipeline::{analyze_and_output, output_results, run_analysis};
 use crate::app::warnings::{check_suppression_ratio, count_all_suppressions};
 use crate::config::Config;
+use crate::domain::findings::{DryFindingDetails, TqFindingKind};
 use crate::findings::Suppression;
 use crate::report::{AnalysisResult, Summary};
 use std::fs;
@@ -773,4 +774,145 @@ fn test_analyze_and_output_returns_analyzed_functions() {
         "returned analysis must carry the fixture's functions, got {:?}",
         analysis.results.iter().map(|f| &f.name).collect::<Vec<_>>()
     );
+}
+
+#[test]
+fn a_qual_api_on_a_re_exported_but_unconsumed_function_is_not_spent() {
+    // The end-to-end shape of "a `use` is exposure, not consumption": a library
+    // root re-exports an entry point nothing in the workspace calls, and the
+    // author has marked it. That marker is doing its job. Counting the
+    // `pub use` as a production call reported it as spent — the one advice
+    // that makes an author delete a marker holding back a real finding.
+    let lib = "pub mod inner;\npub use inner::entry;";
+    let inner = "// qual:api\npub fn entry() {}";
+    let parsed = vec![
+        (
+            "src/lib.rs".to_string(),
+            lib.to_string(),
+            syn::parse_file(lib).unwrap(),
+        ),
+        (
+            "src/inner.rs".to_string(),
+            inner.to_string(),
+            syn::parse_file(inner).unwrap(),
+        ),
+    ];
+    let analysis = run_analysis(parsed, &Config::default());
+    let orphans = &analysis.findings.orphan_suppressions;
+    assert!(orphans.is_empty(), "marker still does its job: {orphans:?}");
+    let dead_entry = analysis.findings.dry.iter().any(|f| {
+        matches!(&f.details, DryFindingDetails::DeadCode { qualified_name, .. } if qualified_name.ends_with("entry"))
+    });
+    assert!(
+        !dead_entry,
+        "and the marker keeps the finding away: {:?}",
+        analysis.findings.dry
+    );
+}
+
+#[test]
+fn a_qual_test_helper_reached_through_a_colliding_test_alias_is_not_spent() {
+    // End to end for the per-context alias rule: the test module says
+    // `helper as h`, production calls its own `h`. Resolving the test alias
+    // against the production call set made `helper` production-called, and
+    // the marker check told the author to remove a marker doing its job.
+    let code = "// qual:test_helper\npub fn helper() { let x = 1; }\n\
+        pub fn h() { let x = 1; }\npub fn entry() { h(); }\n\
+        #[cfg(test)]\nmod tests { use super::helper as h; fn t() { h(); } }";
+    let parsed = vec![(
+        "src/lib.rs".to_string(),
+        code.to_string(),
+        syn::parse_file(code).unwrap(),
+    )];
+    let analysis = run_analysis(parsed, &Config::default());
+    let orphans = &analysis.findings.orphan_suppressions;
+    assert!(orphans.is_empty(), "marker still does its job: {orphans:?}");
+    let dead_helper = analysis.findings.dry.iter().any(|f| {
+        matches!(&f.details, DryFindingDetails::DeadCode { qualified_name, .. } if qualified_name.ends_with("helper"))
+    });
+    assert!(!dead_helper, "{:?}", analysis.findings.dry);
+}
+
+/// One source, two consumers with opposite safe directions: DRY-002 may read
+/// an alias implication as a call (an extra name only hides a finding), but
+/// TQ-003 and the marker check take "production calls it" as their trigger,
+/// and there the same extra name invents one.
+fn analysed(code: &str) -> AnalysisResult {
+    let parsed = vec![(
+        "src/lib.rs".to_string(),
+        code.to_string(),
+        syn::parse_file(code).unwrap(),
+    )];
+    run_analysis(parsed, &Config::default())
+}
+
+#[test]
+fn an_alias_implication_does_not_make_a_function_untested() {
+    // `b::go` calls its own `run`; the unrelated `use inner::dead as run` in
+    // `a` pools with it by bare name. DRY-002 lets `dead` go (a known limit);
+    // TQ-003 must not then report `dead` as an untested function with
+    // production callers — nothing calls it.
+    let analysis = analysed(
+        "mod inner { pub fn dead() { let x = 1; } }\nmod a { use crate::inner::dead as run; }\n\
+         mod b { fn run() { let x = 1; } pub fn go() { run(); } }\npub fn main_entry() { b::go(); }",
+    );
+    let untested: Vec<&str> = analysis
+        .findings
+        .test_quality
+        .iter()
+        .filter(|f| f.kind == TqFindingKind::Untested)
+        .map(|f| f.function_name.as_str())
+        .collect();
+    assert!(!untested.contains(&"dead"), "{untested:?}");
+}
+
+#[test]
+fn a_test_reaching_a_function_through_an_alias_still_tests_it() {
+    // The test side is the other way round: a test that calls `w()` after
+    // `use super::work as w` does test `work`, and losing that reports it
+    // untested.
+    let analysis = analysed(
+        "pub fn work() -> u8 { let x = 1; x }\npub fn entry() -> u8 { work() }\n\
+         #[cfg(test)]\nmod t { use super::work as w; #[test] fn t() { assert_eq!(w(), 1); } }",
+    );
+    let untested: Vec<&str> = analysis
+        .findings
+        .test_quality
+        .iter()
+        .filter(|f| f.kind == TqFindingKind::Untested)
+        .map(|f| f.function_name.as_str())
+        .collect();
+    assert!(!untested.contains(&"work"), "{untested:?}");
+}
+
+#[test]
+fn a_type_marker_is_not_spent_by_an_alias_implication() {
+    // The module `Shape` and the enum `Shape { Red }` pool by bare name, so
+    // DRY-006 keeps the enum (a known limit). The `qual:api` on it is then the
+    // author's word that it is an entry point — the marker check must not
+    // call it spent on the strength of the same pooling.
+    let analysis = analysed(
+        "// qual:api\npub enum Shape { Red }\n\
+         mod inner { pub mod Shape { pub const Red: u8 = 1; } }\n\
+         use inner::Shape::Red;\npub fn f() -> u8 { Red }",
+    );
+    let orphans = &analysis.findings.orphan_suppressions;
+    assert!(orphans.is_empty(), "marker still does its job: {orphans:?}");
+}
+
+#[test]
+fn a_marker_is_not_spent_by_a_call_through_an_alias_known_limit() {
+    // Production calls `w()`, which is `work`; a resolver would report the
+    // `qual:api` on `work` spent. The marker check reads what production
+    // literally calls, because the alias implications pool by bare name and
+    // an invented "spent" is the expensive mistake there — so a marker on a
+    // function only reached through its alias is left standing, and TQ-003
+    // likewise does not see such a function as having production callers.
+    // Both err toward a missed finding.
+    let analysis = analysed(
+        "// qual:api\npub fn work() { let x = 1; }\nuse crate::work as w;\npub fn entry() { w(); }\n\
+         mod inner { pub struct Real; }\n// qual:api\npub use inner::Real as Alias;\npub fn takes(_: Alias) {}",
+    );
+    let orphans = &analysis.findings.orphan_suppressions;
+    assert!(orphans.is_empty(), "{orphans:?}");
 }
