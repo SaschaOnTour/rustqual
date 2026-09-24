@@ -57,7 +57,9 @@ misread a `macro_rules!` invocation and a `use`.
   it. A `use` that a `macro_rules!` transcriber generates counts like a
   written one, so `api::Alias()` after `expose!()` reaches `real` — where the
   transcriber parses as written; what only a metavariable would create is
-  outside this analysis, as all macro-generated code is. Everything
+  outside this analysis, as all macro-generated code is. A metavariable
+  (`$f`, `$T`) is never read as the same-named function or type, and the
+  attributes of a `use` — doc links, doc-test fences — are still read. Everything
   is matched by bare name, and what that grain cannot tell apart stays alive;
   the known shapes are pinned as such.
   Not in this release: a function used only as a *value* (`let f: fn() =

@@ -2200,6 +2200,18 @@ fn a_module_qualifier_is_not_a_call_of_a_same_named_function() {
 }
 
 #[test]
+fn a_metavariable_is_not_a_call_of_a_same_named_function() {
+    // `$f()` in a `macro_rules!` definition applies whatever the invocation
+    // passes; the `f` in it is a metavariable, not the function `f`. Reading
+    // it as a call hid a dead `fn f` — and, since TQ-003 and the marker check
+    // read the same set, turned it into an "untested" finding and a spent
+    // `qual:api`.
+    let code = "fn f() { let x = 1; }\nmacro_rules! run { ($f:path) => { $f() }; }\nfn main() {}";
+    let found = dead_code_warnings(&parse(code));
+    assert!(found.iter().any(|w| w.function_name == "f"), "{found:?}");
+}
+
+#[test]
 fn a_binding_a_metavariable_would_create_is_not_seen_known_limit() {
     // rustqual does not expand macros. A transcriber is read where it parses
     // as written; `pub use crate::real as $name` does not, and the `Alias`
