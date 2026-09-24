@@ -1,5 +1,6 @@
 pub(crate) mod btc;
 pub(crate) mod deh;
+mod identity;
 pub(crate) mod iet;
 pub(crate) mod nms;
 pub(crate) mod oi;
@@ -7,7 +8,6 @@ pub(crate) mod sit;
 pub(crate) mod slm;
 
 use std::collections::{HashMap, HashSet};
-use syn::spanned::Spanned;
 
 use crate::config::StructuralConfig;
 use crate::findings::Dimension;
@@ -112,12 +112,33 @@ pub struct StructuralAnalysis {
 pub(crate) struct StructuralMetadata {
     /// enum_name → (defining_file, variant_names)
     pub enum_defs: HashMap<String, (String, Vec<String>)>,
-    /// type_name → defining_file (structs + enums)
-    pub type_defs: HashMap<String, String>,
-    /// trait_name → TraitInfo
-    pub trait_defs: HashMap<String, TraitInfo>,
-    /// trait_name → list of (impl_type, file) — production impls only
-    pub trait_impls: HashMap<String, Vec<(String, String)>>,
+    /// type_name → every file defining a type of that name (structs +
+    /// enums), in walk order. All of them, not the last: two top-level types
+    /// may share a name, and keeping one let the directory walk order decide
+    /// which, so OI flagged a correct impl on one machine and not on another.
+    pub type_defs: HashMap<String, Vec<String>>,
+    /// trait_name → every trait of that name, in walk order. All of them,
+    /// for the reason `type_defs` keeps all: impls are counted by bare trait
+    /// name, and keeping the last definition let the walk order decide which
+    /// trait a single-impl finding landed on.
+    pub trait_defs: HashMap<String, Vec<TraitInfo>>,
+    /// trait_name → list of (impl_type, file, certain_path) — production
+    /// impls only; `certain_path` when the trait is named bare, is no prelude
+    /// name, and no cfg gates the impl (see `identity`).
+    pub trait_impls: HashMap<String, Vec<(String, String, bool)>>,
+    /// (file, name) for every name a `use` binds, from any root — `self::`
+    /// and `super::` may reach a re-export of a foreign trait as well as
+    /// `crate::` can. A bare `impl Name` in that file may mean it.
+    pub outside_imports: HashSet<(String, String)>,
+    /// Files holding a glob `use`: any bare name there may come from it.
+    pub glob_files: HashSet<String>,
+    /// file → its logical places, (crate root, top-level module), from the
+    /// module tree walk; see `shared::reachability::file_modules`.
+    pub file_modules: HashMap<String, Vec<(String, String)>>,
+    /// Depth of `#[cfg(…)]`-gated inline modules around the item being
+    /// collected. rustqual evaluates no cfg, so an impl in there may not
+    /// exist and is never *certain* for SIT.
+    pub(crate) cfg_depth: usize,
     /// trait_name → number of impls living in `#[cfg(test)]` code (a whole test
     /// file, an inline `#[cfg(test)] mod` block, or an item-level `#[cfg(test)]`
     /// on the impl). Not in `trait_impls` (metadata skips test code), but they
@@ -135,6 +156,10 @@ pub(crate) struct TraitInfo {
     pub line: usize,
     pub is_pub: bool,
     pub method_count: usize,
+    /// Behind a `cfg` rustqual does not evaluate — on the trait, an inline
+    /// module around it, its file, or the `mod` pulling the file in — so it
+    /// may not exist, and SIT reports nothing about it.
+    pub gated: bool,
 }
 
 /// Collect structural metadata from all parsed files. Whole test files
@@ -151,77 +176,95 @@ pub(crate) fn collect_metadata(
         type_defs: HashMap::new(),
         trait_defs: HashMap::new(),
         trait_impls: HashMap::new(),
+        outside_imports: HashSet::new(),
+        glob_files: HashSet::new(),
+        file_modules: HashMap::new(),
+        cfg_depth: 0,
         cfg_test_trait_impl_counts: collect_cfg_test_trait_impl_counts(parsed, cfg_test_files),
         inherent_impls: Vec::new(),
+    };
+    let places = crate::adapters::shared::reachability::file_places(parsed);
+    meta.file_modules = places.places;
+    // Gated by the module tree; a file no crate root reaches is judged by
+    // its own `#![cfg]` alone.
+    let gated_files: HashSet<&String> = parsed
+        .iter()
+        .map(|(path, _, _)| path)
+        .filter(|path| places.gated.contains(*path))
+        .collect();
+    let file_gated = |path: &String, file: &syn::File| {
+        gated_files.contains(path) || identity::has_cfg(&file.attrs)
     };
     parsed.iter().for_each(|(path, _, syntax)| {
         if cfg_test_files.contains(path) {
             return;
         }
+        meta.cfg_depth = usize::from(file_gated(path, syntax));
         syntax.items.iter().for_each(|item| {
             collect_item_metadata(item, path, &mut meta);
         });
     });
+    meta.cfg_depth = 0;
     meta
+}
+
+impl StructuralMetadata {
+    /// Record one more file defining a type of this name.
+    /// Operation: one map entry push, no own calls.
+    fn define_type(&mut self, name: &str, path: &str) {
+        self.type_defs
+            .entry(name.to_string())
+            .or_default()
+            .push(path.to_string());
+    }
 }
 
 /// Extract metadata from a single top-level item.
 /// Operation: match dispatch on item kind, own calls hidden in closures.
 fn collect_item_metadata(item: &syn::Item, path: &str, meta: &mut StructuralMetadata) {
-    let impl_type_name = |imp: &syn::ItemImpl| -> Option<String> { extract_impl_type_name(imp) };
     let cfg_test = |attrs: &[syn::Attribute]| -> bool { has_cfg_test_attr(attrs) };
     match item {
-        syn::Item::Enum(e) => {
+        // A `#[cfg(test)]` type does not exist in a production build, so it
+        // cannot be what a production impl means; counting it let a test
+        // fixture vouch for an orphaned impl of a same-named type.
+        syn::Item::Enum(e) if !cfg_test(&e.attrs) => {
             let name = e.ident.to_string();
             let variants: Vec<String> = e.variants.iter().map(|v| v.ident.to_string()).collect();
-            meta.type_defs.insert(name.clone(), path.to_string());
+            meta.define_type(&name, path);
             meta.enum_defs.insert(name, (path.to_string(), variants));
         }
-        syn::Item::Struct(s) => {
-            meta.type_defs.insert(s.ident.to_string(), path.to_string());
-        }
-        syn::Item::Trait(t) => {
+        syn::Item::Struct(s) if !cfg_test(&s.attrs) => meta.define_type(&s.ident.to_string(), path),
+        // A `#[cfg(test)]` trait is no second definition for SIT's
+        // ambiguity rule — it does not exist where the production impls do.
+        syn::Item::Trait(t) if !cfg_test(&t.attrs) => {
             let is_pub = matches!(t.vis, syn::Visibility::Public(_));
             let method_count = t
                 .items
                 .iter()
                 .filter(|i| matches!(i, syn::TraitItem::Fn(_)))
                 .count();
-            meta.trait_defs.insert(
-                t.ident.to_string(),
-                TraitInfo {
+            meta.trait_defs
+                .entry(t.ident.to_string())
+                .or_default()
+                .push(TraitInfo {
                     file: path.to_string(),
                     line: t.ident.span().start().line,
                     is_pub,
                     method_count,
-                },
-            );
+                    gated: identity::has_cfg(&t.attrs) || meta.cfg_depth > 0,
+                });
         }
-        syn::Item::Impl(imp) if !cfg_test(&imp.attrs) => {
-            if let Some(ref type_name) = impl_type_name(imp) {
-                let line = imp.span().start().line;
-                if let Some((_, ref tp, _)) = imp.trait_ {
-                    let tn = tp
-                        .segments
-                        .last()
-                        .map(|s| s.ident.to_string())
-                        .unwrap_or_default();
-                    meta.trait_impls
-                        .entry(tn)
-                        .or_default()
-                        .push((type_name.clone(), path.to_string()));
-                } else {
-                    meta.inherent_impls
-                        .push((type_name.clone(), path.to_string(), line));
-                }
-            }
-        }
+        syn::Item::Impl(imp) if !cfg_test(&imp.attrs) => identity::record_impl(imp, path, meta),
+        syn::Item::Use(u) if !cfg_test(&u.attrs) => identity::record_outside_imports(u, path, meta),
         syn::Item::Mod(m) if !cfg_test(&m.attrs) => {
+            let gated = usize::from(identity::has_cfg(&m.attrs));
+            meta.cfg_depth += gated;
             m.content.iter().for_each(|(_, items)| {
                 items
                     .iter()
                     .for_each(|i| collect_item_metadata(i, path, meta));
             });
+            meta.cfg_depth -= gated;
         }
         _ => {}
     }
@@ -229,7 +272,7 @@ fn collect_item_metadata(item: &syn::Item, path: &str, meta: &mut StructuralMeta
 
 /// Extract the type name from an impl block.
 /// Operation: match on self_ty, no own calls.
-fn extract_impl_type_name(imp: &syn::ItemImpl) -> Option<String> {
+pub(crate) fn extract_impl_type_name(imp: &syn::ItemImpl) -> Option<String> {
     match &*imp.self_ty {
         syn::Type::Path(tp) => tp.path.segments.last().map(|s| s.ident.to_string()),
         _ => None,

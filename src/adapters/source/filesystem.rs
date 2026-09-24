@@ -18,7 +18,11 @@ pub(crate) fn collect_rust_files(path: &Path) -> Vec<PathBuf> {
         }
     }
 
+    // Sorted: `readdir` order differs between filesystems and checkouts, and
+    // every map later built from this list inherits it — an OI verdict once
+    // depended on whether `apps/` or `crates/` was read first.
     WalkDir::new(path)
+        .sort_by_file_name()
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| {

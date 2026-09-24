@@ -238,3 +238,29 @@ fn marker_inside_a_nested_macro_group_literal_is_not_collected() {
         "a literal nested in a macro group is still data"
     );
 }
+
+#[test]
+fn collected_files_come_back_in_a_fixed_order() {
+    // The filesystem's `readdir` order differs between filesystems and
+    // checkouts, and every map built from the file list inherits it. Sorted,
+    // the same tree gives the same analysis on every machine.
+    let dir = tempfile::Builder::new()
+        .prefix("rustqual_test_")
+        .tempdir()
+        .unwrap();
+    for name in [
+        "crates/z.rs",
+        "apps/b.rs",
+        "crates/a.rs",
+        "apps/a/mod.rs",
+        "m.rs",
+    ] {
+        let path = dir.path().join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, "fn f() {}").unwrap();
+    }
+    let files = collect_rust_files(dir.path());
+    let mut sorted = files.clone();
+    sorted.sort();
+    assert_eq!(files, sorted);
+}

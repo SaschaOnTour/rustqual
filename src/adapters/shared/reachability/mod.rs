@@ -72,6 +72,52 @@ impl ExternalReach {
     }
 }
 
+/// Where the module tree puts each file, and which files sit behind a cfg.
+#[derive(Default)]
+pub(crate) struct FilePlaces {
+    /// file → every logical place, (crate root, top-level module), the module
+    /// empty for a crate root itself. Logical, not physical: under
+    /// `#[path = "types.rs"] mod a` the file `types.rs` is module `a`, and so
+    /// is a child it declares. *Every* place is kept — a file mounted twice,
+    /// at any depth, a module declared twice under exclusive cfgs, and the
+    /// inline modules a file declares (lib.rs holding `mod a { … }` is also at
+    /// `a`) — because the consumer asks "could these two share a module", and
+    /// over-answering yes can only withhold a finding. Sorted, so the answer
+    /// never depends on hash or declaration order.
+    pub places: HashMap<String, Vec<(String, String)>>,
+    /// Files reached through any `cfg`-gated `mod`, or carrying `#![cfg]` —
+    /// by the module tree, `#[path]` and inline ancestors included, never by
+    /// a name match. Reached gated once is gated: over-approximating only
+    /// withholds a finding.
+    pub gated: HashSet<String>,
+}
+
+/// Build `FilePlaces` from one walk of every crate's module tree. Files no
+/// crate root reaches are absent from both.
+/// Operation: one pass over the placements, then a sort.
+pub(crate) fn file_places(parsed: &[(String, String, syn::File)]) -> FilePlaces {
+    let mut out = FilePlaces::default();
+    walk_crate_tree(parsed)
+        .placements
+        .into_iter()
+        .for_each(|(key, file, gated)| {
+            let (root, path) = key.split_once('|').unwrap_or((key.as_str(), ""));
+            let top = path.split("::").find(|s| !s.is_empty()).unwrap_or("");
+            if gated {
+                out.gated.insert(file.clone());
+            }
+            out.places
+                .entry(file)
+                .or_default()
+                .push((root.to_string(), top.to_string()));
+        });
+    out.places.values_mut().for_each(|found| {
+        found.sort();
+        found.dedup();
+    });
+    out
+}
+
 /// Build the reachability facts for the whole parsed set.
 /// Integration: tree walk, then the glob / re-export closures.
 pub(crate) fn compute_external_reach(parsed: &[(String, String, syn::File)]) -> ExternalReach {
