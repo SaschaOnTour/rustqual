@@ -5,11 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.8.2] - 2026-07-27
+## [1.8.3] - 2026-09-24
 
-Two false findings that pulled against each other — DRY-001 punished exactly
-the spelled-out calls DRY-002 rewards — plus two more ways the call graph
-misread a `macro_rules!` invocation and a `use`.
+A `use` is exposure, not consumption — with a written contract for what the
+name-based analysis can and cannot tell apart — plus three more macro shapes
+and a structural finding that depended on the directory walk order.
 
 ### Changed
 - **A `use` is exposure, not consumption (DRY-002, DRY-006, marker check).** An
@@ -74,6 +74,65 @@ misread a `macro_rules!` invocation and a `use`.
   library crate.
 
 ### Fixed
+- **Macro call-through, three more shapes (DRY-002, TQ-003).** Each was found in
+  review as a function the macro really runs reported `uncalled`: a macro that
+  applies `$a` itself *and* forwards `$b` was read once, in the first round,
+  before its target was known — every macro is now re-read on every round of the
+  fixpoint, and the fixpoint runs until nothing changes rather than for as many
+  rounds as there are macros (two macros forwarding to each other under rules of
+  different arity make a longer chain), so the forwarded position is not lost;
+  `($f)()` is the same call as `$f()` and is now recognised; and a name defined
+  twice (`macro_rules! go` in two modules) was keyed by name so the last
+  definition answered for both — which one an invocation reaches is textual
+  scope this analysis does not model, so such a name is now *undecidable*, which
+  means every argument is a possible callee.
+- **A metavariable is not a name (DRY-002, DRY-006).** `$f()` in a
+  `macro_rules!` definition was read as a call of `fn f`, and `$T` as a
+  reference to `struct T`; beyond hiding a dead item, the call-set entry
+  reached TQ-003 and the marker check. An ident right after `$` is skipped.
+- **OI no longer depends on the directory walk order (coupling).** Types were
+  known by bare name with the last definition winning, and the file walk was
+  unsorted, so a workspace with two top-level types of the same name was
+  clean on one machine and reported an orphaned impl on another — for an
+  impl eleven lines below its own type. OI now keeps every definition of a
+  name and reports an impl only when none of them shares its module, a
+  verdict that holds whichever one it means; the finding names every
+  candidate rather than guess one. Modules are *logical* where the module
+  tree walk knows them — under `#[path = "types.rs"] mod a`, `types.rs` and
+  its children are module `a`; a file is at home at *every* place the tree
+  gives it — mounted twice at any depth, and the inline modules it declares —
+  since over-answering "could these share a module" only withholds a
+  finding. Only candidates of the impl's own crate count, since an inherent
+  impl can only be for a type of its own crate. A `#[cfg(test)]` type is no
+  candidate, and an impl behind any `cfg` gets no verdict; neither does one
+  whose file the module tree cannot place (`cfg_attr(path = …)`).
+- **`mod r#type` resolves to `type.rs` (all dimensions).** The shared module
+  file resolver looked for `r#type.rs` / `r#type/`, so a raw-identifier
+  module's file was never reached: its `#[cfg(test)]` went unseen, and its
+  types were placed by file name alone. The file walk is sorted. Namesakes
+  inside one crate still pool — a missed finding, tracked in #59/#60.
+- **SIT counts an impl only where it certainly means the private trait
+  (coupling).** Traits had the same last-wins map, and impls were counted by
+  bare trait name, so any route by which a foreign trait reached a local
+  trait's name — the prelude (`Default`, `Send`, `Future`), a foreign path,
+  a re-export through a facade module reached by `crate::`, `self::` or
+  `super::`, a glob — reported a local trait nobody implements as
+  single-impl, and so did an impl behind a `cfg` that is off. SIT now counts
+  an impl only where no such route exists: in the trait's own file, the
+  trait named bare, no prelude name, no `cfg` on the impl, around it, on its
+  file or on any `mod` the module tree reaches the file through (`#[path]`
+  and inline ancestors included), and
+  nothing in the file binding that name by `use` or glob. Anything else is
+  undecidable and not reported, as is a trait name defined twice — so a
+  single impl in a child module is a missed finding for now (#60). Findings
+  come out sorted by trait name.
+
+## [1.8.2] - 2026-07-27
+
+Two false findings that pulled against each other: DRY-001 punished exactly the
+spelled-out calls DRY-002 rewards.
+
+### Fixed
 - **A callee's name counts (DRY-001).** Normalisation replaced a called
   function with a positional index, so a body whose whole meaning is *which*
   functions it names — a suite runner, a dispatch list, a registration table —
@@ -95,8 +154,7 @@ misread a `macro_rules!` invocation and a `use`.
   not in scope inside its own initializer, so the right-hand side of
   `let load = load();` is the *function*; a `for` pattern is not in scope in the
   iterator expression and is gone after the loop; a `while let` binding stays in
-  its loop; a match arm's bindings stay in that arm; a closure's parameters
-  stay in the closure; an `if let` binding
+  its loop; a match arm's bindings stay in that arm; a closure's parameters stay in the closure; an `if let` binding
   covers the then-branch and neither the `else` nor what follows. All of it for
   one reason: mistaking a free function for a local is the direction that
   *invents* duplicates.
@@ -116,8 +174,7 @@ misread a `macro_rules!` invocation and a `use`.
   the two-level shape the real thing has, resolved over the macro-reach closure
   that was already there. Only at an invocation of one of those macros is every
   ident harvested as a possible callee: the trigger is narrow so an ordinary
-  `name_of!(dead_helper)`, a macro that only spells its argument, still
-  cannot vouch for a dead function. Macros
+  `assert_eq!(x, dead_helper)` still cannot vouch for a dead function. Macros
   that only quote their input are excluded — `stringify!($f())` produces the
   text `"$f()"` and runs nothing, so reading it as a call would have excused a
   plainly dead function (`stringify`, `quote`, `quote_spanned`). Nested macros
@@ -176,17 +233,7 @@ misread a `macro_rules!` invocation and a `use`.
   whole invocation. An unreadable arm also stays in its place instead of
   collapsing the list: it triggers the coarse fallback only once every *earlier*
   arm has been ruled out on its own terms, so a first arm that matches still
-  decides. Three more shapes, each found in review as a function the macro
-  really runs reported `uncalled`: a macro that applies `$a` itself *and*
-  forwards `$b` was read once, in the first round, before its target was known
-  — every macro is now re-read on every round of the fixpoint, and the fixpoint
-  runs until nothing changes rather than for as many rounds as there are
-  macros (two macros forwarding to each other under rules of different arity
-  make a longer chain), so the forwarded position is not lost; `($f)()` is the same call as `$f()` and is now
-  recognised; and a name defined twice (`macro_rules! go` in two modules) was
-  keyed by name so the last definition answered for both — which one an
-  invocation reaches is textual scope this analysis does not model, so such a
-  name is now *undecidable*, which means every argument is a possible callee.
+  decides.
 
 ## [1.8.1] - 2026-07-26
 

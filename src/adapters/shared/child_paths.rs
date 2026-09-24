@@ -46,10 +46,14 @@ impl<'a> ChildPathResolver<'a> {
         inline_mods: &[String],
         mod_item: &syn::ItemMod,
     ) -> Option<String> {
+        // A raw identifier names its file without the `r#`: `mod r#type`
+        // lives in `type.rs`, `mod r#type { mod x; }` puts `x` under `type/`.
+        let inline: Vec<String> = inline_mods.iter().map(|m| unraw(m)).collect();
         match path_attribute(&mod_item.attrs) {
-            Some(explicit) => self.resolve_explicit_path(parent_path, inline_mods, &explicit),
+            Some(explicit) => self.resolve_explicit_path(parent_path, &inline, &explicit),
             None => {
-                self.resolve_by_convention(parent_path, inline_mods, &mod_item.ident.to_string())
+                let name = unraw(&mod_item.ident.to_string());
+                self.resolve_by_convention(parent_path, &inline, &name)
             }
         }
     }
@@ -163,4 +167,10 @@ fn path_attribute(attrs: &[syn::Attribute]) -> Option<String> {
             _ => None,
         }
     })
+}
+
+/// A module name as it appears in a file path: `r#type` → `type`.
+/// Operation: prefix strip, no own calls.
+fn unraw(name: &str) -> String {
+    name.strip_prefix("r#").unwrap_or(name).to_string()
 }

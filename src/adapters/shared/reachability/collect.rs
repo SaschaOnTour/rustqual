@@ -53,6 +53,10 @@ pub(super) struct ModuleTree {
     /// the file is in no public chain while the type — and therefore every
     /// method on it — is callable from outside.
     pub methods: Vec<(String, String, String)>,
+    /// Every (module key, file, behind a cfg) the walk registered — all of
+    /// them, where `modules` keeps the first file per key: one module may be
+    /// declared twice under exclusive cfgs, each pulling in its own file.
+    pub placements: Vec<(String, String, bool)>,
 }
 
 /// Where the walk currently is.
@@ -76,6 +80,9 @@ struct Scope<'a> {
     /// can be `pub` in its file while the file itself sits behind a private
     /// `mod`; the two are judged separately, and combined by the caller.
     inline_is_pub: bool,
+    /// Whether any `mod` on the way here, or the file itself (`#![cfg]`),
+    /// carries a `cfg` — a condition this analysis does not evaluate.
+    gated: bool,
 }
 
 /// The walk's shared state: the parsed ASTs, the shared module resolver, the
@@ -108,6 +115,7 @@ pub(super) fn walk_crate_tree(parsed: &[(String, String, syn::File)]) -> ModuleT
                 file_depth: 0,
                 chain_is_pub: exposed,
                 inline_is_pub: true,
+                gated: false,
             });
         });
     walk.tree
@@ -141,10 +149,15 @@ impl Walk<'_> {
         )) {
             return;
         }
-        register_module(scope, &mut self.tree);
         let Some(syntax) = self.asts.get(scope.file).copied() else {
+            register_module(scope, &mut self.tree);
             return;
         };
+        let scope = Scope {
+            gated: scope.gated || has_cfg(&syntax.attrs),
+            ..scope
+        };
+        register_module(scope, &mut self.tree);
         self.items(scope, &syntax.items);
     }
 
@@ -221,12 +234,14 @@ impl Walk<'_> {
         let mut nested = scope.mod_path.to_vec();
         nested.push(m.ident.to_string());
         let chain_is_pub = scope.chain_is_pub && is_pub(&m.vis);
+        let gated = scope.gated || has_cfg(&m.attrs);
         match &m.content {
             Some((_, inner)) => {
                 let inner_scope = Scope {
                     mod_path: &nested,
                     chain_is_pub,
                     inline_is_pub: scope.inline_is_pub && is_pub(&m.vis),
+                    gated,
                     ..scope
                 };
                 register_module(inner_scope, &mut self.tree);
@@ -243,6 +258,7 @@ impl Walk<'_> {
                         file_depth: nested.len(),
                         inline_is_pub: true,
                         chain_is_pub,
+                        gated,
                     });
                 }
             }
@@ -254,8 +270,11 @@ impl Walk<'_> {
 /// the file is externally reachable.
 /// Operation: two inserts, no own calls.
 fn register_module(scope: Scope<'_>, tree: &mut ModuleTree) {
+    let key = module_key(scope.root, scope.mod_path);
+    tree.placements
+        .push((key.clone(), scope.file.to_string(), scope.gated));
     tree.modules
-        .entry(module_key(scope.root, scope.mod_path))
+        .entry(key)
         .or_insert_with(|| scope.file.to_string());
     if scope.chain_is_pub {
         tree.reachable_files.insert(scope.file.to_string());
@@ -419,4 +438,13 @@ fn self_type_name(ty: &syn::Type) -> Option<String> {
 /// Operation: visibility match, no own calls.
 fn is_pub(vis: &syn::Visibility) -> bool {
     matches!(vis, syn::Visibility::Public(_))
+}
+
+/// Whether an item carries a `cfg` or `cfg_attr` — a condition this analysis
+/// does not evaluate.
+/// Operation: attribute scan, no own calls.
+fn has_cfg(attrs: &[syn::Attribute]) -> bool {
+    attrs
+        .iter()
+        .any(|a| a.path().is_ident("cfg") || a.path().is_ident("cfg_attr"))
 }

@@ -33,7 +33,7 @@ fn test_collect_metadata_struct_and_impl() {
     let syntax = syn::parse_file(source).expect("test source");
     let parsed = vec![("lib.rs".to_string(), source.to_string(), syntax)];
     let meta = collect_metadata(&parsed, &std::collections::HashSet::new());
-    assert_eq!(meta.type_defs.get("Foo"), Some(&"lib.rs".to_string()));
+    assert_eq!(meta.type_defs.get("Foo"), Some(&vec!["lib.rs".to_string()]));
     assert_eq!(meta.inherent_impls.len(), 1);
     assert_eq!(meta.inherent_impls[0].0, "Foo");
 }
@@ -45,8 +45,8 @@ fn test_collect_metadata_trait_and_impl() {
     let parsed = vec![("lib.rs".to_string(), source.to_string(), syntax)];
     let meta = collect_metadata(&parsed, &std::collections::HashSet::new());
     assert!(meta.trait_defs.contains_key("Drawable"));
-    assert!(!meta.trait_defs["Drawable"].is_pub);
-    assert_eq!(meta.trait_defs["Drawable"].method_count, 1);
+    assert!(!meta.trait_defs["Drawable"][0].is_pub);
+    assert_eq!(meta.trait_defs["Drawable"][0].method_count, 1);
     assert_eq!(meta.trait_impls["Drawable"].len(), 1);
 }
 
